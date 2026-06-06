@@ -150,16 +150,16 @@ class WorkbenchDocumentCardsQuery:
                                 'section_id', claim_rows.section_id,
                                 'section_index', claim_rows.section_index,
                                 'section_title', claim_rows.section_title,
-                                'local_ref', claim_rows.claim_json ->> 'local_ref',
-                                'claim', claim_rows.claim_json ->> 'claim',
-                                'claim_kind', claim_rows.claim_json ->> 'claim_kind',
+                                'local_ref', COALESCE(claim_rows.claim_json ->> 'local_ref', claim_rows.claim_json ->> 'id', claim_rows.claim_json ->> 'claim_id'),
+                                'claim', COALESCE(claim_rows.claim_json ->> 'claim', claim_rows.claim_json ->> 'canonical_claim', claim_rows.claim_json ->> 'canonical_formulation', claim_rows.claim_json ->> 'canonical_statement', claim_rows.claim_json ->> 'text'),
+                                'claim_kind', COALESCE(claim_rows.claim_json ->> 'claim_kind', claim_rows.claim_json ->> 'claim_type', claim_rows.claim_json ->> 'type'),
                                 'granularity', claim_rows.claim_json ->> 'granularity',
-                                'evidence_block', claim_rows.claim_json ->> 'evidence_block',
+                                'evidence_block', COALESCE(claim_rows.claim_json ->> 'evidence_block', claim_rows.claim_json ->> 'evidence', claim_rows.claim_json ->> 'quote'),
                                 'scope', claim_rows.claim_json ->> 'scope',
                                 'exclusion_scope', claim_rows.claim_json ->> 'exclusion_scope',
                                 'possible_questions', COALESCE(claim_rows.claim_json -> 'possible_questions', '[]'::jsonb),
-                                'triples', COALESCE(claim_rows.claim_json -> 'triples', '[]'::jsonb),
-                                'local_relations', COALESCE(claim_rows.claim_json -> 'local_relations', '[]'::jsonb),
+                                'triples', COALESCE(claim_rows.claim_json -> 'triples', claim_rows.claim_json -> 'rdf_triples', '[]'::jsonb),
+                                'local_relations', COALESCE(claim_rows.claim_json -> 'local_relations', claim_rows.claim_json -> 'relations', '[]'::jsonb),
                                 'confidence', claim_rows.claim_json -> 'confidence'
                             )
                             ORDER BY claim_rows.section_index, claim_rows.ordinality
@@ -189,7 +189,7 @@ class WorkbenchDocumentCardsQuery:
                         d.current_processing_run_id IS NULL
                         OR a.processing_run_id = d.current_processing_run_id
                       )
-                      AND lower(a.artifact_type::text) = 'parsed_llm_output'
+                      AND a.payload_json ? 'claim_observations'
                     ORDER BY s.section_index NULLS LAST, claim_items.ordinality
                     LIMIT 20
                 ) AS claim_rows

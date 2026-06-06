@@ -277,8 +277,62 @@ const isDocumentFailed = (doc: Document): boolean => {
   return doc.status === "error" || doc.preprocessing_status === "failed";
 };
 
+const workbenchPhaseNumber = (
+  doc: Document,
+  key: string,
+): number => {
+  const metadata = doc.card_view?.metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return 0;
+
+  const phase = (metadata as Record<string, object | null | undefined>)
+    .workbench_phase;
+  if (!phase || typeof phase !== "object" || Array.isArray(phase)) return 0;
+
+  const value = (phase as Record<string, unknown>)[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+};
+
 const isDocumentProcessing = (doc: Document): boolean => {
-  if (doc.card_view) return doc.card_view.lifecycle_state === "processing";
+  if (doc.card_view) {
+    const lifecycleState = doc.card_view.lifecycle_state;
+    if (
+      [
+        "processing",
+        "auto_recovery_scheduled",
+        "paused_provider",
+        "paused_quota",
+      ].includes(lifecycleState)
+    ) {
+      return true;
+    }
+
+    const total = doc.card_view.sections.total;
+    const promptACompleted = workbenchPhaseNumber(
+      doc,
+      "prompt_a_completed_sections",
+    );
+    const leased = workbenchPhaseNumber(doc, "section_queue_leased_count");
+    const ready = workbenchPhaseNumber(doc, "section_queue_ready_count");
+    const registryReady = workbenchPhaseNumber(
+      doc,
+      "registry_application_ready_count",
+    );
+    const registryLeased = workbenchPhaseNumber(
+      doc,
+      "registry_application_leased_count",
+    );
+
+    return (
+      total > 0 &&
+      promptACompleted < total &&
+      (leased > 0 || ready > 0 || registryReady > 0 || registryLeased > 0)
+    );
+  }
 
   return (
     !isDocumentCancelled(doc) &&
@@ -866,7 +920,7 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
     refetchInterval: (query) => {
       const data = query.state.data;
-      return Array.isArray(data) && data.some(isDocumentProcessing) ? 2000 : false;
+      return Array.isArray(data) && data.some(isDocumentProcessing) ? 1500 : false;
     },
     refetchIntervalInBackground: false,
   });

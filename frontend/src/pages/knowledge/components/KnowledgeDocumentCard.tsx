@@ -477,20 +477,21 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         </div>
 
         <div className="flex flex-wrap gap-2 text-xs">
-          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-            Факты: {formatNumber(cardView.registry.entry_count)}
-            {cardView.registry.retained ? ' · registry сохранён' : ''}
-          </span>
-          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-            Runtime: {formatNumber(cardView.runtime.runtime_entry_count)} записей
-          </span>
           {(promptACompleted > 0 || sectionQueueLeased > 0 || sectionQueueReady > 0) && (
             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
               Prompt A: {formatNumber(promptACompleted)} /{' '}
               {formatNumber(cardView.sections.total)}
               {sectionQueueLeased > 0
-                ? ` · leased ${formatNumber(sectionQueueLeased)}`
+                ? ` · активно ${formatNumber(sectionQueueLeased)}`
                 : ''}
+              {sectionQueueReady > 0
+                ? ` · очередь ${formatNumber(sectionQueueReady)}`
+                : ''}
+            </span>
+          )}
+          {claimPreviewCount > 0 && (
+            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
+              Локальные claims: {formatNumber(claimPreviewCount)}
             </span>
           )}
           {registryApplicationPending > 0 && (
@@ -500,20 +501,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           )}
           {embeddingIndexedClaims > 0 && (
             <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              Embeddings: {formatNumber(embeddingIndexedClaims)} claims
-            </span>
-          )}
-          {claimPreviewCount > 0 && (
-            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              Извлечено claims: {formatNumber(claimPreviewCount)}
-            </span>
-          )}
-          {cardView.registry.final_snapshot_id && (
-            <span
-              className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]"
-              title={cardView.registry.final_snapshot_id}
-            >
-              Snapshot: {cardView.registry.final_snapshot_id}
+              Embeddings: {formatNumber(embeddingIndexedClaims)}
             </span>
           )}
           {cardView.transient_purged && (
@@ -557,7 +545,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           <div className="rounded-xl bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="font-semibold text-[var(--text-primary)]">
-                Извлечённые факты Prompt A
+                Локально извлечённые claims Prompt A
               </div>
               <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
                 {formatNumber(claimPreviewCount)}
@@ -710,7 +698,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
               <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
                 <div className="font-medium text-[var(--text-primary)]">
-                  Итоговые факты
+                  Canonical / runtime итог
                 </div>
                 <div className="mt-1">
                   {formatNumber(cardView.registry.entry_count)} фактов ·{' '}
@@ -734,12 +722,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               >
                 Открыть trace и курацию
               </button>
-              {claimPreviewCount > 0 && (
-            <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[var(--text-secondary)]">
-              Извлечено claims: {formatNumber(claimPreviewCount)}
-            </span>
-          )}
-          {cardView.registry.final_snapshot_id && (
+              {cardView.registry.final_snapshot_id && (
                 <span
                   className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[var(--text-muted)]"
                   title={cardView.registry.final_snapshot_id}
