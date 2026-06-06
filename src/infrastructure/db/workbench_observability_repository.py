@@ -340,10 +340,8 @@ class WorkbenchObservabilityRepository:
                 f.updated_at
             FROM knowledge_workbench_canonical_facts AS f
             LEFT JOIN knowledge_workbench_fact_mentions AS m
-              ON m.project_id = f.project_id
-             AND m.document_id = f.document_id
+              ON m.fact_id = f.fact_id
              AND m.registry_id = f.registry_id
-             AND m.fact_id = f.fact_id
             WHERE f.project_id = $1
               AND f.document_id = $2
               AND f.status <> 'deleted'
@@ -688,10 +686,8 @@ class WorkbenchObservabilityRepository:
                 ) AS source_section_ids
             FROM knowledge_workbench_canonical_facts AS f
             LEFT JOIN knowledge_workbench_fact_mentions AS m
-              ON m.project_id = f.project_id
-             AND m.document_id = f.document_id
+              ON m.fact_id = f.fact_id
              AND m.registry_id = f.registry_id
-             AND m.fact_id = f.fact_id
             WHERE f.project_id = $1
               AND f.document_id = $2
               AND f.status <> 'deleted'
