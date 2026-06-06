@@ -486,6 +486,13 @@ export interface WorkbenchEvidenceTraceFinding {
   source_chunk_indexes: unknown[];
   confidence?: number | null;
   reason?: string | null;
+  granularity?: string | null;
+  scope?: string | null;
+  exclusion_scope?: string | null;
+  triples?: unknown[];
+  local_relations?: unknown[];
+  node_run_id?: string | null;
+  artifact_id?: string | null;
   created_at?: string | null;
 }
 

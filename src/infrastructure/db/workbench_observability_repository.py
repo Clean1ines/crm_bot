@@ -192,24 +192,77 @@ class WorkbenchObservabilityRepository:
                 'claim_observation' AS action,
                 node.status AS status,
                 NULL::text AS target_fact_id,
-                claim.item->>'local_ref' AS claim_local_ref,
-                claim.item->>'claim' AS title,
-                claim.item->>'claim' AS claim,
-                COALESCE(claim.item->>'claim_kind', 'other') AS claim_kind,
+                COALESCE(
+                    claim.item->>'local_ref',
+                    claim.item->>'id',
+                    claim.item->>'claim_id'
+                ) AS claim_local_ref,
+                COALESCE(
+                    claim.item->>'claim',
+                    claim.item->>'canonical_claim',
+                    claim.item->>'canonical_formulation',
+                    claim.item->>'canonical_statement',
+                    claim.item->>'text'
+                ) AS title,
+                COALESCE(
+                    claim.item->>'claim',
+                    claim.item->>'canonical_claim',
+                    claim.item->>'canonical_formulation',
+                    claim.item->>'canonical_statement',
+                    claim.item->>'text'
+                ) AS claim,
+                COALESCE(
+                    claim.item->>'claim_kind',
+                    claim.item->>'claim_type',
+                    claim.item->>'type',
+                    'other'
+                ) AS claim_kind,
                 COALESCE(claim.item->>'scope', claim.item->>'claim') AS answer,
-                claim.item->>'claim' AS short_answer,
+                COALESCE(
+                    claim.item->>'claim',
+                    claim.item->>'canonical_claim',
+                    claim.item->>'canonical_formulation',
+                    claim.item->>'canonical_statement',
+                    claim.item->>'text'
+                ) AS short_answer,
                 NULL::text AS claim_delta,
                 COALESCE(claim.item->'possible_questions', '[]'::jsonb) AS variants,
                 CASE
-                    WHEN COALESCE(claim.item->>'evidence_block', '') = ''
+                    WHEN COALESCE(
+                        claim.item->>'evidence_block',
+                        claim.item->>'evidence',
+                        claim.item->>'quote',
+                        ''
+                    ) = ''
                     THEN '[]'::jsonb
-                    ELSE jsonb_build_array(claim.item->>'evidence_block')
+                    ELSE jsonb_build_array(
+                        COALESCE(
+                            claim.item->>'evidence_block',
+                            claim.item->>'evidence',
+                            claim.item->>'quote'
+                        )
+                    )
                 END AS evidence_quotes,
                 COALESCE(claim.item->'source_refs', '[]'::jsonb) AS source_refs,
                 COALESCE(claim.item->'source_chunk_indexes', '[]'::jsonb)
                     AS source_chunk_indexes,
                 NULLIF(claim.item->>'confidence', '')::double precision AS confidence,
                 COALESCE(claim.item->>'exclusion_scope', '') AS reason,
+                claim.item->>'granularity' AS granularity,
+                claim.item->>'scope' AS scope,
+                claim.item->>'exclusion_scope' AS exclusion_scope,
+                COALESCE(
+                    claim.item->'triples',
+                    claim.item->'rdf_triples',
+                    '[]'::jsonb
+                ) AS triples,
+                COALESCE(
+                    claim.item->'local_relations',
+                    claim.item->'relations',
+                    '[]'::jsonb
+                ) AS local_relations,
+                artifact.node_run_id,
+                artifact.artifact_id,
                 artifact.created_at
             FROM knowledge_workbench_processing_node_artifacts AS artifact
             JOIN knowledge_workbench_processing_node_runs AS node

@@ -13,6 +13,9 @@ import {
 } from '@shared/api/modules/knowledge';
 import { getErrorMessage } from '@shared/api/core/errors';
 
+type TraceTabId = 'prompt_a' | 'facts' | 'surfaces' | 'gaps';
+type PromptASectionFilter = 'processed' | 'all' | 'empty';
+
 const formatNumber = (value: number): string => {
   if (!Number.isFinite(value)) return '0';
   return new Intl.NumberFormat().format(value);
@@ -33,7 +36,11 @@ const searchText = (
     finding.claim,
     finding.claim_kind,
     finding.answer,
+    finding.scope,
+    finding.exclusion_scope,
+    finding.granularity,
     ...stringValues(finding.evidence_quotes),
+    ...stringValues(finding.variants),
   ].join(' ')),
   ...section.canonical_facts.map((fact) => [
     fact.claim,
@@ -110,6 +117,18 @@ const EvidenceList: React.FC<{ values: unknown[] }> = ({ values }) => {
   );
 };
 
+const JsonBlock: React.FC<{ value: unknown[] | undefined }> = ({ value }) => {
+  if (!Array.isArray(value) || value.length === 0) {
+    return <span className="text-[var(--text-muted)]">—</span>;
+  }
+
+  return (
+    <pre className="overflow-x-auto rounded-lg bg-[var(--control-bg)] p-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+      {JSON.stringify(value, null, 2)}
+    </pre>
+  );
+};
+
 const FindingCard: React.FC<{ finding: WorkbenchEvidenceTraceFinding }> = ({
   finding,
 }) => (
@@ -118,10 +137,15 @@ const FindingCard: React.FC<{ finding: WorkbenchEvidenceTraceFinding }> = ({
       {finding.claim || finding.title || finding.claim_local_ref || 'Claim observation'}
     </div>
     <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
-      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">claim</span>
+      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">Prompt A</span>
       {finding.claim_kind && (
         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
           {finding.claim_kind}
+        </span>
+      )}
+      {finding.granularity && (
+        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+          {finding.granularity}
         </span>
       )}
       {finding.confidence !== null && typeof finding.confidence === 'number' && (
@@ -135,12 +159,55 @@ const FindingCard: React.FC<{ finding: WorkbenchEvidenceTraceFinding }> = ({
         </span>
       )}
     </div>
+
     <details className="mt-3 text-xs text-[var(--text-secondary)]">
       <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-        Evidence
+        Детали claim
       </summary>
-      <div className="mt-2">
-        <EvidenceList values={finding.evidence_quotes} />
+
+      <div className="mt-3 space-y-3">
+        <TraceDetailRow label="Evidence">
+          <EvidenceList values={finding.evidence_quotes} />
+        </TraceDetailRow>
+
+        {finding.scope && (
+          <TraceDetailRow label="Scope">
+            {finding.scope}
+          </TraceDetailRow>
+        )}
+
+        {finding.exclusion_scope && (
+          <TraceDetailRow label="Exclusion scope">
+            {finding.exclusion_scope}
+          </TraceDetailRow>
+        )}
+
+        {Array.isArray(finding.variants) && finding.variants.length > 0 && (
+          <TraceDetailRow label="Possible questions">
+            <ul className="list-disc space-y-1 pl-4 text-[var(--text-secondary)]">
+              {finding.variants.map((variant, index) => (
+                <li key={`${String(variant)}-${index}`}>{String(variant)}</li>
+              ))}
+            </ul>
+          </TraceDetailRow>
+        )}
+
+        <TraceDetailRow label="Triples">
+          <JsonBlock value={finding.triples} />
+        </TraceDetailRow>
+
+        <TraceDetailRow label="Local relations">
+          <JsonBlock value={finding.local_relations} />
+        </TraceDetailRow>
+
+        {(finding.node_run_id || finding.artifact_id) && (
+          <TraceDetailRow label="Trace IDs">
+            <div className="space-y-1 break-all text-[var(--text-secondary)]">
+              {finding.node_run_id && <div>node_run_id: {finding.node_run_id}</div>}
+              {finding.artifact_id && <div>artifact_id: {finding.artifact_id}</div>}
+            </div>
+          </TraceDetailRow>
+        )}
       </div>
     </details>
   </div>
@@ -292,7 +359,9 @@ export const KnowledgeDocumentCurationModal: React.FC<{
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState('');
   const [expandedSectionIds, setExpandedSectionIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'sections' | 'facts' | 'surfaces' | 'gaps'>('sections');
+  const [promptASectionFilter, setPromptASectionFilter] =
+    useState<PromptASectionFilter>('processed');
+  const [activeTab, setActiveTab] = useState<TraceTabId>('prompt_a');
 
   const traceQuery = useQuery({
     queryKey: ['knowledge-document-evidence-trace', projectId, documentId],
@@ -419,10 +488,51 @@ export const KnowledgeDocumentCurationModal: React.FC<{
   const coverage = traceQuery.data?.coverage ?? {};
   const gaps = traceQuery.data?.gaps ?? {};
 
-  const filteredSections = useMemo(() => {
-    if (!normalizedFilter) return sections;
-    return sections.filter((section) => searchText(section).includes(normalizedFilter));
-  }, [normalizedFilter, sections]);
+  const promptAProcessedSections = useMemo(
+    () => sections.filter((section) => section.findings.length > 0),
+    [sections],
+  );
+  const promptAEmptySections = useMemo(
+    () => sections.filter((section) => section.findings.length === 0),
+    [sections],
+  );
+
+  const filteredPromptASections = useMemo(() => {
+    const source =
+      promptASectionFilter === 'all'
+        ? sections
+        : promptASectionFilter === 'empty'
+          ? promptAEmptySections
+          : promptAProcessedSections;
+
+    if (!normalizedFilter) return source;
+    return source.filter((section) => searchText(section).includes(normalizedFilter));
+  }, [
+    normalizedFilter,
+    promptAEmptySections,
+    promptAProcessedSections,
+    promptASectionFilter,
+    sections,
+  ]);
+
+  const traceTabs = useMemo(() => {
+    const hasGaps = Object.values(gaps).some((value) => {
+      if (Array.isArray(value)) return value.length > 0;
+      if (value && typeof value === 'object') return Object.keys(value).length > 0;
+      return Boolean(value);
+    });
+
+    return [
+      ['prompt_a', `Prompt A · ${formatNumber(findings.length)}`],
+      ...(canonicalFacts.length > 0
+        ? ([['facts', `Canonical · ${formatNumber(canonicalFacts.length)}`]] as const)
+        : []),
+      ...(surfaces.length > 0
+        ? ([['surfaces', `Surfaces · ${formatNumber(surfaces.length)}`]] as const)
+        : []),
+      ...(hasGaps ? ([['gaps', 'Пробелы / warnings']] as const) : []),
+    ] as Array<[TraceTabId, string]>;
+  }, [canonicalFacts.length, findings.length, gaps, surfaces.length]);
 
   const filteredFacts = useMemo(() => {
     if (!normalizedFilter) return canonicalFacts;
@@ -496,29 +606,28 @@ export const KnowledgeDocumentCurationModal: React.FC<{
             {documentName}
           </div>
           <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
-            Workbench trace plus explicit surface curation mutations: approve, reject, edit, merge, delete, publish selected.
+            Trace показывает результат Prompt A по секциям: какие claims извлечены, на каком evidence они стоят и какие triples/relations вернул LLM.
           </p>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-            <span>Секции: {formatNumber(sections.length)}</span>
+            <span>Prompt A секций: {formatNumber(promptAProcessedSections.length)} / {formatNumber(sections.length)}</span>
             <span>Claims: {formatNumber(findings.length)}</span>
-            <span>Canonical facts: {formatNumber(canonicalFacts.length)}</span>
-            <span>Surfaces: {formatNumber(surfaces.length)}</span>
+            {canonicalFacts.length > 0 && (
+              <span>Canonical facts: {formatNumber(canonicalFacts.length)}</span>
+            )}
+            {surfaces.length > 0 && (
+              <span>Surfaces: {formatNumber(surfaces.length)}</span>
+            )}
             <span>Coverage facts: {formatNumber(Number(coverage.canonical_facts_with_evidence ?? 0))}</span>
           </div>
         </div>
 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap gap-2">
-            {[
-              ['sections', 'Секции и claims'],
-              ['facts', 'Canonical facts'],
-              ['surfaces', 'Surfaces'],
-              ['gaps', 'Пробелы / warnings'],
-            ].map(([id, label]) => (
+            {traceTabs.map(([id, label]) => (
               <button
                 key={id}
                 type="button"
-                onClick={() => setActiveTab(id as 'sections' | 'facts' | 'surfaces' | 'gaps')}
+                onClick={() => setActiveTab(id)}
                 className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                   activeTab === id
                     ? 'bg-[var(--accent-primary)] text-white'
@@ -535,7 +644,7 @@ export const KnowledgeDocumentCurationModal: React.FC<{
             <input
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
-              placeholder="Поиск по claims, facts, surfaces, evidence"
+              placeholder="Поиск по Prompt A claims, evidence, triples"
               className="min-h-10 w-full rounded-lg bg-[var(--control-bg)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
             />
           </div>
@@ -550,13 +659,45 @@ export const KnowledgeDocumentCurationModal: React.FC<{
           <div className="rounded-xl bg-[var(--accent-danger-bg)] p-4 text-sm text-[var(--accent-danger-text)]">
             {getErrorMessage(traceQuery.error, 'Не удалось загрузить trace документа')}
           </div>
-        ) : activeTab === 'sections' ? (
-          <div className="max-h-[64vh] space-y-2 overflow-y-auto pr-1">
-            {filteredSections.length === 0 ? (
-              <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
-                Ничего не найдено.
+        ) : activeTab === 'prompt_a' ? (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[var(--surface-secondary)] p-3">
+              <div>
+                <div className="text-sm font-semibold text-[var(--text-primary)]">
+                  Prompt A: обработанные секции и claims
+                </div>
+                <div className="mt-1 text-xs text-[var(--text-muted)]">
+                  По умолчанию показаны секции, по которым уже есть Prompt A artifacts.
+                </div>
               </div>
-            ) : filteredSections.map((section) => {
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  ['processed', `с claims ${formatNumber(promptAProcessedSections.length)}`],
+                  ['all', `все ${formatNumber(sections.length)}`],
+                  ['empty', `пустые ${formatNumber(promptAEmptySections.length)}`],
+                ].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setPromptASectionFilter(id as PromptASectionFilter)}
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                      promptASectionFilter === id
+                        ? 'bg-[var(--accent-primary)] text-white'
+                        : 'bg-[var(--control-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="max-h-[64vh] space-y-2 overflow-y-auto pr-1">
+            {filteredPromptASections.length === 0 ? (
+              <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
+                Prompt A claims не найдены для выбранного фильтра.
+              </div>
+            ) : filteredPromptASections.map((section) => {
               const isExpanded = expandedSectionIds.includes(section.section_id);
               return (
                 <div
@@ -578,16 +719,13 @@ export const KnowledgeDocumentCurationModal: React.FC<{
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
                         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                          {section.status}
+                          {section.findings.length > 0 ? 'Prompt A processed' : 'Prompt A pending/empty'}
                         </span>
                         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
                           claims {formatNumber(section.findings.length)}
                         </span>
                         <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                          facts {formatNumber(section.canonical_facts.length)}
-                        </span>
-                        <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                          surfaces {formatNumber(section.surfaces.length)}
+                          section status: {section.status}
                         </span>
                       </div>
                     </div>
@@ -617,47 +755,12 @@ export const KnowledgeDocumentCurationModal: React.FC<{
                         )}
                       </TraceDetailRow>
 
-                      <TraceDetailRow label="Canonical facts из этой секции">
-                        {section.canonical_facts.length === 0 ? (
-                          <span className="text-[var(--text-muted)]">Факты пока не связаны с секцией.</span>
-                        ) : (
-                          <div className="space-y-2">
-                            {section.canonical_facts.map((fact) => (
-                              <CanonicalFactCard
-                                key={fact.fact_id}
-                                fact={fact}
-                                onMergeInto={mergeIntoFact}
-                                onDelete={deleteFact}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </TraceDetailRow>
-
-                      <TraceDetailRow label="Surfaces из этой секции">
-                        {section.surfaces.length === 0 ? (
-                          <span className="text-[var(--text-muted)]">Surfaces пока не связаны с секцией.</span>
-                        ) : (
-                          <div className="space-y-2">
-                            {section.surfaces.map((surface) => (
-                              <SurfaceCard
-                                key={surface.surface_id}
-                                surface={surface}
-                                isMutating={isMutating}
-                                onApprove={(surfaceId) => approveSurfaceMutation.mutate(surfaceId)}
-                                onReject={rejectSurface}
-                                onEdit={editSurface}
-                                onPublish={(surfaceId) => publishSelectedMutation.mutate([surfaceId])}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </TraceDetailRow>
                     </div>
                   )}
                 </div>
               );
             })}
+            </div>
           </div>
         ) : activeTab === 'facts' ? (
           <div className="max-h-[64vh] space-y-2 overflow-y-auto pr-1">

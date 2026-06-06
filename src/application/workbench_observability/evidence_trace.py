@@ -303,6 +303,13 @@ def _finding_payload(row: Mapping[str, object]) -> dict[str, object]:
         "source_chunk_indexes": _json_list(row.get("source_chunk_indexes")),
         "confidence": _nullable_float(row.get("confidence")),
         "reason": _nullable_text(row.get("reason")),
+        "granularity": _nullable_text(row.get("granularity")),
+        "scope": _nullable_text(row.get("scope")),
+        "exclusion_scope": _nullable_text(row.get("exclusion_scope")),
+        "triples": _json_list(row.get("triples")),
+        "local_relations": _json_list(row.get("local_relations")),
+        "node_run_id": _nullable_text(row.get("node_run_id")),
+        "artifact_id": _nullable_text(row.get("artifact_id")),
         "created_at": _iso(row.get("created_at")),
     }
 
