@@ -8,7 +8,7 @@ from src.application.ai_playground.run_ai_playground import (
     AiPlaygroundLlmResult,
     RunAiPlaygroundService,
 )
-from src.infrastructure.llm.groq_keyring import RotatingAsyncGroq
+from src.infrastructure.llm.groq_keyring import GroqClientRotator
 
 
 class _UsageLike(Protocol):
@@ -39,17 +39,13 @@ class _ChatLike(Protocol):
     completions: _ChatCompletionsLike
 
 
-class _AiPlaygroundGroqClientLike(Protocol):
-    chat: _ChatLike
-
-
 @dataclass(slots=True)
 class GroqAiPlaygroundAdapter:
-    client: _AiPlaygroundGroqClientLike
+    client: GroqClientRotator
 
     @classmethod
     def create_default(cls) -> "GroqAiPlaygroundAdapter":
-        return cls(client=cast(_AiPlaygroundGroqClientLike, RotatingAsyncGroq()))
+        return cls(client=GroqClientRotator())
 
     async def run(
         self,
@@ -66,8 +62,17 @@ class GroqAiPlaygroundAdapter:
         if request.response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = await self.client.chat.completions.create(**kwargs)
-        completion = response  # keep protocol casts local and simple
+        async def create_completion(client: object) -> _CompletionLike:
+            chat = getattr(client, "chat")
+            completions = getattr(chat, "completions")
+            create = getattr(completions, "create")
+            response = await create(**kwargs)
+            return cast(_CompletionLike, response)
+
+        completion = await self.client.run(
+            create_completion,
+            operation_name="ai_playground.run",
+        )
 
         raw_text = self._response_text(completion)
         usage = getattr(completion, "usage", None)

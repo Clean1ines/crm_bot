@@ -63,10 +63,14 @@ def test_ai_playground_does_not_create_direct_groq_sdk_client() -> None:
     assert "dotenv" not in combined
 
 
-def test_ai_playground_composition_reuses_existing_rotating_groq_proxy() -> None:
+def test_ai_playground_composition_reuses_existing_groq_key_rotator_without_model_router_proxy() -> (
+    None
+):
     text = read("src/interfaces/composition/ai_playground.py")
 
-    assert "RotatingAsyncGroq" in text
+    assert "GroqClientRotator" in text
+    assert "RotatingAsyncGroq" not in text
+    assert "GroqModelRouter" not in text
     assert "src.infrastructure.llm.groq_keyring" in text
 
 
