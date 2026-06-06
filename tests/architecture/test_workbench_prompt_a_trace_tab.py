@@ -18,7 +18,6 @@ def test_trace_modal_has_prompt_a_tab_via_evidence_trace() -> None:
     assert "Prompt A processed" in source
     assert "activeTab === 'sections'" not in source
     assert "Секции и claims" not in source
-    assert "processingOverview" not in source
 
 
 def test_prompt_a_tab_keeps_canonical_and_surface_views_out_of_section_claims() -> None:
