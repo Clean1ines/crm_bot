@@ -57,8 +57,10 @@ export const AiPlaygroundPanel: React.FC<AiPlaygroundPanelProps> = ({
       const { data } = await aiPlaygroundApi.run(projectId, {
         system_prompt: systemPrompt,
         user_input: userInput,
-        model,
+        model: selectedModel.model ?? selectedModel.id,
         response_format: expectJson ? "json" : "text",
+        reasoning_effort: selectedModel.reasoning_effort,
+        reasoning_format: selectedModel.reasoning_format,
       });
 
       return data;
@@ -93,7 +95,7 @@ export const AiPlaygroundPanel: React.FC<AiPlaygroundPanelProps> = ({
     if (exceedsTpm) {
       const message = aiPlaygroundLimitMessage(
         estimatedTokens,
-        selectedModel.id,
+        selectedModel.model ?? selectedModel.id,
         selectedModel.tpm,
       );
       setLocalError(message);

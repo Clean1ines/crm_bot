@@ -99,6 +99,8 @@ class RunAiPlaygroundService:
             user_input=user_input,
             model=model,
             response_format=request.response_format,
+            reasoning_effort=request.reasoning_effort,
+            reasoning_format=request.reasoning_format,
         )
 
     @staticmethod

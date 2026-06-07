@@ -1,14 +1,19 @@
 import { authedJsonRequest } from '../core/http';
 
 export type AiPlaygroundResponseFormat = 'text' | 'json';
+export type AiPlaygroundReasoningEffort = 'none';
+export type AiPlaygroundReasoningFormat = 'hidden' | 'parsed';
 
 export type AiPlaygroundModelOption = {
   id: string;
   label: string;
+  model?: string;
   rpm: number;
   rpd: number;
   tpm: number;
   tpd?: number;
+  reasoning_effort?: AiPlaygroundReasoningEffort;
+  reasoning_format?: AiPlaygroundReasoningFormat;
 };
 
 export const AI_PLAYGROUND_DEFAULT_MODEL = 'llama-3.1-8b-instant';
@@ -16,6 +21,16 @@ export const AI_PLAYGROUND_DEFAULT_MODEL = 'llama-3.1-8b-instant';
 export const AI_PLAYGROUND_MODELS: AiPlaygroundModelOption[] = [
   { id: 'llama-3.1-8b-instant', label: 'llama-3.1-8b-instant', rpm: 30, rpd: 14400, tpm: 6000, tpd: 500000 },
   { id: 'qwen/qwen3-32b', label: 'qwen/qwen3-32b', rpm: 60, rpd: 1000, tpm: 6000, tpd: 500000 },
+  {
+    id: 'qwen/qwen3-32b:reasoning-none',
+    label: 'qwen/qwen3-32b · reasoning off',
+    model: 'qwen/qwen3-32b',
+    rpm: 60,
+    rpd: 1000,
+    tpm: 6000,
+    tpd: 500000,
+    reasoning_effort: 'none',
+  },
   { id: 'llama-3.3-70b-versatile', label: 'llama-3.3-70b-versatile', rpm: 30, rpd: 1000, tpm: 12000, tpd: 100000 },
   { id: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'meta-llama/llama-4-scout-17b-16e-instruct', rpm: 30, rpd: 1000, tpm: 30000, tpd: 500000 },
   { id: 'openai/gpt-oss-120b', label: 'openai/gpt-oss-120b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
@@ -29,6 +44,8 @@ export type AiPlaygroundRunRequest = {
   user_input: string;
   model: string;
   response_format: AiPlaygroundResponseFormat;
+  reasoning_effort?: AiPlaygroundReasoningEffort | null;
+  reasoning_format?: AiPlaygroundReasoningFormat | null;
 };
 
 export type AiPlaygroundUsage = {

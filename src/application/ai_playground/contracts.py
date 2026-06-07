@@ -52,6 +52,8 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
 
 
 AiPlaygroundResponseFormat = Literal["text", "json"]
+AiPlaygroundReasoningEffort = Literal["none"]
+AiPlaygroundReasoningFormat = Literal["hidden", "parsed"]
 
 
 class AiPlaygroundRunRequest(BaseModel):
@@ -59,6 +61,8 @@ class AiPlaygroundRunRequest(BaseModel):
     user_input: str = Field(..., min_length=1)
     model: str = Field(default=AI_PLAYGROUND_DEFAULT_MODEL)
     response_format: AiPlaygroundResponseFormat = "text"
+    reasoning_effort: AiPlaygroundReasoningEffort | None = None
+    reasoning_format: AiPlaygroundReasoningFormat | None = None
 
 
 class AiPlaygroundUsage(BaseModel):

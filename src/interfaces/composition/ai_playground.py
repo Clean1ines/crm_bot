@@ -61,6 +61,10 @@ class GroqAiPlaygroundAdapter:
 
         if request.response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
+        if request.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = request.reasoning_effort
+        if request.reasoning_format is not None:
+            kwargs["reasoning_format"] = request.reasoning_format
 
         async def create_completion(client: object) -> _CompletionLike:
             chat = getattr(client, "chat")

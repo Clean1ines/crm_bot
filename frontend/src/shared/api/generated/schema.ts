@@ -137,26 +137,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/projects/{project_id}/knowledge/processing-overview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Knowledge Processing Overview
-         * @description Returns project-level FAQ Workbench processing overview.
-         */
-        get: operations["knowledge_processing_overview_api_projects__project_id__knowledge_processing_overview_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/projects/{project_id}/knowledge/preview": {
         parameters: {
             query?: never;
@@ -527,6 +507,23 @@ export interface paths {
          * @description Deletes a Workbench document and invalidates document-scoped processing artifacts.
          */
         delete: operations["delete_knowledge_document_api_projects__project_id__knowledge__document_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/ai-playground/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Ai Playground */
+        post: operations["run_ai_playground_api_projects__project_id__ai_playground_run_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1445,6 +1442,60 @@ export interface components {
             /** Date */
             date: string;
         };
+        /** AiPlaygroundRunRequest */
+        AiPlaygroundRunRequest: {
+            /** System Prompt */
+            system_prompt: string;
+            /** User Input */
+            user_input: string;
+            /**
+             * Model
+             * @default llama-3.1-8b-instant
+             */
+            model: string;
+            /**
+             * Response Format
+             * @default text
+             * @enum {string}
+             */
+            response_format: "text" | "json";
+            /** Reasoning Effort */
+            reasoning_effort?: "none" | null;
+            /** Reasoning Format */
+            reasoning_format?: ("hidden" | "parsed") | null;
+        };
+        /** AiPlaygroundRunResponse */
+        AiPlaygroundRunResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            /** Status */
+            status: string;
+            /** Raw Text */
+            raw_text: string;
+            /** Parsed Json */
+            parsed_json?: unknown | null;
+            /** Json Parse Error */
+            json_parse_error?: string | null;
+            usage?: components["schemas"]["AiPlaygroundUsage"] | null;
+            /** Duration Ms */
+            duration_ms: number;
+        };
+        /** AiPlaygroundUsage */
+        AiPlaygroundUsage: {
+            /** Prompt Tokens */
+            prompt_tokens: number;
+            /** Completion Tokens */
+            completion_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
         /** AuthMethodsResponse */
         AuthMethodsResponse: {
             /** User Id */
@@ -2159,39 +2210,6 @@ export interface operations {
             path: {
                 project_id: string;
                 document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    knowledge_processing_overview_api_projects__project_id__knowledge_processing_overview_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
             };
             cookie?: never;
         };
@@ -2940,6 +2958,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_ai_playground_api_projects__project_id__ai_playground_run_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiPlaygroundRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiPlaygroundRunResponse"];
                 };
             };
             /** @description Validation Error */
