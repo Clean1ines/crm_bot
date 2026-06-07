@@ -7,6 +7,9 @@ import pytest
 
 from src.domain.project_plane.queue_views import QueueJobView
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
+from src.infrastructure.queue.job_types import (
+    TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+)
 from src.infrastructure.queue.worker_loop import run_worker_loop
 
 
@@ -16,6 +19,7 @@ class FakeQueueRepository:
     claimed: list[str] = field(default_factory=list)
     completed: list[tuple[str, bool, str | None]] = field(default_factory=list)
     failed: list[dict[str, object]] = field(default_factory=list)
+    retried_without_attempt: list[dict[str, object]] = field(default_factory=list)
     stale_recoveries: int = 0
 
     async def claim_job(self, worker_id: str) -> QueueJobView | None:
@@ -49,6 +53,21 @@ class FakeQueueRepository:
         )
         return True
 
+    async def retry_job_without_attempt_increment(
+        self,
+        job_id: str,
+        error: str,
+        retry_delay_seconds: float | None = None,
+    ) -> bool:
+        self.retried_without_attempt.append(
+            {
+                "job_id": job_id,
+                "error": error,
+                "retry_delay_seconds": retry_delay_seconds,
+            }
+        )
+        return True
+
     async def get_stale_locked_jobs(self, timeout_minutes: int = 5) -> list[str]:
         self.stale_recoveries += 1
         return []
@@ -71,11 +90,17 @@ class FakeDispatcher:
                 raise outcome
 
 
-def _job(job_id: str, *, attempts: int = 0, max_attempts: int = 3) -> QueueJobView:
+def _job(
+    job_id: str,
+    *,
+    attempts: int = 0,
+    max_attempts: int = 3,
+    task_type: str = "example_task",
+) -> QueueJobView:
     return QueueJobView.from_record(
         {
             "id": job_id,
-            "task_type": "example_task",
+            "task_type": task_type,
             "payload": {"x": 1},
             "attempts": attempts,
             "max_attempts": max_attempts,
@@ -159,6 +184,47 @@ async def test_worker_loop_retries_transient_job_error() -> None:
     assert queue_repo.failed[0]["job_id"] == "job-1"
     assert queue_repo.failed[0]["increment_attempt"] is True
     assert queue_repo.failed[0]["retry_delay_seconds"] is not None
+
+
+@pytest.mark.asyncio
+async def test_worker_loop_retries_workbench_prompt_a_transient_without_attempt_increment() -> (
+    None
+):
+    shutdown_event = asyncio.Event()
+    error = "retryable Prompt A invocation failure: temporary provider failure"
+    queue_repo = FakeQueueRepository(
+        jobs=[
+            _job(
+                "job-1",
+                task_type=TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            )
+        ]
+    )
+    dispatcher = FakeDispatcher(
+        outcomes=[TransientJobError(error, retry_after_seconds=7)]
+    )
+
+    await asyncio.gather(
+        run_worker_loop(
+            queue_repo=queue_repo,
+            dispatcher=dispatcher,
+            shutdown_event=shutdown_event,
+            worker_id="worker-1",
+            idle_sleep_seconds=0.001,
+            error_sleep_seconds=0.001,
+        ),
+        _stop_soon(shutdown_event),
+    )
+
+    assert queue_repo.completed == []
+    assert queue_repo.failed == []
+    assert queue_repo.retried_without_attempt == [
+        {
+            "job_id": "job-1",
+            "error": error,
+            "retry_delay_seconds": 7.0,
+        }
+    ]
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,7 @@ from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_dispatcher import JobDispatcher
 from src.infrastructure.queue.job_types import (
     TASK_PROCESS_WORKBENCH_DOCUMENT,
+    TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
 )
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
 from src.infrastructure.queue.handlers.workbench_document import (
@@ -20,6 +21,16 @@ from src.infrastructure.queue.stale_recovery import recover_stale_jobs
 from src.infrastructure.llm.groq_keyring import configured_groq_api_keys
 
 logger = get_logger(__name__)
+
+
+def _is_attempt_preserving_workbench_transient_retry(
+    *,
+    task_type: str,
+    error: str,
+) -> bool:
+    return task_type == TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING and error.startswith(
+        "retryable Prompt A "
+    )
 
 
 async def run_worker_loop(
@@ -85,24 +96,35 @@ async def run_worker_loop(
                     )
                     await queue_repo.complete_job(job_id, success=False, error=str(exc))
                 except TransientJobError as exc:
+                    error_message = str(exc)
                     decision = build_retry_decision(
                         job_record,
-                        str(exc),
+                        error_message,
                         retry_after_seconds=exc.retry_after_seconds,
                     )
-                    await queue_repo.fail_job(
-                        job_id,
-                        increment_attempt=True,
-                        retry_delay_seconds=decision.backoff_seconds,
-                        error=str(exc),
-                    )
-                    if (
-                        decision.exhausted
-                        and task_type == TASK_PROCESS_WORKBENCH_DOCUMENT
+                    if _is_attempt_preserving_workbench_transient_retry(
+                        task_type=task_type,
+                        error=error_message,
                     ):
-                        await mark_process_workbench_document_exhausted(
-                            job_record,
+                        await queue_repo.retry_job_without_attempt_increment(
+                            job_id,
+                            retry_delay_seconds=decision.backoff_seconds,
+                            error=error_message,
                         )
+                    else:
+                        await queue_repo.fail_job(
+                            job_id,
+                            increment_attempt=True,
+                            retry_delay_seconds=decision.backoff_seconds,
+                            error=error_message,
+                        )
+                        if (
+                            decision.exhausted
+                            and task_type == TASK_PROCESS_WORKBENCH_DOCUMENT
+                        ):
+                            await mark_process_workbench_document_exhausted(
+                                job_record,
+                            )
                 else:
                     await queue_repo.complete_job(job_id, success=True)
                     logger.info(

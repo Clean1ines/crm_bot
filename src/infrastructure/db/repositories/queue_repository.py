@@ -170,6 +170,54 @@ class QueueRepository:
                 )
             return released
 
+    async def retry_job_without_attempt_increment(
+        self,
+        job_id: str,
+        error: str,
+        retry_delay_seconds: float | None = None,
+    ) -> bool:
+        delay_seconds = (
+            0.0 if retry_delay_seconds is None else max(0.0, float(retry_delay_seconds))
+        )
+        logger.info(
+            "Scheduling job retry without attempt increment",
+            extra={
+                "job_id": job_id,
+                "error": error,
+                "retry_delay_seconds": delay_seconds,
+            },
+        )
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                UPDATE public.execution_queue
+                SET
+                    error = $1,
+                    updated_at = NOW(),
+                    locked_at = NULL,
+                    worker_id = NULL,
+                    status = 'pending',
+                    next_attempt_at = NOW() + ($3::double precision * INTERVAL '1 second')
+                WHERE id = $2 AND status = 'processing'
+            """,
+                error,
+                job_id,
+                delay_seconds,
+            )
+
+            updated = result == "UPDATE 1"
+            if updated:
+                logger.info(
+                    "Job retry scheduled without attempt increment",
+                    extra={"job_id": job_id},
+                )
+            else:
+                logger.warning(
+                    "Job retry schedule failed - not found or not processing",
+                    extra={"job_id": job_id},
+                )
+            return updated
+
     async def fail_job(
         self,
         job_id: str,

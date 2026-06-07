@@ -10,6 +10,7 @@ from typing import Protocol, cast
 from uuid import uuid4
 
 from src.application.ports.faq_workbench_claim_observations_generator import (
+    FaqWorkbenchClaimObservationsGenerationError,
     FaqWorkbenchClaimObservationsGeneratorPort,
 )
 from src.application.ports.knowledge_workbench import (
@@ -291,7 +292,12 @@ class DefaultClaimObservationsRunner:
                     registry_snapshot_payload=registry_snapshot_payload,
                     invocation=invocation,
                 )
-            if invocation is not None:
+            if isinstance(exc, FaqWorkbenchClaimObservationsGenerationError):
+                raise
+            if (
+                invocation is not None
+                and not _is_retryable_prompt_a_transient_generation_error(exc)
+            ):
                 await self.persistence_service.persist_claim_observations_generation_error(
                     ProcessClaimObservationsGenerationErrorCommand(
                         section=command.section,
@@ -437,14 +443,17 @@ class DefaultClaimObservationsRunner:
 def _llm_json_invocation_from_exception(
     exc: BaseException,
 ) -> LlmJsonInvocationResult | None:
-    result = getattr(exc, "result", None)
-    if isinstance(result, LlmJsonInvocationResult):
-        return result
-
     for arg in getattr(exc, "args", ()):
         if isinstance(arg, LlmJsonInvocationResult):
             return arg
+    result = getattr(exc, "result", None)
+    if isinstance(result, LlmJsonInvocationResult):
+        return result
     return None
+
+
+def _is_retryable_prompt_a_transient_generation_error(exc: BaseException) -> bool:
+    return isinstance(exc, FaqWorkbenchClaimObservationsGenerationError)
 
 
 def make_workbench_claim_observations_generator(
