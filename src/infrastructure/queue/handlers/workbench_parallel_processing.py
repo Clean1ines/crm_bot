@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +41,16 @@ from src.domain.project_plane.llm_routing import LlmJsonInvocationResult
 from src.domain.project_plane.knowledge_workbench import (
     DomainInvariantError,
     FactRegistry,
+    JsonValue,
     RegistrySnapshot,
+)
+from src.domain.project_plane.knowledge_workbench.documents import (
+    DocumentSection,
+    DocumentSectionStatus,
+)
+from src.domain.project_plane.knowledge_workbench.section_batch_queue import (
+    SectionBatchQueueItem,
+    SectionBatchQueueItemStatus,
 )
 from src.infrastructure.queue.job_exceptions import (
     PermanentJobError,
@@ -56,6 +67,9 @@ from src.interfaces.composition.faq_workbench_parallel_processing import (
 
 
 PARALLEL_WORKBENCH_PROCESSING_TASK_TYPE = "process_workbench_parallel_processing"
+
+_PROMPT_A_OVERSIZED_SPLIT_ERROR_KIND = "prompt_a_fallback_exhausted_request_too_large"
+_OVERSIZED_SECTION_SPLIT_TARGET_CHARS = 6_000
 
 
 class IdFactory(Protocol):
@@ -85,6 +99,16 @@ class ClaimObservationsRunnerRepositoryPort(
         document_id: str,
         processing_run_id: str,
     ) -> RegistrySnapshot | None: ...
+
+    async def upsert_document_sections(
+        self,
+        sections: tuple[DocumentSection, ...],
+    ) -> None: ...
+
+    async def update_section_batch_queue_item(
+        self,
+        item: SectionBatchQueueItem,
+    ) -> None: ...
 
 
 def _workbench_repository(connection: object) -> KnowledgeWorkbenchRepository:
@@ -258,6 +282,15 @@ class DefaultClaimObservationsRunner:
                 )
         except Exception as exc:
             invocation = _llm_json_invocation_from_exception(exc)
+            if invocation is not None and _prompt_a_invocation_requires_oversized_split(
+                invocation
+            ):
+                return await self._split_oversized_section_and_persist_parent(
+                    command=command,
+                    registry=registry,
+                    registry_snapshot_payload=registry_snapshot_payload,
+                    invocation=invocation,
+                )
             if invocation is not None:
                 await self.persistence_service.persist_claim_observations_generation_error(
                     ProcessClaimObservationsGenerationErrorCommand(
@@ -318,10 +351,96 @@ class DefaultClaimObservationsRunner:
             claim_input_refs=persisted.claim_observation_ids,
         )
 
+    async def _split_oversized_section_and_persist_parent(
+        self,
+        *,
+        command: ProcessLeasedClaimObservationsCommand,
+        registry: FactRegistry,
+        registry_snapshot_payload: JsonValue,
+        invocation: LlmJsonInvocationResult,
+    ) -> ProcessLeasedClaimObservationsResult:
+        section = command.section
+        queue_item = command.queue_item
+        child_texts = _split_oversized_section_text(section.raw_text)
+        child_sections = _oversized_child_sections(
+            section=section,
+            child_texts=child_texts,
+        )
+        child_queue_items = _oversized_child_queue_items(
+            parent_item=queue_item,
+            child_sections=child_sections,
+        )
+
+        await self.repository.upsert_document_sections(child_sections)
+        for child_queue_item in child_queue_items:
+            await self.repository.update_section_batch_queue_item(child_queue_item)
+
+        selected_attempt = invocation.attempts[-1]
+        raw_payload: JsonValue = {
+            "claim_observations": [],
+            "oversized_section_split": {
+                "reason": _PROMPT_A_OVERSIZED_SPLIT_ERROR_KIND,
+                "parent_section_id": section.section_id,
+                "parent_section_key": section.section_key,
+                "child_section_ids": [
+                    child_section.section_id for child_section in child_sections
+                ],
+                "child_queue_item_ids": [
+                    child_queue_item.queue_item_id
+                    for child_queue_item in child_queue_items
+                ],
+            },
+        }
+
+        persisted = await self.persistence_service.persist_claim_observations(
+            ProcessClaimObservationsCommand(
+                section=section,
+                registry=registry,
+                registry_snapshot_payload=registry_snapshot_payload,
+                claim_observations=(),
+                model_name=selected_attempt.model,
+                prompt_version="faq_claim_observations.v1.oversized_split",
+                model_provider=selected_attempt.provider_id,
+                api_key_slot=selected_attempt.api_key_slot,
+                prompt_tokens=invocation.token_usage.prompt_tokens,
+                completion_tokens=invocation.token_usage.completion_tokens,
+                total_tokens=invocation.token_usage.total_tokens,
+                raw_llm_output=invocation.raw_text,
+                raw_payload=raw_payload,
+                invocation_status=invocation.status.value,
+                route_attempts=tuple(
+                    {
+                        "provider_id": attempt.provider_id,
+                        "model": attempt.model,
+                        "api_key_slot": attempt.api_key_slot,
+                        "attempt_index": attempt.attempt_index,
+                        "status": attempt.status.value,
+                        "error_kind": attempt.error_kind,
+                        "cooldown_seconds": attempt.cooldown_seconds,
+                    }
+                    for attempt in invocation.attempts
+                ),
+                llm_warnings=("oversized_section_split",),
+                llm_metrics={
+                    "split_child_count": len(child_sections),
+                    "split_reason": _PROMPT_A_OVERSIZED_SPLIT_ERROR_KIND,
+                },
+            )
+        )
+
+        return ProcessLeasedClaimObservationsResult(
+            claim_observations_node_run_id=persisted.node_run.node_run_id,
+            claim_input_refs=persisted.claim_observation_ids,
+        )
+
 
 def _llm_json_invocation_from_exception(
     exc: BaseException,
 ) -> LlmJsonInvocationResult | None:
+    result = getattr(exc, "result", None)
+    if isinstance(result, LlmJsonInvocationResult):
+        return result
+
     for arg in getattr(exc, "args", ()):
         if isinstance(arg, LlmJsonInvocationResult):
             return arg
@@ -516,6 +635,193 @@ def _ensure_parallel_processing_terminal_result(result: object) -> None:
         raise TransientJobError(
             f"parallel Workbench processing is not terminal: {blocker}"
         )
+
+
+def _prompt_a_invocation_requires_oversized_split(
+    invocation: LlmJsonInvocationResult,
+) -> bool:
+    failure = invocation.failure
+    return (
+        failure is not None
+        and failure.error_kind == _PROMPT_A_OVERSIZED_SPLIT_ERROR_KIND
+    )
+
+
+def _oversized_child_sections(
+    *,
+    section: DocumentSection,
+    child_texts: tuple[str, ...],
+) -> tuple[DocumentSection, ...]:
+    part_count = len(child_texts)
+    if part_count < 2:
+        raise DomainInvariantError(
+            "oversized section split requires at least two child sections"
+        )
+
+    child_sections: list[DocumentSection] = []
+    for index, child_text in enumerate(child_texts, start=1):
+        metadata = dict(section.metadata)
+        metadata.update(
+            {
+                "split_reason": _PROMPT_A_OVERSIZED_SPLIT_ERROR_KIND,
+                "split_parent_section_id": section.section_id,
+                "split_parent_section_key": section.section_key,
+                "split_part_index": index,
+                "split_part_count": part_count,
+            }
+        )
+        child_sections.append(
+            DocumentSection(
+                section_id=f"{section.section_id}-split-{index}",
+                document_id=section.document_id,
+                project_id=section.project_id,
+                section_index=section.section_index,
+                section_key=f"{section.section_key}.split.{index}",
+                heading_path=section.heading_path,
+                title=f"{section.title} · часть {index}/{part_count}",
+                raw_text=child_text,
+                normalized_text=child_text,
+                source_refs=section.source_refs,
+                source_chunk_indexes=section.source_chunk_indexes,
+                status=DocumentSectionStatus.PENDING,
+                parent_section_id=section.section_id,
+                metadata=metadata,
+            )
+        )
+
+    return tuple(child_sections)
+
+
+def _oversized_child_queue_items(
+    *,
+    parent_item: SectionBatchQueueItem,
+    child_sections: tuple[DocumentSection, ...],
+) -> tuple[SectionBatchQueueItem, ...]:
+    child_items: list[SectionBatchQueueItem] = []
+    for index, child_section in enumerate(child_sections, start=1):
+        child_items.append(
+            SectionBatchQueueItem(
+                queue_item_id=f"{parent_item.queue_item_id}-split-{index}",
+                batch_plan_id=parent_item.batch_plan_id,
+                processing_run_id=parent_item.processing_run_id,
+                project_id=parent_item.project_id,
+                document_id=parent_item.document_id,
+                section_id=child_section.section_id,
+                section_key=child_section.section_key,
+                section_index=child_section.section_index,
+                lane_id=parent_item.lane_id,
+                lane_index=parent_item.lane_index + index,
+                observed_registry_snapshot_id=(
+                    parent_item.observed_registry_snapshot_id
+                ),
+                observed_registry_snapshot_sequence=(
+                    parent_item.observed_registry_snapshot_sequence
+                ),
+                status=SectionBatchQueueItemStatus.READY,
+                claimed_by_worker_id=None,
+                lease_expires_at=None,
+                claim_observations_node_run_id=None,
+                registry_application_queue_item_id=None,
+                error_kind=None,
+                attempt_count=0,
+                created_at=parent_item.created_at,
+                updated_at=parent_item.updated_at,
+            )
+        )
+    return tuple(child_items)
+
+
+def _split_oversized_section_text(
+    text: str,
+    *,
+    target_chars: int = _OVERSIZED_SECTION_SPLIT_TARGET_CHARS,
+) -> tuple[str, ...]:
+    if target_chars < 1_000:
+        raise DomainInvariantError("oversized section split target is too small")
+    if not text.strip():
+        raise DomainInvariantError("oversized section split requires non-empty text")
+
+    blocks = _text_blocks_preserving_separators(text)
+    chunks: list[str] = []
+    current = ""
+
+    for block in blocks:
+        if len(block) > target_chars:
+            if current.strip():
+                chunks.append(current)
+                current = ""
+            chunks.extend(_split_large_text_block(block, target_chars=target_chars))
+            continue
+
+        if current and len(current) + len(block) > target_chars:
+            chunks.append(current)
+            current = block
+            continue
+
+        current += block
+
+    if current.strip():
+        chunks.append(current)
+
+    chunks = [chunk for chunk in chunks if chunk.strip()]
+    if len(chunks) >= 2:
+        return tuple(chunks)
+
+    return tuple(_split_large_text_block(text, target_chars=target_chars))
+
+
+def _text_blocks_preserving_separators(text: str) -> tuple[str, ...]:
+    parts = re.split(r"(\n{2,})", text)
+    blocks: list[str] = []
+    index = 0
+    while index < len(parts):
+        content = parts[index]
+        separator = parts[index + 1] if index + 1 < len(parts) else ""
+        block = content + separator
+        if block:
+            blocks.append(block)
+        index += 2
+    return tuple(blocks)
+
+
+def _split_large_text_block(
+    text: str,
+    *,
+    target_chars: int,
+) -> tuple[str, ...]:
+    chunks: list[str] = []
+    remaining = text
+
+    while len(remaining) > target_chars:
+        cut_index = _best_semantic_cut_index(remaining, target_chars=target_chars)
+        chunks.append(remaining[:cut_index])
+        remaining = remaining[cut_index:]
+
+    if remaining.strip():
+        chunks.append(remaining)
+
+    chunks = [chunk for chunk in chunks if chunk.strip()]
+    if len(chunks) < 2:
+        raise DomainInvariantError(
+            "oversized section split could not find a safe boundary"
+        )
+    return tuple(chunks)
+
+
+def _best_semantic_cut_index(text: str, *, target_chars: int) -> int:
+    lower_bound = max(1, target_chars // 2)
+    upper_bound = min(len(text) - 1, target_chars)
+
+    candidates: list[int] = []
+    for marker in ("\n## ", "\n### ", "\n\n", "\n", ". ", "! ", "? ", "; "):
+        index = text.rfind(marker, lower_bound, upper_bound)
+        if index > 0:
+            candidates.append(index + len(marker))
+
+    if candidates:
+        return max(candidates)
+
+    return upper_bound
 
 
 def _required_text(payload: Mapping[str, object], key: str) -> str:

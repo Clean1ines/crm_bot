@@ -1885,6 +1885,60 @@ class KnowledgeWorkbenchRepository(
                 self._json(section.metadata),
             )
 
+    async def upsert_document_sections(
+        self,
+        sections: tuple[DocumentSection, ...],
+    ) -> None:
+        for section in sections:
+            await self._connection.execute(
+                """
+                INSERT INTO knowledge_workbench_document_sections (
+                    section_id,
+                    document_id,
+                    project_id,
+                    section_index,
+                    section_key,
+                    heading_path,
+                    title,
+                    raw_text,
+                    normalized_text,
+                    source_refs,
+                    source_chunk_indexes,
+                    parent_section_id,
+                    status,
+                    metadata
+                )
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                ON CONFLICT (section_id) DO UPDATE SET
+                    section_index = EXCLUDED.section_index,
+                    section_key = EXCLUDED.section_key,
+                    heading_path = EXCLUDED.heading_path,
+                    title = EXCLUDED.title,
+                    raw_text = EXCLUDED.raw_text,
+                    normalized_text = EXCLUDED.normalized_text,
+                    source_refs = EXCLUDED.source_refs,
+                    source_chunk_indexes = EXCLUDED.source_chunk_indexes,
+                    parent_section_id = EXCLUDED.parent_section_id,
+                    status = EXCLUDED.status,
+                    metadata = EXCLUDED.metadata,
+                    updated_at = now()
+                """,
+                section.section_id,
+                section.document_id,
+                section.project_id,
+                section.section_index,
+                section.section_key,
+                self._json(list(section.heading_path)),
+                section.title,
+                section.raw_text,
+                section.normalized_text,
+                self._json(list(section.source_refs)),
+                self._json(list(section.source_chunk_indexes)),
+                section.parent_section_id,
+                section.status.value,
+                self._json(section.metadata),
+            )
+
     async def persist_processing_exhaustion_transition(
         self,
         *,
