@@ -28,8 +28,15 @@ def _is_attempt_preserving_workbench_transient_retry(
     task_type: str,
     error: str,
 ) -> bool:
-    return task_type == TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING and error.startswith(
-        "retryable Prompt A "
+    if task_type != TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING:
+        return False
+
+    return (
+        error.startswith("retryable Prompt A ")
+        or error.startswith("parallel Workbench processing is not terminal:")
+        or error.startswith(
+            "parallel Workbench processing reached max_cycles before terminal completion"
+        )
     )
 
 

@@ -10,7 +10,10 @@ from src.infrastructure.queue.job_exceptions import PermanentJobError, Transient
 from src.infrastructure.queue.job_types import (
     TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
 )
-from src.infrastructure.queue.worker_loop import run_worker_loop
+from src.infrastructure.queue.worker_loop import (
+    _is_attempt_preserving_workbench_transient_retry,
+    run_worker_loop,
+)
 
 
 @dataclass(slots=True)
@@ -112,6 +115,78 @@ def _job(
 async def _stop_soon(event: asyncio.Event) -> None:
     await asyncio.sleep(0)
     event.set()
+
+
+@pytest.mark.parametrize(
+    ("task_type", "error", "expected"),
+    (
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            "retryable Prompt A invocation failure: provider rate limited",
+            True,
+        ),
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            "retryable Prompt A output contract failure: claim language mismatch",
+            True,
+        ),
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            "parallel Workbench processing is not terminal: blocked_by_leases",
+            True,
+        ),
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            "parallel Workbench processing is not terminal: blocked_by_sections",
+            True,
+        ),
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            "parallel Workbench processing is not terminal: waiting_for_fresh_registry",
+            True,
+        ),
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            "parallel Workbench processing is not terminal: wait_for_snapshot",
+            True,
+        ),
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            "parallel Workbench processing is not terminal: keep_draining",
+            True,
+        ),
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            (
+                "parallel Workbench processing reached max_cycles before "
+                "terminal completion"
+            ),
+            True,
+        ),
+        (
+            TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
+            "some unrelated transient provider failure",
+            False,
+        ),
+        (
+            "process_workbench_document",
+            "parallel Workbench processing is not terminal: blocked_by_leases",
+            False,
+        ),
+    ),
+)
+def test_attempt_preserving_workbench_transient_retry_matcher_accepts_non_terminal_parallel_states(
+    task_type: str,
+    error: str,
+    expected: bool,
+) -> None:
+    assert (
+        _is_attempt_preserving_workbench_transient_retry(
+            task_type=task_type,
+            error=error,
+        )
+        is expected
+    )
 
 
 @pytest.mark.asyncio
