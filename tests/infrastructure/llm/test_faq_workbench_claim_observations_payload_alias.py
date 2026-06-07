@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from src.domain.project_plane.knowledge_workbench import DomainInvariantError
+from src.domain.project_plane.knowledge_workbench import (
+    DocumentSectionStatus,
+    DomainInvariantError,
+    JsonValue,
+)
 from src.domain.project_plane.knowledge_workbench.documents import DocumentSection
 from src.domain.project_plane.llm_routing import (
     LlmInvocationStatus,
@@ -22,7 +26,7 @@ from src.infrastructure.llm.faq_workbench_claim_observations_generator import (
 
 @dataclass(slots=True)
 class FakeInvocation:
-    parsed_json: object
+    parsed_json: JsonValue
 
     async def invoke_json(self, request: object) -> LlmJsonInvocationResult:
         return LlmJsonInvocationResult(
@@ -55,13 +59,13 @@ def _section() -> DocumentSection:
         normalized_text="Бот отвечает клиентам в Telegram.",
         source_refs=(),
         source_chunk_indexes=(),
-        status=None,
+        status=DocumentSectionStatus.PENDING,
         metadata={},
     )
 
 
 def _generator(
-    tmp_path: Path, parsed_json: object
+    tmp_path: Path, parsed_json: JsonValue
 ) -> FaqWorkbenchClaimObservationsGenerator:
     prompt_path = tmp_path / "prompt.txt"
     prompt_path.write_text("Return JSON.", encoding="utf-8")
@@ -71,15 +75,28 @@ def _generator(
     )
 
 
-def _claim() -> dict[str, object]:
+def _claim() -> dict[str, JsonValue]:
     return {
-        "local_ref": "c1",
         "claim": "Бот отвечает клиентам в Telegram.",
         "granularity": "atomic",
         "evidence_block": "Бот отвечает клиентам в Telegram.",
         "possible_questions": ["Может ли бот отвечать клиентам?"],
         "exclusion_scope": "",
     }
+
+
+def _required_payload_dict(payload: JsonValue | None) -> dict[str, JsonValue]:
+    assert isinstance(payload, dict)
+    return payload
+
+
+def _first_raw_claim(payload: dict[str, JsonValue]) -> dict[str, JsonValue]:
+    raw_observations = payload.get("claim_observations")
+    assert isinstance(raw_observations, list)
+    assert raw_observations
+    first_observation = raw_observations[0]
+    assert isinstance(first_observation, dict)
+    return first_observation
 
 
 @pytest.mark.asyncio
@@ -102,8 +119,11 @@ async def test_prompt_a_accepts_claims_alias_and_normalizes_raw_payload(
 
     assert len(result.claim_observations) == 1
     assert result.claim_observations[0]["local_ref"] == "c1"
-    assert "claim_observations" in result.raw_payload
-    assert "claims" not in result.raw_payload
+
+    raw_payload = _required_payload_dict(result.raw_payload)
+    assert "claim_observations" in raw_payload
+    assert "claims" not in raw_payload
+
     observation = result.claim_observations[0]
     assert observation["claim"] == "Бот отвечает клиентам в Telegram."
     assert observation["claim_kind"] == "other"
@@ -112,14 +132,14 @@ async def test_prompt_a_accepts_claims_alias_and_normalizes_raw_payload(
     assert observation["local_relations"] == []
     assert observation["confidence"] == 0.9
 
-    assert result.raw_payload["claim_observations"][0]["claim"] == (
-        "Бот отвечает клиентам в Telegram."
-    )
-    assert "claim_kind" not in result.raw_payload["claim_observations"][0]
-    assert "triples" not in result.raw_payload["claim_observations"][0]
-    assert "scope" not in result.raw_payload["claim_observations"][0]
-    assert "local_relations" not in result.raw_payload["claim_observations"][0]
-    assert "confidence" not in result.raw_payload["claim_observations"][0]
+    first_raw_claim = _first_raw_claim(raw_payload)
+    assert first_raw_claim["claim"] == "Бот отвечает клиентам в Telegram."
+    assert "local_ref" not in first_raw_claim
+    assert "claim_kind" not in first_raw_claim
+    assert "triples" not in first_raw_claim
+    assert "scope" not in first_raw_claim
+    assert "local_relations" not in first_raw_claim
+    assert "confidence" not in first_raw_claim
 
 
 def test_prompt_a_rejects_payload_with_both_claim_observations_and_claims(

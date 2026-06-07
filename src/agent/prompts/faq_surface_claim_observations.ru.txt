@@ -39,7 +39,6 @@ Output format:
 {
 "claims": [
 {
-"local_ref": "c1",
 "claim": "",
 "granularity": "atomic",
 "possible_questions": [],
@@ -57,14 +56,12 @@ If there are no useful claims:
 
 Each claim object must contain exactly these fields:
 
-* local_ref;
 * claim;
 * granularity;
 * possible_questions;
 * exclusion_scope;
 * evidence_block.
 
-`local_ref` must be numbered as "c1", "c2", "c3".
 `granularity` must be only "atomic" or "composite".
 `possible_questions` must always be an array of strings.
 `exclusion_scope` must always be a string.

@@ -66,6 +66,7 @@ class FakeRepository:
 class FakeClaimObservationsRunner:
     call_log: list[str] = field(default_factory=list)
     commands: list[ProcessLeasedClaimObservationsCommand] = field(default_factory=list)
+    claim_input_refs: tuple[str, ...] = ("c1", "c2")
 
     async def process_leased_claim_observations(
         self,
@@ -77,7 +78,7 @@ class FakeClaimObservationsRunner:
         self.commands.append(command)
         return ProcessLeasedClaimObservationsResult(
             claim_observations_node_run_id="claim-observations-node-run-1",
-            claim_input_refs=("c1", "c2"),
+            claim_input_refs=self.claim_input_refs,
         )
 
 
@@ -199,6 +200,46 @@ async def test_section_worker_persists_claim_observations_and_stops_before_promp
         "claim_observations_runner.process_leased_claim_observations",
     ]
     assert runner.commands[0].section.section_id == "section-1"
+
+
+@pytest.mark.asyncio
+async def test_section_worker_persists_empty_claim_observations_without_claim_refs() -> (
+    None
+):
+    runner = FakeClaimObservationsRunner(claim_input_refs=())
+    repository = FakeRepository(sections={"section-1": _section()})
+    service = FaqWorkbenchSectionWorkItemProcessorService(
+        repository=repository,
+        claim_observations_runner=runner,
+        id_factory=FakeIdFactory(),
+        time_provider=FixedTimeProvider(),
+    )
+
+    result = await service.process_one_section_work_item(
+        ProcessOneSectionWorkItemCommand(
+            queue_item=_leased_item(),
+            worker_id="worker-1",
+        )
+    )
+
+    assert result.claim_observations_result.claim_input_refs == ()
+    assert result.claim_observations_persisted_item.status is (
+        SectionBatchQueueItemStatus.CLAIM_OBSERVATIONS_PERSISTED
+    )
+    assert result.claim_observations_persisted_item.claim_observations_node_run_id == (
+        "claim-observations-node-run-1"
+    )
+    assert (
+        result.claim_observations_persisted_item.registry_application_queue_item_id
+        is None
+    )
+    assert repository.call_log == [
+        "repo.get_document_section",
+        "repo.update_section_batch_queue_item:claim_observations_persisted",
+    ]
+    assert runner.call_log == [
+        "claim_observations_runner.process_leased_claim_observations",
+    ]
 
 
 @pytest.mark.asyncio

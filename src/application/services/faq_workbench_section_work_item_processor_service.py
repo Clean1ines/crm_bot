@@ -69,8 +69,6 @@ class ProcessLeasedClaimObservationsResult:
     def __post_init__(self) -> None:
         if not self.claim_observations_node_run_id:
             raise DomainInvariantError("claim observations result requires node run id")
-        if not self.claim_input_refs:
-            raise DomainInvariantError("claim observations result requires claim ids")
 
 
 class LeasedClaimObservationsRunnerPort(Protocol):

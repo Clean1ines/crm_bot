@@ -171,7 +171,6 @@ class FaqWorkbenchClaimObservationsGenerator(
         index: int,
     ) -> ClaimObservation:
         allowed_keys = {
-            "local_ref",
             "claim",
             "granularity",
             "evidence_block",
@@ -186,7 +185,7 @@ class FaqWorkbenchClaimObservationsGenerator(
             )
 
         observation: ClaimObservation = {
-            "local_ref": self._required_str(raw_observation, "local_ref", index=index),
+            "local_ref": f"c{index + 1}",
             "claim": self._required_str(raw_observation, "claim", index=index),
             "claim_kind": "other",
             "granularity": self._controlled_str(

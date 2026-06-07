@@ -58,7 +58,6 @@ def _generator() -> FaqWorkbenchClaimObservationsGenerator:
 
 def _minimal_claim(**overrides: JsonValue) -> dict[str, JsonValue]:
     payload: dict[str, JsonValue] = {
-        "local_ref": "c1",
         "claim": "Сервис помогает клиенту быстро получить ответ по документам.",
         "granularity": "atomic",
         "evidence_block": "Сервис помогает клиенту быстро получить ответ по документам.",
@@ -83,7 +82,6 @@ def test_prompt_a_contract_exposes_minimal_llm_schema_only() -> None:
 
     for token in (
         '"claims"',
-        '"local_ref"',
         '"claim"',
         '"granularity"',
         '"evidence_block"',
@@ -93,6 +91,7 @@ def test_prompt_a_contract_exposes_minimal_llm_schema_only() -> None:
         assert token in source
 
     for token in (
+        "local_ref",
         "claim_kind",
         "triples",
         "local_relations",
@@ -137,9 +136,32 @@ def test_generator_rejects_unknown_old_ontology_keys_at_prompt_a_boundary() -> N
         )
 
 
+def test_generator_assigns_local_refs_mechanically_in_order() -> None:
+    observations = _generator().parse_claim_observations_payload(
+        {"claim_observations": [_minimal_claim(), _minimal_claim(claim="Второй факт.")]}
+    )
+
+    assert [observation["local_ref"] for observation in observations] == ["c1", "c2"]
+
+
+def test_generator_rejects_llm_provided_local_ref_at_prompt_a_boundary() -> None:
+    with pytest.raises(DomainInvariantError, match="local_ref"):
+        _generator().parse_claim_observations_payload(
+            {"claim_observations": [_minimal_claim(local_ref="c1")]}
+        )
+
+
+def test_generator_accepts_empty_claims_payload() -> None:
+    observations = _generator().parse_claim_observations_payload(
+        {"claim_observations": []}
+    )
+
+    assert observations == ()
+
+
 @pytest.mark.parametrize(
     "field",
-    ["local_ref", "claim", "granularity", "evidence_block"],
+    ["claim", "granularity", "evidence_block"],
 )
 def test_generator_rejects_missing_required_minimal_claim_fields(field: str) -> None:
     claim = _minimal_claim()
