@@ -268,12 +268,12 @@ class FakePersistenceService:
     pass
 
 
-def test_parallel_queue_handler_builds_default_claim_observations_generator_with_pinned_workbench_adapter_legacy_name(
+def test_parallel_queue_handler_builds_default_claim_observations_generator_with_prompt_a_fallback_adapter(
     monkeypatch,
 ) -> None:
     captured: dict[str, object] = {}
 
-    class FakeWorkbenchQwenLlmJsonInvocationAdapter:
+    class FakeWorkbenchPromptAFallbackLlmJsonInvocationAdapter:
         @classmethod
         def create_default(cls):
             captured["create_default_called"] = True
@@ -290,8 +290,8 @@ def test_parallel_queue_handler_builds_default_claim_observations_generator_with
 
     monkeypatch.setattr(
         handler,
-        "WorkbenchQwenLlmJsonInvocationAdapter",
-        FakeWorkbenchQwenLlmJsonInvocationAdapter,
+        "WorkbenchPromptAFallbackLlmJsonInvocationAdapter",
+        FakeWorkbenchPromptAFallbackLlmJsonInvocationAdapter,
     )
     monkeypatch.setattr(
         handler,
@@ -429,7 +429,7 @@ def test_parallel_queue_handler_no_longer_requires_manual_claim_observations_run
 
     assert "make_workbench_claim_observations_runner" in source
     assert "make_workbench_claim_observations_generator" in source
-    assert "WorkbenchQwenLlmJsonInvocationAdapter.create_default()" in source
+    assert "WorkbenchPromptAFallbackLlmJsonInvocationAdapter.create_default()" in source
     assert "GroqLlmJsonInvocationAdapter.create_default()" not in source
     assert "llama-3.1-8b-instant" not in source
     assert "faq_surface_claim_observations.ru.txt" in source

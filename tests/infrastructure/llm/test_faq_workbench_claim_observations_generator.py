@@ -5,8 +5,14 @@ from pathlib import Path
 import pytest
 
 from src.application.ports.llm_json_invocation import LlmJsonInvocationPort
-from src.domain.project_plane.knowledge_workbench import DomainInvariantError, JsonValue
+from src.domain.project_plane.knowledge_workbench import (
+    DocumentSection,
+    DocumentSectionStatus,
+    DomainInvariantError,
+    JsonValue,
+)
 from src.domain.project_plane.llm_routing import (
+    LlmInvocationFailure,
     LlmInvocationStatus,
     LlmJsonInvocationRequest,
     LlmJsonInvocationResult,
@@ -17,6 +23,7 @@ from src.domain.project_plane.llm_routing import (
 from src.infrastructure.llm.faq_workbench_claim_observations_generator import (
     FaqWorkbenchClaimObservationsGenerator,
     FaqWorkbenchClaimObservationsGeneratorConfig,
+    FaqWorkbenchClaimObservationsInvocationError,
 )
 
 GENERATOR = Path("src/infrastructure/llm/faq_workbench_claim_observations_generator.py")
@@ -202,3 +209,316 @@ def test_contract_wrapper_does_not_inject_legacy_fields_before_base_parser() -> 
     assert "__global__" not in source
     assert "local_relations" not in source
     assert "def _relations" not in source
+
+
+class FakePromptAFallbackInvocation:
+    fallback_models = ("qwen/qwen3-32b", "openai/gpt-oss-120b")
+
+    def __init__(self, responses: dict[str, LlmJsonInvocationResult]) -> None:
+        self.responses = responses
+        self.calls: list[str] = []
+
+    async def invoke_json(
+        self,
+        request: LlmJsonInvocationRequest,
+    ) -> LlmJsonInvocationResult:
+        return await self.invoke_json_for_model(
+            request,
+            model=self.fallback_models[0],
+        )
+
+    async def invoke_json_for_model(
+        self,
+        request: LlmJsonInvocationRequest,
+        *,
+        model: str,
+    ) -> LlmJsonInvocationResult:
+        self.calls.append(model)
+        return self.responses[model]
+
+
+def _fallback_generator(
+    tmp_path: Path,
+    invocation: LlmJsonInvocationPort,
+) -> FaqWorkbenchClaimObservationsGenerator:
+    prompt_path = tmp_path / "prompt.txt"
+    prompt_path.write_text("Return JSON.", encoding="utf-8")
+    return FaqWorkbenchClaimObservationsGenerator(
+        llm_invocation=invocation,
+        config=FaqWorkbenchClaimObservationsGeneratorConfig(prompt_path=prompt_path),
+    )
+
+
+def _section(raw_text: str) -> DocumentSection:
+    return DocumentSection(
+        section_id="section-1",
+        document_id="document-1",
+        project_id="project-1",
+        section_index=0,
+        section_key="section-1",
+        heading_path=(),
+        title="Section",
+        raw_text=raw_text,
+        normalized_text=raw_text,
+        source_refs=(),
+        source_chunk_indexes=(),
+        status=DocumentSectionStatus.PENDING,
+        metadata={},
+    )
+
+
+def _success_result(model: str, payload: JsonValue) -> LlmJsonInvocationResult:
+    return LlmJsonInvocationResult(
+        status=LlmInvocationStatus.SUCCESS,
+        parsed_json=payload,
+        raw_text="{}",
+        token_usage=LlmTokenUsage(prompt_tokens=10, completion_tokens=5),
+        attempts=(
+            LlmRouteAttempt(
+                provider_id="groq",
+                model=model,
+                api_key_slot="4/4",
+                attempt_index=0,
+                status=LlmRouteAttemptStatus.SUCCESS,
+            ),
+        ),
+    )
+
+
+def _failure_result(model: str, status: LlmInvocationStatus) -> LlmJsonInvocationResult:
+    return LlmJsonInvocationResult(
+        status=status,
+        parsed_json=None,
+        raw_text="",
+        token_usage=LlmTokenUsage(prompt_tokens=0, completion_tokens=0),
+        attempts=(
+            LlmRouteAttempt(
+                provider_id="groq",
+                model=model,
+                api_key_slot="4/4",
+                attempt_index=0,
+                status=LlmRouteAttemptStatus.FAILED,
+                error_kind=status.value,
+            ),
+        ),
+        failure=LlmInvocationFailure(
+            status=status,
+            error_kind=status.value,
+            user_message="failed",
+            internal_message="failed",
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_generator_fallbacks_on_english_questions_for_russian_section(
+    tmp_path: Path,
+) -> None:
+    section = _section(
+        "Первый рабочий сценарий — Telegram-ассистент, который отвечает по базе "
+        "знаний и передаёт сложные обращения менеджеру."
+    )
+    qwen_payload = {
+        "claims": [
+            _minimal_claim(
+                claim=(
+                    "Первый рабочий сценарий — Telegram-ассистент, который отвечает "
+                    "по базе знаний и передаёт сложные обращения менеджеру."
+                ),
+                evidence_block=section.raw_text,
+                possible_questions=[
+                    "What is the first working scenario?",
+                    "What does the Telegram assistant do?",
+                ],
+            )
+        ]
+    }
+    gpt_payload = {
+        "claims": [
+            _minimal_claim(
+                claim=(
+                    "Первый рабочий сценарий — Telegram-ассистент, который отвечает "
+                    "по базе знаний и передаёт сложные обращения менеджеру."
+                ),
+                evidence_block=section.raw_text,
+                possible_questions=[
+                    "Что делает первый рабочий сценарий?",
+                    "Как работает Telegram-ассистент?",
+                ],
+            )
+        ]
+    }
+    invocation = FakePromptAFallbackInvocation(
+        {
+            "qwen/qwen3-32b": _success_result("qwen/qwen3-32b", qwen_payload),
+            "openai/gpt-oss-120b": _success_result(
+                "openai/gpt-oss-120b",
+                gpt_payload,
+            ),
+        }
+    )
+    generator = _fallback_generator(tmp_path, invocation)
+
+    result = await generator.generate_findings(
+        section=section,
+        registry_snapshot={},
+    )
+
+    assert invocation.calls == ["qwen/qwen3-32b", "openai/gpt-oss-120b"]
+    assert result.claim_observations[0]["possible_questions"] == [
+        "Что делает первый рабочий сценарий?",
+        "Как работает Telegram-ассистент?",
+    ]
+    assert [attempt.model for attempt in result.invocation.attempts] == [
+        "qwen/qwen3-32b",
+        "openai/gpt-oss-120b",
+    ]
+    assert result.invocation.attempts[0].status is LlmRouteAttemptStatus.FAILED
+    assert result.invocation.attempts[0].error_kind == "prompt_a_contract_validation"
+    assert result.invocation.attempts[1].status is LlmRouteAttemptStatus.SUCCESS
+
+
+@pytest.mark.asyncio
+async def test_generator_fallbacks_on_non_exact_evidence_block(tmp_path: Path) -> None:
+    section = _section("Система хранит историю диалогов для менеджера.")
+    invocation = FakePromptAFallbackInvocation(
+        {
+            "qwen/qwen3-32b": _success_result(
+                "qwen/qwen3-32b",
+                {
+                    "claims": [
+                        _minimal_claim(
+                            claim="Система хранит историю диалогов.",
+                            evidence_block="Система хранит историю клиентов и диалогов.",
+                            possible_questions=["Что хранит система?"],
+                        )
+                    ]
+                },
+            ),
+            "openai/gpt-oss-120b": _success_result(
+                "openai/gpt-oss-120b",
+                {
+                    "claims": [
+                        _minimal_claim(
+                            claim="Система хранит историю диалогов для менеджера.",
+                            evidence_block=section.raw_text,
+                            possible_questions=["Что хранит система?"],
+                        )
+                    ]
+                },
+            ),
+        }
+    )
+    generator = _fallback_generator(tmp_path, invocation)
+
+    result = await generator.generate_findings(section=section, registry_snapshot={})
+
+    assert invocation.calls == ["qwen/qwen3-32b", "openai/gpt-oss-120b"]
+    assert result.claim_observations[0]["evidence_block"] == section.raw_text
+    assert result.invocation.attempts[-1].model == "openai/gpt-oss-120b"
+
+
+@pytest.mark.asyncio
+async def test_generator_strips_leading_markdown_heading_from_evidence_block(
+    tmp_path: Path,
+) -> None:
+    section = _section("## История диалогов\n\nСистема хранит историю диалогов.")
+    invocation = FakePromptAFallbackInvocation(
+        {
+            "qwen/qwen3-32b": _success_result(
+                "qwen/qwen3-32b",
+                {
+                    "claims": [
+                        _minimal_claim(
+                            claim="Система хранит историю диалогов.",
+                            evidence_block=section.raw_text,
+                            possible_questions=["Что хранит система?"],
+                        )
+                    ]
+                },
+            ),
+            "openai/gpt-oss-120b": _success_result(
+                "openai/gpt-oss-120b",
+                {"claims": []},
+            ),
+        }
+    )
+    generator = _fallback_generator(tmp_path, invocation)
+
+    result = await generator.generate_findings(section=section, registry_snapshot={})
+
+    assert invocation.calls == ["qwen/qwen3-32b"]
+    assert result.claim_observations[0]["evidence_block"] == (
+        "Система хранит историю диалогов."
+    )
+
+
+@pytest.mark.asyncio
+async def test_generator_fallbacks_on_request_too_large_status(tmp_path: Path) -> None:
+    section = _section("Система хранит историю диалогов.")
+    invocation = FakePromptAFallbackInvocation(
+        {
+            "qwen/qwen3-32b": _failure_result(
+                "qwen/qwen3-32b",
+                LlmInvocationStatus.REQUEST_TOO_LARGE,
+            ),
+            "openai/gpt-oss-120b": _success_result(
+                "openai/gpt-oss-120b",
+                {
+                    "claims": [
+                        _minimal_claim(
+                            claim="Система хранит историю диалогов.",
+                            evidence_block=section.raw_text,
+                            possible_questions=["Что хранит система?"],
+                        )
+                    ]
+                },
+            ),
+        }
+    )
+    generator = _fallback_generator(tmp_path, invocation)
+
+    result = await generator.generate_findings(section=section, registry_snapshot={})
+
+    assert invocation.calls == ["qwen/qwen3-32b", "openai/gpt-oss-120b"]
+    assert [attempt.model for attempt in result.invocation.attempts] == [
+        "qwen/qwen3-32b",
+        "openai/gpt-oss-120b",
+    ]
+    assert result.invocation.attempts[0].status is LlmRouteAttemptStatus.FAILED
+    assert result.invocation.attempts[1].status is LlmRouteAttemptStatus.SUCCESS
+
+
+@pytest.mark.asyncio
+async def test_generator_reports_stable_failure_when_all_models_are_too_large(
+    tmp_path: Path,
+) -> None:
+    invocation = FakePromptAFallbackInvocation(
+        {
+            "qwen/qwen3-32b": _failure_result(
+                "qwen/qwen3-32b",
+                LlmInvocationStatus.REQUEST_TOO_LARGE,
+            ),
+            "openai/gpt-oss-120b": _failure_result(
+                "openai/gpt-oss-120b",
+                LlmInvocationStatus.OUTPUT_TOO_LARGE,
+            ),
+        }
+    )
+    generator = _fallback_generator(tmp_path, invocation)
+
+    with pytest.raises(
+        FaqWorkbenchClaimObservationsInvocationError,
+        match="prompt_a_fallback_exhausted_request_too_large",
+    ) as exc_info:
+        await generator.generate_findings(
+            section=_section("Система хранит историю диалогов."),
+            registry_snapshot={},
+        )
+
+    assert invocation.calls == ["qwen/qwen3-32b", "openai/gpt-oss-120b"]
+    assert exc_info.value.error_kind == "prompt_a_fallback_exhausted_request_too_large"
+    assert [attempt.model for attempt in exc_info.value.result.attempts] == [
+        "qwen/qwen3-32b",
+        "openai/gpt-oss-120b",
+    ]

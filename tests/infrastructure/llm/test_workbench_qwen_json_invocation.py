@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from src.infrastructure.llm.groq_llm_json_invocation import GroqLlmJsonInvocationConfig
 from src.infrastructure.llm.workbench_qwen_json_invocation import (
+    WORKBENCH_PROMPT_A_FALLBACK_MODELS,
     WORKBENCH_QWEN_MODEL,
+    WorkbenchPromptAFallbackLlmJsonInvocationAdapter,
     WorkbenchQwenLlmJsonInvocationAdapter,
     sanitize_workbench_qwen_json_text,
     workbench_qwen_worker_key_slot,
@@ -89,3 +93,35 @@ def test_workbench_qwen_worker_key_slot_falls_back_without_worker_context() -> N
     assert workbench_qwen_worker_key_slot(None, key_count=4) is None
     assert workbench_qwen_worker_key_slot("", key_count=4) is None
     assert workbench_qwen_worker_key_slot("registry-writer", key_count=4) is None
+
+
+def test_workbench_prompt_a_fallback_adapter_uses_target_chain_reasoning_off() -> None:
+    adapter = WorkbenchPromptAFallbackLlmJsonInvocationAdapter.create_default()
+
+    assert WORKBENCH_PROMPT_A_FALLBACK_MODELS == (
+        "qwen/qwen3-32b",
+        "openai/gpt-oss-120b",
+        "llama-3.3-70b-versatile",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+    )
+    assert adapter.fallback_models == WORKBENCH_PROMPT_A_FALLBACK_MODELS
+    assert adapter.config.default_model == "qwen/qwen3-32b"
+    assert adapter.config.max_completion_tokens is None
+    assert adapter.config.reasoning_effort == "none"
+    assert adapter.config.reasoning_format == "hidden"
+
+
+def test_workbench_prompt_a_fallback_adapter_does_not_expose_global_router_source() -> (
+    None
+):
+    source = Path("src/infrastructure/llm/workbench_qwen_json_invocation.py").read_text(
+        encoding="utf-8"
+    )
+
+    prompt_a_block = source.split(
+        "class WorkbenchPromptAFallbackLlmJsonInvocationAdapter",
+        1,
+    )[1].split("def sanitize_workbench_qwen_json_text", 1)[0]
+    assert "GroqModelRouter" not in prompt_a_block
+    assert "RotatingAsyncGroq" not in prompt_a_block
+    assert "GroqLlmJsonInvocationAdapter.create_default" not in prompt_a_block

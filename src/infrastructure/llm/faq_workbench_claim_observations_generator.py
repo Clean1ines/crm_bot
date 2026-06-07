@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 
 from src.application.ports.faq_workbench_claim_observations_generator import (
     ClaimObservation,
@@ -19,8 +20,13 @@ from src.domain.project_plane.knowledge_workbench import (
     JsonValue,
 )
 from src.domain.project_plane.llm_routing import (
+    LlmInvocationFailure,
     LlmInvocationStatus,
     LlmJsonInvocationRequest,
+    LlmJsonInvocationResult,
+    LlmRouteAttempt,
+    LlmRouteAttemptStatus,
+    LlmTokenUsage,
 )
 
 
@@ -28,6 +34,35 @@ class FaqWorkbenchClaimObservationsInvocationError(
     FaqWorkbenchClaimObservationsGenerationError
 ):
     """Backward-compatible infrastructure alias for first section LLM failures."""
+
+
+class PromptAFallbackLlmJsonInvocationPort(LlmJsonInvocationPort, Protocol):
+    fallback_models: tuple[str, ...]
+
+    async def invoke_json_for_model(
+        self,
+        request: LlmJsonInvocationRequest,
+        *,
+        model: str,
+    ) -> LlmJsonInvocationResult: ...
+
+
+_PROMPT_A_FALLBACK_STATUSES = frozenset(
+    {
+        LlmInvocationStatus.REQUEST_TOO_LARGE,
+        LlmInvocationStatus.OUTPUT_TOO_LARGE,
+        LlmInvocationStatus.INVALID_JSON,
+        LlmInvocationStatus.PROVIDER_ERROR,
+    }
+)
+_PROMPT_A_VALIDATION_ERROR_KIND = "prompt_a_contract_validation"
+_PROMPT_A_EXHAUSTED_TOO_LARGE_ERROR_KIND = (
+    "prompt_a_fallback_exhausted_request_too_large"
+)
+_LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+./-]*")
+_LATIN_LETTER_RE = re.compile(r"[A-Za-z]")
+_CYRILLIC_LETTER_RE = re.compile(r"[А-Яа-яЁё]")
+_MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,15 +89,134 @@ class FaqWorkbenchClaimObservationsGenerator(
             section=section,
             registry_snapshot=registry_snapshot,
         )
-        result = await self.llm_invocation.invoke_json(
-            LlmJsonInvocationRequest(
-                operation_name=self.config.operation_name,
-                prompt=prompt,
-                route_purpose=self.config.route_purpose,
-                idempotency_key=f"{section.document_id}:{section.section_key}",
-            )
+        request = LlmJsonInvocationRequest(
+            operation_name=self.config.operation_name,
+            prompt=prompt,
+            route_purpose=self.config.route_purpose,
+            idempotency_key=f"{section.document_id}:{section.section_key}",
         )
 
+        fallback_invocation = self._fallback_invocation()
+        if fallback_invocation is not None:
+            return await self._generate_findings_with_fallback(
+                request=request,
+                section=section,
+                fallback_invocation=fallback_invocation,
+            )
+
+        result = await self.llm_invocation.invoke_json(request)
+        return self._generation_result_from_invocation(
+            result=result,
+            section=section,
+        )
+
+    def _fallback_invocation(self) -> PromptAFallbackLlmJsonInvocationPort | None:
+        invoke_for_model = getattr(self.llm_invocation, "invoke_json_for_model", None)
+        fallback_models = getattr(self.llm_invocation, "fallback_models", None)
+        if (
+            callable(invoke_for_model)
+            and isinstance(fallback_models, tuple)
+            and all(isinstance(model, str) and model for model in fallback_models)
+        ):
+            return cast(PromptAFallbackLlmJsonInvocationPort, self.llm_invocation)
+        return None
+
+    async def _generate_findings_with_fallback(
+        self,
+        *,
+        request: LlmJsonInvocationRequest,
+        section: DocumentSection,
+        fallback_invocation: PromptAFallbackLlmJsonInvocationPort,
+    ) -> FaqWorkbenchClaimObservationsGenerationResult:
+        prompt_attempts: list[LlmRouteAttempt] = []
+        failed_statuses: list[LlmInvocationStatus] = []
+        last_invocation_result: LlmJsonInvocationResult | None = None
+        last_validation_error: DomainInvariantError | None = None
+
+        for model in fallback_invocation.fallback_models:
+            result = await fallback_invocation.invoke_json_for_model(
+                request,
+                model=model,
+            )
+            last_invocation_result = result
+
+            if result.status is not LlmInvocationStatus.SUCCESS:
+                failed_statuses.append(result.status)
+                prompt_attempts.append(
+                    self._prompt_a_attempt_from_result(
+                        result,
+                        model=model,
+                        attempt_index=len(prompt_attempts),
+                        status=LlmRouteAttemptStatus.FAILED,
+                        error_kind=self._failure_error_kind(result),
+                    )
+                )
+                if result.status not in _PROMPT_A_FALLBACK_STATUSES:
+                    raise FaqWorkbenchClaimObservationsInvocationError(
+                        self._result_with_attempts(result, tuple(prompt_attempts))
+                    )
+                continue
+
+            try:
+                generation_result = self._generation_result_from_invocation(
+                    result=result,
+                    section=section,
+                )
+            except DomainInvariantError as exc:
+                last_validation_error = exc
+                prompt_attempts.append(
+                    self._prompt_a_attempt_from_result(
+                        result,
+                        model=model,
+                        attempt_index=len(prompt_attempts),
+                        status=LlmRouteAttemptStatus.FAILED,
+                        error_kind=_PROMPT_A_VALIDATION_ERROR_KIND,
+                    )
+                )
+                continue
+
+            prompt_attempts.append(
+                self._prompt_a_attempt_from_result(
+                    result,
+                    model=model,
+                    attempt_index=len(prompt_attempts),
+                    status=LlmRouteAttemptStatus.SUCCESS,
+                    error_kind=None,
+                )
+            )
+            return FaqWorkbenchClaimObservationsGenerationResult(
+                claim_observations=generation_result.claim_observations,
+                invocation=self._result_with_attempts(
+                    generation_result.invocation,
+                    tuple(prompt_attempts),
+                ),
+                raw_payload=generation_result.raw_payload,
+                warnings=generation_result.warnings,
+                metrics=generation_result.metrics,
+            )
+
+        if last_validation_error is not None:
+            raise DomainInvariantError(
+                "claim observation output contract failure after fallback chain: "
+                f"{last_validation_error}"
+            ) from last_validation_error
+
+        if last_invocation_result is not None:
+            exhausted = self._fallback_exhausted_result(
+                last_result=last_invocation_result,
+                attempts=tuple(prompt_attempts),
+                failed_statuses=tuple(failed_statuses),
+            )
+            raise FaqWorkbenchClaimObservationsInvocationError(exhausted)
+
+        raise DomainInvariantError("claim observation fallback chain is empty")
+
+    def _generation_result_from_invocation(
+        self,
+        *,
+        result: LlmJsonInvocationResult,
+        section: DocumentSection,
+    ) -> FaqWorkbenchClaimObservationsGenerationResult:
         if result.status is not LlmInvocationStatus.SUCCESS:
             raise FaqWorkbenchClaimObservationsInvocationError(result)
 
@@ -74,6 +228,10 @@ class FaqWorkbenchClaimObservationsGenerator(
         parsed_json = _workbench_json_value(result.parsed_json)
         normalized_payload = self._normalize_claim_observations_payload(parsed_json)
         claim_observations = self.parse_claim_observations_payload(normalized_payload)
+        claim_observations = self._validate_claim_observations_against_section(
+            observations=claim_observations,
+            section=section,
+        )
         return FaqWorkbenchClaimObservationsGenerationResult(
             claim_observations=claim_observations,
             invocation=result,
@@ -81,6 +239,235 @@ class FaqWorkbenchClaimObservationsGenerator(
             warnings=self._warnings_from_payload(normalized_payload),
             metrics=self._metrics_from_payload(normalized_payload),
         )
+
+    def _validate_claim_observations_against_section(
+        self,
+        *,
+        observations: tuple[ClaimObservation, ...],
+        section: DocumentSection,
+    ) -> tuple[ClaimObservation, ...]:
+        source_candidates = self._section_text_candidates(section)
+        source_text = "\n".join(source_candidates)
+        source_latin_terms = frozenset(self._latin_terms(source_text))
+        source_is_russian = self._is_cyrillic_dominant(source_text)
+
+        validated: list[ClaimObservation] = []
+        for index, observation in enumerate(observations):
+            current: ClaimObservation = dict(observation)
+            current["evidence_block"] = self._normalized_evidence_block(
+                current,
+                section=section,
+                index=index,
+            )
+
+            if source_is_russian:
+                claim = current.get("claim")
+                if isinstance(claim, str):
+                    self._validate_russian_text_field(
+                        claim,
+                        field_name="claim",
+                        index=index,
+                        source_latin_terms=source_latin_terms,
+                    )
+
+                exclusion_scope = current.get("exclusion_scope")
+                if isinstance(exclusion_scope, str):
+                    self._validate_russian_text_field(
+                        exclusion_scope,
+                        field_name="exclusion_scope",
+                        index=index,
+                        source_latin_terms=source_latin_terms,
+                    )
+
+                possible_questions = current.get("possible_questions")
+                if isinstance(possible_questions, list):
+                    for question in possible_questions:
+                        if isinstance(question, str):
+                            self._validate_russian_text_field(
+                                question,
+                                field_name="possible_questions",
+                                index=index,
+                                source_latin_terms=source_latin_terms,
+                            )
+
+            validated.append(current)
+
+        return tuple(validated)
+
+    def _normalized_evidence_block(
+        self,
+        observation: ClaimObservation,
+        *,
+        section: DocumentSection,
+        index: int,
+    ) -> str:
+        value = observation.get("evidence_block")
+        if not isinstance(value, str) or not value.strip():
+            raise DomainInvariantError(
+                f"claim observation #{index} requires non-empty string evidence_block"
+            )
+
+        evidence = value.strip()
+        evidence_without_heading = self._strip_leading_markdown_heading(evidence)
+        if (
+            evidence_without_heading != evidence
+            and evidence_without_heading
+            and self._source_contains_text(section, evidence_without_heading)
+        ):
+            return evidence_without_heading
+
+        if self._source_contains_text(section, evidence):
+            return evidence
+
+        raise DomainInvariantError(
+            f"claim observation #{index} evidence_block must exactly match section text"
+        )
+
+    def _source_contains_text(self, section: DocumentSection, text: str) -> bool:
+        return any(
+            text in candidate for candidate in self._section_text_candidates(section)
+        )
+
+    def _section_text_candidates(self, section: DocumentSection) -> tuple[str, ...]:
+        candidates: list[str] = []
+        for value in (section.raw_text, section.normalized_text):
+            if isinstance(value, str) and value.strip() and value not in candidates:
+                candidates.append(value)
+        if section.title and section.raw_text:
+            titled = f"{section.title}\n\n{section.raw_text}"
+            if titled not in candidates:
+                candidates.append(titled)
+        return tuple(candidates)
+
+    def _strip_leading_markdown_heading(self, text: str) -> str:
+        lines = text.splitlines()
+        while lines and _MARKDOWN_HEADING_RE.match(lines[0]):
+            lines = lines[1:]
+            while lines and not lines[0].strip():
+                lines = lines[1:]
+        return "\n".join(lines).strip()
+
+    def _validate_russian_text_field(
+        self,
+        value: str,
+        *,
+        field_name: str,
+        index: int,
+        source_latin_terms: frozenset[str],
+    ) -> None:
+        text = value.strip()
+        if not text:
+            return
+
+        latin_count = len(_LATIN_LETTER_RE.findall(text))
+        cyrillic_count = len(_CYRILLIC_LETTER_RE.findall(text))
+        if latin_count >= 4 and latin_count > cyrillic_count:
+            raise DomainInvariantError(
+                f"claim observation #{index} {field_name} must match source language"
+            )
+
+        unknown_terms = tuple(
+            term
+            for term in self._latin_terms(text)
+            if len(term) > 1 and term not in source_latin_terms
+        )
+        if unknown_terms:
+            preview = ", ".join(unknown_terms[:5])
+            raise DomainInvariantError(
+                f"claim observation #{index} {field_name} contains foreign terms "
+                f"not present in source section: {preview}"
+            )
+
+    def _latin_terms(self, text: str) -> tuple[str, ...]:
+        return tuple(
+            match.group(0).casefold() for match in _LATIN_TOKEN_RE.finditer(text)
+        )
+
+    def _is_cyrillic_dominant(self, text: str) -> bool:
+        cyrillic_count = len(_CYRILLIC_LETTER_RE.findall(text))
+        latin_count = len(_LATIN_LETTER_RE.findall(text))
+        return cyrillic_count >= 20 and cyrillic_count > latin_count
+
+    def _prompt_a_attempt_from_result(
+        self,
+        result: LlmJsonInvocationResult,
+        *,
+        model: str,
+        attempt_index: int,
+        status: LlmRouteAttemptStatus,
+        error_kind: str | None,
+    ) -> LlmRouteAttempt:
+        base = result.attempts[-1]
+        return LlmRouteAttempt(
+            provider_id=base.provider_id,
+            model=model or base.model,
+            api_key_slot=base.api_key_slot,
+            attempt_index=attempt_index,
+            status=status,
+            error_kind=error_kind,
+            cooldown_seconds=base.cooldown_seconds,
+        )
+
+    def _failure_error_kind(self, result: LlmJsonInvocationResult) -> str:
+        if result.failure is not None:
+            return result.failure.error_kind
+        return result.status.value
+
+    def _result_with_attempts(
+        self,
+        result: LlmJsonInvocationResult,
+        attempts: tuple[LlmRouteAttempt, ...],
+    ) -> LlmJsonInvocationResult:
+        return LlmJsonInvocationResult(
+            status=result.status,
+            parsed_json=result.parsed_json,
+            raw_text=result.raw_text,
+            token_usage=result.token_usage,
+            attempts=attempts,
+            failure=result.failure,
+            started_at=result.started_at,
+            completed_at=result.completed_at,
+        )
+
+    def _fallback_exhausted_result(
+        self,
+        *,
+        last_result: LlmJsonInvocationResult,
+        attempts: tuple[LlmRouteAttempt, ...],
+        failed_statuses: tuple[LlmInvocationStatus, ...],
+    ) -> LlmJsonInvocationResult:
+        too_large_statuses = {
+            LlmInvocationStatus.REQUEST_TOO_LARGE,
+            LlmInvocationStatus.OUTPUT_TOO_LARGE,
+        }
+        if failed_statuses and all(
+            status in too_large_statuses for status in failed_statuses
+        ):
+            status = LlmInvocationStatus.REQUEST_TOO_LARGE
+            return LlmJsonInvocationResult(
+                status=status,
+                parsed_json=None,
+                raw_text=last_result.raw_text,
+                token_usage=last_result.token_usage
+                or LlmTokenUsage(prompt_tokens=0, completion_tokens=0),
+                attempts=attempts,
+                failure=LlmInvocationFailure(
+                    status=status,
+                    error_kind=_PROMPT_A_EXHAUSTED_TOO_LARGE_ERROR_KIND,
+                    user_message=(
+                        "Prompt A section is too large for every configured fallback model."
+                    ),
+                    internal_message=(
+                        "Prompt A fallback chain exhausted with request/output too large; "
+                        "section split is required."
+                    ),
+                    cooldown_seconds=None,
+                ),
+                started_at=last_result.started_at,
+                completed_at=last_result.completed_at,
+            )
+
+        return self._result_with_attempts(last_result, attempts)
 
     def build_prompt(
         self,

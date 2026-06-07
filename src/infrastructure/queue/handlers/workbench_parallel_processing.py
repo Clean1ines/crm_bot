@@ -28,7 +28,7 @@ from src.infrastructure.llm.faq_workbench_claim_observations_generator import (
     FaqWorkbenchClaimObservationsGeneratorConfig,
 )
 from src.infrastructure.llm.workbench_qwen_json_invocation import (
-    WorkbenchQwenLlmJsonInvocationAdapter,
+    WorkbenchPromptAFallbackLlmJsonInvocationAdapter,
     workbench_qwen_worker_context,
 )
 from src.application.services.faq_workbench_parallel_processing_coordinator_service import (
@@ -337,7 +337,7 @@ def make_workbench_claim_observations_generator(
         llm_invocation=(
             llm_json_invocation
             if llm_json_invocation is not None
-            else WorkbenchQwenLlmJsonInvocationAdapter.create_default()
+            else WorkbenchPromptAFallbackLlmJsonInvocationAdapter.create_default()
         ),
         config=FaqWorkbenchClaimObservationsGeneratorConfig(prompt_path=prompt_path),
     )

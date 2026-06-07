@@ -10,7 +10,11 @@ from typing import cast
 
 from groq import AsyncGroq
 
-from src.domain.project_plane.llm_routing import JsonValue
+from src.domain.project_plane.llm_routing import (
+    JsonValue,
+    LlmJsonInvocationRequest,
+    LlmJsonInvocationResult,
+)
 from src.infrastructure.llm.groq_keyring import configured_groq_api_keys
 from src.infrastructure.llm.groq_llm_json_invocation import (
     GroqChatCompletionLike,
@@ -25,6 +29,12 @@ from src.infrastructure.llm.groq_router import (
 )
 
 WORKBENCH_QWEN_MODEL = "qwen/qwen3-32b"
+WORKBENCH_PROMPT_A_FALLBACK_MODELS = (
+    WORKBENCH_QWEN_MODEL,
+    "openai/gpt-oss-120b",
+    "llama-3.3-70b-versatile",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+)
 
 _WORKBENCH_QWEN_WORKER_ID: ContextVar[str | None] = ContextVar(
     "workbench_qwen_worker_id",
@@ -272,9 +282,10 @@ class _WorkbenchQwenJsonClient:
 class WorkbenchQwenLlmJsonInvocationAdapter(GroqLlmJsonInvocationAdapter):
     """Workbench-only Qwen reasoning-off JSON invocation.
 
-    Prompt A and Prompt C use qwen/qwen3-32b with reasoning disabled.
+    Prompt C and legacy direct Workbench calls use qwen/qwen3-32b with
+    reasoning disabled. Prompt A uses WorkbenchPromptAFallbackLlmJsonInvocationAdapter.
     Model routing is disabled.
-    Prompt A section workers bind deterministically to Groq key slots.
+    Section workers bind deterministically to Groq key slots.
     """
 
     @classmethod
@@ -312,6 +323,59 @@ class WorkbenchQwenLlmJsonInvocationAdapter(GroqLlmJsonInvocationAdapter):
     def _loads_json_value(self, raw_text: str) -> JsonValue:
         sanitized = sanitize_workbench_qwen_json_text(raw_text)
         return cast(JsonValue, json.loads(sanitized))
+
+
+class WorkbenchPromptAFallbackLlmJsonInvocationAdapter(
+    WorkbenchQwenLlmJsonInvocationAdapter
+):
+    """Prompt A target fallback chain over the Workbench worker-affine Groq proxy.
+
+    This adapter does not use the global Groq model router. The generator owns
+    Prompt A output validation and calls invoke_json_for_model for each target
+    model until one model returns valid claim observations.
+    """
+
+    fallback_models: tuple[str, ...] = WORKBENCH_PROMPT_A_FALLBACK_MODELS
+
+    @classmethod
+    def create_default(
+        cls,
+        *,
+        config: GroqLlmJsonInvocationConfig | None = None,
+    ) -> WorkbenchPromptAFallbackLlmJsonInvocationAdapter:
+        temperature = config.temperature if config is not None else 0.0
+        resolved = GroqLlmJsonInvocationConfig(
+            default_model=WORKBENCH_PROMPT_A_FALLBACK_MODELS[0],
+            temperature=temperature,
+            max_completion_tokens=None,
+            reasoning_effort="none",
+            reasoning_format="hidden",
+        )
+        return cls(
+            client=_WorkbenchQwenJsonClient.create(),
+            config=resolved,
+        )
+
+    async def invoke_json_for_model(
+        self,
+        request: LlmJsonInvocationRequest,
+        *,
+        model: str,
+    ) -> LlmJsonInvocationResult:
+        if model not in self.fallback_models:
+            raise ValueError(f"unsupported Prompt A fallback model: {model}")
+
+        single_model_adapter = WorkbenchQwenLlmJsonInvocationAdapter(
+            client=self.client,
+            config=GroqLlmJsonInvocationConfig(
+                default_model=model,
+                temperature=self.config.temperature,
+                max_completion_tokens=None,
+                reasoning_effort="none",
+                reasoning_format="hidden",
+            ),
+        )
+        return await single_model_adapter.invoke_json(request)
 
 
 def sanitize_workbench_qwen_json_text(raw_text: str) -> str:
@@ -387,7 +451,9 @@ def _usage_int(response: GroqChatCompletionLike, field_name: str) -> int:
 
 
 __all__ = [
+    "WORKBENCH_PROMPT_A_FALLBACK_MODELS",
     "WORKBENCH_QWEN_MODEL",
+    "WorkbenchPromptAFallbackLlmJsonInvocationAdapter",
     "WorkbenchQwenLlmJsonInvocationAdapter",
     "sanitize_workbench_qwen_json_text",
     "workbench_qwen_worker_context",
