@@ -22,16 +22,20 @@ def test_workbench_default_llm_invocation_is_pinned_workbench_adapter_legacy_nam
     assert "llama-3.1-8b-instant" not in composition
 
 
-def test_workbench_pinned_adapter_uses_versatile_without_global_groq_router() -> None:
+def test_workbench_pinned_adapter_uses_qwen_reasoning_off_without_global_router() -> (
+    None
+):
     source = ADAPTER.read_text(encoding="utf-8")
 
-    assert 'WORKBENCH_QWEN_MODEL = "llama-3.3-70b-versatile"' in source
-    assert '"qwen/qwen3-32b"' not in source
+    assert 'WORKBENCH_QWEN_MODEL = "qwen/qwen3-32b"' in source
+    assert '"llama-3.3-70b-versatile"' not in source
     assert "GroqModelRouter" not in source
     assert "RotatingAsyncGroq" not in source
     assert "PRIMARY_CHAIN" not in source
     assert "CHEAP_SMALL_CHAIN" not in source
     assert "max_completion_tokens=None" in source
+    assert 'reasoning_effort="none"' in source
+    assert 'reasoning_format="hidden"' in source
     assert "workbench_qwen_worker_key_slot" in source
     assert "sanitize_workbench_qwen_json_text" in source
     assert "<think>" in source

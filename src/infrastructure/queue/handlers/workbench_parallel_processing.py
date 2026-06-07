@@ -107,7 +107,7 @@ class WorkbenchParallelProcessingJobPayloadDto:
     project_id: str
     document_id: str
     processing_run_id: str
-    section_worker_count: int = 3
+    section_worker_count: int = 4
     worker_id_prefix: str = "workbench-parallel"
     lease_seconds: int = 300
     max_cycles: int = 10_000
@@ -155,7 +155,7 @@ class WorkbenchParallelProcessingJobPayloadDto:
             section_worker_count=_positive_int(
                 payload,
                 "section_worker_count",
-                default=3,
+                default=4,
             ),
             worker_id_prefix=_optional_text(
                 payload,

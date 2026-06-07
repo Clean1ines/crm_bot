@@ -77,6 +77,8 @@ class GroqLlmJsonInvocationConfig:
     default_model: str = DEFAULT_GROQ_JSON_MODEL
     temperature: float = 0.0
     max_completion_tokens: int | None = None
+    reasoning_effort: str | None = None
+    reasoning_format: str | None = None
 
 
 @dataclass(slots=True)
@@ -112,7 +114,7 @@ class GroqLlmJsonInvocationAdapter(LlmJsonInvocationPort):
                 ],
                 temperature=self.config.temperature,
                 response_format={"type": "json_object"},
-                **self._max_completion_kwargs(),
+                **self._completion_kwargs(),
             )
 
             raw_text = self._response_text(response)
@@ -161,10 +163,23 @@ class GroqLlmJsonInvocationAdapter(LlmJsonInvocationPort):
                 exc=exc,
             )
 
+    def _completion_kwargs(self) -> dict[str, object]:
+        kwargs = self._max_completion_kwargs()
+        kwargs.update(self._reasoning_kwargs())
+        return kwargs
+
     def _max_completion_kwargs(self) -> dict[str, object]:
         if self.config.max_completion_tokens is None:
             return {}
         return {"max_completion_tokens": self.config.max_completion_tokens}
+
+    def _reasoning_kwargs(self) -> dict[str, object]:
+        kwargs: dict[str, object] = {}
+        if self.config.reasoning_effort is not None:
+            kwargs["reasoning_effort"] = self.config.reasoning_effort
+        if self.config.reasoning_format is not None:
+            kwargs["reasoning_format"] = self.config.reasoning_format
+        return kwargs
 
     def _response_text(self, response: GroqChatCompletionLike) -> str:
         if not response.choices:

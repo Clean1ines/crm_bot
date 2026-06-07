@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY3: str | None = Field(
         None, description="Optional tertiary Groq API key for rate-limit rotation"
     )
+    GROQ_API_KEY4: str | None = Field(
+        None, description="Optional fourth Groq API key for rate-limit rotation"
+    )
     GROQ_MODEL: str = Field(
         "llama-3.3-70b-versatile", description="Default Groq model for agent"
     )

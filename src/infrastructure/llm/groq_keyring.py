@@ -210,6 +210,7 @@ def configured_groq_api_keys() -> tuple[str, ...]:
         getattr(settings, "GROQ_API_KEY", None),
         getattr(settings, "GROQ_API_KEY2", None),
         getattr(settings, "GROQ_API_KEY3", None),
+        getattr(settings, "GROQ_API_KEY4", None),
     )
 
     keys: list[str] = []

@@ -24,7 +24,7 @@ from src.infrastructure.llm.groq_router import (
     retry_after_seconds_from_exception,
 )
 
-WORKBENCH_QWEN_MODEL = "llama-3.3-70b-versatile"
+WORKBENCH_QWEN_MODEL = "qwen/qwen3-32b"
 
 _WORKBENCH_QWEN_WORKER_ID: ContextVar[str | None] = ContextVar(
     "workbench_qwen_worker_id",
@@ -118,14 +118,16 @@ def workbench_qwen_worker_key_slot(
 
 @dataclass(slots=True)
 class _WorkbenchQwenCompletionsProxy:
-    """Qwen-only Groq proxy with deterministic section-worker key affinity.
+    """Workbench Qwen reasoning-off proxy with deterministic key affinity.
 
-    With three configured keys:
+    With four configured keys:
       workbench-parallel-section-...-1 -> key slot 1
       workbench-parallel-section-...-2 -> key slot 2
       workbench-parallel-section-...-3 -> key slot 3
+      workbench-parallel-section-...-4 -> key slot 4
+      workbench-parallel-section-...-5 -> key slot 1
 
-    This never uses model routing and never changes the model away from Qwen.
+    This never uses model routing and never changes the pinned Workbench model.
     """
 
     _events: list[_WorkbenchQwenRouteEvent] = field(default_factory=list)
@@ -268,9 +270,9 @@ class _WorkbenchQwenJsonClient:
 
 
 class WorkbenchQwenLlmJsonInvocationAdapter(GroqLlmJsonInvocationAdapter):
-    """Workbench-only Groq JSON invocation.
+    """Workbench-only Qwen reasoning-off JSON invocation.
 
-    Prompt A and Prompt C use the pinned Workbench Groq model.
+    Prompt A and Prompt C use qwen/qwen3-32b with reasoning disabled.
     Model routing is disabled.
     Prompt A section workers bind deterministically to Groq key slots.
     """
@@ -284,16 +286,22 @@ class WorkbenchQwenLlmJsonInvocationAdapter(GroqLlmJsonInvocationAdapter):
         resolved = config or GroqLlmJsonInvocationConfig(
             default_model=WORKBENCH_QWEN_MODEL,
             max_completion_tokens=None,
+            reasoning_effort="none",
+            reasoning_format="hidden",
         )
 
         if (
             resolved.default_model != WORKBENCH_QWEN_MODEL
             or resolved.max_completion_tokens is not None
+            or resolved.reasoning_effort != "none"
+            or resolved.reasoning_format != "hidden"
         ):
             resolved = GroqLlmJsonInvocationConfig(
                 default_model=WORKBENCH_QWEN_MODEL,
                 max_completion_tokens=None,
                 temperature=resolved.temperature,
+                reasoning_effort="none",
+                reasoning_format="hidden",
             )
 
         return cls(

@@ -60,7 +60,7 @@ class FakeRepository:
     pass
 
 
-def test_parallel_queue_payload_defaults_to_three_section_workers() -> None:
+def test_parallel_queue_payload_defaults_to_four_section_workers() -> None:
     payload = WorkbenchParallelProcessingJobPayloadDto(
         project_id="project-1",
         document_id="document-1",
@@ -72,7 +72,7 @@ def test_parallel_queue_payload_defaults_to_three_section_workers() -> None:
     assert command.project_id == "project-1"
     assert command.document_id == "document-1"
     assert command.processing_run_id == "processing-run-1"
-    assert command.section_worker_count == 3
+    assert command.section_worker_count == 4
     assert command.worker_id_prefix == "workbench-parallel"
     assert command.lease_seconds == 300
     assert command.max_cycles == 10_000
@@ -85,7 +85,7 @@ def test_parallel_queue_payload_from_mapping_coerces_positive_ints() -> None:
             "project_id": "project-1",
             "document_id": "document-1",
             "processing_run_id": "processing-run-1",
-            "section_worker_count": "3",
+            "section_worker_count": "4",
             "worker_id_prefix": "parallel-test",
             "lease_seconds": "120",
             "max_cycles": "7",
@@ -93,7 +93,7 @@ def test_parallel_queue_payload_from_mapping_coerces_positive_ints() -> None:
         }
     )
 
-    assert payload.section_worker_count == 3
+    assert payload.section_worker_count == 4
     assert payload.worker_id_prefix == "parallel-test"
     assert payload.lease_seconds == 120
     assert payload.max_cycles == 7
@@ -107,7 +107,7 @@ async def test_parallel_handler_invokes_coordinator_with_command_from_dto() -> N
         project_id="project-1",
         document_id="document-1",
         processing_run_id="processing-run-1",
-        section_worker_count=3,
+        section_worker_count=4,
         worker_id_prefix="test-worker",
         lease_seconds=77,
         max_cycles=11,
@@ -125,7 +125,7 @@ async def test_parallel_handler_invokes_coordinator_with_command_from_dto() -> N
     assert command.project_id == "project-1"
     assert command.document_id == "document-1"
     assert command.processing_run_id == "processing-run-1"
-    assert command.section_worker_count == 3
+    assert command.section_worker_count == 4
     assert command.worker_id_prefix == "test-worker"
     assert command.lease_seconds == 77
     assert command.max_cycles == 11
@@ -146,7 +146,7 @@ async def test_parallel_handler_accepts_raw_mapping_payload() -> None:
     )
 
     assert len(coordinator.commands) == 1
-    assert coordinator.commands[0].section_worker_count == 3
+    assert coordinator.commands[0].section_worker_count == 4
 
 
 def test_parallel_payload_rejects_missing_required_ids() -> None:
