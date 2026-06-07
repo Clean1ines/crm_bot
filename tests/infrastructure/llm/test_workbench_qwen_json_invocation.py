@@ -11,7 +11,7 @@ from src.infrastructure.llm.workbench_qwen_json_invocation import (
 )
 
 
-def test_workbench_qwen_adapter_uses_fixed_qwen_model() -> None:
+def test_workbench_qwen_adapter_uses_pinned_versatile_model() -> None:
     adapter = WorkbenchQwenLlmJsonInvocationAdapter(
         client=object(),
         config=GroqLlmJsonInvocationConfig(
@@ -20,7 +20,8 @@ def test_workbench_qwen_adapter_uses_fixed_qwen_model() -> None:
         ),
     )
 
-    assert adapter.config.default_model == "qwen/qwen3-32b"
+    assert WORKBENCH_QWEN_MODEL == "llama-3.3-70b-versatile"
+    assert adapter.config.default_model == "llama-3.3-70b-versatile"
 
 
 @pytest.mark.parametrize(

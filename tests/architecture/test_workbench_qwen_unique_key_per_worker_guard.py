@@ -7,11 +7,13 @@ ADAPTER = Path("src/infrastructure/llm/workbench_qwen_json_invocation.py")
 HANDLER = Path("src/infrastructure/queue/handlers/workbench_parallel_processing.py")
 
 
-def test_workbench_qwen_is_strict_qwen_without_router_or_completion_cap() -> None:
+def test_workbench_pinned_adapter_is_strict_versatile_without_router_or_completion_cap() -> (
+    None
+):
     source = ADAPTER.read_text(encoding="utf-8")
 
     required = (
-        'WORKBENCH_QWEN_MODEL = "qwen/qwen3-32b"',
+        'WORKBENCH_QWEN_MODEL = "llama-3.3-70b-versatile"',
         "configured_groq_api_keys",
         "AsyncGroq(api_key=selection.key)",
         "max_completion_tokens=None",
@@ -31,7 +33,7 @@ def test_workbench_qwen_is_strict_qwen_without_router_or_completion_cap() -> Non
         "RotatingAsyncGroq",
         "max_completion_tokens=4096",
         "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
+        '"qwen/qwen3-32b"',
     )
     for marker in forbidden:
         assert marker not in source

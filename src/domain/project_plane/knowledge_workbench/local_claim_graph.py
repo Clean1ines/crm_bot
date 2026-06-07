@@ -84,8 +84,6 @@ class LocalClaim:
             raise DomainInvariantError(
                 "local claim granularity must be atomic or composite"
             )
-        if not self.triples:
-            raise DomainInvariantError("local claim requires triples")
         if not 0 <= self.confidence <= 1:
             raise DomainInvariantError("local claim confidence must be in [0, 1]")
 
@@ -167,7 +165,7 @@ def _parse_local_claim(payload: dict[str, JsonValue], *, index: int) -> LocalCla
         triples=tuple(
             _parse_triple(item, claim_index=index, triple_index=triple_index)
             for triple_index, item in enumerate(
-                _required_list(payload, "triples", index=index)
+                _required_list(payload, "triples", index=index, allow_empty=True)
             )
         ),
         evidence=LocalEvidenceMention(

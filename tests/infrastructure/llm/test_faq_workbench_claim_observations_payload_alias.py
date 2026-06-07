@@ -75,22 +75,10 @@ def _claim() -> dict[str, object]:
     return {
         "local_ref": "c1",
         "claim": "Бот отвечает клиентам в Telegram.",
-        "claim_kind": "capability",
         "granularity": "atomic",
-        "triples": [
-            {
-                "subject": "бот",
-                "predicate": "supports",
-                "object": "ответы клиентам в Telegram",
-                "qualifiers": [],
-            }
-        ],
         "evidence_block": "Бот отвечает клиентам в Telegram.",
         "possible_questions": ["Может ли бот отвечать клиентам?"],
-        "scope": "Telegram",
         "exclusion_scope": "",
-        "local_relations": [],
-        "confidence": 0.9,
     }
 
 
@@ -116,9 +104,22 @@ async def test_prompt_a_accepts_claims_alias_and_normalizes_raw_payload(
     assert result.claim_observations[0]["local_ref"] == "c1"
     assert "claim_observations" in result.raw_payload
     assert "claims" not in result.raw_payload
+    observation = result.claim_observations[0]
+    assert observation["claim"] == "Бот отвечает клиентам в Telegram."
+    assert observation["claim_kind"] == "other"
+    assert observation["triples"] == []
+    assert observation["scope"] == ""
+    assert observation["local_relations"] == []
+    assert observation["confidence"] == 0.9
+
     assert result.raw_payload["claim_observations"][0]["claim"] == (
         "Бот отвечает клиентам в Telegram."
     )
+    assert "claim_kind" not in result.raw_payload["claim_observations"][0]
+    assert "triples" not in result.raw_payload["claim_observations"][0]
+    assert "scope" not in result.raw_payload["claim_observations"][0]
+    assert "local_relations" not in result.raw_payload["claim_observations"][0]
+    assert "confidence" not in result.raw_payload["claim_observations"][0]
 
 
 def test_prompt_a_rejects_payload_with_both_claim_observations_and_claims(

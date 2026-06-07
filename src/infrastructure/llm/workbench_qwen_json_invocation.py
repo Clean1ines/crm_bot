@@ -24,7 +24,7 @@ from src.infrastructure.llm.groq_router import (
     retry_after_seconds_from_exception,
 )
 
-WORKBENCH_QWEN_MODEL = "qwen/qwen3-32b"
+WORKBENCH_QWEN_MODEL = "llama-3.3-70b-versatile"
 
 _WORKBENCH_QWEN_WORKER_ID: ContextVar[str | None] = ContextVar(
     "workbench_qwen_worker_id",
@@ -270,7 +270,7 @@ class _WorkbenchQwenJsonClient:
 class WorkbenchQwenLlmJsonInvocationAdapter(GroqLlmJsonInvocationAdapter):
     """Workbench-only Groq JSON invocation.
 
-    Prompt A and Prompt C use exactly qwen/qwen3-32b.
+    Prompt A and Prompt C use the pinned Workbench Groq model.
     Model routing is disabled.
     Prompt A section workers bind deterministically to Groq key slots.
     """
@@ -307,7 +307,7 @@ class WorkbenchQwenLlmJsonInvocationAdapter(GroqLlmJsonInvocationAdapter):
 
 
 def sanitize_workbench_qwen_json_text(raw_text: str) -> str:
-    """Strip Qwen reasoning wrappers and return the first JSON object."""
+    """Strip reasoning wrappers and return the first JSON object."""
 
     text = raw_text.strip()
     text = re.sub(r"(?is)^\s*<think>.*?</think>\s*", "", text, count=1).strip()

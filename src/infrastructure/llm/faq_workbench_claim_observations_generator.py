@@ -173,15 +173,10 @@ class FaqWorkbenchClaimObservationsGenerator(
         allowed_keys = {
             "local_ref",
             "claim",
-            "claim_kind",
             "granularity",
-            "triples",
             "evidence_block",
             "possible_questions",
-            "scope",
             "exclusion_scope",
-            "local_relations",
-            "confidence",
         }
         unknown_keys = set(raw_observation).difference(allowed_keys)
         if unknown_keys:
@@ -193,34 +188,14 @@ class FaqWorkbenchClaimObservationsGenerator(
         observation: ClaimObservation = {
             "local_ref": self._required_str(raw_observation, "local_ref", index=index),
             "claim": self._required_str(raw_observation, "claim", index=index),
-            "claim_kind": self._controlled_str(
-                raw_observation,
-                "claim_kind",
-                allowed={
-                    "definition",
-                    "property",
-                    "capability",
-                    "limitation",
-                    "rule",
-                    "condition",
-                    "process",
-                    "list",
-                    "comparison",
-                    "criterion",
-                    "example_set",
-                    "value",
-                    "exception",
-                    "other",
-                },
-                index=index,
-            ),
+            "claim_kind": "other",
             "granularity": self._controlled_str(
                 raw_observation,
                 "granularity",
                 allowed={"atomic", "composite"},
                 index=index,
             ),
-            "triples": self._triples(raw_observation, index=index),
+            "triples": [],
             "evidence_block": self._required_str(
                 raw_observation,
                 "evidence_block",
@@ -229,22 +204,16 @@ class FaqWorkbenchClaimObservationsGenerator(
             "possible_questions": list(
                 self._string_tuple(raw_observation, "possible_questions", index=index)
             ),
-            "scope": self._required_str(raw_observation, "scope", index=index),
+            "scope": "",
             "exclusion_scope": self._optional_str(
                 raw_observation,
                 "exclusion_scope",
                 index=index,
             )
             or "",
-            "local_relations": self._json_list(
-                raw_observation,
-                "local_relations",
-                index=index,
-                label="claim observation",
-            ),
-            "confidence": self._confidence(raw_observation, index=index),
+            "local_relations": [],
+            "confidence": 0.9,
         }
-
         self._assert_json_value(observation)
         return observation
 
@@ -255,9 +224,11 @@ class FaqWorkbenchClaimObservationsGenerator(
         index: int,
     ) -> list[JsonValue]:
         raw_triples = payload.get("triples")
-        if not isinstance(raw_triples, list) or not raw_triples:
+        if raw_triples is None:
+            return []
+        if not isinstance(raw_triples, list):
             raise DomainInvariantError(
-                f"claim observation #{index} requires non-empty triples list"
+                f"claim observation #{index} field triples must be list"
             )
 
         triples: list[JsonValue] = []

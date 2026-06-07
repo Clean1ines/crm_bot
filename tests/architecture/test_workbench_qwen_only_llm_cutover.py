@@ -8,7 +8,9 @@ COMPOSITION = Path("src/interfaces/composition/faq_workbench_parallel_processing
 ADAPTER = Path("src/infrastructure/llm/workbench_qwen_json_invocation.py")
 
 
-def test_workbench_default_llm_invocation_is_qwen_only_adapter() -> None:
+def test_workbench_default_llm_invocation_is_pinned_workbench_adapter_legacy_name() -> (
+    None
+):
     handler = HANDLER.read_text(encoding="utf-8")
     composition = COMPOSITION.read_text(encoding="utf-8")
 
@@ -20,14 +22,17 @@ def test_workbench_default_llm_invocation_is_qwen_only_adapter() -> None:
     assert "llama-3.1-8b-instant" not in composition
 
 
-def test_workbench_qwen_adapter_does_not_import_global_groq_router() -> None:
+def test_workbench_pinned_adapter_uses_versatile_without_global_groq_router() -> None:
     source = ADAPTER.read_text(encoding="utf-8")
 
-    assert 'WORKBENCH_QWEN_MODEL = "qwen/qwen3-32b"' in source
+    assert 'WORKBENCH_QWEN_MODEL = "llama-3.3-70b-versatile"' in source
+    assert '"qwen/qwen3-32b"' not in source
     assert "GroqModelRouter" not in source
     assert "RotatingAsyncGroq" not in source
     assert "PRIMARY_CHAIN" not in source
     assert "CHEAP_SMALL_CHAIN" not in source
+    assert "max_completion_tokens=None" in source
+    assert "workbench_qwen_worker_key_slot" in source
     assert "sanitize_workbench_qwen_json_text" in source
     assert "<think>" in source
     assert "</think>" in source

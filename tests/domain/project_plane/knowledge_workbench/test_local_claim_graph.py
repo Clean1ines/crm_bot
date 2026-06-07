@@ -83,7 +83,9 @@ def test_local_claim_graph_requires_non_empty_claim_observations() -> None:
         )
 
 
-def test_local_claim_graph_requires_triples() -> None:
+def test_local_claim_graph_accepts_empty_triples_for_prompt_a_local_extraction() -> (
+    None
+):
     payload = _payload()
     claims = payload["claim_observations"]
     assert isinstance(claims, list)
@@ -91,11 +93,13 @@ def test_local_claim_graph_requires_triples() -> None:
     assert isinstance(claim, dict)
     claim["triples"] = []
 
-    with pytest.raises(DomainInvariantError, match="non-empty triples"):
-        local_claim_graph_from_claim_observations_payload(
-            payload,
-            project_id="project-1",
-            document_id="document-1",
-            section_id="section-1",
-            node_run_id="node-run-1",
-        )
+    graph = local_claim_graph_from_claim_observations_payload(
+        payload,
+        project_id="project-1",
+        document_id="document-1",
+        section_id="section-1",
+        node_run_id="node-run-1",
+    )
+
+    assert graph.claims[0].triples == ()
+    assert graph.claims[0].local_ref == "c1"

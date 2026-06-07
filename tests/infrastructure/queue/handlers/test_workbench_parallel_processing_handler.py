@@ -268,7 +268,7 @@ class FakePersistenceService:
     pass
 
 
-def test_parallel_queue_handler_builds_default_claim_observations_generator_with_workbench_qwen_path(
+def test_parallel_queue_handler_builds_default_claim_observations_generator_with_pinned_workbench_adapter_legacy_name(
     monkeypatch,
 ) -> None:
     captured: dict[str, object] = {}
