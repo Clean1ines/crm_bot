@@ -11,7 +11,7 @@ def test_manual_resume_composition_uses_resume_specific_parallel_queue_adapter()
     assert "WorkbenchResumeParallelQueueAdapter" in source
     assert "TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING" in source
     assert "task_type=TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING" in source
-    assert '"section_worker_count": 3' in source
+    assert '"section_worker_count": 4' in source
 
     assert "WorkbenchQueueAdapter" not in source
     assert "WorkbenchParallelQueueAdapter" not in source

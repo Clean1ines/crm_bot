@@ -48,7 +48,7 @@ class WorkbenchResumeParallelQueueAdapter:
                 "project_id": payload.project_id,
                 "document_id": payload.document_id,
                 "processing_run_id": payload.processing_run_id,
-                "section_worker_count": 3,
+                "section_worker_count": 4,
                 "worker_id_prefix": "workbench-parallel",
                 "lease_seconds": 300,
                 "max_cycles": 10_000,

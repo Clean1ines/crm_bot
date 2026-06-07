@@ -59,7 +59,7 @@ async def test_dispatcher_routes_parallel_workbench_task_from_json_payload(
                     "project_id": "project-1",
                     "document_id": "document-1",
                     "processing_run_id": "processing-run-1",
-                    "section_worker_count": 3,
+                    "section_worker_count": 4,
                 }
             ),
         },
@@ -72,7 +72,7 @@ async def test_dispatcher_routes_parallel_workbench_task_from_json_payload(
         "project_id": "project-1",
         "document_id": "document-1",
         "processing_run_id": "processing-run-1",
-        "section_worker_count": 3,
+        "section_worker_count": 4,
     }
 
 

@@ -171,7 +171,7 @@ class RunParallelWorkbenchProcessingCommand:
     project_id: str
     document_id: str
     processing_run_id: str
-    section_worker_count: int = 3
+    section_worker_count: int = 4
     worker_id_prefix: str = "workbench"
     lease_seconds: int = 300
     max_cycles: int = 10_000

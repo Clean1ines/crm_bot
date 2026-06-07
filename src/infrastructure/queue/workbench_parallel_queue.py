@@ -22,7 +22,7 @@ class EnqueueWorkbenchParallelProcessingCommand:
     project_id: str
     document_id: str
     processing_run_id: str
-    section_worker_count: int = 3
+    section_worker_count: int = 4
     worker_id_prefix: str = "workbench-parallel"
     lease_seconds: int = 300
     max_cycles: int = 10_000
@@ -86,7 +86,7 @@ class WorkbenchParallelQueueAdapter:
                 project_id=payload.project_id,
                 document_id=payload.document_id,
                 processing_run_id=payload.processing_run_id,
-                section_worker_count=3,
+                section_worker_count=4,
             )
         )
 

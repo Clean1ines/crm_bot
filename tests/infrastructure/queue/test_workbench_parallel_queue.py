@@ -34,7 +34,7 @@ async def test_parallel_queue_adapter_enqueues_parallel_task_payload() -> None:
             project_id="project-1",
             document_id="document-1",
             processing_run_id="processing-run-1",
-            section_worker_count=3,
+            section_worker_count=4,
             worker_id_prefix="parallel-worker",
             lease_seconds=120,
             max_cycles=17,
@@ -47,7 +47,7 @@ async def test_parallel_queue_adapter_enqueues_parallel_task_payload() -> None:
         "project_id": "project-1",
         "document_id": "document-1",
         "processing_run_id": "processing-run-1",
-        "section_worker_count": 3,
+        "section_worker_count": 4,
         "worker_id_prefix": "parallel-worker",
         "lease_seconds": 120,
         "max_cycles": 17,
@@ -76,7 +76,7 @@ async def test_parallel_queue_adapter_defaults_to_three_section_workers() -> Non
         )
     )
 
-    assert result.payload["section_worker_count"] == 3
+    assert result.payload["section_worker_count"] == 4
     assert result.payload["worker_id_prefix"] == "workbench-parallel"
     assert result.payload["lease_seconds"] == 300
     assert result.payload["max_cycles"] == 10_000
