@@ -171,6 +171,45 @@ class WorkItemStateMachine:
         )
 
     @staticmethod
+    def resolve_user_action_required_to_ready(
+        item: WorkItem,
+        *,
+        reason: str | None = None,
+    ) -> WorkItem:
+        WorkItemStateMachine._require_user_action_required(item, "resolve to ready")
+        if reason is not None and not reason.strip():
+            raise ValueError("reason must be non-empty when provided")
+        return replace(
+            item,
+            status=WorkItemStatus.READY,
+            leased_by=None,
+            lease_token=None,
+            lease_expires_at=None,
+            next_attempt_at=None,
+            last_error_kind=reason,
+        )
+
+    @staticmethod
+    def resolve_user_action_required_to_deferred(
+        item: WorkItem,
+        *,
+        wait_until: WaitUntil,
+        reason: str | None = None,
+    ) -> WorkItem:
+        WorkItemStateMachine._require_user_action_required(item, "resolve to deferred")
+        if reason is not None and not reason.strip():
+            raise ValueError("reason must be non-empty when provided")
+        return replace(
+            item,
+            status=WorkItemStatus.DEFERRED,
+            leased_by=None,
+            lease_token=None,
+            lease_expires_at=None,
+            next_attempt_at=wait_until,
+            last_error_kind=reason,
+        )
+
+    @staticmethod
     def reclaim_expired_lease(item: WorkItem, *, now: datetime) -> WorkItem:
         if item.status is not WorkItemStatus.LEASED:
             return item
@@ -193,6 +232,13 @@ class WorkItemStateMachine:
     @staticmethod
     def _require_leased(item: WorkItem, action: str) -> None:
         if item.status is not WorkItemStatus.LEASED:
+            raise InvalidWorkItemTransition(
+                f"Cannot {action} work item from status {item.status}"
+            )
+
+    @staticmethod
+    def _require_user_action_required(item: WorkItem, action: str) -> None:
+        if item.status is not WorkItemStatus.USER_ACTION_REQUIRED:
             raise InvalidWorkItemTransition(
                 f"Cannot {action} work item from status {item.status}"
             )

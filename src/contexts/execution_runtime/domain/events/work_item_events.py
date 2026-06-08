@@ -68,3 +68,16 @@ class WorkItemUserActionRequired(WorkItemDomainEvent):
             raise ValueError("decision_kind must be non-empty")
         if self.reason is not None and not self.reason.strip():
             raise ValueError("reason must be non-empty when provided")
+
+
+@dataclass(frozen=True, slots=True)
+class WorkItemUserActionResolved(WorkItemDomainEvent):
+    decision_kind: str
+    decision_value: str
+
+    def __post_init__(self) -> None:
+        WorkItemDomainEvent.__post_init__(self)
+        if not self.decision_kind or not self.decision_kind.strip():
+            raise ValueError("decision_kind must be non-empty")
+        if not self.decision_value or not self.decision_value.strip():
+            raise ValueError("decision_value must be non-empty")

@@ -15,6 +15,7 @@ from src.contexts.execution_runtime.domain.events.work_item_events import (
     WorkItemLeased,
     WorkItemSplitSuperseded,
     WorkItemUserActionRequired,
+    WorkItemUserActionResolved,
 )
 
 
@@ -27,6 +28,7 @@ WorkItemEvent: TypeAlias = (
     | WorkItemLeaseExpired
     | WorkItemSplitSuperseded
     | WorkItemUserActionRequired
+    | WorkItemUserActionResolved
 )
 
 
