@@ -50,6 +50,7 @@ def test_work_item_statuses_are_canonical_and_business_agnostic() -> None:
         "terminal_failed",
         "cancelled",
         "split_superseded",
+        "user_action_required",
     }
 
     forbidden_legacy_statuses = {

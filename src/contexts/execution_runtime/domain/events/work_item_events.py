@@ -55,3 +55,16 @@ class WorkItemLeaseExpired(WorkItemDomainEvent):
 @dataclass(frozen=True, slots=True)
 class WorkItemSplitSuperseded(WorkItemDomainEvent):
     reason: str = "split_required"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkItemUserActionRequired(WorkItemDomainEvent):
+    decision_kind: str
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        WorkItemDomainEvent.__post_init__(self)
+        if not self.decision_kind or not self.decision_kind.strip():
+            raise ValueError("decision_kind must be non-empty")
+        if self.reason is not None and not self.reason.strip():
+            raise ValueError("reason must be non-empty when provided")

@@ -18,6 +18,7 @@ class WorkItemStatus(StrEnum):
     TERMINAL_FAILED = "terminal_failed"
     CANCELLED = "cancelled"
     SPLIT_SUPERSEDED = "split_superseded"
+    USER_ACTION_REQUIRED = "user_action_required"
 
     @property
     def is_terminal(self) -> bool:
@@ -26,6 +27,7 @@ class WorkItemStatus(StrEnum):
             WorkItemStatus.TERMINAL_FAILED,
             WorkItemStatus.CANCELLED,
             WorkItemStatus.SPLIT_SUPERSEDED,
+            WorkItemStatus.USER_ACTION_REQUIRED,
         }
 
     @property

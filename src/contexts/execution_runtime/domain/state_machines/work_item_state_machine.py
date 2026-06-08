@@ -152,6 +152,25 @@ class WorkItemStateMachine:
         )
 
     @staticmethod
+    def require_user_action_leased(
+        item: WorkItem,
+        *,
+        error_kind: str,
+    ) -> WorkItem:
+        WorkItemStateMachine._require_leased(item, "require user action")
+        if not error_kind or not error_kind.strip():
+            raise ValueError("error_kind must be non-empty")
+        return replace(
+            item,
+            status=WorkItemStatus.USER_ACTION_REQUIRED,
+            leased_by=None,
+            lease_token=None,
+            lease_expires_at=None,
+            next_attempt_at=None,
+            last_error_kind=error_kind,
+        )
+
+    @staticmethod
     def reclaim_expired_lease(item: WorkItem, *, now: datetime) -> WorkItem:
         if item.status is not WorkItemStatus.LEASED:
             return item
