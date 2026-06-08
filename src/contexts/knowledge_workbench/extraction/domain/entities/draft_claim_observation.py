@@ -40,9 +40,3 @@ class DraftClaimObservation:
     def __post_init__(self) -> None:
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
             raise ValueError("DraftClaimObservation.created_at must be timezone-aware")
-
-        question_values = tuple(question.value for question in self.possible_questions)
-        if len(set(question_values)) != len(question_values):
-            raise ValueError(
-                "DraftClaimObservation.possible_questions must not contain duplicates"
-            )

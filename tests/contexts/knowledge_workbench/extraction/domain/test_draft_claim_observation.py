@@ -151,14 +151,18 @@ def test_possible_questions_may_be_empty() -> None:
     assert observation.possible_questions == ()
 
 
-def test_duplicate_possible_questions_rejected() -> None:
-    with pytest.raises(ValueError):
-        _observation(
-            possible_questions=(
-                PossibleQuestion("What does it do?"),
-                PossibleQuestion("What does it do?"),
-            )
+def test_duplicate_possible_questions_are_allowed_in_draft_observation() -> None:
+    observation = _observation(
+        possible_questions=(
+            PossibleQuestion("What does it do?"),
+            PossibleQuestion("What does it do?"),
         )
+    )
+
+    assert tuple(question.value for question in observation.possible_questions) == (
+        "What does it do?",
+        "What does it do?",
+    )
 
 
 def test_empty_claim_rejected() -> None:
