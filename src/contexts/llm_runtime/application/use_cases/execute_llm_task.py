@@ -11,6 +11,11 @@ from src.contexts.llm_runtime.application.policies.llm_route_planning_policy imp
     LlmRoutePlanDecisionKind,
     LlmRoutePlanningPolicy,
 )
+from src.contexts.llm_runtime.application.ports.llm_output_validation_port import (
+    LlmOutputValidationPort,
+    LlmOutputValidationResult,
+    LlmOutputValidationSuccess,
+)
 from src.contexts.llm_runtime.application.ports.llm_provider_port import (
     LlmProviderFailure,
     LlmProviderPort,
@@ -46,10 +51,12 @@ class ExecuteLlmTask:
         self,
         *,
         provider: LlmProviderPort,
+        output_validator: LlmOutputValidationPort | None = None,
         error_policy: LlmErrorPolicy | None = None,
         route_planning_policy: LlmRoutePlanningPolicy | None = None,
     ) -> None:
         self._provider = provider
+        self._output_validator = output_validator or _AcceptAllOutputValidator()
         self._error_policy = error_policy or LlmErrorPolicy()
         self._route_planning_policy = route_planning_policy or LlmRoutePlanningPolicy()
 
@@ -65,12 +72,25 @@ class ExecuteLlmTask:
         )
 
         if isinstance(result, LlmProviderSuccess):
-            succeeded_task = LlmTaskStateMachine.succeed_running(running_task)
-            return ExecuteLlmTaskOutcome(
-                kind=ExecuteLlmTaskOutcomeKind.SUCCEEDED,
-                task=succeeded_task,
+            validation_result = self._output_validator.validate(
+                task=running_task,
                 raw_text=result.raw_text,
-                usage=result.usage,
+            )
+
+            if isinstance(validation_result, LlmOutputValidationSuccess):
+                succeeded_task = LlmTaskStateMachine.succeed_running(running_task)
+                return ExecuteLlmTaskOutcome(
+                    kind=ExecuteLlmTaskOutcomeKind.SUCCEEDED,
+                    task=succeeded_task,
+                    raw_text=result.raw_text,
+                    usage=result.usage,
+                )
+
+            return self._handle_failure(
+                running_task=running_task,
+                failure=LlmProviderFailure(error_kind=validation_result.error_kind),
+                current_route=command.route,
+                candidates=command.candidates,
             )
 
         return self._handle_failure(
@@ -240,3 +260,8 @@ class ExecuteLlmTask:
             task=retryable_task,
             error_kind=failure.error_kind,
         )
+
+
+class _AcceptAllOutputValidator:
+    def validate(self, *, task: LlmTask, raw_text: str) -> LlmOutputValidationResult:
+        return LlmOutputValidationSuccess()

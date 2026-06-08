@@ -8,6 +8,11 @@ import pytest
 from src.contexts.llm_runtime.application.policies.llm_route_planning_policy import (
     LlmRouteCandidate,
 )
+from src.contexts.llm_runtime.application.ports.llm_output_validation_port import (
+    LlmOutputValidationFailure,
+    LlmOutputValidationResult,
+    LlmOutputValidationSuccess,
+)
 from src.contexts.llm_runtime.application.ports.llm_provider_port import (
     LlmProviderFailure,
     LlmProviderResult,
@@ -44,6 +49,16 @@ class FakeProvider:
     def invoke(self, *, task: LlmTask, route: LlmRoute) -> LlmProviderResult:
         assert task.status is LlmTaskStatus.RUNNING
         assert task.selected_route == route
+        return self.result
+
+
+@dataclass(frozen=True, slots=True)
+class FakeOutputValidator:
+    result: LlmOutputValidationResult
+
+    def validate(self, *, task: LlmTask, raw_text: str) -> LlmOutputValidationResult:
+        assert task.status is LlmTaskStatus.RUNNING
+        assert raw_text
         return self.result
 
 
@@ -121,6 +136,64 @@ def test_execute_llm_task_success_returns_succeeded_outcome() -> None:
     assert outcome.task.status is LlmTaskStatus.SUCCEEDED
     assert outcome.raw_text == '{"ok": true}'
     assert outcome.usage == TokenUsage(input_tokens=10, output_tokens=5)
+
+
+def test_execute_llm_task_validates_provider_success_before_accepting_it() -> None:
+    use_case = ExecuteLlmTask(
+        provider=FakeProvider(
+            LlmProviderSuccess(
+                raw_text='{"ok": true}',
+                usage=TokenUsage(input_tokens=10, output_tokens=5),
+            ),
+        ),
+        output_validator=FakeOutputValidator(LlmOutputValidationSuccess()),
+    )
+
+    outcome = use_case.execute(_command())
+
+    assert outcome.kind is ExecuteLlmTaskOutcomeKind.SUCCEEDED
+    assert outcome.task.status is LlmTaskStatus.SUCCEEDED
+
+
+def test_validation_failure_turns_provider_success_into_retry_required() -> None:
+    use_case = ExecuteLlmTask(
+        provider=FakeProvider(
+            LlmProviderSuccess(raw_text='{"broken": true}'),
+        ),
+        output_validator=FakeOutputValidator(
+            LlmOutputValidationFailure(
+                error_kind=LlmErrorKind.VALIDATION_FAILED,
+                error_codes=("missing_required_field",),
+            ),
+        ),
+    )
+
+    outcome = use_case.execute(_command())
+
+    assert outcome.kind is ExecuteLlmTaskOutcomeKind.RETRY_REQUIRED
+    assert outcome.task.status is LlmTaskStatus.RETRYABLE_FAILED
+    assert outcome.error_kind is LlmErrorKind.VALIDATION_FAILED
+    assert outcome.raw_text is None
+
+
+def test_empty_output_validation_requires_confirmation() -> None:
+    use_case = ExecuteLlmTask(
+        provider=FakeProvider(
+            LlmProviderSuccess(raw_text="{}"),
+        ),
+        output_validator=FakeOutputValidator(
+            LlmOutputValidationFailure(
+                error_kind=LlmErrorKind.EMPTY_OUTPUT,
+                error_codes=("empty_output",),
+            ),
+        ),
+    )
+
+    outcome = use_case.execute(_command())
+
+    assert outcome.kind is ExecuteLlmTaskOutcomeKind.CONFIRM_EMPTY_OUTPUT_REQUIRED
+    assert outcome.task.status is LlmTaskStatus.RETRYABLE_FAILED
+    assert outcome.error_kind is LlmErrorKind.EMPTY_OUTPUT
 
 
 def test_request_too_large_returns_route_change_when_larger_context_route_exists() -> (
