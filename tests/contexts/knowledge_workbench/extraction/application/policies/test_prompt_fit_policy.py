@@ -6,7 +6,7 @@ from typing import cast
 
 import pytest
 
-from src.contexts.knowledge_workbench.source_management.application.policies.prompt_fit_policy import (
+from src.contexts.knowledge_workbench.extraction.application.policies.prompt_fit_policy import (
     PromptEnvelope,
     PromptFitDecisionKind,
     PromptFitPolicy,
@@ -20,12 +20,12 @@ from src.contexts.llm_runtime.domain.value_objects.prompt_version import PromptV
 
 
 ROOT = Path(__file__).resolve().parents[6]
-SOURCE_MANAGEMENT_POLICY = (
+EXTRACTION_PROMPT_FIT_POLICY = (
     ROOT
     / "src"
     / "contexts"
     / "knowledge_workbench"
-    / "source_management"
+    / "extraction"
     / "application"
     / "policies"
     / "prompt_fit_policy.py"
@@ -178,7 +178,7 @@ def test_empty_prompt_id_is_rejected() -> None:
 
 
 def test_prompt_fit_policy_does_not_import_provider_or_groq_infrastructure() -> None:
-    text = SOURCE_MANAGEMENT_POLICY.read_text(encoding="utf-8")
+    text = EXTRACTION_PROMPT_FIT_POLICY.read_text(encoding="utf-8")
 
     forbidden_markers = (
         "provider_adapter",

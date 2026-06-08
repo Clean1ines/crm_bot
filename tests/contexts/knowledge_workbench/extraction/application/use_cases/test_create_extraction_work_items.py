@@ -8,7 +8,7 @@ import pytest
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
-from src.contexts.knowledge_workbench.source_management.application.use_cases.create_extraction_work_items import (
+from src.contexts.knowledge_workbench.extraction.application.use_cases.create_extraction_work_items import (
     CLAIM_EXTRACTION_WORK_KIND,
     CreateExtractionWorkItems,
     CreateExtractionWorkItemsCommand,
@@ -42,7 +42,7 @@ CREATE_EXTRACTION_WORK_ITEMS = (
     / "src"
     / "contexts"
     / "knowledge_workbench"
-    / "source_management"
+    / "extraction"
     / "application"
     / "use_cases"
     / "create_extraction_work_items.py"

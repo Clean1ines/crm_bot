@@ -80,29 +80,35 @@ class FakeClaimExtractionWorkItemUnitOfWork:
     committed: bool = False
     rolled_back: bool = False
     fail_on_commit: bool = False
+    fail_on_action: str | None = None
+
+    def _record_action(self, action: str) -> None:
+        self.actions.append(action)
+        if self.fail_on_action == action:
+            raise RuntimeError(f"{action} failed")
 
     def save_work_item(self, item: WorkItem) -> None:
-        self.actions.append("save_work_item")
+        self._record_action("save_work_item")
         self.saved_work_items.append(item)
 
     def save_work_item_attempt(self, attempt: WorkItemAttempt) -> None:
-        self.actions.append("save_work_item_attempt")
+        self._record_action("save_work_item_attempt")
         self.saved_work_item_attempts.append(attempt)
 
     def save_llm_task(self, task: LlmTask) -> None:
-        self.actions.append("save_llm_task")
+        self._record_action("save_llm_task")
         self.saved_llm_tasks.append(task)
 
     def save_llm_attempt(self, attempt: LlmAttempt) -> None:
-        self.actions.append("save_llm_attempt")
+        self._record_action("save_llm_attempt")
         self.saved_llm_attempts.append(attempt)
 
     def save_artifact(self, artifact: PipelineArtifact) -> None:
-        self.actions.append("save_artifact")
+        self._record_action("save_artifact")
         self.saved_artifacts.append(artifact)
 
     def append_event(self, event: ClaimExtractionRuntimeEvent) -> None:
-        self.actions.append("append_event")
+        self._record_action("append_event")
         self.appended_events.append(event)
 
     def commit(self) -> None:
@@ -264,6 +270,29 @@ def test_record_claim_extraction_success_rolls_back_when_commit_fails() -> None:
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back
     assert unit_of_work.actions[-2:] == ["commit", "rollback"]
+
+
+@pytest.mark.parametrize(
+    "fail_on_action",
+    (
+        "save_work_item",
+        "append_event",
+    ),
+)
+def test_record_claim_extraction_success_rolls_back_when_save_or_append_fails(
+    fail_on_action: str,
+) -> None:
+    unit_of_work = FakeClaimExtractionWorkItemUnitOfWork(
+        fail_on_action=fail_on_action,
+    )
+
+    with pytest.raises(RuntimeError, match=f"{fail_on_action} failed"):
+        RecordClaimExtractionSuccess(unit_of_work=unit_of_work).execute(_command())
+
+    assert not unit_of_work.committed
+    assert unit_of_work.rolled_back
+    assert fail_on_action in unit_of_work.actions
+    assert unit_of_work.actions[-1] == "rollback"
 
 
 def test_record_claim_extraction_success_requires_succeeded_llm_task() -> None:
