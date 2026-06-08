@@ -9,6 +9,7 @@ SOURCE_MANAGEMENT_CONTEXT = (
 )
 SOURCE_MANAGEMENT_DOMAIN = SOURCE_MANAGEMENT_CONTEXT / "domain"
 SOURCE_MANAGEMENT_USE_CASES = SOURCE_MANAGEMENT_CONTEXT / "application" / "use_cases"
+SOURCE_MANAGEMENT_POLICIES = SOURCE_MANAGEMENT_CONTEXT / "application" / "policies"
 
 FORBIDDEN_MARKERS: tuple[str, ...] = (
     "llm_runtime",
@@ -113,4 +114,38 @@ def test_source_management_use_cases_do_not_take_prompt_id() -> None:
         "orchestration. Existing PromptFitPolicy is intentionally out of scope for "
         "this migration patch; this guard prevents prompt_id from reappearing in "
         "source_management/application/use_cases:\n" + "\n".join(offenders)
+    )
+
+
+def test_source_management_context_does_not_own_prompt_model_fit_decisions() -> None:
+    forbidden_markers = (
+        "src.contexts.llm_runtime",
+        "ModelProfile",
+        "PromptVersion",
+        "prompt_id",
+        "PromptFitPolicy",
+        "PromptEnvelope",
+        "SourceUnitFitInput",
+    )
+
+    offenders: list[str] = []
+
+    for path in SOURCE_MANAGEMENT_CONTEXT.rglob("*.py"):
+        if path.name == "__init__.py":
+            continue
+
+        text = path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for marker in forbidden_markers:
+                if marker in line:
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{line_number} contains forbidden marker {marker!r}"
+                    )
+
+    assert not offenders, (
+        "Source Management must not own prompt/model fit decisions. Source "
+        "Management owns SourceDocument, SourceUnit, source parsing, source "
+        "splitting, source lineage and source text properties. Prompt/model "
+        "capacity decisions belong to knowledge_workbench/extraction:\n"
+        + "\n".join(offenders)
     )
