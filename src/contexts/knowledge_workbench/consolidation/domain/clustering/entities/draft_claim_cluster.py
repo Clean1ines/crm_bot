@@ -3,11 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from src.contexts.knowledge_workbench.consolidation.domain.value_objects.cluster_ref import (
+from src.contexts.knowledge_workbench.consolidation.domain.clustering.value_objects.cluster_ref import (
     ClusterRef,
-)
-from src.contexts.knowledge_workbench.consolidation.domain.value_objects.subcluster_ref import (
-    SubclusterRef,
 )
 from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_observation_ref import (
     DraftClaimObservationRef,
@@ -15,16 +12,15 @@ from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_clai
 
 
 @dataclass(frozen=True, slots=True)
-class DraftClaimSubcluster:
-    subcluster_ref: SubclusterRef
-    parent_cluster_ref: ClusterRef
+class DraftClaimCluster:
+    cluster_ref: ClusterRef
     members: tuple[DraftClaimObservationRef, ...]
     created_at: datetime
 
     def __post_init__(self) -> None:
         if not self.members:
-            raise ValueError("DraftClaimSubcluster.members must be non-empty")
+            raise ValueError("DraftClaimCluster.members must be non-empty")
         if len(set(self.members)) != len(self.members):
-            raise ValueError("DraftClaimSubcluster.members must not contain duplicates")
+            raise ValueError("DraftClaimCluster.members must not contain duplicates")
         if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
-            raise ValueError("DraftClaimSubcluster.created_at must be timezone-aware")
+            raise ValueError("DraftClaimCluster.created_at must be timezone-aware")

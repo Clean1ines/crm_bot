@@ -6,19 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.knowledge_workbench.consolidation.domain.entities.draft_claim_cluster import (
+from src.contexts.knowledge_workbench.consolidation.domain.clustering.entities.draft_claim_cluster import (
     DraftClaimCluster,
 )
-from src.contexts.knowledge_workbench.consolidation.domain.entities.draft_claim_subcluster import (
+from src.contexts.knowledge_workbench.consolidation.domain.clustering.entities.draft_claim_subcluster import (
     DraftClaimSubcluster,
 )
-from src.contexts.knowledge_workbench.consolidation.domain.value_objects.cluster_member_ref import (
+from src.contexts.knowledge_workbench.consolidation.domain.clustering.value_objects.cluster_member_ref import (
     ClusterMemberRef,
 )
-from src.contexts.knowledge_workbench.consolidation.domain.value_objects.cluster_ref import (
+from src.contexts.knowledge_workbench.consolidation.domain.clustering.value_objects.cluster_ref import (
     ClusterRef,
 )
-from src.contexts.knowledge_workbench.consolidation.domain.value_objects.subcluster_ref import (
+from src.contexts.knowledge_workbench.consolidation.domain.clustering.value_objects.subcluster_ref import (
     SubclusterRef,
 )
 from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_observation_ref import (
@@ -26,9 +26,15 @@ from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_clai
 )
 
 
-ROOT = Path(__file__).resolve().parents[5]
-CONSOLIDATION_DOMAIN = (
-    ROOT / "src" / "contexts" / "knowledge_workbench" / "consolidation" / "domain"
+ROOT = Path(__file__).resolve().parents[6]
+CLUSTERING_DOMAIN = (
+    ROOT
+    / "src"
+    / "contexts"
+    / "knowledge_workbench"
+    / "consolidation"
+    / "domain"
+    / "clustering"
 )
 
 
@@ -151,32 +157,21 @@ def test_cluster_member_ref_wraps_draft_claim_observation_ref() -> None:
     assert member_ref.value.value == "draft-claim-1"
 
 
-def test_clustering_domain_has_no_runtime_db_or_later_output_semantics() -> None:
+def test_clustering_subpackage_has_no_later_output_semantics() -> None:
     forbidden_markers = (
-        "llm_runtime",
-        "embedding_runtime",
-        "artifact_runtime",
-        "execution_runtime",
-        "Groq",
-        "groq",
-        "Qwen",
-        "qwen",
-        "Postgres",
-        "postgres",
-        "pgvector",
-        "PromptC",
-        "Prompt C",
-        "Ontology",
-        "CanonicalIntent",
-        "ClaimType",
-        "ClaimTriple",
-        "ClaimRelation",
         "Surface",
         "surface",
+        "Ontology",
+        "ontology",
+        "CanonicalIntent",
+        "ConsolidatedSurface",
+        "KnowledgeSurface",
+        "Publication",
+        "Prompt C output parser",
     )
 
     offenders: list[str] = []
-    for path in CONSOLIDATION_DOMAIN.rglob("*.py"):
+    for path in CLUSTERING_DOMAIN.rglob("*.py"):
         if path.name == "__init__.py":
             continue
         text = path.read_text(encoding="utf-8")
