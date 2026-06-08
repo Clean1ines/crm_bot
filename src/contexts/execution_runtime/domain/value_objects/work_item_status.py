@@ -1,0 +1,37 @@
+from __future__ import annotations
+
+from enum import StrEnum
+
+
+class WorkItemStatus(StrEnum):
+    """Canonical Execution Runtime lifecycle status.
+
+    These statuses are deliberately generic. They must encode only execution
+    lifecycle semantics.
+    """
+
+    READY = "ready"
+    LEASED = "leased"
+    DEFERRED = "deferred"
+    COMPLETED = "completed"
+    RETRYABLE_FAILED = "retryable_failed"
+    TERMINAL_FAILED = "terminal_failed"
+    CANCELLED = "cancelled"
+    SPLIT_SUPERSEDED = "split_superseded"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in {
+            WorkItemStatus.COMPLETED,
+            WorkItemStatus.TERMINAL_FAILED,
+            WorkItemStatus.CANCELLED,
+            WorkItemStatus.SPLIT_SUPERSEDED,
+        }
+
+    @property
+    def is_waiting(self) -> bool:
+        return self in {
+            WorkItemStatus.READY,
+            WorkItemStatus.DEFERRED,
+            WorkItemStatus.RETRYABLE_FAILED,
+        }

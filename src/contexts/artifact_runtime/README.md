@@ -76,7 +76,7 @@ are legacy status/checkpoint hybrids and must not become canonical artifact runt
 
 `NodeRun` may be an artifact/attempt source, but it is not canonical `PipelineArtifact` unless explicitly redefined during migration.
 
-Any old table that stores raw LLM output, parsed payload, route attempts, or node execution result must be classified as one of:
+All old tables that store raw LLM output, parsed payload, route attempts, or node execution result must be classified as one of:
 
 - canonical artifact storage;
 - artifact source adapter;
