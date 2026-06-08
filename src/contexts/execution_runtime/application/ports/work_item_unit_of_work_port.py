@@ -13,6 +13,7 @@ from src.contexts.execution_runtime.domain.events.work_item_events import (
     WorkItemFailed,
     WorkItemLeaseExpired,
     WorkItemLeased,
+    WorkItemSplitSuperseded,
 )
 
 
@@ -23,6 +24,7 @@ WorkItemEvent: TypeAlias = (
     | WorkItemFailed
     | WorkItemCancelled
     | WorkItemLeaseExpired
+    | WorkItemSplitSuperseded
 )
 
 

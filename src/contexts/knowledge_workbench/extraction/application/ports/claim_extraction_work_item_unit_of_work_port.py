@@ -23,6 +23,7 @@ from src.contexts.execution_runtime.domain.events.work_item_events import (
     WorkItemFailed,
     WorkItemLeaseExpired,
     WorkItemLeased,
+    WorkItemSplitSuperseded,
 )
 from src.contexts.llm_runtime.domain.entities.llm_attempt import LlmAttempt
 from src.contexts.llm_runtime.domain.entities.llm_task import LlmTask
@@ -42,6 +43,7 @@ ClaimExtractionRuntimeEvent: TypeAlias = (
     | WorkItemFailed
     | WorkItemCancelled
     | WorkItemLeaseExpired
+    | WorkItemSplitSuperseded
     | LlmTaskSucceeded
     | LlmTaskDeferred
     | LlmTaskFailed

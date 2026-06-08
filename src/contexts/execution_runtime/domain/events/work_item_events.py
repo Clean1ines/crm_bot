@@ -50,3 +50,8 @@ class WorkItemCancelled(WorkItemDomainEvent):
 @dataclass(frozen=True, slots=True)
 class WorkItemLeaseExpired(WorkItemDomainEvent):
     previous_worker_ref: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class WorkItemSplitSuperseded(WorkItemDomainEvent):
+    reason: str = "split_required"
