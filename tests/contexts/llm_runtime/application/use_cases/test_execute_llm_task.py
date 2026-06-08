@@ -8,6 +8,11 @@ import pytest
 from src.contexts.llm_runtime.application.policies.llm_route_planning_policy import (
     LlmRouteCandidate,
 )
+from src.contexts.llm_runtime.application.ports.llm_provider_input import (
+    LlmProviderInput,
+    LlmProviderMessage,
+    LlmProviderMessageRole,
+)
 from src.contexts.llm_runtime.application.ports.llm_output_validation_port import (
     LlmOutputValidationFailure,
     LlmOutputValidationResult,
@@ -46,9 +51,16 @@ from src.contexts.llm_runtime.domain.value_objects.token_usage import TokenUsage
 class FakeProvider:
     result: LlmProviderResult
 
-    def invoke(self, *, task: LlmTask, route: LlmRoute) -> LlmProviderResult:
+    def invoke(
+        self,
+        *,
+        task: LlmTask,
+        route: LlmRoute,
+        provider_input: LlmProviderInput,
+    ) -> LlmProviderResult:
         assert task.status is LlmTaskStatus.RUNNING
         assert task.selected_route == route
+        assert provider_input.messages
         return self.result
 
 
@@ -108,6 +120,17 @@ def _task() -> LlmTask:
     )
 
 
+def _provider_input() -> LlmProviderInput:
+    return LlmProviderInput(
+        messages=(
+            LlmProviderMessage(
+                role=LlmProviderMessageRole.USER,
+                content="Return JSON.",
+            ),
+        ),
+    )
+
+
 def _command(
     candidates: tuple[LlmRouteCandidate, ...] | None = None,
 ) -> ExecuteLlmTaskCommand:
@@ -117,6 +140,7 @@ def _command(
         task=_task(),
         route=route,
         candidates=candidates or default_candidates,
+        provider_input=_provider_input(),
     )
 
 
@@ -223,6 +247,7 @@ def test_request_too_large_returns_route_change_when_larger_context_route_exists
             task=_task(),
             route=current.route,
             candidates=(current, larger),
+            provider_input=_provider_input(),
         ),
     )
 
@@ -268,6 +293,7 @@ def test_minute_limit_uses_other_account_when_available() -> None:
             task=_task(),
             route=current.route,
             candidates=(current, other_account),
+            provider_input=_provider_input(),
         ),
     )
 
@@ -297,6 +323,7 @@ def test_minute_limit_defers_when_no_account_available() -> None:
             task=_task(),
             route=current.route,
             candidates=(current,),
+            provider_input=_provider_input(),
         ),
     )
 
@@ -323,6 +350,7 @@ def test_daily_limit_exhaustion_is_visible_outcome() -> None:
             task=_task(),
             route=current.route,
             candidates=(current,),
+            provider_input=_provider_input(),
         ),
     )
 
@@ -391,5 +419,6 @@ def test_execute_llm_task_rejects_task_that_cannot_start() -> None:
                 task=succeeded,
                 route=_route(),
                 candidates=(_candidate(model="model-1", account="account-1"),),
+                provider_input=_provider_input(),
             ),
         )

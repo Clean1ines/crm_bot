@@ -11,6 +11,9 @@ from src.contexts.llm_runtime.application.policies.llm_route_planning_policy imp
     LlmRoutePlanDecisionKind,
     LlmRoutePlanningPolicy,
 )
+from src.contexts.llm_runtime.application.ports.llm_provider_input import (
+    LlmProviderInput,
+)
 from src.contexts.llm_runtime.application.ports.llm_output_validation_port import (
     LlmOutputValidationPort,
     LlmOutputValidationResult,
@@ -38,6 +41,7 @@ class ExecuteLlmTaskCommand:
     task: LlmTask
     route: LlmRoute
     candidates: tuple[LlmRouteCandidate, ...]
+    provider_input: LlmProviderInput
 
 
 class ExecuteLlmTask:
@@ -69,6 +73,7 @@ class ExecuteLlmTask:
         result = self._provider.invoke(
             task=running_task,
             route=command.route,
+            provider_input=command.provider_input,
         )
 
         if isinstance(result, LlmProviderSuccess):

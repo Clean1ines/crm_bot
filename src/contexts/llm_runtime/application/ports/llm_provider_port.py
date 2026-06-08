@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from src.contexts.llm_runtime.application.ports.llm_provider_input import (
+    LlmProviderInput,
+)
 from src.contexts.llm_runtime.domain.entities.llm_task import LlmTask
 from src.contexts.llm_runtime.domain.value_objects.llm_error_kind import LlmErrorKind
 from src.contexts.llm_runtime.domain.value_objects.llm_route import LlmRoute
@@ -31,5 +34,11 @@ LlmProviderResult = LlmProviderSuccess | LlmProviderFailure
 
 
 class LlmProviderPort(Protocol):
-    def invoke(self, *, task: LlmTask, route: LlmRoute) -> LlmProviderResult:
+    def invoke(
+        self,
+        *,
+        task: LlmTask,
+        route: LlmRoute,
+        provider_input: LlmProviderInput,
+    ) -> LlmProviderResult:
         """Invoke a prepared task through a selected route."""

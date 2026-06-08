@@ -10,6 +10,9 @@ from src.contexts.llm_runtime.application.policies.llm_execution_recording_polic
 from src.contexts.llm_runtime.application.policies.llm_route_planning_policy import (
     LlmRouteCandidate,
 )
+from src.contexts.llm_runtime.application.ports.llm_provider_input import (
+    LlmProviderInput,
+)
 from src.contexts.llm_runtime.application.ports.llm_provider_port import LlmProviderPort
 from src.contexts.llm_runtime.application.ports.llm_task_unit_of_work_port import (
     LlmTaskUnitOfWorkPort,
@@ -33,6 +36,7 @@ class ExecuteAndRecordLlmTaskCommand:
     task: LlmTask
     route: LlmRoute
     candidates: tuple[LlmRouteCandidate, ...]
+    provider_input: LlmProviderInput
     attempt_id: str
     attempt_number: int
     started_at: datetime
@@ -76,6 +80,7 @@ class ExecuteAndRecordLlmTask:
                 task=command.task,
                 route=command.route,
                 candidates=command.candidates,
+                provider_input=command.provider_input,
             ),
         )
 

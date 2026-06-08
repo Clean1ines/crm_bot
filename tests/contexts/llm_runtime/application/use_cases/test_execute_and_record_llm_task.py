@@ -8,6 +8,11 @@ import pytest
 from src.contexts.llm_runtime.application.policies.llm_route_planning_policy import (
     LlmRouteCandidate,
 )
+from src.contexts.llm_runtime.application.ports.llm_provider_input import (
+    LlmProviderInput,
+    LlmProviderMessage,
+    LlmProviderMessageRole,
+)
 from src.contexts.llm_runtime.application.ports.llm_provider_port import (
     LlmProviderFailure,
     LlmProviderResult,
@@ -49,9 +54,16 @@ from src.contexts.llm_runtime.domain.value_objects.token_usage import TokenUsage
 class FakeProvider:
     result: LlmProviderResult
 
-    def invoke(self, *, task: LlmTask, route: LlmRoute) -> LlmProviderResult:
+    def invoke(
+        self,
+        *,
+        task: LlmTask,
+        route: LlmRoute,
+        provider_input: LlmProviderInput,
+    ) -> LlmProviderResult:
         assert task.status is LlmTaskStatus.RUNNING
         assert task.selected_route == route
+        assert provider_input.messages
         return self.result
 
 
@@ -128,6 +140,17 @@ def _task() -> LlmTask:
     )
 
 
+def _provider_input() -> LlmProviderInput:
+    return LlmProviderInput(
+        messages=(
+            LlmProviderMessage(
+                role=LlmProviderMessageRole.USER,
+                content="Return JSON.",
+            ),
+        ),
+    )
+
+
 def _command(
     candidates: tuple[LlmRouteCandidate, ...] | None = None,
 ) -> ExecuteAndRecordLlmTaskCommand:
@@ -135,6 +158,7 @@ def _command(
         task=_task(),
         route=_route(),
         candidates=candidates or (_candidate(),),
+        provider_input=_provider_input(),
         attempt_id="attempt-1",
         attempt_number=1,
         started_at=_now(),
@@ -236,6 +260,7 @@ def test_execute_and_record_command_requires_timestamps() -> None:
             task=_task(),
             route=_route(),
             candidates=(_candidate(),),
+            provider_input=_provider_input(),
             attempt_id="attempt-1",
             attempt_number=1,
             started_at=datetime(2026, 6, 8, 12, 0),
@@ -248,6 +273,7 @@ def test_execute_and_record_command_requires_timestamps() -> None:
             task=_task(),
             route=_route(),
             candidates=(_candidate(),),
+            provider_input=_provider_input(),
             attempt_id="attempt-1",
             attempt_number=1,
             started_at=_now(),
