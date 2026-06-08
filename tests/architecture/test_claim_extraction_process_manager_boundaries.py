@@ -90,3 +90,52 @@ def test_claim_extraction_process_managers_do_not_encode_provider_db_or_legacy_q
         "Claim extraction process managers must not encode provider, DB, or legacy "
         "queue/status semantics:\n" + "\n".join(offenders)
     )
+
+
+def test_claim_extraction_process_managers_do_not_import_forbidden_architecture_layers_or_legacy_symbols() -> (
+    None
+):
+    forbidden_markers = (
+        "src.infrastructure.",
+        "src.application.",
+        "src.domain.project_plane.",
+        "src.interfaces.",
+        "src.contexts.llm_runtime.infrastructure.",
+        "src.contexts.execution_runtime.infrastructure.",
+        "src.contexts.artifact_runtime.infrastructure.",
+        "src.contexts.llm_runtime.infrastructure.providers",
+        "Groq",
+        "groq",
+        "Qwen",
+        "qwen",
+        "provider_adapter",
+        "queue.handlers",
+        "workbench_parallel_processing",
+        "SectionBatchQueueItem",
+        "ProcessingNodeRun",
+        "ProcessingNodeArtifact",
+        "CLAIM_OBSERVATIONS_PERSISTED",
+        "REGISTRY_APPLICATION_QUEUED",
+        "REGISTRY_APPLICATION_APPLIED",
+    )
+
+    offenders: list[str] = []
+
+    for path in PROCESS_MANAGERS.rglob("*.py"):
+        if path.name == "__init__.py":
+            continue
+
+        text = path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for marker in forbidden_markers:
+                if marker in line:
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{line_number} contains forbidden marker {marker!r}"
+                    )
+
+    assert not offenders, (
+        "Claim extraction process managers must be application transaction "
+        "scripts over ports/domain objects only. They must not import "
+        "infrastructure, legacy layer-first code, provider adapters, old queue "
+        "handlers, or old Workbench node/status artifacts:\n" + "\n".join(offenders)
+    )

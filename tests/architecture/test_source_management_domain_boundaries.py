@@ -149,3 +149,47 @@ def test_source_management_context_does_not_own_prompt_model_fit_decisions() -> 
         "capacity decisions belong to knowledge_workbench/extraction:\n"
         + "\n".join(offenders)
     )
+
+
+def test_source_management_context_does_not_know_downstream_runtime_or_extraction_orchestration() -> (
+    None
+):
+    source_management_context = (
+        ROOT / "src" / "contexts" / "knowledge_workbench" / "source_management"
+    )
+    forbidden_markers = (
+        "src.contexts.execution_runtime",
+        "src.contexts.llm_runtime",
+        "src.contexts.artifact_runtime",
+        "WorkItem",
+        "WorkKind",
+        "LlmTask",
+        "PipelineArtifact",
+        "prompt_id",
+        "claim_extraction",
+        "PromptVersion",
+        "ModelProfile",
+        "PromptFitPolicy",
+    )
+
+    offenders: list[str] = []
+
+    for path in source_management_context.rglob("*.py"):
+        if path.name == "__init__.py":
+            continue
+
+        text = path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            for marker in forbidden_markers:
+                if marker in line:
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}:{line_number} contains forbidden marker {marker!r}"
+                    )
+
+    assert not offenders, (
+        "Source Management must stay upstream and source-only. It owns "
+        "SourceDocument, SourceUnit, source refs, parsers, split, format and "
+        "lineage. It must not know Execution Runtime, LLM Runtime, Artifact "
+        "Runtime, prompt/model fit, or downstream claim_extraction orchestration:\n"
+        + "\n".join(offenders)
+    )
