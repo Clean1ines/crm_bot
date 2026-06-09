@@ -5,35 +5,24 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
-    PipelineArtifact,
-)
-from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import (
-    ArtifactKind,
-)
-from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import (
-    ArtifactLineage,
-)
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
+from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import ArtifactKind
+from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import ArtifactLineage
 from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
     ArtifactPayload,
     JsonInputValue,
 )
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.artifact_runtime.domain.value_objects.artifact_status import (
-    ArtifactStatus,
-)
-from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
-    ArtifactVisibility,
-)
-from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
-    RetentionPolicy,
-)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_status import ArtifactStatus
+from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import ArtifactVisibility
+from src.contexts.artifact_runtime.domain.value_objects.retention_policy import RetentionPolicy
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_artifact_parser import (
     EXPECTED_DRAFT_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
     DraftClaimObservationArtifactParser,
     InvalidDraftClaimObservationArtifact,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import (
+    DraftClaimObservationProvenanceCandidate,
     InvalidDraftClaimObservationProvenanceCandidate,
 )
 from src.contexts.knowledge_workbench.extraction.application.process_managers.apply_draft_claim_observation_artifact import (
@@ -43,12 +32,8 @@ from src.contexts.knowledge_workbench.extraction.application.process_managers.ap
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_application_unit_of_work_port import (
     DraftClaimObservationApplicationEvent,
 )
-from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import (
-    DraftClaimObservation,
-)
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
-    SourceUnitRef,
-)
+from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import DraftClaimObservation
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
 
 
 ROOT = Path(__file__).resolve().parents[6]
@@ -65,33 +50,56 @@ PROCESS_MANAGER_FILE = (
 
 
 class FakeDraftClaimObservationApplicationUnitOfWork:
-    def __init__(self, *, fail_on_commit: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_commit: bool = False,
+        fail_on_provenance_save: bool = False,
+    ) -> None:
         self.saved_observations: tuple[DraftClaimObservation, ...] = ()
+        self.saved_provenance_candidates: tuple[
+            DraftClaimObservationProvenanceCandidate,
+            ...,
+        ] = ()
         self.events: tuple[DraftClaimObservationApplicationEvent, ...] = ()
-        self.actions: tuple[str, ...] = ()
+        self.operations: list[str] = []
+        self.committed = False
+        self.rolled_back = False
         self.fail_on_commit = fail_on_commit
+        self.fail_on_provenance_save = fail_on_provenance_save
 
     def save_draft_claim_observations(
         self,
         observations: tuple[DraftClaimObservation, ...],
     ) -> None:
-        self.actions = self.actions + ("save_draft_claim_observations",)
+        self.operations.append("save_observations")
         self.saved_observations = self.saved_observations + observations
+
+    def save_draft_claim_observation_provenance_candidates(
+        self,
+        candidates: tuple[DraftClaimObservationProvenanceCandidate, ...],
+    ) -> None:
+        self.operations.append("save_provenance_candidates")
+        if self.fail_on_provenance_save:
+            raise RuntimeError("provenance candidate save failed")
+        self.saved_provenance_candidates = self.saved_provenance_candidates + candidates
 
     def append_event(
         self,
         event: DraftClaimObservationApplicationEvent,
     ) -> None:
-        self.actions = self.actions + ("append_event",)
+        self.operations.append("append_event")
         self.events = self.events + (event,)
 
     def commit(self) -> None:
-        self.actions = self.actions + ("commit",)
+        self.operations.append("commit")
         if self.fail_on_commit:
             raise RuntimeError("commit failed")
+        self.committed = True
 
     def rollback(self) -> None:
-        self.actions = self.actions + ("rollback",)
+        self.operations.append("rollback")
+        self.rolled_back = True
 
 
 def _now() -> datetime:
@@ -181,111 +189,131 @@ def _manager(
 
 
 def test_applies_one_observation_and_commits() -> None:
-    unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork()
+    uow = FakeDraftClaimObservationApplicationUnitOfWork()
     artifact = _artifact(_provenance_payload(claims=(_claim_payload(),)))
 
-    result = _manager(unit_of_work).execute(_command(artifact))
+    result = _manager(uow).execute(_command(artifact))
 
     assert len(result.observations) == 1
-    assert result.observations[0].claim.value == (
-        "Product turns documents into knowledge."
-    )
-    assert len(result.provenance_candidates) == 1
+    assert result.observations[0].claim.value == "Product turns documents into knowledge."
+    assert uow.saved_observations == result.observations
+    assert uow.saved_provenance_candidates == result.provenance_candidates
+    assert len(result.provenance_candidates) == len(result.observations)
     assert result.provenance_candidates[0].observation_ref == (
         result.observations[0].observation_ref
     )
     assert result.provenance_candidates[0].parsed_artifact_ref == artifact.artifact_ref
     assert result.provenance_candidates[0].raw_artifact_ref == ArtifactRef("raw-artifact-1")
-    assert unit_of_work.saved_observations == result.observations
-    assert unit_of_work.events == (result.event,)
-    assert unit_of_work.actions == (
-        "save_draft_claim_observations",
-        "append_event",
-        "commit",
-    )
+    assert uow.events == (result.event,)
+    assert uow.committed is True
+    assert uow.rolled_back is False
 
 
 def test_applies_empty_observations_and_commits_count_zero() -> None:
-    unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork()
+    uow = FakeDraftClaimObservationApplicationUnitOfWork()
     artifact = _artifact(_provenance_payload(claims=()))
 
-    result = _manager(unit_of_work).execute(_command(artifact))
+    result = _manager(uow).execute(_command(artifact))
 
     assert result.observations == ()
     assert result.provenance_candidates == ()
     assert result.event.observation_count == 0
-    assert unit_of_work.saved_observations == ()
-    assert unit_of_work.events == (result.event,)
-    assert unit_of_work.actions == (
-        "save_draft_claim_observations",
-        "append_event",
-        "commit",
-    )
+    assert uow.saved_observations == ()
+    assert uow.saved_provenance_candidates == ()
+    assert uow.events == (result.event,)
+    assert uow.committed is True
+    assert uow.rolled_back is False
 
 
-def test_provenance_candidates_are_not_persisted_yet() -> None:
-    unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork()
+def test_execute_saves_provenance_candidates_before_event_commit() -> None:
+    uow = FakeDraftClaimObservationApplicationUnitOfWork()
     artifact = _artifact(_provenance_payload(claims=(_claim_payload(),)))
 
-    result = _manager(unit_of_work).execute(_command(artifact))
+    _manager(uow).execute(_command(artifact))
 
-    assert len(result.provenance_candidates) == 1
-    assert not hasattr(unit_of_work, "saved_provenance_candidates")
-    assert unit_of_work.actions == (
-        "save_draft_claim_observations",
+    assert uow.operations == [
+        "save_observations",
+        "save_provenance_candidates",
         "append_event",
         "commit",
-    )
+    ]
 
 
 def test_parser_failure_rolls_back() -> None:
-    unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork()
+    uow = FakeDraftClaimObservationApplicationUnitOfWork()
     artifact = _artifact(
         _provenance_payload(claims=()),
         artifact_kind=ArtifactKind("knowledge_workbench.other.parsed"),
     )
 
     with pytest.raises(InvalidDraftClaimObservationArtifact):
-        _manager(unit_of_work).execute(_command(artifact))
+        _manager(uow).execute(_command(artifact))
 
-    assert unit_of_work.saved_observations == ()
-    assert unit_of_work.events == ()
-    assert unit_of_work.actions == ("rollback",)
+    assert uow.saved_observations == ()
+    assert uow.saved_provenance_candidates == ()
+    assert uow.events == ()
+    assert uow.operations == ["rollback"]
 
 
 def test_provenance_failure_rolls_back_without_persisting_observations() -> None:
-    unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork()
+    uow = FakeDraftClaimObservationApplicationUnitOfWork()
     artifact = _artifact(
         _provenance_payload(claims=(_claim_payload(),), source_unit_ref="document-2.unit.0"),
     )
 
     with pytest.raises(InvalidDraftClaimObservationProvenanceCandidate):
-        _manager(unit_of_work).execute(_command(artifact))
+        _manager(uow).execute(_command(artifact))
 
-    assert unit_of_work.saved_observations == ()
-    assert unit_of_work.events == ()
-    assert unit_of_work.actions == ("rollback",)
+    assert uow.saved_observations == ()
+    assert uow.saved_provenance_candidates == ()
+    assert uow.events == ()
+    assert uow.operations == ["rollback"]
+
+
+def test_execute_rolls_back_when_provenance_candidate_save_fails() -> None:
+    uow = FakeDraftClaimObservationApplicationUnitOfWork(
+        fail_on_provenance_save=True,
+    )
+    artifact = _artifact(_provenance_payload(claims=(_claim_payload(),)))
+
+    with pytest.raises(RuntimeError, match="provenance candidate save failed"):
+        _manager(uow).execute(_command(artifact))
+
+    assert len(uow.saved_observations) == 1
+    assert uow.saved_provenance_candidates == ()
+    assert uow.events == ()
+    assert uow.committed is False
+    assert uow.rolled_back is True
+    assert uow.operations == [
+        "save_observations",
+        "save_provenance_candidates",
+        "rollback",
+    ]
 
 
 def test_commit_failure_rolls_back() -> None:
-    unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork(fail_on_commit=True)
+    uow = FakeDraftClaimObservationApplicationUnitOfWork(fail_on_commit=True)
     artifact = _artifact(_provenance_payload(claims=(_claim_payload(),)))
 
     with pytest.raises(RuntimeError):
-        _manager(unit_of_work).execute(_command(artifact))
+        _manager(uow).execute(_command(artifact))
 
-    assert len(unit_of_work.saved_observations) == 1
-    assert len(unit_of_work.events) == 1
-    assert unit_of_work.actions == (
-        "save_draft_claim_observations",
+    assert len(uow.saved_observations) == 1
+    assert len(uow.saved_provenance_candidates) == 1
+    assert len(uow.events) == 1
+    assert uow.committed is False
+    assert uow.rolled_back is True
+    assert uow.operations == [
+        "save_observations",
+        "save_provenance_candidates",
         "append_event",
         "commit",
         "rollback",
-    )
+    ]
 
 
 def test_event_has_artifact_ref_source_unit_ref_and_count() -> None:
-    unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork()
+    uow = FakeDraftClaimObservationApplicationUnitOfWork()
     artifact = _artifact(
         _provenance_payload(
             claims=(
@@ -297,28 +325,13 @@ def test_event_has_artifact_ref_source_unit_ref_and_count() -> None:
     )
     source_unit_ref = SourceUnitRef("document-1.unit.0")
 
-    result = _manager(unit_of_work).execute(
-        _command(artifact, source_unit_ref=source_unit_ref)
-    )
+    result = _manager(uow).execute(_command(artifact, source_unit_ref=source_unit_ref))
 
     assert result.event.artifact_ref.value == "parsed-artifact-9"
     assert result.event.source_unit_ref == source_unit_ref
     assert result.event.observation_count == 2
     assert result.event.occurred_at == _now()
     assert tuple(candidate.claim_index for candidate in result.provenance_candidates) == (0, 1)
-
-
-def test_actions_order_is_save_event_commit() -> None:
-    unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork()
-    artifact = _artifact(_provenance_payload(claims=(_claim_payload(),)))
-
-    _manager(unit_of_work).execute(_command(artifact))
-
-    assert unit_of_work.actions == (
-        "save_draft_claim_observations",
-        "append_event",
-        "commit",
-    )
 
 
 def test_command_requires_timezone_aware_timestamps() -> None:
