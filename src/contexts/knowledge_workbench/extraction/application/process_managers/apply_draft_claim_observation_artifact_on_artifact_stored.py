@@ -64,6 +64,11 @@ class ApplyDraftClaimObservationArtifactOnArtifactStored:
                 artifact_ref=artifact_ref,
                 status="ignored_missing_artifact",
             )
+        if getattr(artifact, "artifact_kind") == PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND:
+            return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
+                artifact_ref=artifact_ref,
+                status="ignored_invalid_prompt_a_provenance",
+            )
         return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
             artifact_ref=artifact_ref,
             status="ignored_non_prompt_a_parsed_artifact",
