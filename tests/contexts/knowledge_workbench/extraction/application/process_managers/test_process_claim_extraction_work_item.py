@@ -33,6 +33,7 @@ from src.contexts.knowledge_workbench.extraction.application.process_managers.re
 )
 from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_split_required import RecordClaimExtractionSplitRequiredCommand
 from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_success import RecordClaimExtractionSuccessCommand
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
 from src.contexts.llm_runtime.application.ports.llm_provider_input import (
     LlmProviderInput,
     LlmProviderMessage,
@@ -140,40 +141,15 @@ def _llm_task(
     )
 
 
-def _prompt_a_provenance_payload() -> dict[str, object]:
-    return {
-        "workflow_run_id": "workflow-1",
-        "stage_run_id": "stage-1",
-        "source_unit_ref": "source-unit-1",
-        "work_item_id": "work-1",
-        "work_item_attempt_id": "work-attempt-1",
-        "llm_task_id": "task-1",
-        "llm_attempt_id": "llm-attempt-1",
-        "prompt_id": "prompt-a",
-        "prompt_version": "v1",
-    }
-
-
 def _artifact(ref: str, kind: str) -> PipelineArtifact:
-    payload = _prompt_a_provenance_payload()
-    if kind == "knowledge_workbench.claim_observations.raw":
-        payload["raw_output"] = '{"claims": []}'
-        lineage = ArtifactLineage()
-    elif kind == "knowledge_workbench.claim_observations.parsed":
-        payload["raw_artifact_ref"] = "raw-artifact-1"
-        payload["claims"] = ()
-        lineage = ArtifactLineage(parent_refs=(ArtifactRef("raw-artifact-1"),))
-    else:
-        payload = {"ok": True}
-        lineage = ArtifactLineage()
     return PipelineArtifact(
         artifact_ref=ArtifactRef(ref),
         artifact_kind=ArtifactKind(kind),
-        payload=ArtifactPayload(payload),
+        payload=ArtifactPayload({"ok": True}),
         status=ArtifactStatus.STORED,
         visibility=ArtifactVisibility.INTERNAL,
         retention_policy=RetentionPolicy.temporary(),
-        lineage=lineage,
+        lineage=ArtifactLineage(),
         created_at=_now(),
         updated_at=_now(),
     )
@@ -253,14 +229,10 @@ def _command(**overrides: object) -> ProcessClaimExtractionWorkItemCommand:
         "started_at": _now(),
         "finished_at": _now() + timedelta(seconds=1),
         "occurred_at": _now() + timedelta(seconds=1),
-        "raw_output_artifact": _artifact(
-            "raw-artifact-1",
-            "knowledge_workbench.claim_observations.raw",
-        ),
-        "parsed_output_artifact": _artifact(
-            "parsed-artifact-1",
-            "knowledge_workbench.claim_observations.parsed",
-        ),
+        "workflow_run_id": "workflow-1",
+        "stage_run_id": "stage-1",
+        "source_unit_ref": SourceUnitRef("source-unit-1"),
+        "parsed_claims_payload": (),
         "split_artifact": _artifact(
             "split-artifact-1",
             "knowledge_workbench.claim_extraction.split_required",
@@ -285,31 +257,37 @@ def test_success_dispatches_to_success_recorder() -> None:
     assert result.llm_attempt.usage == TokenUsage(input_tokens=10, output_tokens=5)
     assert len(harness.llm_executor.calls) == 1
     assert len(harness.success.calls) == 1
-    assert isinstance(harness.success.calls[0], RecordClaimExtractionSuccessCommand)
+    command = harness.success.calls[0]
+    assert isinstance(command, RecordClaimExtractionSuccessCommand)
+
+    raw = command.raw_output_artifact
+    parsed = command.parsed_output_artifact
+
+    assert raw.artifact_ref.value == (
+        "claim-extraction:workflow-1:stage-1:work-1:work-attempt-1:llm-attempt-1:raw"
+    )
+    assert parsed.artifact_ref.value == (
+        "claim-extraction:workflow-1:stage-1:work-1:work-attempt-1:llm-attempt-1:parsed"
+    )
+
+    assert raw.payload.value["workflow_run_id"] == "workflow-1"
+    assert raw.payload.value["stage_run_id"] == "stage-1"
+    assert raw.payload.value["source_unit_ref"] == "source-unit-1"
+    assert raw.payload.value["work_item_id"] == "work-1"
+    assert raw.payload.value["work_item_attempt_id"] == "work-attempt-1"
+    assert raw.payload.value["llm_task_id"] == "task-1"
+    assert raw.payload.value["llm_attempt_id"] == "llm-attempt-1"
+    assert raw.payload.value["prompt_id"] == "prompt-a"
+    assert raw.payload.value["prompt_version"] == "v1"
+    assert raw.payload.value["raw_output"] == '{"claims": []}'
+
+    assert parsed.payload.value["raw_artifact_ref"] == raw.artifact_ref.value
+    assert parsed.payload.value["claims"] == ()
+    assert parsed.lineage.parent_refs == (raw.artifact_ref,)
     assert not harness.deferred.calls
     assert not harness.daily.calls
     assert not harness.split.calls
     assert not harness.failed.calls
-
-
-def test_success_rejects_arbitrary_prebuilt_artifacts_without_provenance() -> None:
-    harness = _harness(_outcome(ExecuteLlmTaskOutcomeKind.SUCCEEDED))
-    arbitrary_raw = PipelineArtifact(
-        artifact_ref=ArtifactRef("raw-artifact-1"),
-        artifact_kind=ArtifactKind("knowledge_workbench.claim_observations.raw"),
-        payload=ArtifactPayload({"ok": True}),
-        status=ArtifactStatus.STORED,
-        visibility=ArtifactVisibility.INTERNAL,
-        retention_policy=RetentionPolicy.temporary(),
-        lineage=ArtifactLineage(),
-        created_at=_now(),
-        updated_at=_now(),
-    )
-
-    with pytest.raises(ValueError):
-        harness.process.execute(_command(raw_output_artifact=arbitrary_raw))
-
-    assert not harness.success.calls
 
 
 def test_deferred_dispatches_to_deferred_recorder() -> None:
@@ -491,16 +469,6 @@ def test_retryable_outcome_requires_next_attempt_at() -> None:
         harness.process.execute(_command(retry_next_attempt_at=None))
 
 
-def test_success_requires_raw_and_parsed_artifacts() -> None:
-    harness = _harness(_outcome(ExecuteLlmTaskOutcomeKind.SUCCEEDED))
-
-    with pytest.raises(ValueError, match="raw_output_artifact"):
-        harness.process.execute(_command(raw_output_artifact=None))
-
-    with pytest.raises(ValueError, match="parsed_output_artifact"):
-        harness.process.execute(_command(parsed_output_artifact=None))
-
-
 def test_split_required_requires_split_artifact() -> None:
     task = _llm_task(
         status=LlmTaskStatus.TERMINAL_FAILED,
@@ -524,6 +492,40 @@ def test_process_command_requires_timezone_aware_timestamps() -> None:
 
     with pytest.raises(ValueError, match="finished_at must be >= started_at"):
         _command(finished_at=_now() - timedelta(seconds=1))
+
+
+def test_process_command_requires_non_empty_workflow_and_stage_ids() -> None:
+    with pytest.raises(ValueError, match="workflow_run_id must be non-empty"):
+        _command(workflow_run_id=" ")
+
+    with pytest.raises(ValueError, match="stage_run_id must be non-empty"):
+        _command(stage_run_id=" ")
+
+
+def test_process_command_requires_parsed_claims_payload_tuple_of_mappings() -> None:
+    with pytest.raises(ValueError, match="parsed_claims_payload must be a tuple"):
+        _command(parsed_claims_payload=[])
+
+    with pytest.raises(ValueError, match="parsed_claims_payload items must be mappings"):
+        _command(parsed_claims_payload=("not-mapping",))
+
+
+def test_success_path_does_not_reference_command_prebuilt_success_artifacts() -> None:
+    text = Path(
+        "src/contexts/knowledge_workbench/extraction/application/process_managers/"
+        "process_claim_extraction_work_item.py"
+    ).read_text(encoding="utf-8")
+
+    forbidden_markers = (
+        "raw_output_artifact: PipelineArtifact | None",
+        "parsed_output_artifact: PipelineArtifact | None",
+        "command.raw_output_artifact",
+        "command.parsed_output_artifact",
+    )
+
+    offenders = [marker for marker in forbidden_markers if marker in text]
+
+    assert not offenders
 
 
 def test_process_claim_extraction_source_does_not_import_provider_db_or_legacy_paths() -> None:
