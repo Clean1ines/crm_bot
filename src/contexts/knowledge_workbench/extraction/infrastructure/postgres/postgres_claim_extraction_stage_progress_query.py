@@ -5,20 +5,24 @@ from datetime import datetime
 from typing import Protocol
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
-from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.knowledge_workbench.extraction.application.read_models.claim_extraction_stage_progress import (
     ClaimExtractionStageProgressQueryPort,
 )
 
 
+class StageProgressRowLike(Protocol):
+    def __getitem__(self, key: str) -> object: ...
+
+
 class AsyncStageProgressConnectionLike(Protocol):
-    async def fetch(self, query: str, *args: object) -> list[object]: ...
+    async def fetch(self, query: str, *args: object) -> list[StageProgressRowLike]: ...
 
     async def fetchval(self, query: str, *args: object) -> object: ...
 
@@ -99,7 +103,7 @@ class PostgresClaimExtractionStageProgressQuery(ClaimExtractionStageProgressQuer
         return value
 
 
-def _row_to_work_item(row: object) -> WorkItem:
+def _row_to_work_item(row: StageProgressRowLike) -> WorkItem:
     item_row = _execution_work_item_row(row)
     return WorkItem(
         work_item_id=item_row.work_item_id,
@@ -116,7 +120,7 @@ def _row_to_work_item(row: object) -> WorkItem:
     )
 
 
-def _execution_work_item_row(row: object) -> ExecutionWorkItemRow:
+def _execution_work_item_row(row: StageProgressRowLike) -> ExecutionWorkItemRow:
     return ExecutionWorkItemRow(
         work_item_id=_required_str(row, "work_item_id"),
         work_kind=_required_str(row, "work_kind"),
@@ -130,21 +134,21 @@ def _execution_work_item_row(row: object) -> ExecutionWorkItemRow:
     )
 
 
-def _value(row: object, key: str) -> object:
+def _value(row: StageProgressRowLike, key: str) -> object:
     try:
-        return row[key]  # type: ignore[index]
+        return row[key]
     except KeyError as exc:
         raise KeyError(f"Missing execution_work_items column: {key}") from exc
 
 
-def _required_str(row: object, key: str) -> str:
+def _required_str(row: StageProgressRowLike, key: str) -> str:
     value = _value(row, key)
     if not isinstance(value, str) or not value.strip():
         raise TypeError(f"{key} must be a non-empty string")
     return value
 
 
-def _optional_str(row: object, key: str) -> str | None:
+def _optional_str(row: StageProgressRowLike, key: str) -> str | None:
     value = _value(row, key)
     if value is None:
         return None
@@ -153,14 +157,14 @@ def _optional_str(row: object, key: str) -> str | None:
     return value
 
 
-def _required_int(row: object, key: str) -> int:
+def _required_int(row: StageProgressRowLike, key: str) -> int:
     value = _value(row, key)
     if not isinstance(value, int):
         raise TypeError(f"{key} must be int")
     return value
 
 
-def _optional_datetime(row: object, key: str) -> datetime | None:
+def _optional_datetime(row: StageProgressRowLike, key: str) -> datetime | None:
     value = _value(row, key)
     if value is None:
         return None
