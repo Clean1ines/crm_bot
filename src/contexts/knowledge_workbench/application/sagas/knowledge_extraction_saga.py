@@ -11,6 +11,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
     KnowledgeExtractionPhaseKey,
     KnowledgeExtractionWorkflowStatus,
 )
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_source_phase_reconciliation import (
+    KnowledgeExtractionSourcePhaseReconciler,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,11 +54,13 @@ class KnowledgeExtractionSaga:
         command_log: KnowledgeExtractionCommandLogPort,
         event_cursor: KnowledgeExtractionEventCursorPort,
         command_emitter: KnowledgeExtractionCommandEmitterPort,
+        source_phase_reconciler: KnowledgeExtractionSourcePhaseReconciler | None = None,
     ) -> None:
         self._state_repository = state_repository
         self._command_log = command_log
         self._event_cursor = event_cursor
         self._command_emitter = command_emitter
+        self._source_phase_reconciler = source_phase_reconciler
 
     async def reconcile(
         self,
