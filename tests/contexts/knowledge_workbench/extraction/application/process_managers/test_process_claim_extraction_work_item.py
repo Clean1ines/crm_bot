@@ -6,59 +6,33 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
-    PipelineArtifact,
-)
-from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import (
-    ArtifactKind,
-)
-from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import (
-    ArtifactLineage,
-)
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
-    ArtifactPayload,
-)
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
+from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import ArtifactKind
+from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import ArtifactLineage
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import ArtifactPayload
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.artifact_runtime.domain.value_objects.artifact_status import (
-    ArtifactStatus,
-)
-from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
-    ArtifactVisibility,
-)
-from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
-    RetentionPolicy,
-)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_status import ArtifactStatus
+from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import ArtifactVisibility
+from src.contexts.artifact_runtime.domain.value_objects.retention_policy import RetentionPolicy
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
-from src.contexts.execution_runtime.domain.entities.work_item_attempt import (
-    WorkItemAttempt,
-)
+from src.contexts.execution_runtime.domain.entities.work_item_attempt import WorkItemAttempt
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
-from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
-    WorkItemStatus,
-)
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import WorkItemStatus
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.knowledge_workbench.extraction.application.process_managers.process_claim_extraction_work_item import (
     ProcessClaimExtractionWorkItem,
     ProcessClaimExtractionWorkItemCommand,
 )
-from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_daily_exhausted import (
-    RecordClaimExtractionDailyExhaustedCommand,
-)
-from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_deferred import (
-    RecordClaimExtractionDeferredCommand,
-)
+from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_daily_exhausted import RecordClaimExtractionDailyExhaustedCommand
+from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_deferred import RecordClaimExtractionDeferredCommand
 from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_failed import (
     ClaimExtractionFailureMode,
     RecordClaimExtractionFailedCommand,
 )
-from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_split_required import (
-    RecordClaimExtractionSplitRequiredCommand,
-)
-from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_success import (
-    RecordClaimExtractionSuccessCommand,
-)
+from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_split_required import RecordClaimExtractionSplitRequiredCommand
+from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_success import RecordClaimExtractionSuccessCommand
 from src.contexts.llm_runtime.application.ports.llm_provider_input import (
     LlmProviderInput,
     LlmProviderMessage,
@@ -68,22 +42,16 @@ from src.contexts.llm_runtime.application.results.execute_llm_task_result import
     ExecuteLlmTaskOutcome,
     ExecuteLlmTaskOutcomeKind,
 )
-from src.contexts.llm_runtime.application.use_cases.execute_llm_task import (
-    ExecuteLlmTaskCommand,
-)
+from src.contexts.llm_runtime.application.use_cases.execute_llm_task import ExecuteLlmTaskCommand
 from src.contexts.llm_runtime.domain.entities.llm_task import LlmTask
 from src.contexts.llm_runtime.domain.value_objects.input_ref import LlmInputRef
 from src.contexts.llm_runtime.domain.value_objects.llm_error_kind import LlmErrorKind
 from src.contexts.llm_runtime.domain.value_objects.llm_route import LlmRoute
 from src.contexts.llm_runtime.domain.value_objects.llm_task_status import LlmTaskStatus
 from src.contexts.llm_runtime.domain.value_objects.model_id import ModelId
-from src.contexts.llm_runtime.domain.value_objects.output_contract_ref import (
-    OutputContractRef,
-)
+from src.contexts.llm_runtime.domain.value_objects.output_contract_ref import OutputContractRef
 from src.contexts.llm_runtime.domain.value_objects.prompt_version import PromptVersion
-from src.contexts.llm_runtime.domain.value_objects.provider_account_ref import (
-    ProviderAccountRef,
-)
+from src.contexts.llm_runtime.domain.value_objects.provider_account_ref import ProviderAccountRef
 from src.contexts.llm_runtime.domain.value_objects.provider_id import ProviderId
 from src.contexts.llm_runtime.domain.value_objects.token_usage import TokenUsage
 
@@ -172,15 +140,40 @@ def _llm_task(
     )
 
 
+def _prompt_a_provenance_payload() -> dict[str, object]:
+    return {
+        "workflow_run_id": "workflow-1",
+        "stage_run_id": "stage-1",
+        "source_unit_ref": "source-unit-1",
+        "work_item_id": "work-1",
+        "work_item_attempt_id": "work-attempt-1",
+        "llm_task_id": "task-1",
+        "llm_attempt_id": "llm-attempt-1",
+        "prompt_id": "prompt-a",
+        "prompt_version": "v1",
+    }
+
+
 def _artifact(ref: str, kind: str) -> PipelineArtifact:
+    payload = _prompt_a_provenance_payload()
+    if kind == "knowledge_workbench.claim_observations.raw":
+        payload["raw_output"] = '{"claims": []}'
+        lineage = ArtifactLineage()
+    elif kind == "knowledge_workbench.claim_observations.parsed":
+        payload["raw_artifact_ref"] = "raw-artifact-1"
+        payload["claims"] = ()
+        lineage = ArtifactLineage(parent_refs=(ArtifactRef("raw-artifact-1"),))
+    else:
+        payload = {"ok": True}
+        lineage = ArtifactLineage()
     return PipelineArtifact(
         artifact_ref=ArtifactRef(ref),
         artifact_kind=ArtifactKind(kind),
-        payload=ArtifactPayload({"ok": True}),
+        payload=ArtifactPayload(payload),
         status=ArtifactStatus.STORED,
         visibility=ArtifactVisibility.INTERNAL,
         retention_policy=RetentionPolicy.temporary(),
-        lineage=ArtifactLineage(),
+        lineage=lineage,
         created_at=_now(),
         updated_at=_now(),
     )
@@ -299,6 +292,26 @@ def test_success_dispatches_to_success_recorder() -> None:
     assert not harness.failed.calls
 
 
+def test_success_rejects_arbitrary_prebuilt_artifacts_without_provenance() -> None:
+    harness = _harness(_outcome(ExecuteLlmTaskOutcomeKind.SUCCEEDED))
+    arbitrary_raw = PipelineArtifact(
+        artifact_ref=ArtifactRef("raw-artifact-1"),
+        artifact_kind=ArtifactKind("knowledge_workbench.claim_observations.raw"),
+        payload=ArtifactPayload({"ok": True}),
+        status=ArtifactStatus.STORED,
+        visibility=ArtifactVisibility.INTERNAL,
+        retention_policy=RetentionPolicy.temporary(),
+        lineage=ArtifactLineage(),
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+    with pytest.raises(ValueError):
+        harness.process.execute(_command(raw_output_artifact=arbitrary_raw))
+
+    assert not harness.success.calls
+
+
 def test_deferred_dispatches_to_deferred_recorder() -> None:
     wait_until = _now() + timedelta(seconds=60)
     task = _llm_task(
@@ -344,9 +357,7 @@ def test_daily_exhausted_dispatches_to_daily_recorder() -> None:
 
     assert result.dispatched_to == "daily_exhausted"
     assert len(harness.daily.calls) == 1
-    assert isinstance(
-        harness.daily.calls[0], RecordClaimExtractionDailyExhaustedCommand
-    )
+    assert isinstance(harness.daily.calls[0], RecordClaimExtractionDailyExhaustedCommand)
     assert not harness.success.calls
     assert not harness.deferred.calls
     assert not harness.split.calls
@@ -515,9 +526,7 @@ def test_process_command_requires_timezone_aware_timestamps() -> None:
         _command(finished_at=_now() - timedelta(seconds=1))
 
 
-def test_process_claim_extraction_source_does_not_import_provider_db_or_legacy_paths() -> (
-    None
-):
+def test_process_claim_extraction_source_does_not_import_provider_db_or_legacy_paths() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/extraction/application/process_managers/"
         "process_claim_extraction_work_item.py",
