@@ -82,6 +82,17 @@ class KnowledgeExtractionSaga:
         )
 
 
+def _replace_checkpoints(
+    existing: tuple[KnowledgeExtractionPhaseCheckpoint, ...],
+    replacements: tuple[KnowledgeExtractionPhaseCheckpoint, ...],
+) -> tuple[KnowledgeExtractionPhaseCheckpoint, ...]:
+    replacement_keys = {checkpoint.phase_key for checkpoint in replacements}
+    kept = tuple(
+        checkpoint for checkpoint in existing if checkpoint.phase_key not in replacement_keys
+    )
+    return kept + replacements
+
+
 def _require_non_empty(value: str, field_name: str) -> None:
     if not value or not value.strip():
         raise ValueError(f"{field_name} must be non-empty")
