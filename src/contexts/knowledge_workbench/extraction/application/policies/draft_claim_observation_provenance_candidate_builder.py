@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -113,7 +114,7 @@ class DraftClaimObservationProvenanceCandidateBuilder:
         return tuple(candidates)
 
 
-def _provenance(payload: dict[str, JsonInputValue]) -> ClaimExtractionArtifactProvenance:
+def _provenance(payload: Mapping[str, JsonInputValue]) -> ClaimExtractionArtifactProvenance:
     try:
         return ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(
             payload,
@@ -131,7 +132,11 @@ def _raw_artifact_ref(parsed_artifact: PipelineArtifact) -> ArtifactRef:
         )
     raw_artifact_ref = ArtifactRef(raw_ref_value)
     parent_refs = parsed_artifact.lineage.parent_refs
-    if parent_refs and raw_artifact_ref not in parent_refs:
+    if not parent_refs:
+        raise InvalidDraftClaimObservationProvenanceCandidate(
+            "parsed artifact lineage must contain raw_artifact_ref",
+        )
+    if raw_artifact_ref not in parent_refs:
         raise InvalidDraftClaimObservationProvenanceCandidate(
             "raw_artifact_ref must match parsed artifact lineage",
         )
