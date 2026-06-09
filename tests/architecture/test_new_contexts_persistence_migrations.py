@@ -40,6 +40,12 @@ EXPECTED_MIGRATIONS = {
         "idx_draft_claim_observations_source_unit",
         "idx_draft_claim_observation_questions_observation",
     ),
+    "088_create_claim_extraction_stage_work_item_index.sql": (
+        "CREATE TABLE IF NOT EXISTS claim_extraction_stage_work_items",
+        "idx_claim_extraction_stage_work_items_stage",
+        "idx_claim_extraction_stage_work_items_work_item",
+        "idx_pipeline_artifacts_claim_extraction_stage_payload",
+    ),
 }
 
 FORBIDDEN_LEGACY_MARKERS = (
@@ -68,6 +74,7 @@ REQUIRED_TABLES = (
     "outbox_events",
     "draft_claim_observations",
     "draft_claim_observation_possible_questions",
+    "claim_extraction_stage_work_items",
 )
 
 
@@ -228,3 +235,17 @@ def test_draft_claim_observation_migration_stays_prompt_a_draft_only() -> None:
         "Prompt A draft claim persistence must not contain consolidation/publication fields:\n"
         + "\n".join(offenders)
     )
+
+
+def test_claim_extraction_stage_work_item_index_keeps_stage_refs_out_of_execution_items() -> None:
+    execution_text = _read_migration("083_create_execution_runtime_tables.sql")
+    stage_index_text = _read_migration(
+        "088_create_claim_extraction_stage_work_item_index.sql"
+    )
+
+    assert "workflow_run_id" not in execution_text
+    assert "stage_run_id" not in execution_text
+    assert "workflow_run_id text NOT NULL" in stage_index_text
+    assert "stage_run_id text NOT NULL" in stage_index_text
+    assert "work_item_id text NOT NULL REFERENCES execution_work_items" in stage_index_text
+    assert "PRIMARY KEY (workflow_run_id, stage_run_id, work_item_id)" in stage_index_text
