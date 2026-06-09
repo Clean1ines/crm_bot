@@ -80,6 +80,23 @@ class FakeWorkItemUnitOfWork:
 
 
 @dataclass(slots=True)
+class FakeStageWorkItemIndex:
+    saved: list[tuple[str, str, WorkItem]] = field(default_factory=list)
+    fail_on_save: bool = False
+
+    def save_stage_work_item(
+        self,
+        *,
+        workflow_run_id: str,
+        stage_run_id: str,
+        work_item: WorkItem,
+    ) -> None:
+        if self.fail_on_save:
+            raise RuntimeError("index save failed")
+        self.saved.append((workflow_run_id, stage_run_id, work_item))
+
+
+@dataclass(slots=True)
 class FakeWorkItemCreator:
     work_items: tuple[WorkItem, ...]
     received_source_units: tuple[SourceUnit, ...] = ()
@@ -160,30 +177,64 @@ def _work_item(
     )
 
 
+def _command(
+    source_units: tuple[SourceUnit, ...] = (_source_unit("unit-1"),),
+) -> RunClaimExtractionStageCommand:
+    return RunClaimExtractionStageCommand(
+        workflow_run_id="workflow-1",
+        stage_run_id="stage-1",
+        source_units=source_units,
+        prompt_id="faq_claim_observations",
+    )
+
+
 def test_empty_source_units_rejected() -> None:
     with pytest.raises(ValueError, match="source_units must be non-empty"):
         RunClaimExtractionStageCommand(
+            workflow_run_id="workflow-1",
+            stage_run_id="stage-1",
             source_units=(),
             prompt_id="faq_claim_observations",
         )
 
 
-def test_stage_runner_creates_and_saves_claim_extraction_work_items() -> None:
+def test_stage_refs_are_required() -> None:
+    with pytest.raises(ValueError, match="workflow_run_id must be non-empty"):
+        RunClaimExtractionStageCommand(
+            workflow_run_id="",
+            stage_run_id="stage-1",
+            source_units=(_source_unit("unit-1"),),
+            prompt_id="faq_claim_observations",
+        )
+
+    with pytest.raises(ValueError, match="stage_run_id must be non-empty"):
+        RunClaimExtractionStageCommand(
+            workflow_run_id="workflow-1",
+            stage_run_id="",
+            source_units=(_source_unit("unit-1"),),
+            prompt_id="faq_claim_observations",
+        )
+
+
+def test_stage_runner_creates_saves_and_indexes_claim_extraction_work_items() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
+    stage_index = FakeStageWorkItemIndex()
     source_units = (_source_unit("unit-1"), _source_unit("unit-2", ordinal=1))
 
-    result = RunClaimExtractionStage(unit_of_work=unit_of_work).execute(
-        RunClaimExtractionStageCommand(
-            source_units=source_units,
-            prompt_id="faq_claim_observations",
-        ),
-    )
+    result = RunClaimExtractionStage(
+        unit_of_work=unit_of_work,
+        stage_work_item_index=stage_index,
+    ).execute(_command(source_units=source_units))
 
     assert len(result.work_items) == 2
     assert all(
         item.work_kind == CLAIM_EXTRACTION_WORK_KIND for item in result.work_items
     )
     assert unit_of_work.saved_work_items == list(result.work_items)
+    assert stage_index.saved == [
+        ("workflow-1", "stage-1", result.work_items[0]),
+        ("workflow-1", "stage-1", result.work_items[1]),
+    ]
     assert unit_of_work.saved_attempts == []
     assert unit_of_work.events == []
     assert unit_of_work.committed is True
@@ -197,12 +248,16 @@ def test_stage_runner_accepts_fake_creator_and_passes_source_units_and_prompt_id
     source_units = (_source_unit("unit-1"),)
     creator = FakeWorkItemCreator(work_items=(_work_item("work-1"),))
     unit_of_work = FakeWorkItemUnitOfWork()
+    stage_index = FakeStageWorkItemIndex()
 
     result = RunClaimExtractionStage(
         unit_of_work=unit_of_work,
+        stage_work_item_index=stage_index,
         work_item_creator=creator,
     ).execute(
         RunClaimExtractionStageCommand(
+            workflow_run_id="workflow-1",
+            stage_run_id="stage-1",
             source_units=source_units,
             prompt_id="prompt-a",
         ),
@@ -211,19 +266,35 @@ def test_stage_runner_accepts_fake_creator_and_passes_source_units_and_prompt_id
     assert creator.received_source_units == source_units
     assert creator.received_prompt_id == "prompt-a"
     assert result.work_items == (_work_item("work-1"),)
+    assert stage_index.saved == [("workflow-1", "stage-1", _work_item("work-1"))]
 
 
-def test_stage_runner_rolls_back_when_save_fails() -> None:
+def test_stage_runner_rolls_back_when_work_item_save_fails() -> None:
     unit_of_work = FakeWorkItemUnitOfWork(fail_on_save=True)
+    stage_index = FakeStageWorkItemIndex()
 
     with pytest.raises(RuntimeError, match="save failed"):
-        RunClaimExtractionStage(unit_of_work=unit_of_work).execute(
-            RunClaimExtractionStageCommand(
-                source_units=(_source_unit("unit-1"),),
-                prompt_id="faq_claim_observations",
-            ),
-        )
+        RunClaimExtractionStage(
+            unit_of_work=unit_of_work,
+            stage_work_item_index=stage_index,
+        ).execute(_command())
 
+    assert unit_of_work.committed is False
+    assert unit_of_work.rolled_back is True
+    assert stage_index.saved == []
+
+
+def test_stage_runner_rolls_back_when_stage_index_save_fails() -> None:
+    unit_of_work = FakeWorkItemUnitOfWork()
+    stage_index = FakeStageWorkItemIndex(fail_on_save=True)
+
+    with pytest.raises(RuntimeError, match="index save failed"):
+        RunClaimExtractionStage(
+            unit_of_work=unit_of_work,
+            stage_work_item_index=stage_index,
+        ).execute(_command())
+
+    assert unit_of_work.saved_work_items
     assert unit_of_work.committed is False
     assert unit_of_work.rolled_back is True
 
