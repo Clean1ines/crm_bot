@@ -27,5 +27,7 @@ def make_claim_extraction_stage_postgres_runtime(
 ) -> ClaimExtractionStagePostgresRuntime:
     return ClaimExtractionStagePostgresRuntime(
         runner=make_postgres_claim_extraction_stage_runner(connection),
-        progress_reader=make_postgres_claim_extraction_stage_progress_reader(connection),
+        progress_reader=make_postgres_claim_extraction_stage_progress_reader(
+            connection
+        ),
     )

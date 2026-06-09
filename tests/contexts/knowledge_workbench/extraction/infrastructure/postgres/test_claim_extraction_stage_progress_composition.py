@@ -21,7 +21,9 @@ class FakeConnection:
         return 0
 
 
-def test_postgres_claim_extraction_stage_progress_composition_builds_async_read_model() -> None:
+def test_postgres_claim_extraction_stage_progress_composition_builds_async_read_model() -> (
+    None
+):
     reader = make_postgres_claim_extraction_stage_progress_reader(FakeConnection())
 
     assert isinstance(reader, AsyncClaimExtractionStageProgressReadModel)

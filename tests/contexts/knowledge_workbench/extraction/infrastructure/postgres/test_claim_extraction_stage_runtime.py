@@ -33,5 +33,7 @@ def test_postgres_runtime_composition_builds_runner_and_async_progress_reader() 
 
     assert isinstance(runtime, ClaimExtractionStagePostgresRuntime)
     assert isinstance(runtime.runner, RunClaimExtractionStageAsync)
-    assert isinstance(runtime.progress_reader, AsyncClaimExtractionStageProgressReadModel)
+    assert isinstance(
+        runtime.progress_reader, AsyncClaimExtractionStageProgressReadModel
+    )
     assert inspect.iscoroutinefunction(runtime.progress_reader.execute)

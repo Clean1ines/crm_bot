@@ -237,7 +237,9 @@ def test_draft_claim_observation_migration_stays_prompt_a_draft_only() -> None:
     )
 
 
-def test_claim_extraction_stage_work_item_index_keeps_stage_refs_out_of_execution_items() -> None:
+def test_claim_extraction_stage_work_item_index_keeps_stage_refs_out_of_execution_items() -> (
+    None
+):
     execution_text = _read_migration("083_create_execution_runtime_tables.sql")
     stage_index_text = _read_migration(
         "088_create_claim_extraction_stage_work_item_index.sql"
@@ -247,5 +249,9 @@ def test_claim_extraction_stage_work_item_index_keeps_stage_refs_out_of_executio
     assert "stage_run_id" not in execution_text
     assert "workflow_run_id text NOT NULL" in stage_index_text
     assert "stage_run_id text NOT NULL" in stage_index_text
-    assert "work_item_id text NOT NULL REFERENCES execution_work_items" in stage_index_text
-    assert "PRIMARY KEY (workflow_run_id, stage_run_id, work_item_id)" in stage_index_text
+    assert (
+        "work_item_id text NOT NULL REFERENCES execution_work_items" in stage_index_text
+    )
+    assert (
+        "PRIMARY KEY (workflow_run_id, stage_run_id, work_item_id)" in stage_index_text
+    )

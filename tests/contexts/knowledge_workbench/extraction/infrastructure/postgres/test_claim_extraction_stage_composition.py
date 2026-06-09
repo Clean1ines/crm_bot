@@ -27,4 +27,6 @@ def test_postgres_claim_extraction_stage_composition_builds_async_runner() -> No
 
     assert isinstance(runner, RunClaimExtractionStageAsync)
     assert isinstance(runner._unit_of_work, PostgresClaimExtractionWorkItemUnitOfWork)
-    assert isinstance(runner._stage_work_item_index, PostgresClaimExtractionStageWorkItemIndex)
+    assert isinstance(
+        runner._stage_work_item_index, PostgresClaimExtractionStageWorkItemIndex
+    )

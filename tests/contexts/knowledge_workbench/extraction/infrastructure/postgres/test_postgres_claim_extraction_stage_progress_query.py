@@ -111,7 +111,9 @@ async def test_load_work_items_reads_stage_index_and_maps_rows_to_work_items() -
 
 
 @pytest.mark.asyncio
-async def test_count_artifacts_reads_claim_observation_artifacts_by_payload_stage_refs() -> None:
+async def test_count_artifacts_reads_claim_observation_artifacts_by_payload_stage_refs() -> (
+    None
+):
     connection = FakeConnection(artifact_count=3)
     query = PostgresClaimExtractionStageProgressQuery(connection)
 
@@ -170,7 +172,9 @@ async def test_load_work_items_rejects_malformed_rows() -> None:
         )
 
 
-def test_adapter_source_does_not_import_legacy_http_frontend_or_ignore_markers() -> None:
+def test_adapter_source_does_not_import_legacy_http_frontend_or_ignore_markers() -> (
+    None
+):
     source = Path(
         "src/contexts/knowledge_workbench/extraction/infrastructure/postgres/"
         "postgres_claim_extraction_stage_progress_query.py",

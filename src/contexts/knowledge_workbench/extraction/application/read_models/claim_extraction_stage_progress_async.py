@@ -29,7 +29,9 @@ class AsyncClaimExtractionStageProgressQueryPort(Protocol):
 
 
 class AsyncClaimExtractionStageProgressReadModel:
-    def __init__(self, *, query_port: AsyncClaimExtractionStageProgressQueryPort) -> None:
+    def __init__(
+        self, *, query_port: AsyncClaimExtractionStageProgressQueryPort
+    ) -> None:
         self._query_port = query_port
 
     async def execute(
@@ -53,7 +55,9 @@ class AsyncClaimExtractionStageProgressReadModel:
 
 
 @dataclass(frozen=True, slots=True)
-class _LoadedClaimExtractionStageProgressQueryPort(ClaimExtractionStageProgressQueryPort):
+class _LoadedClaimExtractionStageProgressQueryPort(
+    ClaimExtractionStageProgressQueryPort
+):
     work_items: tuple[WorkItem, ...]
     artifacts_count: int
 

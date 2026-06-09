@@ -11,7 +11,9 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
 )
 
 
-def make_postgres_claim_extraction_stage_runner(connection: object) -> RunClaimExtractionStageAsync:
+def make_postgres_claim_extraction_stage_runner(
+    connection: object,
+) -> RunClaimExtractionStageAsync:
     return RunClaimExtractionStageAsync(
         unit_of_work=PostgresClaimExtractionWorkItemUnitOfWork(connection),
         stage_work_item_index=PostgresClaimExtractionStageWorkItemIndex(connection),

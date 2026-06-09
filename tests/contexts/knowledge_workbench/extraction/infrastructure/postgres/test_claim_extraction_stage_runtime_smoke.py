@@ -226,7 +226,9 @@ async def test_postgres_runtime_start_then_progress_reads_indexed_work_items() -
 
 
 @pytest.mark.asyncio
-async def test_postgres_runtime_rolls_back_work_item_and_index_writes_together() -> None:
+async def test_postgres_runtime_rolls_back_work_item_and_index_writes_together() -> (
+    None
+):
     connection = FakeRuntimeConnection(fail_on_stage_index_insert=True)
     runtime = make_claim_extraction_stage_postgres_runtime(connection)
 
