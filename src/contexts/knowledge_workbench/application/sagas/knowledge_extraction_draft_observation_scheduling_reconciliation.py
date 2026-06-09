@@ -83,7 +83,10 @@ def _source_units_not_ready_decision(state: KnowledgeExtractionWorkflowState) ->
 
 
 def _source_unit_count_from_payload(payload: object) -> int:
-    value = payload.get("source_unit_count")
+    getter = getattr(payload, "get", None)
+    if not callable(getter):
+        raise TypeError("source_unit_count checkpoint payload must support get")
+    value = getter("source_unit_count")
     if not isinstance(value, int):
         raise TypeError("source_unit_count checkpoint payload must be int")
     if value < 0:
