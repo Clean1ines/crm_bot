@@ -41,6 +41,7 @@ def _now() -> datetime:
 def _document() -> SourceDocument:
     return SourceDocument(
         document_ref=SourceDocumentRef("document-1"),
+        project_id="project-1",
         source_format=SourceFormat.MARKDOWN,
         content_hash="sha256:abc",
         created_at=_now(),
