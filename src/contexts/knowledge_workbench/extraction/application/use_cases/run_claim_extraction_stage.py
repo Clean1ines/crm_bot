@@ -27,6 +27,16 @@ class ClaimExtractionWorkItemCreatorPort(Protocol):
     ) -> object: ...
 
 
+class ClaimExtractionStageWorkItemIndexPort(Protocol):
+    def save_stage_work_item(
+        self,
+        *,
+        workflow_run_id: str,
+        stage_run_id: str,
+        work_item: WorkItem,
+    ) -> None: ...
+
+
 class ClaimExtractionStageStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -38,14 +48,17 @@ class ClaimExtractionStageStatus(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class RunClaimExtractionStageCommand:
+    workflow_run_id: str
+    stage_run_id: str
     source_units: tuple[SourceUnit, ...]
     prompt_id: str
 
     def __post_init__(self) -> None:
+        _require_non_empty(self.workflow_run_id, "workflow_run_id")
+        _require_non_empty(self.stage_run_id, "stage_run_id")
         if not self.source_units:
             raise ValueError("source_units must be non-empty")
-        if not self.prompt_id or not self.prompt_id.strip():
-            raise ValueError("prompt_id must be non-empty")
+        _require_non_empty(self.prompt_id, "prompt_id")
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,9 +93,11 @@ class RunClaimExtractionStage:
         self,
         *,
         unit_of_work: WorkItemUnitOfWorkPort,
+        stage_work_item_index: ClaimExtractionStageWorkItemIndexPort,
         work_item_creator: ClaimExtractionWorkItemCreatorPort | None = None,
     ) -> None:
         self._unit_of_work = unit_of_work
+        self._stage_work_item_index = stage_work_item_index
         self._work_item_creator = work_item_creator or CreateExtractionWorkItems()
 
     def execute(
@@ -100,6 +115,11 @@ class RunClaimExtractionStage:
         try:
             for item in work_items:
                 self._unit_of_work.save_work_item(item)
+                self._stage_work_item_index.save_stage_work_item(
+                    workflow_run_id=command.workflow_run_id,
+                    stage_run_id=command.stage_run_id,
+                    work_item=item,
+                )
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
@@ -209,3 +229,8 @@ def _stage_status(
         return ClaimExtractionStageStatus.PENDING
 
     return ClaimExtractionStageStatus.IN_PROGRESS
+
+
+def _require_non_empty(value: str, field_name: str) -> None:
+    if not value or not value.strip():
+        raise ValueError(f"{field_name} must be non-empty")
