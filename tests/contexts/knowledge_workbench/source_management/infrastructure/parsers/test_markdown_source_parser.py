@@ -42,6 +42,7 @@ def _now() -> datetime:
 def _document() -> SourceDocument:
     return SourceDocument(
         document_ref=SourceDocumentRef("document-1"),
+        project_id="project-1",
         source_format=SourceFormat.MARKDOWN,
         content_hash="sha256:abc",
         created_at=_now(),
@@ -157,7 +158,6 @@ def test_parser_does_not_import_runtime_provider_or_artifact_boundaries() -> Non
         "Postgres",
         "postgres",
     )
-
     offenders = [marker for marker in forbidden_markers if marker in text]
 
     assert not offenders
