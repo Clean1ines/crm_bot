@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from typing import Protocol, TypeAlias
 
-from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import (
-    DraftClaimObservation,
-)
-from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import (
-    DraftClaimObservationsApplied,
-)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import DraftClaimObservationProvenanceCandidate
+from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import DraftClaimObservation
+from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import DraftClaimObservationsApplied
 
 
 DraftClaimObservationApplicationEvent: TypeAlias = DraftClaimObservationsApplied
@@ -19,10 +16,12 @@ class DraftClaimObservationApplicationUnitOfWorkPort(Protocol):
         observations: tuple[DraftClaimObservation, ...],
     ) -> None: ...
 
-    def append_event(
+    def save_draft_claim_observation_provenance_candidates(
         self,
-        event: DraftClaimObservationApplicationEvent,
+        candidates: tuple[DraftClaimObservationProvenanceCandidate, ...],
     ) -> None: ...
+
+    def append_event(self, event: DraftClaimObservationApplicationEvent) -> None: ...
 
     def commit(self) -> None: ...
 
