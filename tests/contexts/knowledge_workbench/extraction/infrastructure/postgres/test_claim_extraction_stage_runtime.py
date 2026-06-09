@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from src.contexts.knowledge_workbench.extraction.application.read_models.claim_extraction_stage_progress import (
-    ClaimExtractionStageProgressReadModel,
+import inspect
+
+from src.contexts.knowledge_workbench.extraction.application.read_models.claim_extraction_stage_progress_async import (
+    AsyncClaimExtractionStageProgressReadModel,
 )
 from src.contexts.knowledge_workbench.extraction.application.use_cases.run_claim_extraction_stage_async import (
     RunClaimExtractionStageAsync,
@@ -26,9 +28,10 @@ class FakeConnection:
         return 0
 
 
-def test_postgres_runtime_composition_builds_runner_and_progress_reader() -> None:
+def test_postgres_runtime_composition_builds_runner_and_async_progress_reader() -> None:
     runtime = make_claim_extraction_stage_postgres_runtime(FakeConnection())
 
     assert isinstance(runtime, ClaimExtractionStagePostgresRuntime)
     assert isinstance(runtime.runner, RunClaimExtractionStageAsync)
-    assert isinstance(runtime.progress_reader, ClaimExtractionStageProgressReadModel)
+    assert isinstance(runtime.progress_reader, AsyncClaimExtractionStageProgressReadModel)
+    assert inspect.iscoroutinefunction(runtime.progress_reader.execute)
