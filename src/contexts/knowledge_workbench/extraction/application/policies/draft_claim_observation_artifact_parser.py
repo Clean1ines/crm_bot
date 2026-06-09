@@ -13,6 +13,12 @@ from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import (
 from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
     JsonInputValue,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_artifact_provenance import (
+    PARSED_ARTIFACT_PAYLOAD_FIELD_NAMES,
+    PROVENANCE_PAYLOAD_FIELD_NAMES,
+    ClaimExtractionArtifactProvenance,
+    InvalidClaimExtractionArtifactProvenance,
+)
 from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import (
     DraftClaimObservation,
 )
@@ -42,7 +48,8 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 EXPECTED_DRAFT_CLAIM_OBSERVATIONS_ARTIFACT_KIND = ArtifactKind(
     "knowledge_workbench.claim_observations.parsed"
 )
-_TOP_LEVEL_FIELDS = frozenset({"claims"})
+_LEGACY_TOP_LEVEL_FIELDS = frozenset({"claims"})
+_PROVENANCE_TOP_LEVEL_FIELDS = frozenset(PARSED_ARTIFACT_PAYLOAD_FIELD_NAMES)
 _CLAIM_FIELDS = frozenset(
     {
         "claim",
@@ -80,11 +87,7 @@ class DraftClaimObservationArtifactParser:
             raise InvalidDraftClaimObservationArtifact("wrong artifact kind")
 
         payload = artifact.payload.value
-        if set(payload.keys()) != _TOP_LEVEL_FIELDS:
-            raise InvalidDraftClaimObservationArtifact(
-                "payload must contain exactly the claims field"
-            )
-
+        self._validate_top_level_payload(payload)
         claims_value = payload["claims"]
         if not isinstance(claims_value, (list, tuple)):
             raise InvalidDraftClaimObservationArtifact("claims must be a list or tuple")
@@ -103,6 +106,22 @@ class DraftClaimObservationArtifactParser:
             )
 
         return tuple(observations)
+
+    def _validate_top_level_payload(
+        self,
+        payload: Mapping[str, JsonInputValue],
+    ) -> None:
+        payload_fields = set(payload.keys())
+        if payload_fields == _LEGACY_TOP_LEVEL_FIELDS:
+            return
+        if payload_fields != _PROVENANCE_TOP_LEVEL_FIELDS:
+            raise InvalidDraftClaimObservationArtifact(
+                "payload must contain claims only or the full Prompt A provenance payload"
+            )
+        try:
+            ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(payload)
+        except InvalidClaimExtractionArtifactProvenance as exc:
+            raise InvalidDraftClaimObservationArtifact(str(exc)) from exc
 
     def _claim_mapping(
         self,
