@@ -21,6 +21,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sou
     KnowledgeExtractionSourcePhaseReconciler,
 )
 
+_SOURCE_DOCUMENT_MISSING_PAUSE_REASON = "source_document_missing"
+_SOURCE_UNITS_MISSING_PAUSE_REASON = "source_units_missing"
+
 
 @dataclass(frozen=True, slots=True)
 class ReconcileKnowledgeExtractionSagaCommand:
