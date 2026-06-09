@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.contexts.knowledge_workbench.extraction.application.read_models.claim_extraction_stage_progress import (
-    ClaimExtractionStageProgressReadModel,
+from src.contexts.knowledge_workbench.extraction.application.read_models.claim_extraction_stage_progress_async import (
+    AsyncClaimExtractionStageProgressReadModel,
 )
 from src.contexts.knowledge_workbench.extraction.application.use_cases.run_claim_extraction_stage_async import (
     RunClaimExtractionStageAsync,
@@ -19,7 +19,7 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.claim_e
 @dataclass(frozen=True, slots=True)
 class ClaimExtractionStagePostgresRuntime:
     runner: RunClaimExtractionStageAsync
-    progress_reader: ClaimExtractionStageProgressReadModel
+    progress_reader: AsyncClaimExtractionStageProgressReadModel
 
 
 def make_claim_extraction_stage_postgres_runtime(
