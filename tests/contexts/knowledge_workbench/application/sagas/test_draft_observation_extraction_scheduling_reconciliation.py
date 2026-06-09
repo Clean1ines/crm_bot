@@ -147,16 +147,13 @@ async def test_invalid_checkpoint_payload_raises() -> None:
         await reconciler.reconcile_scheduling(_state((bad_payload,)))
 
 
-@pytest.mark.parametrize(
-    "decision",
-    (
-        DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 0, 1, DraftObservationExtractionSchedulingStatus.SOURCE_UNITS_NOT_READY),
-        DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 2, 1, DraftObservationExtractionSchedulingStatus.READY_TO_SCHEDULE),
-        DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 2, 2, DraftObservationExtractionSchedulingStatus.PARTIALLY_SCHEDULED),
-    ),
-)
-def test_decision_validation_catches_inconsistent_shape(decision: DraftObservationExtractionSchedulingDecision) -> None:
-    assert decision
+def test_decision_validation_catches_inconsistent_shape() -> None:
+    with pytest.raises(ValueError):
+        DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 0, 1, DraftObservationExtractionSchedulingStatus.SOURCE_UNITS_NOT_READY)
+    with pytest.raises(ValueError):
+        DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 2, 1, DraftObservationExtractionSchedulingStatus.READY_TO_SCHEDULE)
+    with pytest.raises(ValueError):
+        DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 2, 2, DraftObservationExtractionSchedulingStatus.PARTIALLY_SCHEDULED)
 
 
 def test_decision_validation_rejects_bad_inputs() -> None:
