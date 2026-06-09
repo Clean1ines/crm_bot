@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from object import object
-
 from src.contexts.knowledge_workbench.extraction.application.use_cases.run_claim_extraction_stage_async import (
     RunClaimExtractionStageAsync,
 )
