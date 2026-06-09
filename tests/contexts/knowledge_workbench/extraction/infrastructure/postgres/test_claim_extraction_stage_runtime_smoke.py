@@ -256,7 +256,7 @@ async def test_postgres_runtime_rolls_back_work_item_and_index_writes_together()
         "read.execution_work_items",
         "read.pipeline_artifacts",
     ]
-    assert progress.status is ClaimExtractionStageProgressStatus.EMPTY
+    assert progress.status is ClaimExtractionStageProgressStatus.PENDING
     assert progress.total_work_item_count == 0
     assert progress.ready_count == 0
     assert progress.artifacts_count == 0
