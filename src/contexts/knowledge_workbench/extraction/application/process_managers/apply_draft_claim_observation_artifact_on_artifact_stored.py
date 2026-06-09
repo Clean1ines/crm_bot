@@ -66,7 +66,7 @@ class ApplyDraftClaimObservationArtifactOnArtifactStored:
             )
         if getattr(artifact, "artifact_kind") == PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND:
             try:
-                ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(
+                provenance = ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(
                     artifact.payload.value,
                 )
             except InvalidClaimExtractionArtifactProvenance:
@@ -74,9 +74,17 @@ class ApplyDraftClaimObservationArtifactOnArtifactStored:
                     artifact_ref=artifact_ref,
                     status="ignored_invalid_prompt_a_provenance",
                 )
+            apply_command = ApplyDraftClaimObservationArtifactCommand(
+                parsed_artifact=artifact,
+                source_unit_ref=provenance.source_unit_ref,
+                created_at=artifact.created_at,
+                occurred_at=command.occurred_at,
+            )
+            apply_result = await self._apply_use_case.execute(apply_command)
             return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
                 artifact_ref=artifact_ref,
                 status="applied",
+                apply_result=apply_result,
             )
         return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
             artifact_ref=artifact_ref,
