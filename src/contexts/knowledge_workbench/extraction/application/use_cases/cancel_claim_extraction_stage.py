@@ -156,15 +156,6 @@ class CancelClaimExtractionStage:
 
 
 def _cancel_item(item: WorkItem, *, reason: str) -> WorkItem:
-    if item.status is WorkItemStatus.USER_ACTION_REQUIRED:
-        return WorkItem(
-            work_item_id=item.work_item_id,
-            work_kind=item.work_kind,
-            status=WorkItemStatus.CANCELLED,
-            attempt_count=item.attempt_count,
-            last_error_kind=reason,
-        )
-
     return WorkItemStateMachine.cancel(item, error_kind=reason)
 
 
