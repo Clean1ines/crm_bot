@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from types import MappingProxyType
 from typing import Protocol, TypeAlias
 from uuid import uuid4
 
