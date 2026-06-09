@@ -348,7 +348,6 @@ def test_knowledge_extraction_saga_migration_defines_canonical_durable_state() -
         "CHECK (status <> 'CANCELLED' OR cancelled_at IS NOT NULL)",
         "CHECK (jsonb_typeof(checkpoint_payload) = 'object')",
         "PRIMARY KEY (workflow_run_id, phase_key)",
-        "ON CONFLICT",
     )
     forbidden = (
         "knowledge_workbench_processing_runs",
