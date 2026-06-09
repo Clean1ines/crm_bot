@@ -10,6 +10,10 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
     DraftClaimObservationArtifactParser,
     DraftClaimObservationArtifactParserInput,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import (
+    DraftClaimObservationProvenanceCandidate,
+    DraftClaimObservationProvenanceCandidateBuilder,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_application_unit_of_work_port import (
     DraftClaimObservationApplicationUnitOfWorkPort,
 )
@@ -41,6 +45,7 @@ class ApplyDraftClaimObservationArtifactCommand:
 @dataclass(frozen=True, slots=True)
 class ApplyDraftClaimObservationArtifactResult:
     observations: tuple[DraftClaimObservation, ...]
+    provenance_candidates: tuple[DraftClaimObservationProvenanceCandidate, ...]
     event: DraftClaimObservationsApplied
 
 
@@ -50,9 +55,14 @@ class ApplyDraftClaimObservationArtifact:
         *,
         parser: DraftClaimObservationArtifactParser,
         unit_of_work: DraftClaimObservationApplicationUnitOfWorkPort,
+        provenance_candidate_builder: DraftClaimObservationProvenanceCandidateBuilder | None = None,
     ) -> None:
         self._parser = parser
         self._unit_of_work = unit_of_work
+        self._provenance_candidate_builder = (
+            provenance_candidate_builder
+            or DraftClaimObservationProvenanceCandidateBuilder()
+        )
 
     def execute(
         self,
@@ -65,6 +75,12 @@ class ApplyDraftClaimObservationArtifact:
                     source_unit_ref=command.source_unit_ref,
                     created_at=command.created_at,
                 )
+            )
+            provenance_candidates = self._provenance_candidate_builder.build(
+                parsed_artifact=command.parsed_artifact,
+                source_unit_ref=command.source_unit_ref,
+                observations=observations,
+                created_at=command.created_at,
             )
             event = DraftClaimObservationsApplied(
                 artifact_ref=command.parsed_artifact.artifact_ref,
@@ -82,5 +98,6 @@ class ApplyDraftClaimObservationArtifact:
 
         return ApplyDraftClaimObservationArtifactResult(
             observations=observations,
+            provenance_candidates=provenance_candidates,
             event=event,
         )
