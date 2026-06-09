@@ -46,6 +46,21 @@ EXPECTED_MIGRATIONS = {
         "idx_claim_extraction_stage_work_items_work_item",
         "idx_pipeline_artifacts_claim_extraction_stage_payload",
     ),
+    "089_create_draft_claim_observation_provenance.sql": (
+        "CREATE TABLE IF NOT EXISTS draft_claim_observation_provenance",
+        "observation_ref text PRIMARY KEY REFERENCES draft_claim_observations",
+        "workflow_run_id text NOT NULL",
+        "stage_run_id text NOT NULL",
+        "work_item_id text NOT NULL",
+        "work_item_attempt_id text NOT NULL",
+        "llm_task_id text NOT NULL",
+        "llm_attempt_id text NOT NULL",
+        "raw_artifact_ref text NOT NULL",
+        "parsed_artifact_ref text NOT NULL",
+        "claim_index integer NOT NULL",
+        "idx_draft_claim_observation_provenance_stage",
+        "idx_draft_claim_observation_provenance_artifacts",
+    ),
 }
 
 FORBIDDEN_LEGACY_MARKERS = (
@@ -75,6 +90,7 @@ REQUIRED_TABLES = (
     "draft_claim_observations",
     "draft_claim_observation_possible_questions",
     "claim_extraction_stage_work_items",
+    "draft_claim_observation_provenance",
 )
 
 
@@ -255,3 +271,42 @@ def test_claim_extraction_stage_work_item_index_keeps_stage_refs_out_of_executio
     assert (
         "PRIMARY KEY (workflow_run_id, stage_run_id, work_item_id)" in stage_index_text
     )
+
+
+def test_draft_claim_observation_provenance_migration_stays_extraction_trace_only() -> None:
+    text = _read_migration("089_create_draft_claim_observation_provenance.sql")
+
+    required = (
+        "observation_ref text PRIMARY KEY REFERENCES draft_claim_observations",
+        "source_unit_ref text NOT NULL",
+        "workflow_run_id text NOT NULL",
+        "stage_run_id text NOT NULL",
+        "work_item_id text NOT NULL",
+        "work_item_attempt_id text NOT NULL",
+        "llm_task_id text NOT NULL",
+        "llm_attempt_id text NOT NULL",
+        "prompt_id text NOT NULL",
+        "prompt_version text NOT NULL",
+        "raw_artifact_ref text NOT NULL",
+        "parsed_artifact_ref text NOT NULL",
+        "claim_index integer NOT NULL",
+    )
+
+    forbidden = (
+        "REFERENCES execution_work_items",
+        "REFERENCES execution_work_item_attempts",
+        "REFERENCES llm_tasks",
+        "REFERENCES llm_attempts",
+        "REFERENCES pipeline_artifacts",
+        "surface_kind",
+        "canonical_intent",
+        "ontology",
+        "publication",
+        "consolidated",
+    )
+
+    missing = [fragment for fragment in required if fragment not in text]
+    offenders = [marker for marker in forbidden if marker in text]
+
+    assert not missing, "\n".join(missing)
+    assert not offenders, "\n".join(offenders)
