@@ -23,6 +23,10 @@ class ApplyDraftClaimObservationArtifactOnArtifactStoredCommand:
     event: ArtifactStored
     occurred_at: datetime
 
+    def __post_init__(self) -> None:
+        if self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None:
+            raise ValueError("occurred_at must be timezone-aware")
+
 
 @dataclass(frozen=True, slots=True)
 class ApplyDraftClaimObservationArtifactOnArtifactStoredResult:
