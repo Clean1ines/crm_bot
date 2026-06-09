@@ -53,11 +53,13 @@ class FakeTransaction:
     async def commit(self) -> None:
         self.committed += 1
         self.connection.boundary_events.append("transaction.commit")
+        self.connection.commit_pending_writes()
         self.connection.transaction_active = False
 
     async def rollback(self) -> None:
         self.rolled_back += 1
         self.connection.boundary_events.append("transaction.rollback")
+        self.connection.clear_pending_writes()
         self.connection.transaction_active = False
 
 
@@ -71,8 +73,11 @@ class FakeRow:
 
 @dataclass(slots=True)
 class FakeRuntimeConnection:
+    fail_on_stage_index_insert: bool = False
     work_items: dict[str, dict[str, object]] = field(default_factory=dict)
     stage_items: list[tuple[str, str, str]] = field(default_factory=list)
+    pending_work_items: dict[str, dict[str, object]] = field(default_factory=dict)
+    pending_stage_items: list[tuple[str, str, str]] = field(default_factory=list)
     execute_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     fetch_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     fetchval_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
@@ -86,12 +91,23 @@ class FakeRuntimeConnection:
     def transaction(self) -> FakeTransaction:
         return self.transaction_obj
 
+    def commit_pending_writes(self) -> None:
+        self.work_items.update(self.pending_work_items)
+        for item in self.pending_stage_items:
+            if item not in self.stage_items:
+                self.stage_items.append(item)
+        self.clear_pending_writes()
+
+    def clear_pending_writes(self) -> None:
+        self.pending_work_items.clear()
+        self.pending_stage_items.clear()
+
     async def execute(self, query: str, *args: object) -> object:
         self.execute_calls.append((query, args))
         if "INSERT INTO execution_work_items" in query:
             assert self.transaction_active is True
             self.boundary_events.append("write.execution_work_items")
-            self.work_items[str(args[0])] = {
+            self.pending_work_items[str(args[0])] = {
                 "work_item_id": args[0],
                 "work_kind": args[1],
                 "status": args[2],
@@ -106,9 +122,11 @@ class FakeRuntimeConnection:
         if "INSERT INTO claim_extraction_stage_work_items" in query:
             assert self.transaction_active is True
             self.boundary_events.append("write.claim_extraction_stage_work_items")
+            if self.fail_on_stage_index_insert:
+                raise RuntimeError("stage index insert failed")
             item = (str(args[0]), str(args[1]), str(args[2]))
-            if item not in self.stage_items:
-                self.stage_items.append(item)
+            if item not in self.pending_stage_items:
+                self.pending_stage_items.append(item)
             return "OK"
         return "OK"
 
@@ -151,22 +169,24 @@ def _source_unit(ref: str, *, ordinal: int) -> SourceUnit:
     )
 
 
+def _command() -> RunClaimExtractionStageCommand:
+    return RunClaimExtractionStageCommand(
+        workflow_run_id="workflow-1",
+        stage_run_id="stage-1",
+        source_units=(
+            _source_unit("unit-1", ordinal=0),
+            _source_unit("unit-2", ordinal=1),
+        ),
+        prompt_id="faq_claim_observations",
+    )
+
+
 @pytest.mark.asyncio
 async def test_postgres_runtime_start_then_progress_reads_indexed_work_items() -> None:
     connection = FakeRuntimeConnection()
     runtime = make_claim_extraction_stage_postgres_runtime(connection)
 
-    start_result = await runtime.runner.execute(
-        RunClaimExtractionStageCommand(
-            workflow_run_id="workflow-1",
-            stage_run_id="stage-1",
-            source_units=(
-                _source_unit("unit-1", ordinal=0),
-                _source_unit("unit-2", ordinal=1),
-            ),
-            prompt_id="faq_claim_observations",
-        ),
-    )
+    start_result = await runtime.runner.execute(_command())
     progress = await runtime.progress_reader.execute(
         ClaimExtractionStageProgressQuery(
             workflow_run_id="workflow-1",
@@ -180,6 +200,8 @@ async def test_postgres_runtime_start_then_progress_reads_indexed_work_items() -
     assert connection.transaction_obj.rolled_back == 0
     assert connection.transaction_active is False
     assert len(connection.work_items) == 2
+    assert connection.pending_work_items == {}
+    assert connection.pending_stage_items == []
     assert connection.stage_items == [
         ("workflow-1", "stage-1", start_result.work_items[0].work_item_id),
         ("workflow-1", "stage-1", start_result.work_items[1].work_item_id),
@@ -201,3 +223,40 @@ async def test_postgres_runtime_start_then_progress_reads_indexed_work_items() -
     assert progress.blocker_kind is None
     assert connection.fetch_calls
     assert connection.fetchval_calls
+
+
+@pytest.mark.asyncio
+async def test_postgres_runtime_rolls_back_work_item_and_index_writes_together() -> None:
+    connection = FakeRuntimeConnection(fail_on_stage_index_insert=True)
+    runtime = make_claim_extraction_stage_postgres_runtime(connection)
+
+    with pytest.raises(RuntimeError, match="stage index insert failed"):
+        await runtime.runner.execute(_command())
+
+    progress = await runtime.progress_reader.execute(
+        ClaimExtractionStageProgressQuery(
+            workflow_run_id="workflow-1",
+            stage_run_id="stage-1",
+        ),
+    )
+
+    assert connection.transaction_obj.started == 1
+    assert connection.transaction_obj.committed == 0
+    assert connection.transaction_obj.rolled_back == 1
+    assert connection.transaction_active is False
+    assert connection.work_items == {}
+    assert connection.stage_items == []
+    assert connection.pending_work_items == {}
+    assert connection.pending_stage_items == []
+    assert connection.boundary_events == [
+        "transaction.start",
+        "write.execution_work_items",
+        "write.claim_extraction_stage_work_items",
+        "transaction.rollback",
+        "read.execution_work_items",
+        "read.pipeline_artifacts",
+    ]
+    assert progress.status is ClaimExtractionStageProgressStatus.EMPTY
+    assert progress.total_work_item_count == 0
+    assert progress.ready_count == 0
+    assert progress.artifacts_count == 0
