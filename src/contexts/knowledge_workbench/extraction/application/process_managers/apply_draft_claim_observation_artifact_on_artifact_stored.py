@@ -5,8 +5,16 @@ from typing import Protocol
 from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
 from src.contexts.artifact_runtime.domain.events.artifact_events import ArtifactStored
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_artifact_provenance import (
+    ClaimExtractionArtifactProvenance,
+    InvalidClaimExtractionArtifactProvenance,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_prompt_a_artifact_factory import (
+    PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
+)
 from src.contexts.knowledge_workbench.extraction.application.process_managers.apply_draft_claim_observation_artifact import (
     ApplyDraftClaimObservationArtifactAsync,
+    ApplyDraftClaimObservationArtifactCommand,
     ApplyDraftClaimObservationArtifactResult,
 )
 
