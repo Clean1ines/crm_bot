@@ -8,7 +8,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
     KnowledgeExtractionSagaStateRepositoryPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
+    KnowledgeExtractionPhaseCheckpoint,
     KnowledgeExtractionPhaseKey,
+    KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_source_phase_reconciliation import (
