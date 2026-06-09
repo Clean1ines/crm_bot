@@ -38,7 +38,9 @@ class FakeConnection:
         return 0
 
 
-def test_postgres_runtime_composition_builds_runner_progress_reader_and_apply_use_case() -> None:
+def test_postgres_runtime_composition_builds_runner_progress_reader_and_apply_use_case() -> (
+    None
+):
     runtime = make_claim_extraction_stage_postgres_runtime(FakeConnection())
 
     assert isinstance(runtime, ClaimExtractionStagePostgresRuntime)

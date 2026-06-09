@@ -56,7 +56,8 @@ class ApplyDraftClaimObservationArtifact:
         *,
         parser: DraftClaimObservationArtifactParser,
         unit_of_work: DraftClaimObservationApplicationUnitOfWorkPort,
-        provenance_candidate_builder: DraftClaimObservationProvenanceCandidateBuilder | None = None,
+        provenance_candidate_builder: DraftClaimObservationProvenanceCandidateBuilder
+        | None = None,
     ) -> None:
         self._parser = parser
         self._unit_of_work = unit_of_work
@@ -113,7 +114,8 @@ class ApplyDraftClaimObservationArtifactAsync:
         *,
         parser: DraftClaimObservationArtifactParser,
         unit_of_work: AsyncDraftClaimObservationApplicationUnitOfWorkPort,
-        provenance_candidate_builder: DraftClaimObservationProvenanceCandidateBuilder | None = None,
+        provenance_candidate_builder: DraftClaimObservationProvenanceCandidateBuilder
+        | None = None,
     ) -> None:
         self._parser = parser
         self._unit_of_work = unit_of_work

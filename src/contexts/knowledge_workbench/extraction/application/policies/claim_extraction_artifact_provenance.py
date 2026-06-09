@@ -4,9 +4,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Self, TypeAlias
 
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import JsonInputValue
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    JsonInputValue,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 ClaimExtractionProvenancePayloadFields: TypeAlias = dict[str, str]
 ClaimExtractionArtifactPayloadFields: TypeAlias = dict[str, JsonInputValue]
@@ -69,7 +73,9 @@ class ClaimExtractionArtifactProvenance:
             "prompt_version": self.prompt_version,
         }
 
-    def to_raw_artifact_payload_fields(self, *, raw_output: str) -> ClaimExtractionArtifactPayloadFields:
+    def to_raw_artifact_payload_fields(
+        self, *, raw_output: str
+    ) -> ClaimExtractionArtifactPayloadFields:
         _require_non_empty(raw_output, "raw_output")
         payload: ClaimExtractionArtifactPayloadFields = dict(self.to_payload_fields())
         payload["raw_output"] = raw_output
@@ -93,7 +99,9 @@ class ClaimExtractionArtifactProvenance:
         return cls(
             workflow_run_id=_required_payload_str(payload, "workflow_run_id"),
             stage_run_id=_required_payload_str(payload, "stage_run_id"),
-            source_unit_ref=SourceUnitRef(_required_payload_str(payload, "source_unit_ref")),
+            source_unit_ref=SourceUnitRef(
+                _required_payload_str(payload, "source_unit_ref")
+            ),
             work_item_id=_required_payload_str(payload, "work_item_id"),
             work_item_attempt_id=_required_payload_str(payload, "work_item_attempt_id"),
             llm_task_id=_required_payload_str(payload, "llm_task_id"),
@@ -103,12 +111,16 @@ class ClaimExtractionArtifactProvenance:
         )
 
     @classmethod
-    def from_raw_artifact_payload_fields(cls, payload: Mapping[str, JsonInputValue]) -> Self:
+    def from_raw_artifact_payload_fields(
+        cls, payload: Mapping[str, JsonInputValue]
+    ) -> Self:
         _required_payload_str(payload, "raw_output")
         return cls.from_payload_fields(payload)
 
     @classmethod
-    def from_parsed_artifact_payload_fields(cls, payload: Mapping[str, JsonInputValue]) -> Self:
+    def from_parsed_artifact_payload_fields(
+        cls, payload: Mapping[str, JsonInputValue]
+    ) -> Self:
         _required_payload_str(payload, "raw_artifact_ref")
         _required_payload_claims(payload)
         return cls.from_payload_fields(payload)
@@ -116,10 +128,14 @@ class ClaimExtractionArtifactProvenance:
 
 def _require_non_empty(value: str, field_name: str) -> None:
     if not value or not value.strip():
-        raise InvalidClaimExtractionArtifactProvenance(f"{field_name} must be non-empty")
+        raise InvalidClaimExtractionArtifactProvenance(
+            f"{field_name} must be non-empty"
+        )
 
 
-def _required_payload_str(payload: Mapping[str, JsonInputValue], field_name: str) -> str:
+def _required_payload_str(
+    payload: Mapping[str, JsonInputValue], field_name: str
+) -> str:
     if field_name not in payload:
         raise InvalidClaimExtractionArtifactProvenance(f"{field_name} is required")
     value = payload[field_name]
@@ -138,7 +154,9 @@ def _required_payload_claims(payload: Mapping[str, JsonInputValue]) -> None:
         raise InvalidClaimExtractionArtifactProvenance("claims must be a list or tuple")
     for claim in value:
         if not isinstance(claim, Mapping):
-            raise InvalidClaimExtractionArtifactProvenance("claims must contain only objects")
+            raise InvalidClaimExtractionArtifactProvenance(
+                "claims must contain only objects"
+            )
 
 
 def _require_claims_tuple(claims: tuple[Mapping[str, JsonInputValue], ...]) -> None:
@@ -146,4 +164,6 @@ def _require_claims_tuple(claims: tuple[Mapping[str, JsonInputValue], ...]) -> N
         raise InvalidClaimExtractionArtifactProvenance("claims must be a tuple")
     for claim in claims:
         if not isinstance(claim, Mapping):
-            raise InvalidClaimExtractionArtifactProvenance("claims must contain only objects")
+            raise InvalidClaimExtractionArtifactProvenance(
+                "claims must contain only objects"
+            )

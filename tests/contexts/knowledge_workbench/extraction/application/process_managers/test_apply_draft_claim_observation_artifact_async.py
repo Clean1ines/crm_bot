@@ -5,27 +5,50 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
-from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import ArtifactKind
-from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import ArtifactLineage
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import ArtifactPayload, JsonInputValue
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
+    PipelineArtifact,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import (
+    ArtifactKind,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import (
+    ArtifactLineage,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    ArtifactPayload,
+    JsonInputValue,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.artifact_runtime.domain.value_objects.artifact_status import ArtifactStatus
-from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import ArtifactVisibility
-from src.contexts.artifact_runtime.domain.value_objects.retention_policy import RetentionPolicy
+from src.contexts.artifact_runtime.domain.value_objects.artifact_status import (
+    ArtifactStatus,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
+    ArtifactVisibility,
+)
+from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
+    RetentionPolicy,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_artifact_parser import (
     EXPECTED_DRAFT_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
     DraftClaimObservationArtifactParser,
     InvalidDraftClaimObservationArtifact,
 )
-from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import DraftClaimObservationProvenanceCandidate
-from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_application_unit_of_work_port import DraftClaimObservationApplicationEvent
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import (
+    DraftClaimObservationProvenanceCandidate,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_application_unit_of_work_port import (
+    DraftClaimObservationApplicationEvent,
+)
 from src.contexts.knowledge_workbench.extraction.application.process_managers.apply_draft_claim_observation_artifact import (
     ApplyDraftClaimObservationArtifactAsync,
     ApplyDraftClaimObservationArtifactCommand,
 )
-from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import DraftClaimObservation
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import (
+    DraftClaimObservation,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 
 PROCESS_MANAGER_FILE = (
@@ -151,7 +174,9 @@ def _manager(
 
 
 @pytest.mark.asyncio
-async def test_async_execute_saves_observations_provenance_event_and_commits_in_order() -> None:
+async def test_async_execute_saves_observations_provenance_event_and_commits_in_order() -> (
+    None
+):
     unit_of_work = FakeAsyncDraftClaimObservationApplicationUnitOfWork()
     artifact = _artifact(_provenance_payload(claims=(_claim_payload(),)))
 
@@ -211,7 +236,9 @@ async def test_async_execute_rolls_back_on_parser_failure() -> None:
     assert unit_of_work.operations == ["rollback"]
 
 
-def test_async_apply_uses_async_uow_and_does_not_import_db_or_later_stage_concepts() -> None:
+def test_async_apply_uses_async_uow_and_does_not_import_db_or_later_stage_concepts() -> (
+    None
+):
     text = PROCESS_MANAGER_FILE.read_text(encoding="utf-8")
 
     required_markers = (

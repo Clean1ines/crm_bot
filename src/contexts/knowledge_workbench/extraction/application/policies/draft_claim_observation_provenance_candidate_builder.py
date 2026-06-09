@@ -4,8 +4,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import JsonInputValue
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
+    PipelineArtifact,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    JsonInputValue,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_artifact_provenance import (
     ClaimExtractionArtifactProvenance,
@@ -114,7 +118,9 @@ class DraftClaimObservationProvenanceCandidateBuilder:
         return tuple(candidates)
 
 
-def _provenance(payload: Mapping[str, JsonInputValue]) -> ClaimExtractionArtifactProvenance:
+def _provenance(
+    payload: Mapping[str, JsonInputValue],
+) -> ClaimExtractionArtifactProvenance:
     try:
         return ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(
             payload,

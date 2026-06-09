@@ -44,7 +44,9 @@ class FakeConnection:
         return "OK"
 
 
-def test_make_postgres_apply_draft_claim_observation_artifact_wires_async_use_case() -> None:
+def test_make_postgres_apply_draft_claim_observation_artifact_wires_async_use_case() -> (
+    None
+):
     use_case = make_postgres_apply_draft_claim_observation_artifact(FakeConnection())
 
     assert isinstance(use_case, ApplyDraftClaimObservationArtifactAsync)
@@ -59,7 +61,9 @@ def test_make_postgres_apply_draft_claim_observation_artifact_wires_async_use_ca
     )
 
 
-def test_draft_claim_observation_application_composition_has_no_runtime_or_legacy_dependencies() -> None:
+def test_draft_claim_observation_application_composition_has_no_runtime_or_legacy_dependencies() -> (
+    None
+):
     text = COMPOSITION_FILE.read_text(encoding="utf-8")
 
     required_markers = (

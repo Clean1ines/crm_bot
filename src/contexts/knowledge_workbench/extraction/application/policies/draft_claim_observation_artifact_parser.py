@@ -15,7 +15,6 @@ from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import 
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_artifact_provenance import (
     PARSED_ARTIFACT_PAYLOAD_FIELD_NAMES,
-    PROVENANCE_PAYLOAD_FIELD_NAMES,
     ClaimExtractionArtifactProvenance,
     InvalidClaimExtractionArtifactProvenance,
 )
@@ -119,7 +118,9 @@ class DraftClaimObservationArtifactParser:
                 "payload must contain claims only or the full Prompt A provenance payload"
             )
         try:
-            ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(payload)
+            ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(
+                payload
+            )
         except InvalidClaimExtractionArtifactProvenance as exc:
             raise InvalidDraftClaimObservationArtifact(str(exc)) from exc
 

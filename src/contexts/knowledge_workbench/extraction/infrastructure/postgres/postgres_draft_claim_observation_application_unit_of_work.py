@@ -4,13 +4,19 @@ from datetime import datetime, timezone
 from typing import Protocol, TypeAlias
 from uuid import uuid4
 
-from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import DraftClaimObservationProvenanceCandidate
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import (
+    DraftClaimObservationProvenanceCandidate,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_application_unit_of_work_port import (
     AsyncDraftClaimObservationApplicationUnitOfWorkPort,
     DraftClaimObservationApplicationEvent,
 )
-from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import DraftClaimObservation
-from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import DraftClaimObservationsApplied
+from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import (
+    DraftClaimObservation,
+)
+from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import (
+    DraftClaimObservationsApplied,
+)
 
 
 JsonScalar: TypeAlias = None | bool | int | float | str
@@ -246,7 +252,9 @@ def _map_event(
             },
             event.occurred_at,
         )
-    raise TypeError(f"Unsupported draft claim observation event: {type(event).__name__}")
+    raise TypeError(
+        f"Unsupported draft claim observation event: {type(event).__name__}"
+    )
 
 
 def _utc_now() -> datetime:

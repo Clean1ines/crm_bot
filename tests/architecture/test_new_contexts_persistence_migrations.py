@@ -302,7 +302,9 @@ def test_claim_extraction_stage_work_item_index_keeps_stage_refs_out_of_executio
     )
 
 
-def test_draft_claim_observation_provenance_migration_stays_extraction_trace_only() -> None:
+def test_draft_claim_observation_provenance_migration_stays_extraction_trace_only() -> (
+    None
+):
     text = _read_migration("089_create_draft_claim_observation_provenance.sql")
 
     required = (

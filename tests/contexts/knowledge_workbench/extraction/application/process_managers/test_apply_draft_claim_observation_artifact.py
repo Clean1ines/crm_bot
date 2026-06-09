@@ -5,17 +5,29 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
-from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import ArtifactKind
-from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import ArtifactLineage
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
+    PipelineArtifact,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import (
+    ArtifactKind,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import (
+    ArtifactLineage,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
     ArtifactPayload,
     JsonInputValue,
 )
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.artifact_runtime.domain.value_objects.artifact_status import ArtifactStatus
-from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import ArtifactVisibility
-from src.contexts.artifact_runtime.domain.value_objects.retention_policy import RetentionPolicy
+from src.contexts.artifact_runtime.domain.value_objects.artifact_status import (
+    ArtifactStatus,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
+    ArtifactVisibility,
+)
+from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
+    RetentionPolicy,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_artifact_parser import (
     EXPECTED_DRAFT_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
     DraftClaimObservationArtifactParser,
@@ -32,8 +44,12 @@ from src.contexts.knowledge_workbench.extraction.application.process_managers.ap
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_application_unit_of_work_port import (
     DraftClaimObservationApplicationEvent,
 )
-from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import DraftClaimObservation
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import (
+    DraftClaimObservation,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 
 ROOT = Path(__file__).resolve().parents[6]
@@ -149,7 +165,9 @@ def _artifact(
     *,
     artifact_kind: ArtifactKind = EXPECTED_DRAFT_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
     artifact_ref: ArtifactRef = ArtifactRef("parsed-artifact-1"),
-    lineage: ArtifactLineage = ArtifactLineage(parent_refs=(ArtifactRef("raw-artifact-1"),)),
+    lineage: ArtifactLineage = ArtifactLineage(
+        parent_refs=(ArtifactRef("raw-artifact-1"),)
+    ),
 ) -> PipelineArtifact:
     return PipelineArtifact(
         artifact_ref=artifact_ref,
@@ -195,7 +213,9 @@ def test_applies_one_observation_and_commits() -> None:
     result = _manager(uow).execute(_command(artifact))
 
     assert len(result.observations) == 1
-    assert result.observations[0].claim.value == "Product turns documents into knowledge."
+    assert (
+        result.observations[0].claim.value == "Product turns documents into knowledge."
+    )
     assert uow.saved_observations == result.observations
     assert uow.saved_provenance_candidates == result.provenance_candidates
     assert len(result.provenance_candidates) == len(result.observations)
@@ -203,7 +223,9 @@ def test_applies_one_observation_and_commits() -> None:
         result.observations[0].observation_ref
     )
     assert result.provenance_candidates[0].parsed_artifact_ref == artifact.artifact_ref
-    assert result.provenance_candidates[0].raw_artifact_ref == ArtifactRef("raw-artifact-1")
+    assert result.provenance_candidates[0].raw_artifact_ref == ArtifactRef(
+        "raw-artifact-1"
+    )
     assert uow.events == (result.event,)
     assert uow.committed is True
     assert uow.rolled_back is False
@@ -258,7 +280,9 @@ def test_parser_failure_rolls_back() -> None:
 def test_provenance_failure_rolls_back_without_persisting_observations() -> None:
     uow = FakeDraftClaimObservationApplicationUnitOfWork()
     artifact = _artifact(
-        _provenance_payload(claims=(_claim_payload(),), source_unit_ref="document-2.unit.0"),
+        _provenance_payload(
+            claims=(_claim_payload(),), source_unit_ref="document-2.unit.0"
+        ),
     )
 
     with pytest.raises(InvalidDraftClaimObservationProvenanceCandidate):
@@ -331,7 +355,9 @@ def test_event_has_artifact_ref_source_unit_ref_and_count() -> None:
     assert result.event.source_unit_ref == source_unit_ref
     assert result.event.observation_count == 2
     assert result.event.occurred_at == _now()
-    assert tuple(candidate.claim_index for candidate in result.provenance_candidates) == (0, 1)
+    assert tuple(
+        candidate.claim_index for candidate in result.provenance_candidates
+    ) == (0, 1)
 
 
 def test_command_requires_timezone_aware_timestamps() -> None:

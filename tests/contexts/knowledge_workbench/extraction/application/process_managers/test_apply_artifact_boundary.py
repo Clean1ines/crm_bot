@@ -5,15 +5,30 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
+    PipelineArtifact,
+)
 from src.contexts.artifact_runtime.domain.events.artifact_events import ArtifactStored
-from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import ArtifactKind
-from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import ArtifactLineage
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import ArtifactPayload, JsonInputValue
+from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import (
+    ArtifactKind,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import (
+    ArtifactLineage,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    ArtifactPayload,
+    JsonInputValue,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.artifact_runtime.domain.value_objects.artifact_status import ArtifactStatus
-from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import ArtifactVisibility
-from src.contexts.artifact_runtime.domain.value_objects.retention_policy import RetentionPolicy
+from src.contexts.artifact_runtime.domain.value_objects.artifact_status import (
+    ArtifactStatus,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
+    ArtifactVisibility,
+)
+from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
+    RetentionPolicy,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_prompt_a_artifact_factory import (
     PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
 )
@@ -25,8 +40,12 @@ from src.contexts.knowledge_workbench.extraction.application.process_managers.ap
     ApplyDraftClaimObservationArtifactOnArtifactStored,
     ApplyDraftClaimObservationArtifactOnArtifactStoredCommand,
 )
-from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import DraftClaimObservationsApplied
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import (
+    DraftClaimObservationsApplied,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 
 PROCESS_MANAGER_FILE = (
@@ -102,7 +121,9 @@ def _artifact(
     artifact_kind: ArtifactKind = PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
     payload: dict[str, JsonInputValue] | None = None,
     artifact_ref: ArtifactRef = ArtifactRef("parsed-artifact-1"),
-    lineage: ArtifactLineage = ArtifactLineage(parent_refs=(ArtifactRef("raw-artifact-1"),)),
+    lineage: ArtifactLineage = ArtifactLineage(
+        parent_refs=(ArtifactRef("raw-artifact-1"),)
+    ),
     created_at: datetime | None = None,
     updated_at: datetime | None = None,
 ) -> PipelineArtifact:

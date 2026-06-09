@@ -139,14 +139,23 @@ def _require_factory_created_prompt_a_artifact_pair(
 ) -> None:
     if raw_artifact.artifact_kind != PROMPT_A_RAW_CLAIM_OBSERVATIONS_ARTIFACT_KIND:
         raise ValueError("raw_output_artifact must use Prompt A raw artifact kind")
-    if parsed_artifact.artifact_kind != PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND:
-        raise ValueError("parsed_output_artifact must use Prompt A parsed artifact kind")
+    if (
+        parsed_artifact.artifact_kind
+        != PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND
+    ):
+        raise ValueError(
+            "parsed_output_artifact must use Prompt A parsed artifact kind"
+        )
     if parsed_artifact.lineage.parent_refs != (raw_artifact.artifact_ref,):
-        raise ValueError("parsed_output_artifact must have raw_output_artifact as sole parent")
+        raise ValueError(
+            "parsed_output_artifact must have raw_output_artifact as sole parent"
+        )
 
     try:
-        raw_provenance = ClaimExtractionArtifactProvenance.from_raw_artifact_payload_fields(
-            raw_artifact.payload.value,
+        raw_provenance = (
+            ClaimExtractionArtifactProvenance.from_raw_artifact_payload_fields(
+                raw_artifact.payload.value,
+            )
         )
         parsed_provenance = (
             ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(
@@ -161,7 +170,9 @@ def _require_factory_created_prompt_a_artifact_pair(
     if raw_provenance.work_item_id != work_item.work_item_id:
         raise ValueError("artifact provenance work_item_id must match WorkItem")
     if raw_provenance.work_item_attempt_id != work_item_attempt.attempt_id:
-        raise ValueError("artifact provenance work_item_attempt_id must match WorkItemAttempt")
+        raise ValueError(
+            "artifact provenance work_item_attempt_id must match WorkItemAttempt"
+        )
     if raw_provenance.llm_task_id != llm_task.task_id:
         raise ValueError("artifact provenance llm_task_id must match LlmTask")
     if raw_provenance.llm_attempt_id != llm_attempt.attempt_id:

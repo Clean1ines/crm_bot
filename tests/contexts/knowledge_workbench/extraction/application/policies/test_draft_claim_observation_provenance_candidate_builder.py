@@ -5,17 +5,26 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
-from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import ArtifactKind
-from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import ArtifactLineage
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
+    PipelineArtifact,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import (
+    ArtifactLineage,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
     ArtifactPayload,
     JsonInputValue,
 )
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.artifact_runtime.domain.value_objects.artifact_status import ArtifactStatus
-from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import ArtifactVisibility
-from src.contexts.artifact_runtime.domain.value_objects.retention_policy import RetentionPolicy
+from src.contexts.artifact_runtime.domain.value_objects.artifact_status import (
+    ArtifactStatus,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
+    ArtifactVisibility,
+)
+from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
+    RetentionPolicy,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_artifact_parser import (
     EXPECTED_DRAFT_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
     DraftClaimObservationArtifactParser,
@@ -25,7 +34,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
     DraftClaimObservationProvenanceCandidateBuilder,
     InvalidDraftClaimObservationProvenanceCandidate,
 )
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 
 def _now() -> datetime:
@@ -42,7 +53,9 @@ def _claim_payload(*, claim: str) -> Mapping[str, JsonInputValue]:
     }
 
 
-def _payload(*, claims: tuple[Mapping[str, JsonInputValue], ...]) -> dict[str, JsonInputValue]:
+def _payload(
+    *, claims: tuple[Mapping[str, JsonInputValue], ...]
+) -> dict[str, JsonInputValue]:
     return {
         "workflow_run_id": "workflow-1",
         "stage_run_id": "stage-1",
@@ -61,7 +74,9 @@ def _payload(*, claims: tuple[Mapping[str, JsonInputValue], ...]) -> dict[str, J
 def _artifact(
     payload: dict[str, JsonInputValue],
     *,
-    lineage: ArtifactLineage = ArtifactLineage(parent_refs=(ArtifactRef("raw-artifact-1"),)),
+    lineage: ArtifactLineage = ArtifactLineage(
+        parent_refs=(ArtifactRef("raw-artifact-1"),)
+    ),
     artifact_ref: ArtifactRef = ArtifactRef("parsed-artifact-1"),
 ) -> PipelineArtifact:
     return PipelineArtifact(

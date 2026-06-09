@@ -5,7 +5,9 @@ from dataclasses import replace
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import JsonInputValue
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    JsonInputValue,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_artifact_provenance import (
     PARSED_ARTIFACT_PAYLOAD_FIELD_NAMES,
@@ -14,7 +16,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_extr
     ClaimExtractionArtifactProvenance,
     InvalidClaimExtractionArtifactProvenance,
 )
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 
 def _provenance() -> ClaimExtractionArtifactProvenance:

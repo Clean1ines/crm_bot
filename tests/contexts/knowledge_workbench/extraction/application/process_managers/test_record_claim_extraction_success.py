@@ -5,23 +5,47 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
-from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import ArtifactKind
-from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import ArtifactLineage
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import ArtifactPayload
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
+    PipelineArtifact,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import (
+    ArtifactKind,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import (
+    ArtifactLineage,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    ArtifactPayload,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.artifact_runtime.domain.value_objects.artifact_status import ArtifactStatus
-from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import ArtifactVisibility
-from src.contexts.artifact_runtime.domain.value_objects.retention_policy import RetentionPolicy
+from src.contexts.artifact_runtime.domain.value_objects.artifact_status import (
+    ArtifactStatus,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
+    ArtifactVisibility,
+)
+from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
+    RetentionPolicy,
+)
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
-from src.contexts.execution_runtime.domain.entities.work_item_attempt import WorkItemAttempt
-from src.contexts.execution_runtime.domain.events.work_item_events import WorkItemCompleted
-from src.contexts.execution_runtime.domain.state_machines.work_item_state_machine import WorkItemStateMachine
+from src.contexts.execution_runtime.domain.entities.work_item_attempt import (
+    WorkItemAttempt,
+)
+from src.contexts.execution_runtime.domain.events.work_item_events import (
+    WorkItemCompleted,
+)
+from src.contexts.execution_runtime.domain.state_machines.work_item_state_machine import (
+    WorkItemStateMachine,
+)
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.work_item_status import WorkItemStatus
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
-from src.contexts.knowledge_workbench.extraction.application.ports.claim_extraction_work_item_unit_of_work_port import ClaimExtractionRuntimeEvent
+from src.contexts.knowledge_workbench.extraction.application.ports.claim_extraction_work_item_unit_of_work_port import (
+    ClaimExtractionRuntimeEvent,
+)
 from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_success import (
     RecordClaimExtractionSuccess,
     RecordClaimExtractionSuccessCommand,
@@ -33,9 +57,13 @@ from src.contexts.llm_runtime.domain.value_objects.input_ref import LlmInputRef
 from src.contexts.llm_runtime.domain.value_objects.llm_route import LlmRoute
 from src.contexts.llm_runtime.domain.value_objects.llm_task_status import LlmTaskStatus
 from src.contexts.llm_runtime.domain.value_objects.model_id import ModelId
-from src.contexts.llm_runtime.domain.value_objects.output_contract_ref import OutputContractRef
+from src.contexts.llm_runtime.domain.value_objects.output_contract_ref import (
+    OutputContractRef,
+)
 from src.contexts.llm_runtime.domain.value_objects.prompt_version import PromptVersion
-from src.contexts.llm_runtime.domain.value_objects.provider_account_ref import ProviderAccountRef
+from src.contexts.llm_runtime.domain.value_objects.provider_account_ref import (
+    ProviderAccountRef,
+)
 from src.contexts.llm_runtime.domain.value_objects.provider_id import ProviderId
 from src.contexts.llm_runtime.domain.value_objects.token_usage import TokenUsage
 
@@ -187,7 +215,9 @@ def _raw_artifact() -> PipelineArtifact:
 
 def _parsed_artifact(
     *,
-    lineage: ArtifactLineage = ArtifactLineage(parent_refs=(ArtifactRef("raw-artifact-1"),)),
+    lineage: ArtifactLineage = ArtifactLineage(
+        parent_refs=(ArtifactRef("raw-artifact-1"),)
+    ),
     raw_artifact_ref: str = "raw-artifact-1",
 ) -> PipelineArtifact:
     payload = _prompt_a_provenance_payload()
@@ -236,7 +266,9 @@ def test_record_claim_extraction_success_commits_runtime_write_set_atomically() 
     assert unit_of_work.saved_work_item_attempts == [_work_item_attempt()]
     assert unit_of_work.saved_llm_tasks == [_llm_task()]
     assert unit_of_work.saved_llm_attempts == [_llm_attempt()]
-    assert [artifact.artifact_ref.value for artifact in unit_of_work.saved_artifacts] == [
+    assert [
+        artifact.artifact_ref.value for artifact in unit_of_work.saved_artifacts
+    ] == [
         "raw-artifact-1",
         "parsed-artifact-1",
     ]
@@ -250,12 +282,16 @@ def test_record_claim_extraction_success_commits_runtime_write_set_atomically() 
     assert not unit_of_work.rolled_back
 
 
-def test_record_claim_extraction_success_rejects_parsed_artifact_without_raw_parent_lineage() -> None:
+def test_record_claim_extraction_success_rejects_parsed_artifact_without_raw_parent_lineage() -> (
+    None
+):
     with pytest.raises(ValueError, match="sole parent"):
         _command(parsed_output_artifact=_parsed_artifact(lineage=ArtifactLineage()))
 
 
-def test_record_claim_extraction_success_rejects_raw_ref_payload_lineage_mismatch() -> None:
+def test_record_claim_extraction_success_rejects_raw_ref_payload_lineage_mismatch() -> (
+    None
+):
     with pytest.raises(ValueError, match="raw artifact ref"):
         _command(parsed_output_artifact=_parsed_artifact(raw_artifact_ref="other-raw"))
 

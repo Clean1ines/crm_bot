@@ -7,20 +7,40 @@ from pathlib import Path
 import pytest
 
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import DraftClaimObservationProvenanceCandidate
-from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import DraftClaimObservation
-from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import DraftClaimObservationsApplied
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_granularity import DraftClaimGranularity
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_observation_ref import DraftClaimObservationRef
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_text import DraftClaimText
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.evidence_block import EvidenceBlock
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.exclusion_scope import ExclusionScope
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.possible_question import PossibleQuestion
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import (
+    DraftClaimObservationProvenanceCandidate,
+)
+from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import (
+    DraftClaimObservation,
+)
+from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import (
+    DraftClaimObservationsApplied,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_granularity import (
+    DraftClaimGranularity,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_observation_ref import (
+    DraftClaimObservationRef,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_text import (
+    DraftClaimText,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.evidence_block import (
+    EvidenceBlock,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.exclusion_scope import (
+    ExclusionScope,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.possible_question import (
+    PossibleQuestion,
+)
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_observation_application_unit_of_work import (
     DraftClaimObservationUnitOfWorkClosedError,
     PostgresDraftClaimObservationApplicationUnitOfWork,
 )
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 
 ROOT = Path(__file__).resolve().parents[6]
@@ -105,7 +125,9 @@ class FakeConnection:
         if "INSERT INTO draft_claim_observation_provenance" in normalized:
             observation_ref = str(args[0])
             if observation_ref not in state.observations:
-                raise RuntimeError("draft_claim_observation_provenance observation FK failed")
+                raise RuntimeError(
+                    "draft_claim_observation_provenance observation FK failed"
+                )
             state.provenance[observation_ref] = args
             return "OK"
         if "INSERT INTO outbox_events" in normalized:
@@ -174,7 +196,9 @@ def _event(observation_count: int = 1) -> DraftClaimObservationsApplied:
 
 
 @pytest.mark.asyncio
-async def test_saves_observations_possible_questions_provenance_and_outbox_in_one_commit() -> None:
+async def test_saves_observations_possible_questions_provenance_and_outbox_in_one_commit() -> (
+    None
+):
     connection = FakeConnection()
     unit_of_work = PostgresDraftClaimObservationApplicationUnitOfWork(connection)
     observation = _observation()
@@ -275,7 +299,9 @@ async def test_provenance_cannot_be_saved_before_observation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_empty_observations_and_provenance_are_noop_but_event_can_be_saved() -> None:
+async def test_empty_observations_and_provenance_are_noop_but_event_can_be_saved() -> (
+    None
+):
     connection = FakeConnection()
     unit_of_work = PostgresDraftClaimObservationApplicationUnitOfWork(connection)
 

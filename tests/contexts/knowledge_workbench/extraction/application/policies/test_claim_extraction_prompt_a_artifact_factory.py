@@ -5,11 +5,19 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import JsonInputValue
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    JsonInputValue,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.artifact_runtime.domain.value_objects.artifact_status import ArtifactStatus
-from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import ArtifactVisibility
-from src.contexts.artifact_runtime.domain.value_objects.retention_policy import RetentionPolicy
+from src.contexts.artifact_runtime.domain.value_objects.artifact_status import (
+    ArtifactStatus,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
+    ArtifactVisibility,
+)
+from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
+    RetentionPolicy,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_artifact_provenance import (
     ClaimExtractionArtifactProvenance,
 )
@@ -18,7 +26,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_extr
     PROMPT_A_RAW_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
     ClaimExtractionPromptAArtifactFactory,
 )
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 
 def _now() -> datetime:
@@ -147,7 +157,9 @@ def test_timestamps_must_be_timezone_aware() -> None:
         )
 
 
-def test_updated_at_cannot_be_before_created_at_via_pipeline_artifact_invariant() -> None:
+def test_updated_at_cannot_be_before_created_at_via_pipeline_artifact_invariant() -> (
+    None
+):
     with pytest.raises(ValueError, match="updated_at must be >= created_at"):
         ClaimExtractionPromptAArtifactFactory().build(
             provenance=_provenance(),

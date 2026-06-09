@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import SourceManagementRepositoryPort
+from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
+    SourceManagementRepositoryPort,
+)
 
 
 def test_source_management_repository_port_exposes_expected_methods() -> None:

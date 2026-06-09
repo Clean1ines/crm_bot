@@ -167,7 +167,9 @@ def test_parses_one_composite_claim() -> None:
     assert observations[0].claim.value == "Onboarding includes several steps."
 
 
-def test_parses_provenance_bearing_payload_without_changing_observation_content() -> None:
+def test_parses_provenance_bearing_payload_without_changing_observation_content() -> (
+    None
+):
     observations = _parse(
         _provenance_payload(
             claims=(
@@ -184,7 +186,10 @@ def test_parses_provenance_bearing_payload_without_changing_observation_content(
     observation = observations[0]
     assert observation.observation_ref.value == "parsed-artifact-1:draft-claim:0"
     assert observation.source_unit_ref == SourceUnitRef("document-1.unit.0")
-    assert observation.claim.value == "Provenance payload still yields the same observation."
+    assert (
+        observation.claim.value
+        == "Provenance payload still yields the same observation."
+    )
     assert tuple(question.value for question in observation.possible_questions) == (
         "Does provenance affect parsing?",
     )

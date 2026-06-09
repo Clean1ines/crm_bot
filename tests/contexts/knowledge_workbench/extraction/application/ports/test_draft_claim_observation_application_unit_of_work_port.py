@@ -6,21 +6,41 @@ from pathlib import Path
 import pytest
 
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import DraftClaimObservationProvenanceCandidate
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import (
+    DraftClaimObservationProvenanceCandidate,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_application_unit_of_work_port import (
     AsyncDraftClaimObservationApplicationUnitOfWorkPort,
     DraftClaimObservationApplicationEvent,
     DraftClaimObservationApplicationUnitOfWorkPort,
 )
-from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import DraftClaimObservation
-from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import DraftClaimObservationsApplied
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_granularity import DraftClaimGranularity
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_observation_ref import DraftClaimObservationRef
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_text import DraftClaimText
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.evidence_block import EvidenceBlock
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.exclusion_scope import ExclusionScope
-from src.contexts.knowledge_workbench.extraction.domain.value_objects.possible_question import PossibleQuestion
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
+from src.contexts.knowledge_workbench.extraction.domain.entities.draft_claim_observation import (
+    DraftClaimObservation,
+)
+from src.contexts.knowledge_workbench.extraction.domain.events.draft_claim_observation_events import (
+    DraftClaimObservationsApplied,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_granularity import (
+    DraftClaimGranularity,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_observation_ref import (
+    DraftClaimObservationRef,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_text import (
+    DraftClaimText,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.evidence_block import (
+    EvidenceBlock,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.exclusion_scope import (
+    ExclusionScope,
+)
+from src.contexts.knowledge_workbench.extraction.domain.value_objects.possible_question import (
+    PossibleQuestion,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
 
 
 ROOT = Path(__file__).resolve().parents[6]
@@ -67,9 +87,7 @@ class FakeDraftClaimObservationApplicationUnitOfWork:
         self,
         candidates: tuple[DraftClaimObservationProvenanceCandidate, ...],
     ) -> None:
-        self.saved_provenance_candidates = (
-            self.saved_provenance_candidates + candidates
-        )
+        self.saved_provenance_candidates = self.saved_provenance_candidates + candidates
 
     def append_event(self, event: DraftClaimObservationApplicationEvent) -> None:
         self.events = self.events + (event,)
@@ -102,9 +120,7 @@ class FakeAsyncDraftClaimObservationApplicationUnitOfWork:
         self,
         candidates: tuple[DraftClaimObservationProvenanceCandidate, ...],
     ) -> None:
-        self.saved_provenance_candidates = (
-            self.saved_provenance_candidates + candidates
-        )
+        self.saved_provenance_candidates = self.saved_provenance_candidates + candidates
 
     async def append_event(self, event: DraftClaimObservationApplicationEvent) -> None:
         self.events = self.events + (event,)

@@ -1,22 +1,45 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Protocol
 
-from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import SourceManagementRepositoryPort
-from src.contexts.knowledge_workbench.source_management.domain.entities.source_document import SourceDocument
-from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import SourceUnit
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.heading_path import HeadingPath
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import SourceDocumentRef
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import SourceFormat
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_kind import SourceUnitKind
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_lineage import SourceUnitLineage
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import SourceUnitRef
-from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_text import SourceUnitText
+from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
+    SourceManagementRepositoryPort,
+)
+from src.contexts.knowledge_workbench.source_management.domain.entities.source_document import (
+    SourceDocument,
+)
+from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
+    SourceUnit,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.heading_path import (
+    HeadingPath,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
+    SourceDocumentRef,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
+    SourceFormat,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_kind import (
+    SourceUnitKind,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_lineage import (
+    SourceUnitLineage,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_text import (
+    SourceUnitText,
+)
 
 
 class AsyncSourceManagementConnectionLike(Protocol):
-    async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None: ...
+    async def fetchrow(
+        self, query: str, *args: object
+    ) -> Mapping[str, object] | None: ...
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]: ...
     async def execute(self, query: str, *args: object) -> object: ...
 
@@ -36,7 +59,9 @@ class PostgresSourceManagementRepository(SourceManagementRepositoryPort):
             document.created_at,
         )
 
-    async def load_source_document(self, document_ref: SourceDocumentRef) -> SourceDocument | None:
+    async def load_source_document(
+        self, document_ref: SourceDocumentRef
+    ) -> SourceDocument | None:
         row = await self._connection.fetchrow(
             "SELECT document_ref, project_id, source_format, content_hash, original_filename, created_at FROM source_documents WHERE document_ref = $1",
             document_ref.value,
@@ -54,12 +79,18 @@ class PostgresSourceManagementRepository(SourceManagementRepositoryPort):
                 unit.unit_kind.value,
                 unit.text.value,
                 list(unit.heading_path.parts),
-                {"parent_refs": [parent_ref.value for parent_ref in unit.lineage.parent_refs]},
+                {
+                    "parent_refs": [
+                        parent_ref.value for parent_ref in unit.lineage.parent_refs
+                    ]
+                },
                 unit.ordinal,
                 unit.created_at,
             )
 
-    async def list_source_units_for_document(self, document_ref: SourceDocumentRef) -> tuple[SourceUnit, ...]:
+    async def list_source_units_for_document(
+        self, document_ref: SourceDocumentRef
+    ) -> tuple[SourceUnit, ...]:
         rows = await self._connection.fetch(
             "SELECT unit_ref, document_ref, unit_kind, text, heading_path, lineage, ordinal, created_at FROM source_units WHERE document_ref = $1 ORDER BY ordinal ASC",
             document_ref.value,
@@ -81,7 +112,7 @@ def _document_from_row(row: Mapping[str, object]) -> SourceDocument:
         source_format=SourceFormat(_required_str(row, "source_format")),
         content_hash=_required_str(row, "content_hash"),
         original_filename=_optional_str(row, "original_filename"),
-        created_at=_value(row, "created_at"),
+        created_at=_required_datetime(row, "created_at"),
     )
 
 
@@ -91,10 +122,16 @@ def _unit_from_row(row: Mapping[str, object]) -> SourceUnit:
         document_ref=SourceDocumentRef(_required_str(row, "document_ref")),
         unit_kind=SourceUnitKind(_required_str(row, "unit_kind")),
         text=SourceUnitText(_required_str(row, "text")),
-        heading_path=HeadingPath(tuple(_required_str_list(_value(row, "heading_path"), "heading_path"))),
-        lineage=SourceUnitLineage(tuple(SourceUnitRef(value) for value in _parent_refs(_value(row, "lineage")))),
+        heading_path=HeadingPath(
+            tuple(_required_str_list(_value(row, "heading_path"), "heading_path"))
+        ),
+        lineage=SourceUnitLineage(
+            tuple(
+                SourceUnitRef(value) for value in _parent_refs(_value(row, "lineage"))
+            )
+        ),
         ordinal=_required_int(row, "ordinal"),
-        created_at=_value(row, "created_at"),
+        created_at=_required_datetime(row, "created_at"),
     )
 
 
@@ -125,6 +162,13 @@ def _required_int(row: Mapping[str, object], key: str) -> int:
     value = _value(row, key)
     if not isinstance(value, int):
         raise TypeError(f"{key} must be int")
+    return value
+
+
+def _required_datetime(row: Mapping[str, object], key: str) -> datetime:
+    value = _value(row, key)
+    if not isinstance(value, datetime):
+        raise TypeError(f"{key} must be datetime")
     return value
 
 

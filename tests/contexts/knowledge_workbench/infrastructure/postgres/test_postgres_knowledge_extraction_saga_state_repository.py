@@ -17,7 +17,10 @@ from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_knowledge
 )
 
 ROOT = Path(__file__).resolve().parents[5]
-ADAPTER = ROOT / "src/contexts/knowledge_workbench/infrastructure/postgres/postgres_knowledge_extraction_saga_state_repository.py"
+ADAPTER = (
+    ROOT
+    / "src/contexts/knowledge_workbench/infrastructure/postgres/postgres_knowledge_extraction_saga_state_repository.py"
+)
 
 
 def now() -> datetime:

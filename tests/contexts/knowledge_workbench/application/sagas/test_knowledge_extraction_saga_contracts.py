@@ -117,7 +117,9 @@ def test_checkpoint_validates_counts_and_freezes_payload() -> None:
         )
 
 
-def test_workflow_state_validates_checkpoint_ownership_and_terminal_timestamps() -> None:
+def test_workflow_state_validates_checkpoint_ownership_and_terminal_timestamps() -> (
+    None
+):
     checkpoint = KnowledgeExtractionPhaseCheckpoint(
         workflow_run_id="other-workflow",
         phase_key=KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED,
@@ -305,7 +307,9 @@ class _FakeCommandEmitter(KnowledgeExtractionCommandEmitterPort):
 
 
 @pytest.mark.asyncio
-async def test_saga_reconcile_returns_existing_state_without_emitting_commands() -> None:
+async def test_saga_reconcile_returns_existing_state_without_emitting_commands() -> (
+    None
+):
     state = KnowledgeExtractionWorkflowState(
         workflow_run_id="workflow-1",
         project_id="project-1",

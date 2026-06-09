@@ -130,7 +130,9 @@ class ProcessClaimExtractionWorkItem:
         self._daily_exhausted_recorder = daily_exhausted_recorder
         self._split_required_recorder = split_required_recorder
         self._failed_recorder = failed_recorder
-        self._artifact_factory = artifact_factory or ClaimExtractionPromptAArtifactFactory()
+        self._artifact_factory = (
+            artifact_factory or ClaimExtractionPromptAArtifactFactory()
+        )
 
     def execute(
         self,

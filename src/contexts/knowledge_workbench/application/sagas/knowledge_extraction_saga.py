@@ -14,7 +14,6 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionPhaseCheckpoint,
     KnowledgeExtractionPhaseKey,
-    KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_source_phase_reconciliation import (
@@ -115,7 +114,9 @@ def _replace_checkpoints(
 ) -> tuple[KnowledgeExtractionPhaseCheckpoint, ...]:
     replacement_keys = {checkpoint.phase_key for checkpoint in replacements}
     kept = tuple(
-        checkpoint for checkpoint in existing if checkpoint.phase_key not in replacement_keys
+        checkpoint
+        for checkpoint in existing
+        if checkpoint.phase_key not in replacement_keys
     )
     return kept + replacements
 
