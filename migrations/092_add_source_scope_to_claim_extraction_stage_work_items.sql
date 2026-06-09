@@ -10,4 +10,3 @@ WHERE source_document_ref IS NULL
 
 ALTER TABLE claim_extraction_stage_work_items
     ALTER COLUMN source_document_ref SET NOT NULL,
-    ALTER COLUMN source_unit_ref SET NOT NULL;
