@@ -124,7 +124,7 @@ class WorkItemStateMachine:
 
     @staticmethod
     def cancel(item: WorkItem, *, error_kind: str | None = "cancelled") -> WorkItem:
-        if item.status.is_terminal:
+        if item.status.is_terminal and item.status is not WorkItemStatus.USER_ACTION_REQUIRED:
             raise InvalidWorkItemTransition(
                 f"Cannot cancel terminal work item from status {item.status}"
             )
@@ -206,6 +206,25 @@ class WorkItemStateMachine:
             lease_token=None,
             lease_expires_at=None,
             next_attempt_at=wait_until,
+            last_error_kind=reason,
+        )
+
+    @staticmethod
+    def release_leased_to_ready(
+        item: WorkItem,
+        *,
+        reason: str | None = None,
+    ) -> WorkItem:
+        WorkItemStateMachine._require_leased(item, "release to ready")
+        if reason is not None and not reason.strip():
+            raise ValueError("reason must be non-empty when provided")
+        return replace(
+            item,
+            status=WorkItemStatus.READY,
+            leased_by=None,
+            lease_token=None,
+            lease_expires_at=None,
+            next_attempt_at=None,
             last_error_kind=reason,
         )
 
