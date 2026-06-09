@@ -124,7 +124,10 @@ class WorkItemStateMachine:
 
     @staticmethod
     def cancel(item: WorkItem, *, error_kind: str | None = "cancelled") -> WorkItem:
-        if item.status.is_terminal and item.status is not WorkItemStatus.USER_ACTION_REQUIRED:
+        if (
+            item.status.is_terminal
+            and item.status is not WorkItemStatus.USER_ACTION_REQUIRED
+        ):
             raise InvalidWorkItemTransition(
                 f"Cannot cancel terminal work item from status {item.status}"
             )

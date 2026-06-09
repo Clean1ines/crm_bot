@@ -4,8 +4,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import PipelineArtifact
-from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import ArtifactKind
+from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
+    PipelineArtifact,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_kind import (
+    ArtifactKind,
+)
 from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import (
     ArtifactLineage,
 )
@@ -244,7 +248,9 @@ def test_resume_persists_leased_work_item_as_ready_before_counting_it_ready() ->
     assert unit_of_work.committed is True
 
 
-def test_resume_completed_artifact_still_prevents_leased_work_item_reactivation() -> None:
+def test_resume_completed_artifact_still_prevents_leased_work_item_reactivation() -> (
+    None
+):
     leased = _leased_claim_extraction_work_item("unit-1")
     unit_of_work = FakeWorkItemUnitOfWork()
 
