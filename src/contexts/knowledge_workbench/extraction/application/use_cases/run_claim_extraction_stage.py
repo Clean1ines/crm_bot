@@ -4,11 +4,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-
-class ClaimExtractionWorkItemCreatorPort(Protocol):
-    def execute(self, command: object) -> object: ...
-
-
-class ClaimExtractionStageWorkItemIndexPort(Protocol):
-    def save_stage_work_item(self, *, workflow_run_id: str, stage_run_id: str, source_unit: object, work_item: object) -> None:
-        ...
+from src.contexts.execution_runtime.application.ports.work_item_unit_of_work_port import (
+    WorkItemUnitOfWorkPort,
+)
+from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
+from src.contexts.knowledge_workbench.extraction.application.use_cases.create_extraction_work_items import
