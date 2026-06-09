@@ -120,6 +120,24 @@ def _work_item(
     )
 
 
+def _waiting_work_item_with_raw_error(
+    item_id: str,
+    *,
+    status: WorkItemStatus,
+    wait_seconds: int | None = None,
+    last_error_kind: str | None,
+) -> WorkItem:
+    if status not in {WorkItemStatus.DEFERRED, WorkItemStatus.RETRYABLE_FAILED}:
+        raise ValueError("status must be DEFERRED or RETRYABLE_FAILED")
+    return WorkItem(
+        work_item_id=item_id,
+        work_kind=WorkKind("knowledge_workbench.claim_extraction"),
+        status=status,
+        next_attempt_at=WaitUntil(_now() + timedelta(seconds=wait_seconds or 60)),
+        last_error_kind=last_error_kind,
+    )
+
+
 def _query() -> ClaimExtractionStageProgressQuery:
     return ClaimExtractionStageProgressQuery(
         workflow_run_id="workflow-1",
@@ -227,6 +245,82 @@ def test_retryable_invalid_output_wait_stage_has_invalid_output_retry_reason() -
     assert (
         progress.blocker_reason
         is ClaimExtractionStageBlockerReason.INVALID_OUTPUT_RETRY_SCHEDULED
+    )
+    assert progress.next_action is ClaimExtractionStageNextAction.RETRY_WHEN_DUE
+
+
+def test_deferred_request_too_large_wait_stage_requires_source_unit_split() -> None:
+    progress, _query_port = _progress(
+        (
+            _work_item(
+                "deferred-too-large-1",
+                status=WorkItemStatus.DEFERRED,
+                wait_seconds=60,
+                error_kind=LlmErrorKind.REQUEST_TOO_LARGE,
+            ),
+        ),
+    )
+
+    assert progress.status is ClaimExtractionStageProgressStatus.WAITING
+    assert progress.status is not ClaimExtractionStageProgressStatus.WAITING_FOR_QUOTA
+    assert progress.blocker_kind is ClaimExtractionStageBlockerKind.SPLIT_REQUIRED
+    assert (
+        progress.blocker_reason
+        is ClaimExtractionStageBlockerReason.SOURCE_UNIT_SPLIT_REQUIRED
+    )
+    assert progress.next_action is ClaimExtractionStageNextAction.SPLIT_SOURCE_UNIT
+
+
+@pytest.mark.parametrize("last_error_kind", ("provider_sneezed", None))
+def test_unknown_or_missing_wait_reason_defaults_to_provider_retry(
+    last_error_kind: str | None,
+) -> None:
+    progress, _query_port = _progress(
+        (
+            _waiting_work_item_with_raw_error(
+                "deferred-unknown-1",
+                status=WorkItemStatus.DEFERRED,
+                wait_seconds=60,
+                last_error_kind=last_error_kind,
+            ),
+        ),
+    )
+
+    assert progress.status is ClaimExtractionStageProgressStatus.WAITING
+    assert progress.status is not ClaimExtractionStageProgressStatus.WAITING_FOR_QUOTA
+    assert progress.blocker_kind is ClaimExtractionStageBlockerKind.RETRY_WAIT
+    assert (
+        progress.blocker_reason
+        is ClaimExtractionStageBlockerReason.PROVIDER_RETRY_SCHEDULED
+    )
+    assert progress.next_action is ClaimExtractionStageNextAction.RETRY_WHEN_DUE
+
+
+def test_deferred_and_retryable_without_quota_reason_never_collapse_to_quota() -> None:
+    progress, _query_port = _progress(
+        (
+            _work_item(
+                "deferred-network-1",
+                status=WorkItemStatus.DEFERRED,
+                wait_seconds=60,
+                error_kind=LlmErrorKind.NETWORK_ERROR,
+            ),
+            _work_item(
+                "retryable-invalid-1",
+                status=WorkItemStatus.RETRYABLE_FAILED,
+                wait_seconds=120,
+                error_kind=LlmErrorKind.INVALID_OUTPUT,
+            ),
+        ),
+    )
+
+    assert progress.status is ClaimExtractionStageProgressStatus.WAITING
+    assert progress.status is not ClaimExtractionStageProgressStatus.WAITING_FOR_QUOTA
+    assert progress.blocker_kind is ClaimExtractionStageBlockerKind.RETRY_WAIT
+    assert progress.blocker_kind is not ClaimExtractionStageBlockerKind.QUOTA_WAIT
+    assert (
+        progress.blocker_reason
+        is ClaimExtractionStageBlockerReason.NETWORK_RETRY_SCHEDULED
     )
     assert progress.next_action is ClaimExtractionStageNextAction.RETRY_WHEN_DUE
 
