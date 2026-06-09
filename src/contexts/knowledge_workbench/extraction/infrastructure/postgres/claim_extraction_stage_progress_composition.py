@@ -4,12 +4,13 @@ from src.contexts.knowledge_workbench.extraction.application.read_models.claim_e
     AsyncClaimExtractionStageProgressReadModel,
 )
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_claim_extraction_stage_progress_query import (
+    AsyncStageProgressConnectionLike,
     PostgresClaimExtractionStageProgressQuery,
 )
 
 
 def make_postgres_claim_extraction_stage_progress_reader(
-    connection: object,
+    connection: AsyncStageProgressConnectionLike,
 ) -> AsyncClaimExtractionStageProgressReadModel:
     return AsyncClaimExtractionStageProgressReadModel(
         query_port=PostgresClaimExtractionStageProgressQuery(connection),

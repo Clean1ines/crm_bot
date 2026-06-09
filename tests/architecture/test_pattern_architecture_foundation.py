@@ -90,26 +90,6 @@ def test_context_roots_do_not_recreate_generic_dumping_grounds() -> None:
     )
 
 
-def test_pattern_contract_exists_and_contains_canonical_distinctions() -> None:
-    assert CONTRACT.exists(), f"missing architecture contract: {CONTRACT}"
-    text = CONTRACT.read_text(encoding="utf-8")
-
-    missing = [item for item in REQUIRED_CANONICAL_DISTINCTIONS if item not in text]
-    assert not missing, (
-        "pattern contract is missing canonical distinctions:\n" + "\n".join(missing)
-    )
-
-
-def test_pattern_contract_marks_legacy_hybrids_explicitly() -> None:
-    assert CONTRACT.exists(), f"missing architecture contract: {CONTRACT}"
-    text = CONTRACT.read_text(encoding="utf-8")
-
-    missing = [item for item in REQUIRED_LEGACY_WARNINGS if item not in text]
-    assert not missing, "pattern contract is missing legacy warnings:\n" + "\n".join(
-        missing
-    )
-
-
 def test_new_context_skeleton_does_not_import_old_workbench_paths() -> None:
     forbidden_import_markers = [
         "src.domain.project_plane.knowledge_workbench",

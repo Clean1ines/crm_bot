@@ -327,7 +327,7 @@ def test_stage_readiness_waiting_user_completed_and_failed() -> None:
         (_work_item("work-1", status=WorkItemStatus.TERMINAL_FAILED),),
     )
 
-    assert waiting.status is ClaimExtractionStageStatus.WAITING_FOR_QUOTA
+    assert waiting.status is ClaimExtractionStageStatus.WAITING
     assert user_action.status is ClaimExtractionStageStatus.USER_ACTION_REQUIRED
     assert completed.status is ClaimExtractionStageStatus.COMPLETED
     assert failed.status is ClaimExtractionStageStatus.FAILED

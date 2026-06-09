@@ -12,8 +12,8 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_status import
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
-from src.contexts.knowledge_workbench.extraction.application.read_models.claim_extraction_stage_progress import (
-    ClaimExtractionStageProgressQueryPort,
+from src.contexts.knowledge_workbench.extraction.application.read_models.claim_extraction_stage_progress_async import (
+    AsyncClaimExtractionStageProgressQueryPort,
 )
 
 
@@ -40,7 +40,9 @@ class ExecutionWorkItemRow:
     last_error_kind: str | None
 
 
-class PostgresClaimExtractionStageProgressQuery(ClaimExtractionStageProgressQueryPort):
+class PostgresClaimExtractionStageProgressQuery(
+    AsyncClaimExtractionStageProgressQueryPort
+):
     """PostgreSQL query adapter for claim-extraction stage progress.
 
     It reads generic Execution Runtime work items through a narrow stage index.

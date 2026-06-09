@@ -8,7 +8,6 @@ from src.contexts.knowledge_workbench.extraction.application.use_cases.create_ex
     CreateExtractionWorkItemsCommand,
 )
 from src.contexts.knowledge_workbench.extraction.application.use_cases.run_claim_extraction_stage import (
-    ClaimExtractionStageReadiness,
     RunClaimExtractionStageCommand,
     RunClaimExtractionStageResult,
     claim_extraction_stage_readiness,

@@ -40,7 +40,7 @@ class ClaimExtractionStageWorkItemIndexPort(Protocol):
 class ClaimExtractionStageStatus(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
-    WAITING_FOR_QUOTA = "waiting_for_quota"
+    WAITING = "waiting"
     USER_ACTION_REQUIRED = "user_action_required"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -216,7 +216,7 @@ def _stage_status(
         return ClaimExtractionStageStatus.USER_ACTION_REQUIRED
 
     if deferred_count > 0 or retryable_failed_count > 0:
-        return ClaimExtractionStageStatus.WAITING_FOR_QUOTA
+        return ClaimExtractionStageStatus.WAITING
 
     if leased_count > 0:
         return ClaimExtractionStageStatus.IN_PROGRESS

@@ -16,10 +16,13 @@ from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKi
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.knowledge_workbench.extraction.application.read_models.claim_extraction_stage_progress import (
     ClaimExtractionStageBlockerKind,
+    ClaimExtractionStageBlockerReason,
+    ClaimExtractionStageNextAction,
     ClaimExtractionStageProgressQuery,
     ClaimExtractionStageProgressReadModel,
     ClaimExtractionStageProgressStatus,
 )
+from src.contexts.llm_runtime.domain.value_objects.llm_error_kind import LlmErrorKind
 
 
 @dataclass(slots=True)
@@ -52,11 +55,18 @@ def _now() -> datetime:
     return datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
 
 
+def _error_kind_value(error_kind: LlmErrorKind | str | None) -> str | None:
+    if isinstance(error_kind, LlmErrorKind):
+        return error_kind.value
+    return error_kind
+
+
 def _work_item(
     item_id: str,
     *,
     status: WorkItemStatus,
     wait_seconds: int | None = None,
+    error_kind: LlmErrorKind | str | None = None,
 ) -> WorkItem:
     if status is WorkItemStatus.LEASED:
         return WorkItem(
@@ -74,18 +84,25 @@ def _work_item(
             work_kind=WorkKind("knowledge_workbench.claim_extraction"),
             status=status,
             next_attempt_at=WaitUntil(_now() + timedelta(seconds=wait_seconds or 60)),
-            last_error_kind="quota_wait",
+            last_error_kind=_error_kind_value(error_kind or LlmErrorKind.MINUTE_LIMIT),
         )
 
-    if status in {
-        WorkItemStatus.TERMINAL_FAILED,
-        WorkItemStatus.CANCELLED,
-    }:
+    if status is WorkItemStatus.TERMINAL_FAILED:
         return WorkItem(
             work_item_id=item_id,
             work_kind=WorkKind("knowledge_workbench.claim_extraction"),
             status=status,
-            last_error_kind="terminal_state",
+            last_error_kind=_error_kind_value(
+                error_kind or LlmErrorKind.VALIDATION_FAILED,
+            ),
+        )
+
+    if status is WorkItemStatus.CANCELLED:
+        return WorkItem(
+            work_item_id=item_id,
+            work_kind=WorkKind("knowledge_workbench.claim_extraction"),
+            status=status,
+            last_error_kind=_error_kind_value(error_kind or "cancelled"),
         )
 
     if status is WorkItemStatus.USER_ACTION_REQUIRED:
@@ -93,7 +110,7 @@ def _work_item(
             work_item_id=item_id,
             work_kind=WorkKind("knowledge_workbench.claim_extraction"),
             status=status,
-            last_error_kind="daily_limit",
+            last_error_kind=_error_kind_value(error_kind or LlmErrorKind.DAILY_LIMIT),
         )
 
     return WorkItem(
@@ -139,27 +156,79 @@ def test_all_completed_stage_is_completed() -> None:
     assert progress.split_superseded_count == 1
     assert progress.artifacts_count == 2
     assert progress.blocker_kind is None
+    assert progress.blocker_reason is None
+    assert progress.next_action is None
     assert query_port.work_item_queries == [("workflow-1", "stage-1")]
     assert query_port.artifact_queries == [("workflow-1", "stage-1")]
 
 
-def test_deferred_future_wait_stage_is_waiting_for_quota() -> None:
+def test_deferred_minute_limit_wait_stage_has_quota_blocker_reason() -> None:
     progress, _query_port = _progress(
         (
-            _work_item("deferred-1", status=WorkItemStatus.DEFERRED, wait_seconds=120),
             _work_item(
-                "retryable-1",
-                status=WorkItemStatus.RETRYABLE_FAILED,
-                wait_seconds=60,
+                "deferred-1",
+                status=WorkItemStatus.DEFERRED,
+                wait_seconds=120,
+                error_kind=LlmErrorKind.MINUTE_LIMIT,
             ),
         ),
     )
 
-    assert progress.status is ClaimExtractionStageProgressStatus.WAITING_FOR_QUOTA
+    assert progress.status is ClaimExtractionStageProgressStatus.WAITING
+    assert progress.status is not ClaimExtractionStageProgressStatus.WAITING_FOR_QUOTA
     assert progress.deferred_count == 1
-    assert progress.retryable_failed_count == 1
-    assert progress.nearest_wait_until == _now() + timedelta(seconds=60)
+    assert progress.nearest_wait_until == _now() + timedelta(seconds=120)
+    assert progress.resume_after == _now() + timedelta(seconds=120)
     assert progress.blocker_kind is ClaimExtractionStageBlockerKind.QUOTA_WAIT
+    assert (
+        progress.blocker_reason
+        is ClaimExtractionStageBlockerReason.WAITING_FOR_MINUTE_QUOTA
+    )
+    assert progress.next_action is ClaimExtractionStageNextAction.RESUME_AFTER_WAIT
+
+
+def test_deferred_network_error_wait_stage_has_retry_blocker_not_quota() -> None:
+    progress, _query_port = _progress(
+        (
+            _work_item(
+                "deferred-1",
+                status=WorkItemStatus.DEFERRED,
+                wait_seconds=60,
+                error_kind=LlmErrorKind.NETWORK_ERROR,
+            ),
+        ),
+    )
+
+    assert progress.status is ClaimExtractionStageProgressStatus.WAITING
+    assert progress.status is not ClaimExtractionStageProgressStatus.WAITING_FOR_QUOTA
+    assert progress.blocker_kind is ClaimExtractionStageBlockerKind.RETRY_WAIT
+    assert (
+        progress.blocker_reason
+        is ClaimExtractionStageBlockerReason.NETWORK_RETRY_SCHEDULED
+    )
+    assert progress.next_action is ClaimExtractionStageNextAction.RETRY_WHEN_DUE
+
+
+def test_retryable_invalid_output_wait_stage_has_invalid_output_retry_reason() -> None:
+    progress, _query_port = _progress(
+        (
+            _work_item(
+                "retryable-1",
+                status=WorkItemStatus.RETRYABLE_FAILED,
+                wait_seconds=60,
+                error_kind=LlmErrorKind.INVALID_OUTPUT,
+            ),
+        ),
+    )
+
+    assert progress.status is ClaimExtractionStageProgressStatus.WAITING
+    assert progress.retryable_failed_count == 1
+    assert progress.blocker_kind is ClaimExtractionStageBlockerKind.RETRY_WAIT
+    assert (
+        progress.blocker_reason
+        is ClaimExtractionStageBlockerReason.INVALID_OUTPUT_RETRY_SCHEDULED
+    )
+    assert progress.next_action is ClaimExtractionStageNextAction.RETRY_WHEN_DUE
 
 
 def test_active_leased_stage_is_in_progress() -> None:
@@ -174,12 +243,18 @@ def test_active_leased_stage_is_in_progress() -> None:
     assert progress.leased_count == 1
     assert progress.ready_count == 1
     assert progress.blocker_kind is ClaimExtractionStageBlockerKind.ACTIVE_LEASE
+    assert progress.blocker_reason is None
+    assert progress.next_action is ClaimExtractionStageNextAction.WAIT_FOR_ACTIVE_LEASE
 
 
-def test_terminal_failed_stage_is_failed() -> None:
+def test_terminal_failed_stage_is_failed_with_terminal_blocker_reason() -> None:
     progress, _query_port = _progress(
         (
-            _work_item("failed-1", status=WorkItemStatus.TERMINAL_FAILED),
+            _work_item(
+                "failed-1",
+                status=WorkItemStatus.TERMINAL_FAILED,
+                error_kind=LlmErrorKind.VALIDATION_FAILED,
+            ),
             _work_item("ready-1", status=WorkItemStatus.READY),
         ),
     )
@@ -187,19 +262,66 @@ def test_terminal_failed_stage_is_failed() -> None:
     assert progress.status is ClaimExtractionStageProgressStatus.FAILED
     assert progress.terminal_failed_count == 1
     assert progress.blocker_kind is ClaimExtractionStageBlockerKind.TERMINAL_FAILED
+    assert progress.blocker_reason is ClaimExtractionStageBlockerReason.TERMINAL_FAILURE
+    assert (
+        progress.next_action is ClaimExtractionStageNextAction.INSPECT_TERMINAL_FAILURE
+    )
 
 
-def test_user_action_required_stage_requires_user_choice() -> None:
+def test_user_action_required_daily_limit_has_daily_choice_blocker_reason() -> None:
     progress, _query_port = _progress(
         (
-            _work_item("daily-limit-1", status=WorkItemStatus.USER_ACTION_REQUIRED),
+            _work_item(
+                "daily-limit-1",
+                status=WorkItemStatus.USER_ACTION_REQUIRED,
+                error_kind=LlmErrorKind.DAILY_LIMIT,
+            ),
             _work_item("ready-1", status=WorkItemStatus.READY),
         ),
     )
 
-    assert progress.status is ClaimExtractionStageProgressStatus.REQUIRES_USER_CHOICE
+    assert progress.status is ClaimExtractionStageProgressStatus.USER_ACTION_REQUIRED
     assert progress.user_action_required_count == 1
     assert progress.blocker_kind is ClaimExtractionStageBlockerKind.USER_ACTION_REQUIRED
+    assert (
+        progress.blocker_reason
+        is ClaimExtractionStageBlockerReason.DAILY_LIMIT_REQUIRES_USER_CHOICE
+    )
+    assert (
+        progress.next_action
+        is ClaimExtractionStageNextAction.CHOOSE_DAILY_LIMIT_RECOVERY
+    )
+
+
+def test_user_action_required_non_daily_requires_failure_inspection() -> None:
+    progress, _query_port = _progress(
+        (
+            _work_item(
+                "user-action-1",
+                status=WorkItemStatus.USER_ACTION_REQUIRED,
+                error_kind=LlmErrorKind.AUTH_ERROR,
+            ),
+        ),
+    )
+
+    assert progress.status is ClaimExtractionStageProgressStatus.USER_ACTION_REQUIRED
+    assert progress.blocker_kind is ClaimExtractionStageBlockerKind.USER_ACTION_REQUIRED
+    assert progress.blocker_reason is ClaimExtractionStageBlockerReason.TERMINAL_FAILURE
+    assert (
+        progress.next_action is ClaimExtractionStageNextAction.INSPECT_TERMINAL_FAILURE
+    )
+
+
+def test_split_superseded_stage_does_not_imply_quota() -> None:
+    progress, _query_port = _progress(
+        (_work_item("split-1", status=WorkItemStatus.SPLIT_SUPERSEDED),),
+    )
+
+    assert progress.status is ClaimExtractionStageProgressStatus.COMPLETED
+    assert progress.split_superseded_count == 1
+    assert progress.blocker_kind is None
+    assert progress.blocker_reason is None
+    assert progress.next_action is None
 
 
 def test_cancelled_and_partial_cancelled_statuses_are_distinct() -> None:
@@ -219,6 +341,8 @@ def test_cancelled_and_partial_cancelled_statuses_are_distinct() -> None:
     assert cancelled.status is ClaimExtractionStageProgressStatus.CANCELLED
     assert cancelled.cancelled_count == 2
     assert cancelled.blocker_kind is ClaimExtractionStageBlockerKind.CANCELLED
+    assert cancelled.blocker_reason is ClaimExtractionStageBlockerReason.CANCELLED
+    assert cancelled.next_action is ClaimExtractionStageNextAction.STOPPED_CANCELLED
     assert partial.status is ClaimExtractionStageProgressStatus.PARTIAL_CANCELLED
     assert partial.cancelled_count == 1
 

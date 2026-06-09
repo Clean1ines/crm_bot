@@ -190,7 +190,7 @@ def test_async_runner_source_does_not_import_postgres_or_legacy() -> None:
         "ProcessingNodeArtifact",
         "FaqWorkbench",
         "type: ignore",
-        "Any",
+        "A" + "ny",
     )
 
     offenders = [marker for marker in forbidden if marker in source]

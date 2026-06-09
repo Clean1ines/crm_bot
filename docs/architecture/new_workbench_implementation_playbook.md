@@ -749,16 +749,13 @@ LLM Runtime owns provider/output execution reasons, such as:
 ```text
 minute_limit
 daily_limit
-provider_transient
-network_transient
 request_too_large
 output_too_large
 invalid_output
 validation_failed
 empty_output
-empty_claims
+network_error
 auth_error
-provider_terminal
 unknown
 ```
 
@@ -798,6 +795,51 @@ invalid_output_retry_scheduled
 validation_retry_scheduled
 empty_output_retry_scheduled
 empty_claims_confirmation_required
+source_unit_split_required
+daily_limit_requires_user_choice
+terminal_failure
+cancelled
+```
+
+### Stage progress vocabulary
+
+Claim Extraction stage progress status vocabulary:
+
+```text
+pending
+in_progress
+waiting
+user_action_required
+completed
+failed
+cancelled
+partial_cancelled
+```
+
+`waiting_for_quota` must not be a generic status for deferred or retryable work. If a compatibility alias remains in code, it may be used only when the underlying blocker reason is quota-related.
+
+Claim Extraction blocker kind vocabulary:
+
+```text
+active_lease
+quota_wait
+retry_wait
+user_action_required
+split_required
+terminal_failed
+cancelled
+```
+
+Claim Extraction blocker reason vocabulary:
+
+```text
+waiting_for_minute_quota
+waiting_for_daily_reset
+provider_retry_scheduled
+network_retry_scheduled
+invalid_output_retry_scheduled
+validation_retry_scheduled
+empty_output_retry_scheduled
 source_unit_split_required
 daily_limit_requires_user_choice
 terminal_failure
@@ -930,7 +972,10 @@ These are intentionally not fully solved by this document. Do not resolve them a
 
 ### 1. Durable blocker storage
 
-Before frontend restore or consolidation depends on blocker explanations, choose one durable strategy:
+Design note:
+
+Before consolidation or frontend restore relies on blocker explanations,
+decide durable blocker/provenance storage:
 
 ```text
 A. explicit claim_extraction_stage_blockers projection/table

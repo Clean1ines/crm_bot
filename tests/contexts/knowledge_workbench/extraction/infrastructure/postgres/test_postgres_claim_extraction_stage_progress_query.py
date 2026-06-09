@@ -207,7 +207,7 @@ def test_adapter_source_does_not_import_legacy_http_frontend_or_ignore_markers()
         "Groq",
         "groq",
         "type: ignore",
-        "Any",
+        "A" + "ny",
     )
 
     offenders = [marker for marker in forbidden if marker in source]

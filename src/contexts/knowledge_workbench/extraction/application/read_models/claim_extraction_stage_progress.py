@@ -9,6 +9,7 @@ from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
+from src.contexts.llm_runtime.domain.value_objects.llm_error_kind import LlmErrorKind
 
 
 class ClaimExtractionStageProgressStatus(StrEnum):
@@ -16,6 +17,7 @@ class ClaimExtractionStageProgressStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     WAITING_FOR_QUOTA = "waiting_for_quota"
     WAITING = "waiting"
+    USER_ACTION_REQUIRED = "user_action_required"
     COMPLETED = "completed"
     FAILED = "failed"
     REQUIRES_USER_CHOICE = "requires_user_choice"
@@ -26,10 +28,35 @@ class ClaimExtractionStageProgressStatus(StrEnum):
 class ClaimExtractionStageBlockerKind(StrEnum):
     ACTIVE_LEASE = "active_lease"
     QUOTA_WAIT = "quota_wait"
-    WAITING = "waiting"
-    TERMINAL_FAILED = "terminal_failed"
+    RETRY_WAIT = "retry_wait"
     USER_ACTION_REQUIRED = "user_action_required"
+    SPLIT_REQUIRED = "split_required"
+    TERMINAL_FAILED = "terminal_failed"
     CANCELLED = "cancelled"
+
+
+class ClaimExtractionStageBlockerReason(StrEnum):
+    WAITING_FOR_MINUTE_QUOTA = "waiting_for_minute_quota"
+    WAITING_FOR_DAILY_RESET = "waiting_for_daily_reset"
+    PROVIDER_RETRY_SCHEDULED = "provider_retry_scheduled"
+    NETWORK_RETRY_SCHEDULED = "network_retry_scheduled"
+    INVALID_OUTPUT_RETRY_SCHEDULED = "invalid_output_retry_scheduled"
+    VALIDATION_RETRY_SCHEDULED = "validation_retry_scheduled"
+    EMPTY_OUTPUT_RETRY_SCHEDULED = "empty_output_retry_scheduled"
+    SOURCE_UNIT_SPLIT_REQUIRED = "source_unit_split_required"
+    DAILY_LIMIT_REQUIRES_USER_CHOICE = "daily_limit_requires_user_choice"
+    TERMINAL_FAILURE = "terminal_failure"
+    CANCELLED = "cancelled"
+
+
+class ClaimExtractionStageNextAction(StrEnum):
+    WAIT_FOR_ACTIVE_LEASE = "wait_for_active_lease"
+    RESUME_AFTER_WAIT = "resume_after_wait"
+    RETRY_WHEN_DUE = "retry_when_due"
+    SPLIT_SOURCE_UNIT = "split_source_unit"
+    CHOOSE_DAILY_LIMIT_RECOVERY = "choose_daily_limit_recovery"
+    INSPECT_TERMINAL_FAILURE = "inspect_terminal_failure"
+    STOPPED_CANCELLED = "stopped_cancelled"
 
 
 class ClaimExtractionStageProgressQueryPort(Protocol):
@@ -72,6 +99,8 @@ class ClaimExtractionStageProgress:
     artifacts_count: int
     nearest_wait_until: datetime | None
     blocker_kind: ClaimExtractionStageBlockerKind | None
+    blocker_reason: ClaimExtractionStageBlockerReason | None
+    next_action: ClaimExtractionStageNextAction | None
     user_action_required_count: int
 
     @property
@@ -87,6 +116,17 @@ class ClaimExtractionStageProgress:
             + self.split_superseded_count
             + self.user_action_required_count
         )
+
+    @property
+    def resume_after(self) -> datetime | None:
+        return self.nearest_wait_until
+
+
+@dataclass(frozen=True, slots=True)
+class _StageBlockerInterpretation:
+    kind: ClaimExtractionStageBlockerKind | None
+    reason: ClaimExtractionStageBlockerReason | None
+    next_action: ClaimExtractionStageNextAction | None
 
 
 class ClaimExtractionStageProgressReadModel:
@@ -131,6 +171,7 @@ class ClaimExtractionStageProgressReadModel:
         )
         nearest_wait_until = _nearest_wait_until(work_items)
         total_count = len(work_items)
+        blocker = _stage_blocker_interpretation(work_items)
 
         return ClaimExtractionStageProgress(
             status=_progress_status(
@@ -155,15 +196,9 @@ class ClaimExtractionStageProgressReadModel:
             split_superseded_count=split_superseded_count,
             artifacts_count=artifacts_count,
             nearest_wait_until=nearest_wait_until,
-            blocker_kind=_blocker_kind(
-                leased_count=leased_count,
-                deferred_count=deferred_count,
-                retryable_failed_count=retryable_failed_count,
-                terminal_failed_count=terminal_failed_count,
-                cancelled_count=cancelled_count,
-                user_action_required_count=user_action_required_count,
-                nearest_wait_until=nearest_wait_until,
-            ),
+            blocker_kind=blocker.kind,
+            blocker_reason=blocker.reason,
+            next_action=blocker.next_action,
             user_action_required_count=user_action_required_count,
         )
 
@@ -208,7 +243,7 @@ def _progress_status(
         return ClaimExtractionStageProgressStatus.FAILED
 
     if user_action_required_count > 0:
-        return ClaimExtractionStageProgressStatus.REQUIRES_USER_CHOICE
+        return ClaimExtractionStageProgressStatus.USER_ACTION_REQUIRED
 
     if leased_count > 0:
         return ClaimExtractionStageProgressStatus.IN_PROGRESS
@@ -224,7 +259,7 @@ def _progress_status(
         return ClaimExtractionStageProgressStatus.COMPLETED
 
     if deferred_count > 0 or retryable_failed_count > 0:
-        return ClaimExtractionStageProgressStatus.WAITING_FOR_QUOTA
+        return ClaimExtractionStageProgressStatus.WAITING
 
     if ready_count > 0:
         return ClaimExtractionStageProgressStatus.PENDING
@@ -232,29 +267,162 @@ def _progress_status(
     return ClaimExtractionStageProgressStatus.WAITING
 
 
-def _blocker_kind(
-    *,
-    leased_count: int,
-    deferred_count: int,
-    retryable_failed_count: int,
-    terminal_failed_count: int,
-    cancelled_count: int,
-    user_action_required_count: int,
-    nearest_wait_until: datetime | None,
-) -> ClaimExtractionStageBlockerKind | None:
-    if terminal_failed_count > 0:
-        return ClaimExtractionStageBlockerKind.TERMINAL_FAILED
-    if user_action_required_count > 0:
-        return ClaimExtractionStageBlockerKind.USER_ACTION_REQUIRED
-    if leased_count > 0:
-        return ClaimExtractionStageBlockerKind.ACTIVE_LEASE
-    if deferred_count > 0 or retryable_failed_count > 0:
-        if nearest_wait_until is not None:
-            return ClaimExtractionStageBlockerKind.QUOTA_WAIT
-        return ClaimExtractionStageBlockerKind.WAITING
-    if cancelled_count > 0:
-        return ClaimExtractionStageBlockerKind.CANCELLED
-    return None
+def _stage_blocker_interpretation(
+    work_items: tuple[WorkItem, ...],
+) -> _StageBlockerInterpretation:
+    if _has_status(work_items, WorkItemStatus.TERMINAL_FAILED):
+        return _StageBlockerInterpretation(
+            kind=ClaimExtractionStageBlockerKind.TERMINAL_FAILED,
+            reason=ClaimExtractionStageBlockerReason.TERMINAL_FAILURE,
+            next_action=ClaimExtractionStageNextAction.INSPECT_TERMINAL_FAILURE,
+        )
+
+    user_action_item = _first_with_status(
+        work_items,
+        WorkItemStatus.USER_ACTION_REQUIRED,
+    )
+    if user_action_item is not None:
+        return _user_action_required_interpretation(user_action_item)
+
+    if _has_status(work_items, WorkItemStatus.LEASED):
+        return _StageBlockerInterpretation(
+            kind=ClaimExtractionStageBlockerKind.ACTIVE_LEASE,
+            reason=None,
+            next_action=ClaimExtractionStageNextAction.WAIT_FOR_ACTIVE_LEASE,
+        )
+
+    waiting_item = _first_waiting_item(work_items)
+    if waiting_item is not None:
+        return _waiting_interpretation(waiting_item)
+
+    if _has_status(work_items, WorkItemStatus.CANCELLED):
+        return _StageBlockerInterpretation(
+            kind=ClaimExtractionStageBlockerKind.CANCELLED,
+            reason=ClaimExtractionStageBlockerReason.CANCELLED,
+            next_action=ClaimExtractionStageNextAction.STOPPED_CANCELLED,
+        )
+
+    return _StageBlockerInterpretation(kind=None, reason=None, next_action=None)
+
+
+def _has_status(work_items: tuple[WorkItem, ...], status: WorkItemStatus) -> bool:
+    return any(item.status is status for item in work_items)
+
+
+def _first_with_status(
+    work_items: tuple[WorkItem, ...],
+    status: WorkItemStatus,
+) -> WorkItem | None:
+    return next((item for item in work_items if item.status is status), None)
+
+
+def _first_waiting_item(work_items: tuple[WorkItem, ...]) -> WorkItem | None:
+    waiting_items = tuple(
+        item
+        for item in work_items
+        if item.status
+        in {
+            WorkItemStatus.DEFERRED,
+            WorkItemStatus.RETRYABLE_FAILED,
+        }
+    )
+    if not waiting_items:
+        return None
+
+    return min(
+        waiting_items,
+        key=lambda item: (
+            item.next_attempt_at.value
+            if item.next_attempt_at is not None
+            else datetime.max
+        ),
+    )
+
+
+def _user_action_required_interpretation(
+    item: WorkItem,
+) -> _StageBlockerInterpretation:
+    error_kind = _llm_error_kind(item.last_error_kind)
+
+    if error_kind is LlmErrorKind.DAILY_LIMIT:
+        return _StageBlockerInterpretation(
+            kind=ClaimExtractionStageBlockerKind.USER_ACTION_REQUIRED,
+            reason=ClaimExtractionStageBlockerReason.DAILY_LIMIT_REQUIRES_USER_CHOICE,
+            next_action=ClaimExtractionStageNextAction.CHOOSE_DAILY_LIMIT_RECOVERY,
+        )
+
+    return _StageBlockerInterpretation(
+        kind=ClaimExtractionStageBlockerKind.USER_ACTION_REQUIRED,
+        reason=ClaimExtractionStageBlockerReason.TERMINAL_FAILURE,
+        next_action=ClaimExtractionStageNextAction.INSPECT_TERMINAL_FAILURE,
+    )
+
+
+def _waiting_interpretation(item: WorkItem) -> _StageBlockerInterpretation:
+    error_kind = _llm_error_kind(item.last_error_kind)
+    if error_kind is LlmErrorKind.MINUTE_LIMIT:
+        return _StageBlockerInterpretation(
+            kind=ClaimExtractionStageBlockerKind.QUOTA_WAIT,
+            reason=ClaimExtractionStageBlockerReason.WAITING_FOR_MINUTE_QUOTA,
+            next_action=ClaimExtractionStageNextAction.RESUME_AFTER_WAIT,
+        )
+    if error_kind is LlmErrorKind.DAILY_LIMIT:
+        return _StageBlockerInterpretation(
+            kind=ClaimExtractionStageBlockerKind.QUOTA_WAIT,
+            reason=ClaimExtractionStageBlockerReason.WAITING_FOR_DAILY_RESET,
+            next_action=ClaimExtractionStageNextAction.RESUME_AFTER_WAIT,
+        )
+    if error_kind is LlmErrorKind.REQUEST_TOO_LARGE:
+        return _split_required_interpretation()
+    if error_kind is LlmErrorKind.OUTPUT_TOO_LARGE:
+        return _split_required_interpretation()
+    if error_kind is LlmErrorKind.NETWORK_ERROR:
+        return _retry_wait_interpretation(
+            ClaimExtractionStageBlockerReason.NETWORK_RETRY_SCHEDULED,
+        )
+    if error_kind is LlmErrorKind.INVALID_OUTPUT:
+        return _retry_wait_interpretation(
+            ClaimExtractionStageBlockerReason.INVALID_OUTPUT_RETRY_SCHEDULED,
+        )
+    if error_kind is LlmErrorKind.VALIDATION_FAILED:
+        return _retry_wait_interpretation(
+            ClaimExtractionStageBlockerReason.VALIDATION_RETRY_SCHEDULED,
+        )
+    if error_kind is LlmErrorKind.EMPTY_OUTPUT:
+        return _retry_wait_interpretation(
+            ClaimExtractionStageBlockerReason.EMPTY_OUTPUT_RETRY_SCHEDULED,
+        )
+
+    return _retry_wait_interpretation(
+        ClaimExtractionStageBlockerReason.PROVIDER_RETRY_SCHEDULED,
+    )
+
+
+def _split_required_interpretation() -> _StageBlockerInterpretation:
+    return _StageBlockerInterpretation(
+        kind=ClaimExtractionStageBlockerKind.SPLIT_REQUIRED,
+        reason=ClaimExtractionStageBlockerReason.SOURCE_UNIT_SPLIT_REQUIRED,
+        next_action=ClaimExtractionStageNextAction.SPLIT_SOURCE_UNIT,
+    )
+
+
+def _retry_wait_interpretation(
+    reason: ClaimExtractionStageBlockerReason,
+) -> _StageBlockerInterpretation:
+    return _StageBlockerInterpretation(
+        kind=ClaimExtractionStageBlockerKind.RETRY_WAIT,
+        reason=reason,
+        next_action=ClaimExtractionStageNextAction.RETRY_WHEN_DUE,
+    )
+
+
+def _llm_error_kind(value: str | None) -> LlmErrorKind:
+    if value is None:
+        return LlmErrorKind.UNKNOWN
+    try:
+        return LlmErrorKind(value)
+    except ValueError:
+        return LlmErrorKind.UNKNOWN
 
 
 def _require_non_empty(value: str, field_name: str) -> None:
