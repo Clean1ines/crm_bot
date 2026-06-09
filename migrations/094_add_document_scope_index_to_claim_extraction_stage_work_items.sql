@@ -1,0 +1,1 @@
+CREATE INDEX IF NOT EXISTS idx_claim_extraction_stage_work_items_document_scope ON claim_extraction_stage_work_items (workflow_run_id, source_document_ref);
