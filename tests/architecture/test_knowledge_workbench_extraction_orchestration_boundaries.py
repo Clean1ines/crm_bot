@@ -104,9 +104,20 @@ def test_create_extraction_work_items_lives_only_in_extraction_use_cases() -> No
         / "use_cases"
         / "run_claim_extraction_stage.py"
     )
+    resume_stage_path = (
+        ROOT
+        / "src"
+        / "contexts"
+        / "knowledge_workbench"
+        / "extraction"
+        / "application"
+        / "use_cases"
+        / "resume_claim_extraction_stage.py"
+    )
     allowed_files = {
         expected_path,
         run_stage_path,
+        resume_stage_path,
     }
 
     offenders: list[str] = []
