@@ -8,6 +8,7 @@ import pytest
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_observation_provenance_candidate_builder import DraftClaimObservationProvenanceCandidate
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_application_unit_of_work_port import (
+    AsyncDraftClaimObservationApplicationUnitOfWorkPort,
     DraftClaimObservationApplicationEvent,
     DraftClaimObservationApplicationUnitOfWorkPort,
 )
@@ -80,9 +81,50 @@ class FakeDraftClaimObservationApplicationUnitOfWork:
         self.rolled_back = True
 
 
+class FakeAsyncDraftClaimObservationApplicationUnitOfWork:
+    def __init__(self) -> None:
+        self.saved_observations: tuple[DraftClaimObservation, ...] = ()
+        self.saved_provenance_candidates: tuple[
+            DraftClaimObservationProvenanceCandidate,
+            ...,
+        ] = ()
+        self.events: tuple[DraftClaimObservationApplicationEvent, ...] = ()
+        self.committed = False
+        self.rolled_back = False
+
+    async def save_draft_claim_observations(
+        self,
+        observations: tuple[DraftClaimObservation, ...],
+    ) -> None:
+        self.saved_observations = self.saved_observations + observations
+
+    async def save_draft_claim_observation_provenance_candidates(
+        self,
+        candidates: tuple[DraftClaimObservationProvenanceCandidate, ...],
+    ) -> None:
+        self.saved_provenance_candidates = (
+            self.saved_provenance_candidates + candidates
+        )
+
+    async def append_event(self, event: DraftClaimObservationApplicationEvent) -> None:
+        self.events = self.events + (event,)
+
+    async def commit(self) -> None:
+        self.committed = True
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
+
+
 def _accept_unit_of_work(
     unit_of_work: DraftClaimObservationApplicationUnitOfWorkPort,
 ) -> DraftClaimObservationApplicationUnitOfWorkPort:
+    return unit_of_work
+
+
+def _accept_async_unit_of_work(
+    unit_of_work: AsyncDraftClaimObservationApplicationUnitOfWorkPort,
+) -> AsyncDraftClaimObservationApplicationUnitOfWorkPort:
     return unit_of_work
 
 
@@ -160,6 +202,27 @@ def test_fake_unit_of_work_implements_port_contract() -> None:
     assert unit_of_work.rolled_back is True
 
 
+@pytest.mark.asyncio
+async def test_fake_async_unit_of_work_implements_async_port_contract() -> None:
+    unit_of_work = FakeAsyncDraftClaimObservationApplicationUnitOfWork()
+
+    accepted = _accept_async_unit_of_work(unit_of_work)
+
+    await accepted.save_draft_claim_observations((_observation(),))
+    await accepted.save_draft_claim_observation_provenance_candidates(
+        (_provenance_candidate(),),
+    )
+    await accepted.append_event(_event())
+    await accepted.commit()
+    await accepted.rollback()
+
+    assert unit_of_work.saved_observations == (_observation(),)
+    assert unit_of_work.saved_provenance_candidates == (_provenance_candidate(),)
+    assert unit_of_work.events == (_event(),)
+    assert unit_of_work.committed is True
+    assert unit_of_work.rolled_back is True
+
+
 def test_can_save_observations_provenance_candidates_event_and_commit() -> None:
     unit_of_work = FakeDraftClaimObservationApplicationUnitOfWork()
     observation = _observation()
@@ -224,6 +287,8 @@ def test_port_contract_names_required_persistence_methods() -> None:
     text = PORT_FILE.read_text(encoding="utf-8")
 
     required_methods = (
+        "class DraftClaimObservationApplicationUnitOfWorkPort",
+        "class AsyncDraftClaimObservationApplicationUnitOfWorkPort",
         "def save_draft_claim_observations(",
         "def save_draft_claim_observation_provenance_candidates(",
         "def append_event(",
