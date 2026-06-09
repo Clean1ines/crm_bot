@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -7,11 +8,20 @@ from typing import Protocol
 from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
     PipelineArtifact,
 )
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    JsonInputValue,
+)
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.entities.work_item_attempt import (
     WorkItemAttempt,
 )
 from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_artifact_provenance import (
+    ClaimExtractionArtifactProvenance,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_prompt_a_artifact_factory import (
+    ClaimExtractionPromptAArtifactFactory,
+)
 from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_daily_exhausted import (
     RecordClaimExtractionDailyExhaustedCommand,
 )
@@ -27,6 +37,9 @@ from src.contexts.knowledge_workbench.extraction.application.process_managers.re
 )
 from src.contexts.knowledge_workbench.extraction.application.process_managers.record_claim_extraction_success import (
     RecordClaimExtractionSuccessCommand,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
 )
 from src.contexts.llm_runtime.application.policies.llm_route_planning_policy import (
     LlmRouteCandidate,
@@ -67,15 +80,18 @@ class ProcessClaimExtractionWorkItemCommand:
     started_at: datetime
     finished_at: datetime
     occurred_at: datetime
-    raw_output_artifact: PipelineArtifact | None = None
-    parsed_output_artifact: PipelineArtifact | None = None
+    workflow_run_id: str
+    stage_run_id: str
+    source_unit_ref: SourceUnitRef
+    parsed_claims_payload: tuple[Mapping[str, JsonInputValue], ...]
     split_artifact: PipelineArtifact | None = None
     error_artifact: PipelineArtifact | None = None
     retry_next_attempt_at: WaitUntil | None = None
 
     def __post_init__(self) -> None:
-        if not self.attempt_id or not self.attempt_id.strip():
-            raise ValueError("attempt_id must be non-empty")
+        _require_non_empty_string(self.attempt_id, "attempt_id")
+        _require_non_empty_string(self.workflow_run_id, "workflow_run_id")
+        _require_non_empty_string(self.stage_run_id, "stage_run_id")
         if self.attempt_number < 1:
             raise ValueError("attempt_number must be >= 1")
         _require_timezone_aware(self.started_at, "started_at")
@@ -83,6 +99,7 @@ class ProcessClaimExtractionWorkItemCommand:
         _require_timezone_aware(self.occurred_at, "occurred_at")
         if self.finished_at < self.started_at:
             raise ValueError("finished_at must be >= started_at")
+        _require_parsed_claims_payload(self.parsed_claims_payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +122,7 @@ class ProcessClaimExtractionWorkItem:
         daily_exhausted_recorder: ClaimExtractionOutcomeRecorderPort,
         split_required_recorder: ClaimExtractionOutcomeRecorderPort,
         failed_recorder: ClaimExtractionOutcomeRecorderPort,
+        artifact_factory: ClaimExtractionPromptAArtifactFactory | None = None,
     ) -> None:
         self._llm_executor = llm_executor
         self._success_recorder = success_recorder
@@ -112,6 +130,7 @@ class ProcessClaimExtractionWorkItem:
         self._daily_exhausted_recorder = daily_exhausted_recorder
         self._split_required_recorder = split_required_recorder
         self._failed_recorder = failed_recorder
+        self._artifact_factory = artifact_factory or ClaimExtractionPromptAArtifactFactory()
 
     def execute(
         self,
@@ -158,16 +177,29 @@ class ProcessClaimExtractionWorkItem:
         llm_attempt: LlmAttempt,
     ) -> tuple[object, str]:
         if outcome.kind is ExecuteLlmTaskOutcomeKind.SUCCEEDED:
-            raw_output_artifact = _require_artifact(
-                command.raw_output_artifact,
-                "raw_output_artifact",
-                outcome.kind,
+            raw_text = outcome.raw_text
+            if raw_text is None:
+                raise ValueError("SUCCEEDED outcome must carry raw_text")
+
+            provenance = ClaimExtractionArtifactProvenance(
+                workflow_run_id=command.workflow_run_id,
+                stage_run_id=command.stage_run_id,
+                source_unit_ref=command.source_unit_ref,
+                work_item_id=command.leased_work_item.work_item_id,
+                work_item_attempt_id=command.work_item_attempt.attempt_id,
+                llm_task_id=outcome.task.task_id,
+                llm_attempt_id=llm_attempt.attempt_id,
+                prompt_id=outcome.task.prompt_id,
+                prompt_version=outcome.task.prompt_version.value,
             )
-            parsed_output_artifact = _require_artifact(
-                command.parsed_output_artifact,
-                "parsed_output_artifact",
-                outcome.kind,
+            artifacts = self._artifact_factory.build(
+                provenance=provenance,
+                raw_output=raw_text,
+                parsed_claims_payload=command.parsed_claims_payload,
+                created_at=command.occurred_at,
+                updated_at=command.occurred_at,
             )
+
             return (
                 self._success_recorder.execute(
                     RecordClaimExtractionSuccessCommand(
@@ -175,8 +207,8 @@ class ProcessClaimExtractionWorkItem:
                         work_item_attempt=command.work_item_attempt,
                         llm_task=outcome.task,
                         llm_attempt=llm_attempt,
-                        raw_output_artifact=raw_output_artifact,
-                        parsed_output_artifact=parsed_output_artifact,
+                        raw_output_artifact=artifacts.raw_output_artifact,
+                        parsed_output_artifact=artifacts.parsed_output_artifact,
                         occurred_at=command.occurred_at,
                     ),
                 ),
@@ -277,9 +309,24 @@ class ProcessClaimExtractionWorkItem:
         raise ValueError(f"Unsupported claim extraction outcome: {outcome.kind.value}")
 
 
+def _require_non_empty_string(value: str, field_name: str) -> None:
+    if not value or not value.strip():
+        raise ValueError(f"{field_name} must be non-empty")
+
+
 def _require_timezone_aware(value: datetime, field_name: str) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
+
+
+def _require_parsed_claims_payload(
+    parsed_claims_payload: tuple[Mapping[str, JsonInputValue], ...],
+) -> None:
+    if not isinstance(parsed_claims_payload, tuple):
+        raise ValueError("parsed_claims_payload must be a tuple")
+    for claim_payload in parsed_claims_payload:
+        if not isinstance(claim_payload, Mapping):
+            raise ValueError("parsed_claims_payload items must be mappings")
 
 
 def _require_artifact(
