@@ -14,6 +14,9 @@ from src.contexts.execution_runtime.application.ports.work_item_unit_of_work_por
     WorkItemUnitOfWorkPort,
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.contexts.execution_runtime.domain.state_machines.work_item_state_machine import (
+    WorkItemStateMachine,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -181,6 +184,12 @@ class ResumeClaimExtractionStage:
                 continue
 
             if existing_item.status is WorkItemStatus.LEASED:
+                recreated.append(
+                    WorkItemStateMachine.release_leased_to_ready(
+                        existing_item,
+                        reason="resume_released_lease",
+                    ),
+                )
                 ready_count += 1
                 continue
 
