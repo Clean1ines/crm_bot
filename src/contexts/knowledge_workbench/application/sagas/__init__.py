@@ -18,6 +18,11 @@ from .knowledge_extraction_saga_state import (
     KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
 )
+from .knowledge_extraction_source_phase_reconciliation import (
+    KnowledgeExtractionSourcePhaseReconciler,
+    SourcePhaseReconciliationResult,
+    SourcePhaseReconciliationStatus,
+)
 
 __all__ = (
     "KnowledgeExtractionCommandEmitterPort",
@@ -30,8 +35,11 @@ __all__ = (
     "KnowledgeExtractionPhaseStatus",
     "KnowledgeExtractionSaga",
     "KnowledgeExtractionSagaStateRepositoryPort",
+    "KnowledgeExtractionSourcePhaseReconciler",
     "KnowledgeExtractionWorkflowState",
     "KnowledgeExtractionWorkflowStatus",
     "ReconcileKnowledgeExtractionSagaCommand",
     "ReconcileKnowledgeExtractionSagaResult",
+    "SourcePhaseReconciliationResult",
+    "SourcePhaseReconciliationStatus",
 )
