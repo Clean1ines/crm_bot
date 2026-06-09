@@ -7,6 +7,10 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
     KnowledgeExtractionEventCursorPort,
     KnowledgeExtractionSagaStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_source_checkpoint_reconciliation import (
+    source_reconciliation_checkpoints,
+    state_with_source_reconciliation,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionPhaseCheckpoint,
     KnowledgeExtractionPhaseKey,
@@ -73,6 +77,26 @@ class KnowledgeExtractionSaga:
         )
         if state is None:
             raise ValueError("knowledge extraction workflow state not found")
+        if self._source_phase_reconciler is not None:
+            source_result = await self._source_phase_reconciler.reconcile_source_phases(
+                state,
+            )
+            checkpoints = source_reconciliation_checkpoints(
+                state,
+                source_result,
+                command.occurred_at,
+            )
+            for checkpoint in checkpoints:
+                await self._state_repository.save_phase_checkpoint(checkpoint)
+            next_state = state_with_source_reconciliation(
+                state,
+                source_result,
+                checkpoints,
+                command.occurred_at,
+            )
+            if next_state != state:
+                await self._state_repository.save_workflow_state(next_state)
+                state = next_state
 
         return ReconcileKnowledgeExtractionSagaResult(
             workflow_run_id=state.workflow_run_id,
