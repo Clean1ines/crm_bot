@@ -1,9 +1,8 @@
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_ports import DraftObservationExtractionWorkIndexPort
-from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import KnowledgeExtractionPhaseCheckpoint, KnowledgeExtractionPhaseKey, KnowledgeExtractionPhaseStatus, KnowledgeExtractionWorkflowState
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import KnowledgeExtractionPhaseKey, KnowledgeExtractionPhaseStatus, KnowledgeExtractionWorkflowState
 
 
 class DraftObservationExtractionSchedulingStatus(StrEnum):
@@ -66,7 +65,7 @@ class DraftObservationExtractionSchedulingReconciler:
         )
 
 
-def _source_units_checkpoint(state: KnowledgeExtractionWorkflowState) -> KnowledgeExtractionPhaseCheckpoint | None:
+def _source_units_checkpoint(state: KnowledgeExtractionWorkflowState):
     for checkpoint in state.checkpoints:
         if checkpoint.phase_key is KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED:
             return checkpoint
@@ -83,7 +82,7 @@ def _source_units_not_ready_decision(state: KnowledgeExtractionWorkflowState) ->
     )
 
 
-def _source_unit_count_from_payload(payload: Mapping[str, object]) -> int:
+def _source_unit_count_from_payload(payload: object) -> int:
     value = payload.get("source_unit_count")
     if not isinstance(value, int):
         raise TypeError("source_unit_count checkpoint payload must be int")
