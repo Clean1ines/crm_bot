@@ -149,7 +149,7 @@ async def test_invalid_checkpoint_payload_raises() -> None:
 
 def test_decision_validation_catches_inconsistent_shape() -> None:
     with pytest.raises(ValueError):
-        DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 0, 1, DraftObservationExtractionSchedulingStatus.SOURCE_UNITS_NOT_READY)
+        DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 2, 0, DraftObservationExtractionSchedulingStatus.PARTIALLY_SCHEDULED)
     with pytest.raises(ValueError):
         DraftObservationExtractionSchedulingDecision("workflow-1", "source-document-1", 2, 1, DraftObservationExtractionSchedulingStatus.READY_TO_SCHEDULE)
     with pytest.raises(ValueError):
