@@ -18,7 +18,7 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import PostgresSourceManagementRepository
 
 
-ROOT = Path(__file__).resolve().parents[7]
+ROOT = Path(__file__).resolve().parents[6]
 ADAPTER = ROOT / "src" / "contexts" / "knowledge_workbench" / "source_management" / "infrastructure" / "postgres" / "postgres_source_management_repository.py"
 
 
