@@ -76,6 +76,26 @@ def _claim_payload(
     }
 
 
+def _provenance_payload(
+    *,
+    claims: JsonInputValue,
+    raw_artifact_ref: JsonInputValue = "raw-artifact-1",
+) -> dict[str, JsonInputValue]:
+    return {
+        "workflow_run_id": "workflow-1",
+        "stage_run_id": "stage-1",
+        "source_unit_ref": "document-1.unit.0",
+        "work_item_id": "work-item-1",
+        "work_item_attempt_id": "work-attempt-1",
+        "llm_task_id": "llm-task-1",
+        "llm_attempt_id": "llm-attempt-1",
+        "prompt_id": "prompt-a",
+        "prompt_version": "v1",
+        "raw_artifact_ref": raw_artifact_ref,
+        "claims": claims,
+    }
+
+
 def _artifact(
     payload: dict[str, JsonInputValue],
     *,
@@ -145,6 +165,45 @@ def test_parses_one_composite_claim() -> None:
 
     assert observations[0].granularity is DraftClaimGranularity.COMPOSITE
     assert observations[0].claim.value == "Onboarding includes several steps."
+
+
+def test_parses_provenance_bearing_payload_without_changing_observation_content() -> None:
+    observations = _parse(
+        _provenance_payload(
+            claims=(
+                _claim_payload(
+                    claim="Provenance payload still yields the same observation.",
+                    possible_questions=("Does provenance affect parsing?",),
+                ),
+            ),
+        ),
+        artifact_ref=ArtifactRef("parsed-artifact-1"),
+    )
+
+    assert len(observations) == 1
+    observation = observations[0]
+    assert observation.observation_ref.value == "parsed-artifact-1:draft-claim:0"
+    assert observation.source_unit_ref == SourceUnitRef("document-1.unit.0")
+    assert observation.claim.value == "Provenance payload still yields the same observation."
+    assert tuple(question.value for question in observation.possible_questions) == (
+        "Does provenance affect parsing?",
+    )
+
+
+def test_provenance_bearing_payload_missing_mandatory_provenance_rejected() -> None:
+    payload = _provenance_payload(claims=(_claim_payload(),))
+    del payload["llm_attempt_id"]
+
+    with pytest.raises(InvalidDraftClaimObservationArtifact):
+        _parse(payload)
+
+
+def test_provenance_bearing_payload_wrong_provenance_type_rejected() -> None:
+    payload = _provenance_payload(claims=(_claim_payload(),))
+    payload["prompt_version"] = 2
+
+    with pytest.raises(InvalidDraftClaimObservationArtifact):
+        _parse(payload)
 
 
 def test_parses_multiple_claims_in_order() -> None:
