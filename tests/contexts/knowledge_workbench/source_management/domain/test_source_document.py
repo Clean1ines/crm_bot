@@ -22,10 +22,37 @@ def _now() -> datetime:
     return datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
 
 
+def test_source_document_accepts_valid_document() -> None:
+    document = SourceDocument(
+        document_ref=SourceDocumentRef("document-1"),
+        project_id="project-1",
+        source_format=SourceFormat.MARKDOWN,
+        content_hash="sha256:abc",
+        created_at=_now(),
+        original_filename="knowledge.md",
+    )
+
+    assert document.document_ref == SourceDocumentRef("document-1")
+    assert document.project_id == "project-1"
+    assert document.source_format is SourceFormat.MARKDOWN
+
+
+def test_source_document_requires_non_empty_project_id() -> None:
+    with pytest.raises(ValueError):
+        SourceDocument(
+            document_ref=SourceDocumentRef("document-1"),
+            project_id=" ",
+            source_format=SourceFormat.MARKDOWN,
+            content_hash="sha256:abc",
+            created_at=_now(),
+        )
+
+
 def test_source_document_requires_non_empty_hash() -> None:
     with pytest.raises(ValueError):
         SourceDocument(
             document_ref=SourceDocumentRef("document-1"),
+            project_id="project-1",
             source_format=SourceFormat.MARKDOWN,
             content_hash=" ",
             created_at=_now(),
@@ -36,6 +63,7 @@ def test_source_document_requires_timezone_aware_timestamp() -> None:
     with pytest.raises(ValueError):
         SourceDocument(
             document_ref=SourceDocumentRef("document-1"),
+            project_id="project-1",
             source_format=SourceFormat.MARKDOWN,
             content_hash="sha256:abc",
             created_at=datetime(2026, 6, 8, 12, 0),
@@ -46,6 +74,7 @@ def test_source_document_rejects_empty_original_filename() -> None:
     with pytest.raises(ValueError):
         SourceDocument(
             document_ref=SourceDocumentRef("document-1"),
+            project_id="project-1",
             source_format=SourceFormat.MARKDOWN,
             content_hash="sha256:abc",
             created_at=_now(),
