@@ -65,9 +65,18 @@ class ApplyDraftClaimObservationArtifactOnArtifactStored:
                 status="ignored_missing_artifact",
             )
         if getattr(artifact, "artifact_kind") == PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND:
+            try:
+                ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(
+                    artifact.payload.value,
+                )
+            except InvalidClaimExtractionArtifactProvenance:
+                return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
+                    artifact_ref=artifact_ref,
+                    status="ignored_invalid_prompt_a_provenance",
+                )
             return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
                 artifact_ref=artifact_ref,
-                status="ignored_invalid_prompt_a_provenance",
+                status="applied",
             )
         return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
             artifact_ref=artifact_ref,
