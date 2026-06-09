@@ -52,3 +52,19 @@ class ApplyDraftClaimObservationArtifactOnArtifactStored:
     ) -> None:
         self._artifact_loader = artifact_loader
         self._apply_use_case = apply_use_case
+
+    async def execute(
+        self,
+        command: ApplyDraftClaimObservationArtifactOnArtifactStoredCommand,
+    ) -> ApplyDraftClaimObservationArtifactOnArtifactStoredResult:
+        artifact_ref = command.event.artifact_ref
+        artifact = await self._artifact_loader.load_artifact(artifact_ref)
+        if artifact is None:
+            return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
+                artifact_ref=artifact_ref,
+                status="ignored_missing_artifact",
+            )
+        return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
+            artifact_ref=artifact_ref,
+            status="ignored_non_prompt_a_parsed_artifact",
+        )
