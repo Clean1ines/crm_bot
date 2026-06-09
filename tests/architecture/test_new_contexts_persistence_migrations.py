@@ -61,6 +61,18 @@ EXPECTED_MIGRATIONS = {
         "idx_draft_claim_observation_provenance_stage",
         "idx_draft_claim_observation_provenance_artifacts",
     ),
+    "090_create_knowledge_extraction_saga_tables.sql": (
+        "CREATE TABLE IF NOT EXISTS knowledge_extraction_workflow_runs",
+        "CREATE TABLE IF NOT EXISTS knowledge_extraction_phase_checkpoints",
+        "CREATE TABLE IF NOT EXISTS knowledge_extraction_command_log",
+        "CREATE TABLE IF NOT EXISTS knowledge_extraction_event_cursor",
+        "idx_knowledge_extraction_workflow_runs_project",
+        "idx_knowledge_extraction_workflow_runs_source_document",
+        "idx_knowledge_extraction_workflow_runs_status_phase",
+        "idx_knowledge_extraction_phase_checkpoints_phase_status",
+        "idx_knowledge_extraction_command_log_workflow_phase",
+        "idx_knowledge_extraction_event_cursor_workflow",
+    ),
 }
 
 FORBIDDEN_LEGACY_MARKERS = (
@@ -68,6 +80,7 @@ FORBIDDEN_LEGACY_MARKERS = (
     "knowledge_workbench_parallel_section_batch_plans",
     "knowledge_workbench_section_batch_plans",
     "knowledge_workbench_section_work_items",
+    "knowledge_workbench_processing_runs",
     "knowledge_workbench_processing_node_runs",
     "knowledge_workbench_processing_node_artifacts",
     "CLAIM_OBSERVATIONS_PERSISTED",
@@ -77,6 +90,8 @@ FORBIDDEN_LEGACY_MARKERS = (
     "ProcessingNodeRun",
     "ProcessingNodeArtifact",
     "SectionBatchQueueItem",
+    "workbench_parallel_processing",
+    "process_workbench_document",
 )
 
 REQUIRED_TABLES = (
@@ -91,6 +106,10 @@ REQUIRED_TABLES = (
     "draft_claim_observation_possible_questions",
     "claim_extraction_stage_work_items",
     "draft_claim_observation_provenance",
+    "knowledge_extraction_workflow_runs",
+    "knowledge_extraction_phase_checkpoints",
+    "knowledge_extraction_command_log",
+    "knowledge_extraction_event_cursor",
 )
 
 
@@ -303,6 +322,39 @@ def test_draft_claim_observation_provenance_migration_stays_extraction_trace_onl
         "ontology",
         "publication",
         "consolidated",
+    )
+
+    missing = [fragment for fragment in required if fragment not in text]
+    offenders = [marker for marker in forbidden if marker in text]
+
+    assert not missing, "\n".join(missing)
+    assert not offenders, "\n".join(offenders)
+
+
+def test_knowledge_extraction_saga_migration_defines_canonical_durable_state() -> None:
+    text = _read_migration("090_create_knowledge_extraction_saga_tables.sql")
+
+    required = (
+        "CREATE TABLE IF NOT EXISTS knowledge_extraction_workflow_runs",
+        "CREATE TABLE IF NOT EXISTS knowledge_extraction_phase_checkpoints",
+        "CREATE TABLE IF NOT EXISTS knowledge_extraction_command_log",
+        "CREATE TABLE IF NOT EXISTS knowledge_extraction_event_cursor",
+        "workflow_run_id text PRIMARY KEY",
+        "project_id text NOT NULL",
+        "source_document_ref text NOT NULL",
+        "status text NOT NULL",
+        "current_phase text NOT NULL",
+        "CHECK (status <> 'COMPLETED' OR completed_at IS NOT NULL)",
+        "CHECK (status <> 'CANCELLED' OR cancelled_at IS NOT NULL)",
+        "CHECK (jsonb_typeof(checkpoint_payload) = 'object')",
+        "PRIMARY KEY (workflow_run_id, phase_key)",
+        "ON CONFLICT",
+    )
+    forbidden = (
+        "knowledge_workbench_processing_runs",
+        "SectionBatchQueueItem",
+        "workbench_parallel_processing",
+        "process_workbench_document",
     )
 
     missing = [fragment for fragment in required if fragment not in text]
