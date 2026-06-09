@@ -90,6 +90,9 @@ class ApplyDraftClaimObservationArtifact:
             )
 
             self._unit_of_work.save_draft_claim_observations(observations)
+            self._unit_of_work.save_draft_claim_observation_provenance_candidates(
+                provenance_candidates,
+            )
             self._unit_of_work.append_event(event)
             self._unit_of_work.commit()
         except Exception:
