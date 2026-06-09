@@ -8,4 +8,6 @@ SET source_document_ref = workflow_run_id,
 WHERE source_document_ref IS NULL
    OR source_unit_ref IS NULL;
 
-ALTER TABLE claim_extraction
+ALTER TABLE claim_extraction_stage_work_items
+    ALTER COLUMN source_document_ref SET NOT NULL,
+    ALTER COLUMN source_unit_ref SET NOT NULL;
