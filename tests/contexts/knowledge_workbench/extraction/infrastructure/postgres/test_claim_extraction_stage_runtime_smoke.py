@@ -40,18 +40,25 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 
 @dataclass(slots=True)
 class FakeTransaction:
+    connection: FakeRuntimeConnection
     started: int = 0
     committed: int = 0
     rolled_back: int = 0
 
     async def start(self) -> None:
         self.started += 1
+        self.connection.transaction_active = True
+        self.connection.boundary_events.append("transaction.start")
 
     async def commit(self) -> None:
         self.committed += 1
+        self.connection.boundary_events.append("transaction.commit")
+        self.connection.transaction_active = False
 
     async def rollback(self) -> None:
         self.rolled_back += 1
+        self.connection.boundary_events.append("transaction.rollback")
+        self.connection.transaction_active = False
 
 
 @dataclass(slots=True)
@@ -64,12 +71,17 @@ class FakeRow:
 
 @dataclass(slots=True)
 class FakeRuntimeConnection:
-    transaction_obj: FakeTransaction = field(default_factory=FakeTransaction)
     work_items: dict[str, dict[str, object]] = field(default_factory=dict)
     stage_items: list[tuple[str, str, str]] = field(default_factory=list)
     execute_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     fetch_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     fetchval_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+    boundary_events: list[str] = field(default_factory=list)
+    transaction_active: bool = False
+    transaction_obj: FakeTransaction = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.transaction_obj = FakeTransaction(connection=self)
 
     def transaction(self) -> FakeTransaction:
         return self.transaction_obj
@@ -77,6 +89,8 @@ class FakeRuntimeConnection:
     async def execute(self, query: str, *args: object) -> object:
         self.execute_calls.append((query, args))
         if "INSERT INTO execution_work_items" in query:
+            assert self.transaction_active is True
+            self.boundary_events.append("write.execution_work_items")
             self.work_items[str(args[0])] = {
                 "work_item_id": args[0],
                 "work_kind": args[1],
@@ -90,6 +104,8 @@ class FakeRuntimeConnection:
             }
             return "OK"
         if "INSERT INTO claim_extraction_stage_work_items" in query:
+            assert self.transaction_active is True
+            self.boundary_events.append("write.claim_extraction_stage_work_items")
             item = (str(args[0]), str(args[1]), str(args[2]))
             if item not in self.stage_items:
                 self.stage_items.append(item)
@@ -97,6 +113,8 @@ class FakeRuntimeConnection:
         return "OK"
 
     async def fetch(self, query: str, *args: object) -> list[FakeRow]:
+        assert self.transaction_active is False
+        self.boundary_events.append("read.execution_work_items")
         self.fetch_calls.append((query, args))
         workflow_run_id = str(args[0])
         stage_run_id = str(args[1])
@@ -110,6 +128,8 @@ class FakeRuntimeConnection:
         return rows
 
     async def fetchval(self, query: str, *args: object) -> object:
+        assert self.transaction_active is False
+        self.boundary_events.append("read.pipeline_artifacts")
         self.fetchval_calls.append((query, args))
         return 0
 
@@ -158,10 +178,21 @@ async def test_postgres_runtime_start_then_progress_reads_indexed_work_items() -
     assert connection.transaction_obj.started == 1
     assert connection.transaction_obj.committed == 1
     assert connection.transaction_obj.rolled_back == 0
+    assert connection.transaction_active is False
     assert len(connection.work_items) == 2
     assert connection.stage_items == [
         ("workflow-1", "stage-1", start_result.work_items[0].work_item_id),
         ("workflow-1", "stage-1", start_result.work_items[1].work_item_id),
+    ]
+    assert connection.boundary_events == [
+        "transaction.start",
+        "write.execution_work_items",
+        "write.claim_extraction_stage_work_items",
+        "write.execution_work_items",
+        "write.claim_extraction_stage_work_items",
+        "transaction.commit",
+        "read.execution_work_items",
+        "read.pipeline_artifacts",
     ]
     assert progress.status is ClaimExtractionStageProgressStatus.PENDING
     assert progress.ready_count == 2
