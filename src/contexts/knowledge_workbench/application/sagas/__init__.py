@@ -64,6 +64,13 @@ from .source_ingestion_segmentation_profiles import (
     WorkbenchPromptProfile,
     default_source_ingestion_segmentation_profile,
 )
+from .source_ingestion_token_estimation import (
+    RoughWorkbenchTokenEstimator,
+    SourceIngestionPromptTokenEstimationService,
+    VerifiedPromptTokenEstimate,
+    WorkbenchPromptText,
+    WorkbenchTokenEstimatorPort,
+)
 from .start_source_ingestion_workflow import (
     SourceIngestionAcceptedPlan,
     StartSourceIngestionWorkflow,
@@ -124,4 +131,9 @@ __all__ = (
     "WorkbenchPromptProfile",
     "default_source_ingestion_segmentation_profile",
     "SourcePhaseReconciliationStatus",
+    "RoughWorkbenchTokenEstimator",
+    "SourceIngestionPromptTokenEstimationService",
+    "VerifiedPromptTokenEstimate",
+    "WorkbenchPromptText",
+    "WorkbenchTokenEstimatorPort",
 )

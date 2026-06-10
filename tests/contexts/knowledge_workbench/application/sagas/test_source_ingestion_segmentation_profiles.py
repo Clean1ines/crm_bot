@@ -8,6 +8,15 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segment
     WorkbenchPromptProfile,
     default_source_ingestion_segmentation_profile,
 )
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_token_estimation import (
+    SourceIngestionPromptTokenEstimationService,
+    WorkbenchPromptText,
+)
+
+
+class StaticEstimator:
+    def estimate_tokens(self, text: str) -> int:
+        return 777
 
 
 def test_default_profile_describes_current_draft_observation_prompt() -> None:
@@ -86,3 +95,25 @@ def test_no_provider_or_runtime_hardcode_in_profile_catalog() -> None:
 
     for marker in forbidden:
         assert marker not in source
+
+
+def test_default_static_prompt_token_count_can_be_replaced_by_estimation_service() -> (
+    None
+):
+    profile = default_source_ingestion_segmentation_profile()
+    service = SourceIngestionPromptTokenEstimationService(
+        token_estimator=StaticEstimator(),
+    )
+
+    updated = service.with_estimated_prompt_tokens(
+        profile=profile,
+        prompt_text=WorkbenchPromptText(
+            prompt_name=profile.prompt.prompt_name,
+            node_id=profile.prompt.node_id,
+            prompt_path=profile.prompt.prompt_path,
+            text="NODE: faq_claim_observations\nReturn JSON.",
+        ),
+    )
+
+    assert profile.prompt.prompt_token_count == 2_000
+    assert updated.prompt.prompt_token_count == 777
