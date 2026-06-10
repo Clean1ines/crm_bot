@@ -51,6 +51,7 @@ def test_allow_when_all_needs_are_available() -> None:
     assert decision.is_allowed()
     assert decision.blocking_resources == ()
     assert decision.reason == "capacity_available"
+    assert decision.max_admissible_items == 1
 
 
 def test_throttle_when_resource_is_insufficient_but_non_zero() -> None:
@@ -81,6 +82,7 @@ def test_throttle_when_resource_is_insufficient_but_non_zero() -> None:
     assert decision.is_allowed() is False
     assert decision.blocking_resources == (CapacityResourceKind.WORKER_SLOT,)
     assert decision.reason == "capacity_temporarily_insufficient"
+    assert decision.max_admissible_items == 0
 
 
 def test_reject_when_resource_unavailable() -> None:
@@ -111,6 +113,7 @@ def test_reject_when_resource_unavailable() -> None:
     assert decision.is_allowed() is False
     assert decision.blocking_resources == (CapacityResourceKind.DB_CONNECTION,)
     assert decision.reason == "capacity_unavailable"
+    assert decision.max_admissible_items == 0
 
 
 def test_missing_resource_is_treated_as_zero() -> None:
@@ -133,6 +136,7 @@ def test_missing_resource_is_treated_as_zero() -> None:
     assert decision.status is CapacityDecisionStatus.REJECT
     assert decision.blocking_resources == (CapacityResourceKind.LOCAL_GPU_LANE,)
     assert decision.reason == "capacity_unavailable"
+    assert decision.max_admissible_items == 0
 
 
 def test_multiple_blocking_resources_are_preserved_deterministically() -> None:
@@ -173,6 +177,7 @@ def test_multiple_blocking_resources_are_preserved_deterministically() -> None:
         CapacityResourceKind.DB_CONNECTION,
     )
     assert decision.reason == "capacity_unavailable"
+    assert decision.max_admissible_items == 0
 
 
 def test_validation_rejects_bad_shapes() -> None:
@@ -227,14 +232,18 @@ def test_validation_rejects_bad_shapes() -> None:
         CapacityDecision(
             status=CapacityDecisionStatus.ALLOW,
             work_class=CapacityWorkClass.IO_BOUND,
+            max_admissible_items=1,
             blocking_resources=(CapacityResourceKind.WORKER_SLOT,),
             reason="capacity_available",
         )
 
-    with pytest.raises(ValueError, match="THROTTLE/REJECT decision must have"):
+    with pytest.raises(
+        ValueError, match="THROTTLE decision must have blocking_resources"
+    ):
         CapacityDecision(
             status=CapacityDecisionStatus.THROTTLE,
             work_class=CapacityWorkClass.IO_BOUND,
+            max_admissible_items=0,
             blocking_resources=(),
             reason="capacity_temporarily_insufficient",
         )
@@ -243,6 +252,7 @@ def test_validation_rejects_bad_shapes() -> None:
         CapacityDecision(
             status=CapacityDecisionStatus.ALLOW,
             work_class=CapacityWorkClass.IO_BOUND,
+            max_admissible_items=1,
             blocking_resources=(),
             reason="",
         )
@@ -317,3 +327,85 @@ def test_capacity_policy_source_guard() -> None:
 
     for marker in forbidden_markers:
         assert marker not in source
+
+
+def test_allows_when_requested_items_fit_all_resources() -> None:
+    request = CapacityRequest(
+        work_class=CapacityWorkClass.IO_BOUND,
+        requested_items=3,
+        needs=(CapacityNeed(CapacityResourceKind.WORKER_SLOT, 1),),
+    )
+    snapshot = CapacitySnapshot(
+        availability=(CapacityAvailability(CapacityResourceKind.WORKER_SLOT, 3),),
+    )
+
+    decision = CapacityAdmissionPolicy().decide(request=request, snapshot=snapshot)
+
+    assert decision.status is CapacityDecisionStatus.ALLOW
+    assert decision.max_admissible_items == 3
+    assert decision.blocking_resources == ()
+
+
+def test_throttles_with_partial_max_admissible_items() -> None:
+    request = CapacityRequest(
+        work_class=CapacityWorkClass.IO_BOUND,
+        requested_items=8,
+        needs=(CapacityNeed(CapacityResourceKind.WORKER_SLOT, 1),),
+    )
+    snapshot = CapacitySnapshot(
+        availability=(CapacityAvailability(CapacityResourceKind.WORKER_SLOT, 3),),
+    )
+
+    decision = CapacityAdmissionPolicy().decide(request=request, snapshot=snapshot)
+
+    assert decision.status is CapacityDecisionStatus.THROTTLE
+    assert decision.max_admissible_items == 3
+    assert decision.blocking_resources == (CapacityResourceKind.WORKER_SLOT,)
+
+
+def test_rejects_with_zero_max_admissible_items_when_resource_unavailable() -> None:
+    request = CapacityRequest(
+        work_class=CapacityWorkClass.IO_BOUND,
+        requested_items=8,
+        needs=(CapacityNeed(CapacityResourceKind.WORKER_SLOT, 1),),
+    )
+    snapshot = CapacitySnapshot(
+        availability=(CapacityAvailability(CapacityResourceKind.WORKER_SLOT, 0),),
+    )
+
+    decision = CapacityAdmissionPolicy().decide(request=request, snapshot=snapshot)
+
+    assert decision.status is CapacityDecisionStatus.REJECT
+    assert decision.max_admissible_items == 0
+
+
+def test_multiple_needs_use_min_capacity() -> None:
+    request = CapacityRequest(
+        work_class=CapacityWorkClass.IO_BOUND,
+        requested_items=8,
+        needs=(
+            CapacityNeed(CapacityResourceKind.WORKER_SLOT, 1),
+            CapacityNeed(CapacityResourceKind.EXTERNAL_IO, 3500),
+        ),
+    )
+    snapshot = CapacitySnapshot(
+        availability=(
+            CapacityAvailability(CapacityResourceKind.WORKER_SLOT, 8),
+            CapacityAvailability(CapacityResourceKind.EXTERNAL_IO, 9000),
+        ),
+    )
+
+    decision = CapacityAdmissionPolicy().decide(request=request, snapshot=snapshot)
+
+    assert decision.status is CapacityDecisionStatus.THROTTLE
+    assert decision.max_admissible_items == 2
+    assert decision.blocking_resources == (CapacityResourceKind.EXTERNAL_IO,)
+
+
+def test_requested_items_default_remains_one() -> None:
+    request = CapacityRequest(
+        work_class=CapacityWorkClass.IO_BOUND,
+        needs=(CapacityNeed(CapacityResourceKind.WORKER_SLOT, 1),),
+    )
+
+    assert request.requested_items == 1

@@ -56,6 +56,7 @@ class CapacityAvailability:
 class CapacityRequest:
     work_class: CapacityWorkClass
     needs: tuple[CapacityNeed, ...]
+    requested_items: int = 1
 
     def __post_init__(self) -> None:
         _require_work_class(self.work_class)
@@ -70,6 +71,10 @@ class CapacityRequest:
             tuple(need.resource_kind for need in self.needs),
             field_name="needs",
         )
+        if not isinstance(self.requested_items, int):
+            raise TypeError("requested_items must be int")
+        if self.requested_items <= 0:
+            raise ValueError("requested_items must be > 0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +104,7 @@ class CapacitySnapshot:
 class CapacityDecision:
     status: CapacityDecisionStatus
     work_class: CapacityWorkClass
+    max_admissible_items: int
     blocking_resources: tuple[CapacityResourceKind, ...] = ()
     reason: str = ""
 
@@ -106,6 +112,10 @@ class CapacityDecision:
         if not isinstance(self.status, CapacityDecisionStatus):
             raise TypeError("status must be CapacityDecisionStatus")
         _require_work_class(self.work_class)
+        if not isinstance(self.max_admissible_items, int):
+            raise TypeError("max_admissible_items must be int")
+        if self.max_admissible_items < 0:
+            raise ValueError("max_admissible_items must be >= 0")
         if not isinstance(self.blocking_resources, tuple):
             raise TypeError("blocking_resources must be tuple")
         for resource_kind in self.blocking_resources:
@@ -116,10 +126,21 @@ class CapacityDecision:
         if self.status is CapacityDecisionStatus.ALLOW:
             if self.blocking_resources:
                 raise ValueError("ALLOW decision must not have blocking_resources")
+            if self.max_admissible_items <= 0:
+                raise ValueError(
+                    "ALLOW decision must have positive max_admissible_items"
+                )
+            return
+
+        if self.status is CapacityDecisionStatus.REJECT:
+            if self.max_admissible_items != 0:
+                raise ValueError("REJECT decision must have zero max_admissible_items")
+            if not self.blocking_resources:
+                raise ValueError("REJECT decision must have blocking_resources")
             return
 
         if not self.blocking_resources:
-            raise ValueError("THROTTLE/REJECT decision must have blocking_resources")
+            raise ValueError("THROTTLE decision must have blocking_resources")
 
     def is_allowed(self) -> bool:
         return self.status is CapacityDecisionStatus.ALLOW
