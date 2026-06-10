@@ -644,7 +644,6 @@ async def knowledge_import_quality_report(
 
 
 @router.get("/{document_id}/price-facts")
-@router.get("/{document_id}/price-facts")
 async def knowledge_price_facts(
     project_id: str,
     document_id: str,
@@ -667,7 +666,6 @@ async def knowledge_price_facts(
     return await service.price_facts(document_id=document_id)
 
 
-@router.get("/commercial-truth-review")
 @router.get("/commercial-truth-review")
 async def project_commercial_truth_review(
     project_id: str,
@@ -695,7 +693,6 @@ async def project_commercial_truth_review(
 
 
 @router.get("/{document_id}/commercial-truth-review")
-@router.get("/{document_id}/commercial-truth-review")
 async def knowledge_commercial_truth_review(
     project_id: str,
     document_id: str,
@@ -722,7 +719,6 @@ async def knowledge_commercial_truth_review(
     )
 
 
-@router.post("/{document_id}/price-facts/publish")
 @router.post("/{document_id}/price-facts/publish")
 async def publish_knowledge_price_facts(
     project_id: str,
@@ -754,7 +750,6 @@ async def publish_knowledge_price_facts(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/{document_id}/price-facts/reject")
 @router.post("/{document_id}/price-facts/reject")
 async def reject_knowledge_price_facts(
     project_id: str,

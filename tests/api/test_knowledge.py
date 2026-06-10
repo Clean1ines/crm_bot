@@ -945,3 +945,45 @@ def test_upload_response_source_units_url_source_guard() -> None:
 
     for marker in forbidden:
         assert marker not in checked_region
+
+
+def test_knowledge_http_routes_are_not_duplicated() -> None:
+    source = _source()
+
+    duplicated_route_markers = (
+        '@router.get("/usage")',
+        '@router.get("/{document_id}/price-facts")',
+        '@router.get("/commercial-truth-review")',
+        '@router.get("/{document_id}/commercial-truth-review")',
+        '@router.post("/{document_id}/price-facts/publish")',
+        '@router.post("/{document_id}/price-facts/reject")',
+    )
+
+    for marker in duplicated_route_markers:
+        assert source.count(marker) == 1
+
+    assert "_source_units_url" in source
+    assert (
+        '@router.get("/source-documents/{source_document_ref}/source-units")' in source
+    )
+    assert "source_units_url" in source
+
+    guarded_region = source.split('@router.post("")', 1)[1].split(
+        '@router.post("/{document_id}/retighten")',
+        1,
+    )[0]
+    forbidden = (
+        "RunClaimExtractionStageAsync",
+        "DraftObservationExtractionSchedulingReconciler",
+        "PROMPT_A_WORK_SCHEDULED",
+        "capacity_runtime",
+        "execution_runtime",
+        "llm_runtime",
+        "artifact_runtime",
+        "worker_loop",
+        "JobDispatcher",
+        "queue",
+    )
+
+    for marker in forbidden:
+        assert marker not in guarded_region
