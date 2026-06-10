@@ -126,7 +126,7 @@ class KnowledgeExtractionSaga:
                     SourceDocumentRef(state.source_document_ref),
                 )
             )
-            phase_result = self._draft_observation_scheduling_phase.execute(
+            phase_result = await self._draft_observation_scheduling_phase.execute(
                 AdvanceToDraftObservationSchedulingPhaseCommand(
                     state=state,
                     source_units=source_units,

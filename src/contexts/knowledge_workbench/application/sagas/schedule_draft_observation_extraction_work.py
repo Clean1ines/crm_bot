@@ -70,7 +70,7 @@ class ScheduleDraftObservationExtractionWorkResult:
 class ScheduleDraftObservationExtractionWork:
     scheduling_unit_of_work: WorkItemSchedulingUnitOfWorkPort
 
-    def execute(
+    async def execute(
         self,
         command: ScheduleDraftObservationExtractionWorkCommand,
     ) -> ScheduleDraftObservationExtractionWorkResult:
@@ -86,7 +86,7 @@ class ScheduleDraftObservationExtractionWork:
                 plans=workbench_plans.plans,
             ),
         )
-        scheduling_result = EnsureWorkItemsScheduled(
+        scheduling_result = await EnsureWorkItemsScheduled(
             unit_of_work=self.scheduling_unit_of_work,
         ).execute(
             EnsureWorkItemsScheduledCommand(

@@ -92,14 +92,14 @@ class AdvanceToDraftObservationSchedulingPhaseResult:
 class AdvanceToDraftObservationSchedulingPhase:
     scheduling_service: ScheduleDraftObservationExtractionWork
 
-    def execute(
+    async def execute(
         self,
         command: AdvanceToDraftObservationSchedulingPhaseCommand,
     ) -> AdvanceToDraftObservationSchedulingPhaseResult:
         state = command.state
         source_units = command.source_units
 
-        scheduling_result = self.scheduling_service.execute(
+        scheduling_result = await self.scheduling_service.execute(
             ScheduleDraftObservationExtractionWorkCommand(
                 workflow_run_id=state.workflow_run_id,
                 source_document_ref=SourceDocumentRef(state.source_document_ref),

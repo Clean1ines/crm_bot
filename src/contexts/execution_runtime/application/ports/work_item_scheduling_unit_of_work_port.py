@@ -7,15 +7,15 @@ from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 
 
 class WorkItemSchedulingUnitOfWorkPort(Protocol):
-    """Transaction boundary for idempotent Execution Runtime scheduling."""
+    """Async transaction boundary for idempotent Execution Runtime scheduling."""
 
-    def get_work_item(self, work_item_id: str) -> WorkItem | None:
+    async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         """Return a scheduled work item by deterministic identity."""
 
-    def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
+    async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
         """Return persisted schedule payload hash for idempotency checks."""
 
-    def save_scheduled_work_item(
+    async def save_scheduled_work_item(
         self,
         *,
         item: WorkItem,
@@ -25,8 +25,8 @@ class WorkItemSchedulingUnitOfWorkPort(Protocol):
     ) -> None:
         """Persist a newly scheduled READY work item and scheduling metadata."""
 
-    def commit(self) -> None:
+    async def commit(self) -> None:
         """Commit transaction."""
 
-    def rollback(self) -> None:
+    async def rollback(self) -> None:
         """Rollback transaction."""

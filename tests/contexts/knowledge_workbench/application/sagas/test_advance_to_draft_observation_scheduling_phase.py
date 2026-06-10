@@ -65,13 +65,13 @@ class FakeWorkItemSchedulingUnitOfWork:
     committed: bool = False
     rolled_back: bool = False
 
-    def get_work_item(self, work_item_id: str) -> WorkItem | None:
+    async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         return self.existing_items.get(work_item_id)
 
-    def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
+    async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
         return self.schedule_payload_hashes.get(work_item_id)
 
-    def save_scheduled_work_item(
+    async def save_scheduled_work_item(
         self,
         *,
         item: WorkItem,
@@ -90,10 +90,10 @@ class FakeWorkItemSchedulingUnitOfWork:
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
 
-    def commit(self) -> None:
+    async def commit(self) -> None:
         self.committed = True
 
-    def rollback(self) -> None:
+    async def rollback(self) -> None:
         self.rolled_back = True
 
 
@@ -189,10 +189,11 @@ def _work_kind() -> WorkKind:
     return WorkKind("knowledge_workbench.draft_observation_extraction")
 
 
-def test_advances_phase_after_scheduling_created_work() -> None:
+@pytest.mark.asyncio
+async def test_advances_phase_after_scheduling_created_work() -> None:
     unit_of_work = FakeWorkItemSchedulingUnitOfWork()
 
-    result = _service(unit_of_work).execute(_command())
+    result = await _service(unit_of_work).execute(_command())
 
     assert (
         result.state.current_phase
@@ -219,13 +220,14 @@ def test_advances_phase_after_scheduling_created_work() -> None:
     assert not unit_of_work.rolled_back
 
 
-def test_repeated_execution_uses_already_exists_and_still_advances() -> None:
+@pytest.mark.asyncio
+async def test_repeated_execution_uses_already_exists_and_still_advances() -> None:
     unit_of_work = FakeWorkItemSchedulingUnitOfWork()
     service = _service(unit_of_work)
     original_state = _state()
 
-    first = service.execute(_command(state=original_state))
-    second = service.execute(_command(state=original_state))
+    first = await service.execute(_command(state=original_state))
+    second = await service.execute(_command(state=original_state))
 
     assert first.created_count == 2
     assert second.planned_count == 2
@@ -240,7 +242,8 @@ def test_repeated_execution_uses_already_exists_and_still_advances() -> None:
     assert len(unit_of_work.saved) == 2
 
 
-def test_conflict_raises_and_does_not_produce_checkpoint() -> None:
+@pytest.mark.asyncio
+async def test_conflict_raises_and_does_not_produce_checkpoint() -> None:
     unit_ref = "source-document:project-1:abc.unit.0"
     work_item_id = _work_item_id(unit_ref=unit_ref)
     unit_of_work = FakeWorkItemSchedulingUnitOfWork(
@@ -254,14 +257,15 @@ def test_conflict_raises_and_does_not_produce_checkpoint() -> None:
     )
 
     with pytest.raises(ValueError, match="draft observation scheduling conflict"):
-        _service(unit_of_work).execute(
+        await _service(unit_of_work).execute(
             _command(source_units=(_source_unit(unit_ref=unit_ref, ordinal=0),)),
         )
 
     assert unit_of_work.saved == []
 
 
-def test_rejects_wrong_current_phase() -> None:
+@pytest.mark.asyncio
+async def test_rejects_wrong_current_phase() -> None:
     with pytest.raises(ValueError, match="current_phase must be SOURCE_UNITS_CREATED"):
         _command(
             state=_state(
@@ -270,12 +274,14 @@ def test_rejects_wrong_current_phase() -> None:
         )
 
 
-def test_rejects_non_running_workflow() -> None:
+@pytest.mark.asyncio
+async def test_rejects_non_running_workflow() -> None:
     with pytest.raises(ValueError, match="workflow status must be RUNNING"):
         _command(state=_state(status=KnowledgeExtractionWorkflowStatus.PAUSED))
 
 
-def test_existing_checkpoint_is_replaced_not_duplicated() -> None:
+@pytest.mark.asyncio
+async def test_existing_checkpoint_is_replaced_not_duplicated() -> None:
     old_checkpoint = KnowledgeExtractionPhaseCheckpoint(
         workflow_run_id=_workflow_run_id(),
         phase_key=KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED,
@@ -288,7 +294,9 @@ def test_existing_checkpoint_is_replaced_not_duplicated() -> None:
     )
     state = _state(checkpoints=(old_checkpoint,))
 
-    result = _service(FakeWorkItemSchedulingUnitOfWork()).execute(_command(state=state))
+    result = await _service(FakeWorkItemSchedulingUnitOfWork()).execute(
+        _command(state=state)
+    )
 
     matching_checkpoints = tuple(
         checkpoint
@@ -300,7 +308,8 @@ def test_existing_checkpoint_is_replaced_not_duplicated() -> None:
     assert "old" not in matching_checkpoints[0].checkpoint_payload
 
 
-def test_advance_to_draft_observation_scheduling_phase_source_guard() -> None:
+@pytest.mark.asyncio
+async def test_advance_to_draft_observation_scheduling_phase_source_guard() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
         "advance_to_draft_observation_scheduling_phase.py",

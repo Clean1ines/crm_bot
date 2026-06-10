@@ -106,7 +106,7 @@ class EnsureWorkItemsScheduledCommand:
 class EnsureWorkItemsScheduled:
     unit_of_work: WorkItemSchedulingUnitOfWorkPort
 
-    def execute(
+    async def execute(
         self,
         command: EnsureWorkItemsScheduledCommand,
     ) -> EnsureWorkItemsScheduledResult:
@@ -114,19 +114,19 @@ class EnsureWorkItemsScheduled:
 
         try:
             for plan in command.plans:
-                outcomes.append(self._ensure_plan(plan))
-            self.unit_of_work.commit()
+                outcomes.append(await self._ensure_plan(plan))
+            await self.unit_of_work.commit()
         except Exception:
-            self.unit_of_work.rollback()
+            await self.unit_of_work.rollback()
             raise
 
         return EnsureWorkItemsScheduledResult(outcomes=tuple(outcomes))
 
-    def _ensure_plan(
+    async def _ensure_plan(
         self,
         plan: WorkItemSchedulePlan,
     ) -> EnsureWorkItemScheduledOutcome:
-        existing = self.unit_of_work.get_work_item(plan.work_item_id)
+        existing = await self.unit_of_work.get_work_item(plan.work_item_id)
         payload_hash = work_item_schedule_payload_hash(plan.payload)
 
         if existing is None:
@@ -134,7 +134,7 @@ class EnsureWorkItemsScheduled:
                 work_item_id=plan.work_item_id,
                 work_kind=plan.work_kind,
             )
-            self.unit_of_work.save_scheduled_work_item(
+            await self.unit_of_work.save_scheduled_work_item(
                 item=item,
                 idempotency_key=plan.idempotency_key,
                 payload_hash=payload_hash,
@@ -145,7 +145,7 @@ class EnsureWorkItemsScheduled:
                 status=EnsureWorkItemScheduledStatus.CREATED,
             )
 
-        existing_payload_hash = self.unit_of_work.get_schedule_payload_hash(
+        existing_payload_hash = await self.unit_of_work.get_schedule_payload_hash(
             plan.work_item_id,
         )
         if existing_payload_hash == payload_hash:

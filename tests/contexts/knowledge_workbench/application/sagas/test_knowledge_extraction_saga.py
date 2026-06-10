@@ -87,13 +87,13 @@ class FakeWorkItemSchedulingUnitOfWork:
     committed: bool = False
     rolled_back: bool = False
 
-    def get_work_item(self, work_item_id: str) -> WorkItem | None:
+    async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         return self.existing_items.get(work_item_id)
 
-    def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
+    async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
         return self.schedule_payload_hashes.get(work_item_id)
 
-    def save_scheduled_work_item(
+    async def save_scheduled_work_item(
         self,
         *,
         item: WorkItem,
@@ -112,10 +112,10 @@ class FakeWorkItemSchedulingUnitOfWork:
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
 
-    def commit(self) -> None:
+    async def commit(self) -> None:
         self.committed = True
 
-    def rollback(self) -> None:
+    async def rollback(self) -> None:
         self.rolled_back = True
 
 
@@ -477,7 +477,8 @@ async def test_scheduling_conflict_propagates() -> None:
         ).reconcile(_command())
 
 
-def test_knowledge_extraction_saga_scheduling_source_guard() -> None:
+@pytest.mark.asyncio
+async def test_knowledge_extraction_saga_scheduling_source_guard() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
         "knowledge_extraction_saga.py",

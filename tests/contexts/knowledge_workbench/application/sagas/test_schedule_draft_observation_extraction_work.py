@@ -59,13 +59,13 @@ class FakeWorkItemSchedulingUnitOfWork:
     committed: bool = False
     rolled_back: bool = False
 
-    def get_work_item(self, work_item_id: str) -> WorkItem | None:
+    async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         return self.existing_items.get(work_item_id)
 
-    def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
+    async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
         return self.schedule_payload_hashes.get(work_item_id)
 
-    def save_scheduled_work_item(
+    async def save_scheduled_work_item(
         self,
         *,
         item: WorkItem,
@@ -84,10 +84,10 @@ class FakeWorkItemSchedulingUnitOfWork:
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
 
-    def commit(self) -> None:
+    async def commit(self) -> None:
         self.committed = True
 
-    def rollback(self) -> None:
+    async def rollback(self) -> None:
         self.rolled_back = True
 
 
@@ -149,10 +149,11 @@ def _work_kind() -> WorkKind:
     return WorkKind("knowledge_workbench.draft_observation_extraction")
 
 
-def test_schedules_created_work_items_for_source_units() -> None:
+@pytest.mark.asyncio
+async def test_schedules_created_work_items_for_source_units() -> None:
     unit_of_work = FakeWorkItemSchedulingUnitOfWork()
 
-    result = _service(unit_of_work).execute(_command())
+    result = await _service(unit_of_work).execute(_command())
 
     assert result.planned_count == 2
     assert result.created_count == 2
@@ -180,12 +181,13 @@ def test_schedules_created_work_items_for_source_units() -> None:
     )
 
 
-def test_repeated_execution_is_already_exists() -> None:
+@pytest.mark.asyncio
+async def test_repeated_execution_is_already_exists() -> None:
     unit_of_work = FakeWorkItemSchedulingUnitOfWork()
     service = _service(unit_of_work)
 
-    first = service.execute(_command())
-    second = service.execute(_command())
+    first = await service.execute(_command())
+    second = await service.execute(_command())
 
     assert first.created_count == 2
     assert second.planned_count == 2
@@ -195,7 +197,8 @@ def test_repeated_execution_is_already_exists() -> None:
     assert len(unit_of_work.saved) == 2
 
 
-def test_conflict_is_surfaced() -> None:
+@pytest.mark.asyncio
+async def test_conflict_is_surfaced() -> None:
     workflow_run_id = "knowledge-extraction:source-document:project-1:abc"
     unit_ref = "source-document:project-1:abc.unit.0"
     work_item_id = _work_item_id(
@@ -212,7 +215,7 @@ def test_conflict_is_surfaced() -> None:
         schedule_payload_hashes={work_item_id: "different-payload-hash"},
     )
 
-    result = _service(unit_of_work).execute(
+    result = await _service(unit_of_work).execute(
         _command(source_units=(_source_unit(unit_ref=unit_ref, ordinal=0),)),
     )
 
@@ -224,10 +227,11 @@ def test_conflict_is_surfaced() -> None:
     assert unit_of_work.saved == []
 
 
-def test_empty_source_units_is_safe_no_op() -> None:
+@pytest.mark.asyncio
+async def test_empty_source_units_is_safe_no_op() -> None:
     unit_of_work = FakeWorkItemSchedulingUnitOfWork()
 
-    result = _service(unit_of_work).execute(_command(source_units=()))
+    result = await _service(unit_of_work).execute(_command(source_units=()))
 
     assert result.planned_count == 0
     assert result.created_count == 0
@@ -239,7 +243,8 @@ def test_empty_source_units_is_safe_no_op() -> None:
     assert not unit_of_work.rolled_back
 
 
-def test_invalid_command_is_rejected() -> None:
+@pytest.mark.asyncio
+async def test_invalid_command_is_rejected() -> None:
     with pytest.raises(ValueError, match="workflow_run_id must be non-empty"):
         _command(workflow_run_id="  ")
 
@@ -251,20 +256,22 @@ def test_invalid_command_is_rejected() -> None:
         )
 
 
-def test_repeated_execution_uses_same_payload_hashes() -> None:
+@pytest.mark.asyncio
+async def test_repeated_execution_uses_same_payload_hashes() -> None:
     unit_of_work = FakeWorkItemSchedulingUnitOfWork()
     service = _service(unit_of_work)
 
-    service.execute(_command())
+    await service.execute(_command())
     first_hashes = dict(unit_of_work.schedule_payload_hashes)
-    service.execute(_command())
+    await service.execute(_command())
 
     assert first_hashes == unit_of_work.schedule_payload_hashes
     for saved in unit_of_work.saved:
         assert saved.payload_hash == work_item_schedule_payload_hash(saved.payload)
 
 
-def test_schedule_draft_observation_extraction_work_source_guard() -> None:
+@pytest.mark.asyncio
+async def test_schedule_draft_observation_extraction_work_source_guard() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
         "schedule_draft_observation_extraction_work.py",

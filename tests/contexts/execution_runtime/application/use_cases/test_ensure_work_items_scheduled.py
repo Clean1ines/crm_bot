@@ -40,13 +40,13 @@ class FakeWorkItemSchedulingUnitOfWork:
     rolled_back: bool = False
     fail_on_save: bool = False
 
-    def get_work_item(self, work_item_id: str) -> WorkItem | None:
+    async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         return self.existing_items.get(work_item_id)
 
-    def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
+    async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
         return self.schedule_payload_hashes.get(work_item_id)
 
-    def save_scheduled_work_item(
+    async def save_scheduled_work_item(
         self,
         *,
         item: WorkItem,
@@ -67,10 +67,10 @@ class FakeWorkItemSchedulingUnitOfWork:
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
 
-    def commit(self) -> None:
+    async def commit(self) -> None:
         self.committed = True
 
-    def rollback(self) -> None:
+    async def rollback(self) -> None:
         self.rolled_back = True
 
 
@@ -97,11 +97,12 @@ def _plan(
     )
 
 
-def test_creates_ready_work_item_when_absent() -> None:
+@pytest.mark.asyncio
+async def test_creates_ready_work_item_when_absent() -> None:
     plan = _plan()
     unit_of_work = FakeWorkItemSchedulingUnitOfWork()
 
-    result = EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,)),
     )
 
@@ -122,7 +123,8 @@ def test_creates_ready_work_item_when_absent() -> None:
     assert not unit_of_work.rolled_back
 
 
-def test_repeated_schedule_with_same_payload_is_already_exists() -> None:
+@pytest.mark.asyncio
+async def test_repeated_schedule_with_same_payload_is_already_exists() -> None:
     plan = _plan()
     existing = WorkItem(work_item_id=plan.work_item_id, work_kind=plan.work_kind)
     unit_of_work = FakeWorkItemSchedulingUnitOfWork(
@@ -132,7 +134,7 @@ def test_repeated_schedule_with_same_payload_is_already_exists() -> None:
         },
     )
 
-    result = EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,)),
     )
 
@@ -146,7 +148,8 @@ def test_repeated_schedule_with_same_payload_is_already_exists() -> None:
     assert not unit_of_work.rolled_back
 
 
-def test_existing_with_different_payload_hash_is_conflict() -> None:
+@pytest.mark.asyncio
+async def test_existing_with_different_payload_hash_is_conflict() -> None:
     plan = _plan(payload={"source_unit_ref": "new"})
     existing = WorkItem(work_item_id=plan.work_item_id, work_kind=plan.work_kind)
     unit_of_work = FakeWorkItemSchedulingUnitOfWork(
@@ -154,7 +157,7 @@ def test_existing_with_different_payload_hash_is_conflict() -> None:
         schedule_payload_hashes={plan.work_item_id: "different-hash"},
     )
 
-    result = EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,)),
     )
 
@@ -168,7 +171,8 @@ def test_existing_with_different_payload_hash_is_conflict() -> None:
     assert not unit_of_work.rolled_back
 
 
-def test_mixed_created_already_exists_and_conflict_counts() -> None:
+@pytest.mark.asyncio
+async def test_mixed_created_already_exists_and_conflict_counts() -> None:
     created = _plan(work_item_id="work-created", idempotency_key="work-created")
     already_exists = _plan(
         work_item_id="work-existing",
@@ -201,7 +205,7 @@ def test_mixed_created_already_exists_and_conflict_counts() -> None:
         },
     )
 
-    result = EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=(created, already_exists, conflict)),
     )
 
@@ -215,7 +219,8 @@ def test_mixed_created_already_exists_and_conflict_counts() -> None:
     ]
 
 
-def test_duplicate_work_item_id_in_command_is_rejected() -> None:
+@pytest.mark.asyncio
+async def test_duplicate_work_item_id_in_command_is_rejected() -> None:
     with pytest.raises(ValueError, match="work_item_id must be unique"):
         EnsureWorkItemsScheduledCommand(
             plans=(
@@ -225,11 +230,12 @@ def test_duplicate_work_item_id_in_command_is_rejected() -> None:
         )
 
 
-def test_rollback_on_save_failure() -> None:
+@pytest.mark.asyncio
+async def test_rollback_on_save_failure() -> None:
     unit_of_work = FakeWorkItemSchedulingUnitOfWork(fail_on_save=True)
 
     with pytest.raises(RuntimeError, match="save failed"):
-        EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+        await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
             EnsureWorkItemsScheduledCommand(plans=(_plan(),)),
         )
 
@@ -238,7 +244,8 @@ def test_rollback_on_save_failure() -> None:
     assert unit_of_work.rolled_back
 
 
-def test_payload_hash_is_deterministic() -> None:
+@pytest.mark.asyncio
+async def test_payload_hash_is_deterministic() -> None:
     left = {"b": 2, "a": 1}
     right = {"a": 1, "b": 2}
 
@@ -247,17 +254,19 @@ def test_payload_hash_is_deterministic() -> None:
     )
 
 
-def test_use_case_accepts_scheduling_unit_of_work_port() -> None:
+@pytest.mark.asyncio
+async def test_use_case_accepts_scheduling_unit_of_work_port() -> None:
     unit_of_work: WorkItemSchedulingUnitOfWorkPort = FakeWorkItemSchedulingUnitOfWork()
 
-    result = EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=()),
     )
 
     assert result.outcomes == ()
 
 
-def test_ensure_work_items_scheduled_source_guard() -> None:
+@pytest.mark.asyncio
+async def test_ensure_work_items_scheduled_source_guard() -> None:
     use_case = Path(
         "src/contexts/execution_runtime/application/use_cases/"
         "ensure_work_items_scheduled.py",
