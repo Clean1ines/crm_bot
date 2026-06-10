@@ -44,6 +44,14 @@ def test_canonical_draft_observation_scheduling_path_is_preserved() -> None:
             "map_draft_observation_plans_to_execution_schedule.py",
         ),
         Path(
+            "src/contexts/knowledge_workbench/application/sagas/"
+            "schedule_draft_observation_extraction_work.py",
+        ),
+        Path(
+            "src/contexts/knowledge_workbench/application/sagas/"
+            "advance_to_draft_observation_scheduling_phase.py",
+        ),
+        Path(
             "src/contexts/execution_runtime/application/use_cases/"
             "ensure_work_items_scheduled.py",
         ),
@@ -55,10 +63,13 @@ def test_canonical_draft_observation_scheduling_path_is_preserved() -> None:
     canonical_markers = (
         "PlanDraftObservationExtractionWork",
         "MapDraftObservationPlansToExecutionSchedule",
+        "ScheduleDraftObservationExtractionWork",
+        "AdvanceToDraftObservationSchedulingPhase",
         "EnsureWorkItemsScheduled",
         "WorkItemSchedulePlan",
         "idempotency_key",
         "payload_hash",
+        "PROMPT_A_WORK_SCHEDULED",
     )
 
     canonical_paths = _python_files_under(
@@ -82,6 +93,10 @@ def test_retired_patch_does_not_add_capacity_llm_or_artifact_runtime_imports() -
         Path(
             "src/contexts/knowledge_workbench/application/sagas/"
             "knowledge_extraction_saga_ports.py",
+        ),
+        Path(
+            "src/contexts/knowledge_workbench/application/sagas/"
+            "advance_to_draft_observation_scheduling_phase.py",
         ),
     )
     forbidden_import_fragments = (

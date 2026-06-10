@@ -147,3 +147,42 @@ def test_draft_observation_scheduler_service_imports_only_application_boundaries
 
     assert not missing, "\n".join(missing)
     assert not offenders, "\n".join(offenders)
+
+
+def test_draft_observation_phase_transition_delegates_to_scheduler_without_runtime_infrastructure() -> (
+    None
+):
+    path = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "advance_to_draft_observation_scheduling_phase.py",
+    )
+    assert path.is_file()
+
+    text = path.read_text(encoding="utf-8")
+    required_markers = [
+        "ScheduleDraftObservationExtractionWork",
+        "ScheduleDraftObservationExtractionWorkCommand",
+        "PROMPT_A_WORK_SCHEDULED",
+        "execution_runtime.ensure_work_items_scheduled",
+    ]
+    forbidden_markers = [
+        "EnsureWorkItemsScheduled",
+        "WorkItemSchedulingUnitOfWorkPort",
+        "WorkItemSchedulePlan",
+        "execution_runtime.application",
+        "execution_runtime.infrastructure",
+        "capacity_runtime",
+        "llm_runtime",
+        "artifact_runtime",
+        "Postgres",
+        "asyncpg",
+        "queue",
+        "worker",
+        "lease",
+    ]
+
+    missing = [marker for marker in required_markers if marker not in text]
+    offenders = [marker for marker in forbidden_markers if marker in text]
+
+    assert not missing, "\n".join(missing)
+    assert not offenders, "\n".join(offenders)

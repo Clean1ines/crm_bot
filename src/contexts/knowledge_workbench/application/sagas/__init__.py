@@ -52,6 +52,11 @@ from .schedule_draft_observation_extraction_work import (
     ScheduleDraftObservationExtractionWorkCommand,
     ScheduleDraftObservationExtractionWorkResult,
 )
+from .advance_to_draft_observation_scheduling_phase import (
+    AdvanceToDraftObservationSchedulingPhase,
+    AdvanceToDraftObservationSchedulingPhaseCommand,
+    AdvanceToDraftObservationSchedulingPhaseResult,
+)
 from .run_source_ingestion_first_phase import (
     CreateSourceUnitsForIngestionPort,
     PersistAcceptedSourceIngestionPlanPort,
@@ -116,6 +121,9 @@ __all__ = (
     "ScheduleDraftObservationExtractionWorkResult",
     "ScheduleDraftObservationExtractionWorkCommand",
     "ScheduleDraftObservationExtractionWork",
+    "AdvanceToDraftObservationSchedulingPhase",
+    "AdvanceToDraftObservationSchedulingPhaseCommand",
+    "AdvanceToDraftObservationSchedulingPhaseResult",
     "MapDraftObservationPlansToExecutionScheduleCommand",
     "MapDraftObservationPlansToExecutionSchedule",
     "PersistAcceptedSourceIngestionPlan",
