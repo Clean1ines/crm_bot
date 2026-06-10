@@ -24,6 +24,13 @@ from .knowledge_extraction_saga_state import (
     KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
 )
+from .create_source_units_for_ingestion import (
+    CreateSourceUnitsForIngestion,
+    CreateSourceUnitsForIngestionCommand,
+    CreateSourceUnitsForIngestionResult,
+    CreateSourceUnitsForIngestionUnitOfWorkPort,
+    build_source_units_from_text,
+)
 from .knowledge_extraction_source_phase_reconciliation import (
     KnowledgeExtractionSourcePhaseReconciler,
     SourcePhaseReconciliationResult,
@@ -55,6 +62,11 @@ __all__ = (
     "DraftObservationExtractionSchedulingReconciler",
     "DraftObservationExtractionSchedulingStatus",
     "DraftObservationExtractionWorkIndexPort",
+    "CreateSourceUnitsForIngestion",
+    "CreateSourceUnitsForIngestionCommand",
+    "CreateSourceUnitsForIngestionResult",
+    "CreateSourceUnitsForIngestionUnitOfWorkPort",
+    "build_source_units_from_text",
     "KnowledgeExtractionCommandEmitterPort",
     "KnowledgeExtractionCommandLogPort",
     "KnowledgeExtractionCommandRecord",
