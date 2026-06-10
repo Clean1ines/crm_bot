@@ -1,5 +1,8 @@
 from datetime import datetime
 
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_checkpoints import (
+    replace_or_append_checkpoint,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionPhaseCheckpoint,
     KnowledgeExtractionPhaseKey,
@@ -55,7 +58,12 @@ def state_with_source_reconciliation(
     checkpoints: tuple[KnowledgeExtractionPhaseCheckpoint, ...],
     occurred_at: datetime,
 ) -> KnowledgeExtractionWorkflowState:
-    merged_checkpoints = replace_source_checkpoints(state.checkpoints, checkpoints)
+    merged_checkpoints = state.checkpoints
+    for checkpoint in checkpoints:
+        merged_checkpoints = replace_or_append_checkpoint(
+            merged_checkpoints,
+            checkpoint,
+        )
     if not source_result.source_document_present:
         return _copy_state(
             state,
@@ -82,19 +90,6 @@ def state_with_source_reconciliation(
         merged_checkpoints,
         occurred_at,
     )
-
-
-def replace_source_checkpoints(
-    existing: tuple[KnowledgeExtractionPhaseCheckpoint, ...],
-    replacements: tuple[KnowledgeExtractionPhaseCheckpoint, ...],
-) -> tuple[KnowledgeExtractionPhaseCheckpoint, ...]:
-    replacement_phase_keys = {checkpoint.phase_key for checkpoint in replacements}
-    kept = tuple(
-        checkpoint
-        for checkpoint in existing
-        if checkpoint.phase_key not in replacement_phase_keys
-    )
-    return kept + replacements
 
 
 def _copy_state(

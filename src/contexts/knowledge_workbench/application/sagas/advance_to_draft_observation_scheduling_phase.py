@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_checkpoints import (
+    replace_or_append_checkpoint,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionPhaseCheckpoint,
     KnowledgeExtractionPhaseKey,
@@ -133,7 +136,7 @@ class AdvanceToDraftObservationSchedulingPhase:
             source_document_ref=state.source_document_ref,
             status=KnowledgeExtractionWorkflowStatus.RUNNING,
             current_phase=KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED,
-            checkpoints=_replace_or_append_checkpoint(
+            checkpoints=replace_or_append_checkpoint(
                 state.checkpoints,
                 checkpoint,
             ),
@@ -157,18 +160,6 @@ class AdvanceToDraftObservationSchedulingPhase:
             already_exists_count=scheduling_result.already_exists_count,
             conflict_count=scheduling_result.conflict_count,
         )
-
-
-def _replace_or_append_checkpoint(
-    checkpoints: tuple[KnowledgeExtractionPhaseCheckpoint, ...],
-    checkpoint: KnowledgeExtractionPhaseCheckpoint,
-) -> tuple[KnowledgeExtractionPhaseCheckpoint, ...]:
-    kept = tuple(
-        existing
-        for existing in checkpoints
-        if existing.phase_key is not checkpoint.phase_key
-    )
-    return kept + (checkpoint,)
 
 
 def _require_timezone_aware(value: datetime, *, field_name: str) -> None:

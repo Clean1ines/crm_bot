@@ -313,11 +313,13 @@ def test_advance_to_draft_observation_scheduling_phase_source_guard() -> None:
         "ScheduleDraftObservationExtractionWork",
         "PROMPT_A_WORK_SCHEDULED",
         "execution_runtime.ensure_work_items_scheduled",
-        "_replace_or_append_checkpoint",
+        "replace_or_append_checkpoint",
     )
     forbidden_markers = (
         _marker("DraftObservationExtraction", "SchedulingReconciler"),
         _marker("DraftObservationExtraction", "WorkIndexPort"),
+        "_replace_or_append_checkpoint",
+        "from .knowledge_extraction_saga import _replace_checkpoints",
         "capacity_runtime",
         "llm_runtime",
         "artifact_runtime",

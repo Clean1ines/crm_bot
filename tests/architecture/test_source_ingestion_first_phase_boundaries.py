@@ -186,3 +186,32 @@ def test_draft_observation_phase_transition_delegates_to_scheduler_without_runti
 
     assert not missing, "\n".join(missing)
     assert not offenders, "\n".join(offenders)
+
+
+def test_saga_checkpoint_replacement_uses_public_helper() -> None:
+    helper = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "knowledge_extraction_checkpoints.py",
+    )
+    assert helper.exists()
+    helper_text = helper.read_text(encoding="utf-8")
+    assert "def replace_or_append_checkpoint" in helper_text
+    assert "KnowledgeExtractionPhaseCheckpoint" in helper_text
+
+    offenders: list[str] = []
+    for path in Path("src/contexts/knowledge_workbench/application/sagas").rglob(
+        "*.py"
+    ):
+        text = path.read_text(encoding="utf-8")
+        if "import _replace_checkpoints" in text:
+            offenders.append(str(path))
+        if "import _replace_or_append_checkpoint" in text:
+            offenders.append(str(path))
+        if "from .knowledge_extraction_saga import _replace" in text:
+            offenders.append(str(path))
+        if "def _replace_checkpoints" in text:
+            offenders.append(str(path))
+        if "def _replace_or_append_checkpoint" in text:
+            offenders.append(str(path))
+
+    assert offenders == []
