@@ -31,6 +31,10 @@ class FakeTransaction:
         self.rolled_back = True
 
 
+class FakeUniqueViolationError(Exception):
+    pass
+
+
 @dataclass(slots=True)
 class FakeConnection:
     work_items: dict[str, dict[str, object]] = field(default_factory=dict)
@@ -58,35 +62,45 @@ class FakeConnection:
         self.executed_queries.append(query)
         if "INSERT INTO execution_work_items" in query:
             work_item_id = str(args[0])
-            self.work_items.setdefault(
-                work_item_id,
-                {
-                    "work_item_id": work_item_id,
-                    "work_kind": args[1],
-                    "status": args[2],
-                    "attempt_count": args[3],
-                    "leased_by": args[4],
-                    "lease_token": args[5],
-                    "lease_expires_at": args[6],
-                    "next_attempt_at": args[7],
-                    "last_error_kind": args[8],
-                },
-            )
+            if work_item_id in self.work_items:
+                raise FakeUniqueViolationError(
+                    "duplicate execution_work_items.work_item_id"
+                )
+            self.work_items[work_item_id] = {
+                "work_item_id": work_item_id,
+                "work_kind": args[1],
+                "status": args[2],
+                "attempt_count": args[3],
+                "leased_by": args[4],
+                "lease_token": args[5],
+                "lease_expires_at": args[6],
+                "next_attempt_at": args[7],
+                "last_error_kind": args[8],
+            }
         if "INSERT INTO execution_work_item_schedules" in query:
             work_item_id = str(args[0])
-            if work_item_id not in self.schedules:
-                self.schedules[work_item_id] = {
-                    "work_item_id": work_item_id,
-                    "idempotency_key": args[1],
-                    "payload_hash": args[2],
-                    "payload": json.loads(str(args[3])),
-                }
+            idempotency_key = str(args[1])
+            if work_item_id in self.schedules:
+                raise FakeUniqueViolationError(
+                    "duplicate execution_work_item_schedules.work_item_id"
+                )
+            for existing_schedule in self.schedules.values():
+                if existing_schedule["idempotency_key"] == idempotency_key:
+                    raise FakeUniqueViolationError(
+                        "duplicate execution_work_item_schedules.idempotency_key"
+                    )
+            self.schedules[work_item_id] = {
+                "work_item_id": work_item_id,
+                "idempotency_key": idempotency_key,
+                "payload_hash": args[2],
+                "payload": json.loads(str(args[3])),
+            }
         return "OK"
 
 
-def _work_item() -> WorkItem:
+def _work_item(work_item_id: str = "work-1") -> WorkItem:
     return WorkItem(
-        work_item_id="work-1",
+        work_item_id=work_item_id,
         work_kind=WorkKind("knowledge_workbench.draft_observation_extraction"),
     )
 
@@ -147,9 +161,7 @@ async def test_missing_work_item_returns_none() -> None:
 
 
 @pytest.mark.asyncio
-async def test_duplicate_work_item_id_and_idempotency_key_do_not_corrupt_schedule() -> (
-    None
-):
+async def test_duplicate_work_item_id_raises_instead_of_silent_ignore() -> None:
     connection = FakeConnection()
     unit_of_work = PostgresWorkItemSchedulingUnitOfWork(
         cast(asyncpg.Connection, connection)
@@ -162,15 +174,49 @@ async def test_duplicate_work_item_id_and_idempotency_key_do_not_corrupt_schedul
         payload_hash="hash-1",
         payload={"source": "unit-1"},
     )
-    await unit_of_work.save_scheduled_work_item(
-        item=item,
-        idempotency_key="idem-1",
-        payload_hash="hash-2",
-        payload={"source": "unit-2"},
-    )
+
+    with pytest.raises(
+        FakeUniqueViolationError,
+        match="duplicate execution_work_items.work_item_id",
+    ):
+        await unit_of_work.save_scheduled_work_item(
+            item=item,
+            idempotency_key="idem-1",
+            payload_hash="hash-2",
+            payload={"source": "unit-2"},
+        )
 
     assert connection.schedules["work-1"]["payload_hash"] == "hash-1"
     assert connection.schedules["work-1"]["payload"] == {"source": "unit-1"}
+
+
+@pytest.mark.asyncio
+async def test_duplicate_idempotency_key_for_different_work_item_raises() -> None:
+    connection = FakeConnection()
+    unit_of_work = PostgresWorkItemSchedulingUnitOfWork(
+        cast(asyncpg.Connection, connection)
+    )
+
+    await unit_of_work.save_scheduled_work_item(
+        item=_work_item("work-1"),
+        idempotency_key="idem-1",
+        payload_hash="hash-1",
+        payload={"source": "unit-1"},
+    )
+
+    with pytest.raises(
+        FakeUniqueViolationError,
+        match="duplicate execution_work_item_schedules.idempotency_key",
+    ):
+        await unit_of_work.save_scheduled_work_item(
+            item=_work_item("work-2"),
+            idempotency_key="idem-1",
+            payload_hash="hash-2",
+            payload={"source": "unit-2"},
+        )
+
+    assert connection.schedules["work-1"]["payload_hash"] == "hash-1"
+    assert "work-2" not in connection.schedules
 
 
 @pytest.mark.asyncio
@@ -188,6 +234,16 @@ async def test_payload_is_stored_as_jsonb_compatible_json() -> None:
     )
 
     assert connection.schedules["work-1"]["payload"] == {"a": 1, "b": 2}
+
+
+def test_implementation_has_no_silent_conflict_sql() -> None:
+    source = Path(
+        "src/contexts/execution_runtime/infrastructure/postgres/"
+        "postgres_work_item_scheduling_unit_of_work.py",
+    ).read_text(encoding="utf-8")
+
+    assert "ON CONFLICT" not in source
+    assert "DO NOTHING" not in source
 
 
 def test_implementation_does_not_import_workbench_capacity_llm_or_artifact() -> None:

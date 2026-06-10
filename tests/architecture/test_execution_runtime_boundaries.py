@@ -77,3 +77,13 @@ def test_scheduling_port_and_use_case_are_async() -> None:
 
     for marker in required_markers:
         assert marker in port + use_case
+
+
+def test_postgres_work_item_scheduling_uow_does_not_silently_ignore_conflicts() -> None:
+    source = Path(
+        "src/contexts/execution_runtime/infrastructure/postgres/"
+        "postgres_work_item_scheduling_unit_of_work.py",
+    ).read_text(encoding="utf-8")
+
+    assert "ON CONFLICT" not in source
+    assert "DO NOTHING" not in source
