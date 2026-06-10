@@ -1,0 +1,224 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
+    LlmDispatchExecutionInput,
+    LlmDispatchExecutionStatus,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_chat_request_builder import (
+    JsonValue,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_dispatch_executor import (
+    GroqDispatchExecutor,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_transport_port import (
+    GroqTransportResponse,
+)
+
+
+class FakeGroqTransport:
+    def __init__(self, response: GroqTransportResponse) -> None:
+        self.response = response
+        self.payloads: list[dict[str, JsonValue]] = []
+
+    def post_chat_completions(
+        self,
+        *,
+        payload: dict[str, JsonValue],
+    ) -> GroqTransportResponse:
+        self.payloads.append(payload)
+        return self.response
+
+
+def _started_at() -> datetime:
+    return datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+
+
+def _success_response(raw_text: str = '{"ok": true}') -> GroqTransportResponse:
+    return GroqTransportResponse(
+        status_code=200,
+        headers={},
+        body={
+            "choices": [
+                {
+                    "message": {
+                        "content": raw_text,
+                    },
+                },
+            ],
+            "usage": {
+                "prompt_tokens": 7,
+                "completion_tokens": 11,
+            },
+        },
+    )
+
+
+def _dispatch_payload(
+    *,
+    schedule_payload: dict[str, object] | None = None,
+    execution_settings: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "work_item_id": "work-1",
+        "schedule_payload": schedule_payload
+        if schedule_payload is not None
+        else {
+            "provider_messages": [
+                {
+                    "role": "user",
+                    "content": "Extract claims",
+                },
+            ],
+        },
+        "llm_allocation": {
+            "provider": "groq",
+            "account_ref": "groq_org_primary",
+            "model_ref": "qwen/qwen3-32b",
+            "slot_index": 0,
+        },
+        "llm_execution_settings": execution_settings
+        if execution_settings is not None
+        else {"reasoning_enabled": False},
+    }
+
+
+def _execution_input(
+    *,
+    dispatch_payload: dict[str, object] | None = None,
+) -> LlmDispatchExecutionInput:
+    return LlmDispatchExecutionInput(
+        attempt_id="attempt-1",
+        work_item_id="work-1",
+        attempt_number=1,
+        dispatch_payload=dispatch_payload or _dispatch_payload(),
+        started_at=_started_at(),
+    )
+
+
+def _executor(transport: FakeGroqTransport) -> GroqDispatchExecutor:
+    return GroqDispatchExecutor(
+        transport=transport,
+        model_profiles=build_groq_free_plan_model_profiles(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_disabled() -> (
+    None
+):
+    transport = FakeGroqTransport(response=_success_response(raw_text='{"done": true}'))
+
+    result = await _executor(transport).execute_dispatch(_execution_input())
+
+    assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
+    assert result.output_payload == {
+        "raw_text": '{"done": true}',
+        "provider": "groq",
+        "model_ref": "qwen/qwen3-32b",
+        "account_ref": "groq_org_primary",
+        "usage": {
+            "input_tokens": 7,
+            "output_tokens": 11,
+            "total_tokens": 18,
+        },
+    }
+    assert len(transport.payloads) == 1
+    request_payload = transport.payloads[0]
+    assert request_payload["model"] == "qwen/qwen3-32b"
+    assert request_payload["messages"] == [
+        {
+            "role": "user",
+            "content": "Extract claims",
+        },
+    ]
+    assert "reasoning_effort" not in request_payload
+
+
+@pytest.mark.asyncio
+async def test_invalid_dispatch_missing_provider_messages_returns_terminal_failed() -> (
+    None
+):
+    transport = FakeGroqTransport(response=_success_response())
+
+    result = await _executor(transport).execute_dispatch(
+        _execution_input(dispatch_payload=_dispatch_payload(schedule_payload={})),
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.TERMINAL_FAILED
+    assert result.error_kind == "invalid_dispatch_payload"
+    assert transport.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_transport_mapper_retryable_error_maps_to_retryable_failed() -> None:
+    transport = FakeGroqTransport(
+        response=GroqTransportResponse(
+            status_code=400,
+            headers={},
+            body={"error": {"message": "maximum context length exceeded"}},
+        ),
+    )
+
+    result = await _executor(transport).execute_dispatch(_execution_input())
+
+    assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
+    assert result.error_kind == "request_too_large"
+
+
+@pytest.mark.asyncio
+async def test_minute_limit_with_wait_until_maps_to_deferred() -> None:
+    transport = FakeGroqTransport(
+        response=GroqTransportResponse(
+            status_code=429,
+            headers={"retry-after": "2"},
+            body={"error": {"message": "Rate limit reached"}},
+        ),
+    )
+
+    result = await _executor(transport).execute_dispatch(_execution_input())
+
+    assert result.status is LlmDispatchExecutionStatus.DEFERRED
+    assert result.error_kind == "minute_limit"
+    assert result.next_attempt_at is not None
+    assert result.next_attempt_at > result.finished_at
+    assert result.next_attempt_at <= result.finished_at + timedelta(seconds=2)
+
+
+@pytest.mark.asyncio
+async def test_auth_error_maps_to_terminal_failed() -> None:
+    transport = FakeGroqTransport(
+        response=GroqTransportResponse(
+            status_code=401,
+            headers={},
+            body={"error": {"message": "Unauthorized"}},
+        ),
+    )
+
+    result = await _executor(transport).execute_dispatch(_execution_input())
+
+    assert result.status is LlmDispatchExecutionStatus.TERMINAL_FAILED
+    assert result.error_kind == "auth_error"
+
+
+def test_executor_does_not_import_legacy_provider_port_or_task_use_cases() -> None:
+    from pathlib import Path
+
+    source = Path(
+        "src/contexts/llm_runtime/infrastructure/providers/groq/"
+        "groq_dispatch_executor.py",
+    ).read_text(encoding="utf-8")
+
+    forbidden = (
+        "LlmProviderPort",
+        "ExecuteLlmTask",
+        "ExecuteAndRecordLlmTask",
+    )
+    for marker in forbidden:
+        assert marker not in source
