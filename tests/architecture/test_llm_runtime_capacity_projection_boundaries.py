@@ -187,3 +187,47 @@ def test_llm_capacity_projection_does_not_import_legacy_groq_router_or_clients()
     )
     for marker in forbidden:
         assert marker not in source
+
+
+def test_llm_model_route_catalog_exposes_execution_settings() -> None:
+    catalog_source = Path(
+        "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
+    ).read_text(encoding="utf-8")
+    test_source = Path(
+        "tests/contexts/llm_runtime/domain/capacity/test_llm_model_route_catalog.py",
+    ).read_text(encoding="utf-8")
+
+    required_catalog_markers = (
+        "LlmModelExecutionSettings",
+        "reasoning_enabled",
+        "reasoning_effort",
+        "execution_settings",
+        "execution_settings_for_model_ref",
+        "qwen/qwen3-32b",
+    )
+    for marker in required_catalog_markers:
+        assert marker in catalog_source
+
+    assert "test_qwen_primary_route_disables_reasoning" in test_source
+
+
+def test_llm_model_route_catalog_does_not_touch_provider_client_or_env() -> None:
+    source = Path(
+        "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
+    ).read_text(encoding="utf-8")
+
+    forbidden = (
+        "os.environ",
+        "GROQ_API_KEY",
+        "import httpx",
+        "from httpx",
+        "import requests",
+        "from requests",
+        "requests.",
+        "AsyncGroq",
+        "Authorization",
+        "api_key",
+        "src.infrastructure.llm.groq_model_router",
+    )
+    for marker in forbidden:
+        assert marker not in source

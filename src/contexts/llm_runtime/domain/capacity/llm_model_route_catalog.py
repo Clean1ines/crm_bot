@@ -11,10 +11,39 @@ class LlmModelRouteRole(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class LlmModelExecutionSettings:
+    reasoning_enabled: bool
+    reasoning_effort: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.reasoning_enabled, bool):
+            raise TypeError("reasoning_enabled must be bool")
+        if self.reasoning_effort is not None:
+            _require_non_empty_text(
+                self.reasoning_effort,
+                field_name="reasoning_effort",
+            )
+        if not self.reasoning_enabled and self.reasoning_effort is not None:
+            raise ValueError(
+                "reasoning_effort must be None when reasoning_enabled is False",
+            )
+
+    def to_provider_options(self) -> dict[str, object]:
+        if not self.reasoning_enabled:
+            return {"reasoning_enabled": False}
+
+        payload: dict[str, object] = {"reasoning_enabled": True}
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
 class LlmModelRoute:
     model_ref: str
     role: LlmModelRouteRole
     order: int
+    execution_settings: LlmModelExecutionSettings
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.model_ref, field_name="model_ref")
@@ -24,6 +53,8 @@ class LlmModelRoute:
             raise TypeError("order must be int")
         if self.order < 0:
             raise ValueError("order must be >= 0")
+        if not isinstance(self.execution_settings, LlmModelExecutionSettings):
+            raise TypeError("execution_settings must be LlmModelExecutionSettings")
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +111,15 @@ class LlmModelRouteCatalog:
                 return route
         return None
 
+    def execution_settings_for_model_ref(
+        self,
+        model_ref: str,
+    ) -> LlmModelExecutionSettings:
+        route = self.route_for_model_ref(model_ref)
+        if route is None:
+            raise ValueError("model_ref is not in route catalog")
+        return route.execution_settings
+
     def _routes_with_role(
         self,
         role: LlmModelRouteRole,
@@ -96,32 +136,38 @@ class LlmModelRouteCatalog:
 
 
 def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
+    reasoning_disabled = LlmModelExecutionSettings(reasoning_enabled=False)
     return LlmModelRouteCatalog(
         routes=(
             LlmModelRoute(
                 model_ref="qwen/qwen3-32b",
                 role=LlmModelRouteRole.PRIMARY,
                 order=0,
+                execution_settings=reasoning_disabled,
             ),
             LlmModelRoute(
                 model_ref="openai/gpt-oss-120b",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=1,
+                execution_settings=reasoning_disabled,
             ),
             LlmModelRoute(
                 model_ref="llama-3.3-70b-versatile",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=2,
+                execution_settings=reasoning_disabled,
             ),
             LlmModelRoute(
                 model_ref="meta-llama/llama-4-scout-17b-16e-instruct",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=3,
+                execution_settings=reasoning_disabled,
             ),
             LlmModelRoute(
                 model_ref="llama-3.1-8b-instant",
                 role=LlmModelRouteRole.DEGRADED_USER_CHOICE,
                 order=4,
+                execution_settings=reasoning_disabled,
             ),
         ),
     )
