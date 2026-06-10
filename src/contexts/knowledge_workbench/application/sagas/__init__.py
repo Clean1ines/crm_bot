@@ -36,6 +36,13 @@ from .source_ingestion_admission import (
     SourceIngestionAdmissionStatus,
     SourceIngestionProjectAccessPort,
 )
+from .start_source_ingestion_workflow import (
+    SourceIngestionAcceptedPlan,
+    StartSourceIngestionWorkflow,
+    StartSourceIngestionWorkflowCommand,
+    StartSourceIngestionWorkflowResult,
+    StartSourceIngestionWorkflowStatus,
+)
 
 __all__ = (
     "DraftObservationExtractionSchedulingDecision",
@@ -62,6 +69,11 @@ __all__ = (
     "SourceIngestionAdmissionPolicy",
     "SourceIngestionAdmissionStatus",
     "SourceIngestionProjectAccessPort",
+    "SourceIngestionAcceptedPlan",
+    "StartSourceIngestionWorkflow",
+    "StartSourceIngestionWorkflowCommand",
+    "StartSourceIngestionWorkflowResult",
+    "StartSourceIngestionWorkflowStatus",
     "SourcePhaseReconciliationResult",
     "SourcePhaseReconciliationStatus",
 )
