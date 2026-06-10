@@ -1,11 +1,23 @@
+from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import cast
 
 import pytest
 
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
-    RunSourceIngestionFirstPhase,
+    RunSourceIngestionFirstPhaseCommand,
+    RunSourceIngestionFirstPhaseResult,
+    RunSourceIngestionFirstPhaseStatus,
+)
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
+    SourceIngestionActor,
+    SourceIngestionAdmissionStatus,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
+    SourceFormat,
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
+from src.interfaces.composition import source_ingestion_first_phase as composition
 from src.interfaces.composition.source_ingestion_first_phase import (
     _ProjectAccessAdapter,
     _SourceIngestionFirstPhaseUnitOfWork,
@@ -54,16 +66,186 @@ class ProjectMemberRoleRepo:
         return self.role
 
 
+class FakeTransaction:
+    def __init__(self) -> None:
+        self.start_count = 0
+        self.commit_count = 0
+        self.rollback_count = 0
+
+    async def start(self) -> None:
+        self.start_count += 1
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
+
+
+class FakeConnection:
+    def __init__(self, transaction: FakeTransaction) -> None:
+        self._transaction = transaction
+        self.executed: list[tuple[str, tuple[object, ...]]] = []
+        self.fetchrow_results: list[Mapping[str, object] | None] = []
+        self.fetch_results: list[list[Mapping[str, object]]] = []
+        self.fetchval_results: list[object] = []
+
+    def transaction(self) -> FakeTransaction:
+        return self._transaction
+
+    async def execute(self, query: str, *args: object) -> object:
+        self.executed.append((query, args))
+        return "OK"
+
+    async def fetchrow(
+        self,
+        query: str,
+        *args: object,
+    ) -> Mapping[str, object] | None:
+        if self.fetchrow_results:
+            return self.fetchrow_results.pop(0)
+        return None
+
+    async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
+        if self.fetch_results:
+            return self.fetch_results.pop(0)
+        return []
+
+    async def fetchval(self, query: str, *args: object) -> object:
+        if self.fetchval_results:
+            return self.fetchval_results.pop(0)
+        return False
+
+
 class FakePool:
-    pass
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        self.acquire_count = 0
+        self.released_connections: list[FakeConnection] = []
+
+    async def acquire(self) -> FakeConnection:
+        self.acquire_count += 1
+        return self.connection
+
+    async def release(self, connection: FakeConnection) -> None:
+        self.released_connections.append(connection)
 
 
-class FakeRepository:
-    pass
+class FakeSourceRepository:
+    constructed_with: list[FakeConnection] = []
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        FakeSourceRepository.constructed_with.append(connection)
+
+
+class FakeSagaRepository:
+    constructed_with: list[FakeConnection] = []
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        FakeSagaRepository.constructed_with.append(connection)
+
+
+class FakeDocumentPersister:
+    constructed_uows: list[_SourceIngestionFirstPhaseUnitOfWork] = []
+
+    def __init__(self, *, unit_of_work: _SourceIngestionFirstPhaseUnitOfWork) -> None:
+        self.unit_of_work = unit_of_work
+        FakeDocumentPersister.constructed_uows.append(unit_of_work)
+
+
+class FakeSourceUnitCreator:
+    constructed_uows: list[_SourceIngestionFirstPhaseUnitOfWork] = []
+
+    def __init__(self, *, unit_of_work: _SourceIngestionFirstPhaseUnitOfWork) -> None:
+        self.unit_of_work = unit_of_work
+        FakeSourceUnitCreator.constructed_uows.append(unit_of_work)
+
+
+class FakeInnerRunner:
+    should_fail = False
+    calls: list[RunSourceIngestionFirstPhaseCommand] = []
+
+    def __init__(
+        self,
+        *,
+        starter: object,
+        document_persister: object,
+        source_unit_creator: object,
+    ) -> None:
+        self.starter = starter
+        self.document_persister = document_persister
+        self.source_unit_creator = source_unit_creator
+
+    async def execute(
+        self,
+        command: RunSourceIngestionFirstPhaseCommand,
+    ) -> RunSourceIngestionFirstPhaseResult:
+        FakeInnerRunner.calls.append(command)
+        if FakeInnerRunner.should_fail:
+            raise RuntimeError("first phase failed")
+        return RunSourceIngestionFirstPhaseResult(
+            status=RunSourceIngestionFirstPhaseStatus.COMPLETED,
+            admission_status=SourceIngestionAdmissionStatus.ALLOWED,
+            workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+            source_document_ref="source-document:project-1:abc",
+            source_unit_count=3,
+        )
+
+
+def _reset_fake_classes() -> None:
+    FakeSourceRepository.constructed_with = []
+    FakeSagaRepository.constructed_with = []
+    FakeDocumentPersister.constructed_uows = []
+    FakeSourceUnitCreator.constructed_uows = []
+    FakeInnerRunner.should_fail = False
+    FakeInnerRunner.calls = []
 
 
 def _user_repo() -> UserRepository:
     return cast(UserRepository, object())
+
+
+def _command() -> RunSourceIngestionFirstPhaseCommand:
+    return RunSourceIngestionFirstPhaseCommand(
+        project_id="project-1",
+        actor=SourceIngestionActor(actor_user_id="owner-1"),
+        original_filename="knowledge.md",
+        source_format=SourceFormat.MARKDOWN,
+        content_bytes=b"# Knowledge",
+        raw_text="# Knowledge\n\nText",
+        occurred_at=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
+    )
+
+
+def _patch_transactional_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reset_fake_classes()
+    monkeypatch.setattr(
+        composition,
+        "PostgresSourceManagementRepository",
+        FakeSourceRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresKnowledgeExtractionSagaStateRepository",
+        FakeSagaRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PersistAcceptedSourceIngestionPlan",
+        FakeDocumentPersister,
+    )
+    monkeypatch.setattr(
+        composition,
+        "CreateSourceUnitsForIngestion",
+        FakeSourceUnitCreator,
+    )
+    monkeypatch.setattr(
+        composition,
+        "RunSourceIngestionFirstPhase",
+        FakeInnerRunner,
+    )
 
 
 @pytest.mark.asyncio
@@ -121,32 +303,84 @@ async def test_actor_project_role_uses_get_project_member_role() -> None:
     assert repo.called_with == [("project-1", "user-1")]
 
 
-def test_factory_returns_run_source_ingestion_first_phase() -> None:
-    use_case = make_source_ingestion_first_phase(
-        pool=FakePool(),
+@pytest.mark.asyncio
+async def test_factory_runner_commits_and_releases_on_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_transactional_dependencies(monkeypatch)
+    transaction = FakeTransaction()
+    connection = FakeConnection(transaction)
+    pool = FakePool(connection)
+
+    runner = make_source_ingestion_first_phase(
+        pool=pool,
+        project_repo=ProjectMemberRoleRepo(role="owner"),
+        user_repo=_user_repo(),
+    )
+    result = await runner.execute(_command())
+
+    assert result.status is RunSourceIngestionFirstPhaseStatus.COMPLETED
+    assert transaction.start_count == 1
+    assert transaction.commit_count == 1
+    assert transaction.rollback_count == 0
+    assert pool.released_connections == [connection]
+    assert FakeSourceRepository.constructed_with == [connection]
+    assert FakeSagaRepository.constructed_with == [connection]
+
+
+@pytest.mark.asyncio
+async def test_factory_runner_rollbacks_and_releases_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_transactional_dependencies(monkeypatch)
+    FakeInnerRunner.should_fail = True
+    transaction = FakeTransaction()
+    connection = FakeConnection(transaction)
+    pool = FakePool(connection)
+
+    runner = make_source_ingestion_first_phase(
+        pool=pool,
         project_repo=ProjectMemberRoleRepo(role="owner"),
         user_repo=_user_repo(),
     )
 
-    assert isinstance(use_case, RunSourceIngestionFirstPhase)
+    with pytest.raises(RuntimeError, match="first phase failed"):
+        await runner.execute(_command())
+
+    assert transaction.start_count == 1
+    assert transaction.commit_count == 0
+    assert transaction.rollback_count == 1
+    assert pool.released_connections == [connection]
 
 
 @pytest.mark.asyncio
-async def test_noop_unit_of_work_delegates_repositories_and_methods_are_awaitable() -> (
-    None
-):
-    source_management = FakeRepository()
-    saga_state = FakeRepository()
-    unit_of_work = _SourceIngestionFirstPhaseUnitOfWork(
-        source_management=source_management,
-        saga_state=saga_state,
+async def test_lower_use_cases_receive_shared_unit_of_work_repositories(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_transactional_dependencies(monkeypatch)
+    transaction = FakeTransaction()
+    connection = FakeConnection(transaction)
+    pool = FakePool(connection)
+
+    runner = make_source_ingestion_first_phase(
+        pool=pool,
+        project_repo=ProjectMemberRoleRepo(role="owner"),
+        user_repo=_user_repo(),
+    )
+    await runner.execute(_command())
+
+    assert len(FakeDocumentPersister.constructed_uows) == 1
+    assert len(FakeSourceUnitCreator.constructed_uows) == 1
+    assert (
+        FakeDocumentPersister.constructed_uows[0]
+        is FakeSourceUnitCreator.constructed_uows[0]
     )
 
-    assert unit_of_work.source_management is source_management
-    assert unit_of_work.saga_state is saga_state
-
-    await unit_of_work.commit()
-    await unit_of_work.rollback()
+    unit_of_work = FakeDocumentPersister.constructed_uows[0]
+    assert isinstance(unit_of_work.source_management, FakeSourceRepository)
+    assert isinstance(unit_of_work.saga_state, FakeSagaRepository)
+    assert unit_of_work.source_management.connection is connection
+    assert unit_of_work.saga_state.connection is connection
 
 
 def test_source_ingestion_first_phase_composition_source_guard() -> None:
@@ -154,19 +388,13 @@ def test_source_ingestion_first_phase_composition_source_guard() -> None:
     text = __import__("pathlib").Path(source).read_text(encoding="utf-8")
 
     required_markers = [
-        "make_source_ingestion_first_phase",
-        "_ProjectAccessAdapter",
-        "_SourceIngestionFirstPhaseUnitOfWork",
-        "SourceIngestionAdmissionPolicy",
-        "StartSourceIngestionWorkflow",
-        "PersistAcceptedSourceIngestionPlan",
-        "CreateSourceUnitsForIngestion",
-        "RunSourceIngestionFirstPhase",
+        "transaction",
+        "commit",
+        "rollback",
+        "release",
         "PostgresSourceManagementRepository",
         "PostgresKnowledgeExtractionSagaStateRepository",
-        "project_exists",
-        "get_project_view",
-        "get_project_member_role",
+        "make_source_ingestion_first_phase",
     ]
     forbidden_markers = [
         "fastapi",

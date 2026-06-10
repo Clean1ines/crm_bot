@@ -10,6 +10,8 @@ from src.contexts.knowledge_workbench.application.sagas.persist_accepted_source_
 )
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhase,
+    RunSourceIngestionFirstPhaseCommand,
+    RunSourceIngestionFirstPhaseResult,
 )
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
     SourceIngestionAdmissionPolicy,
@@ -27,6 +29,37 @@ from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.
     PostgresSourceManagementRepository,
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
+
+
+class SourceIngestionFirstPhaseRunnerPort(Protocol):
+    async def execute(
+        self,
+        command: RunSourceIngestionFirstPhaseCommand,
+    ) -> RunSourceIngestionFirstPhaseResult: ...
+
+
+class _AsyncTransactionLike(Protocol):
+    async def start(self) -> None: ...
+
+    async def commit(self) -> None: ...
+
+    async def rollback(self) -> None: ...
+
+
+class _AsyncSourceIngestionConnectionLike(
+    AsyncSourceManagementConnectionLike,
+    AsyncKnowledgeExtractionSagaConnectionLike,
+    Protocol,
+):
+    def transaction(self) -> _AsyncTransactionLike: ...
+
+
+class _AsyncSourceIngestionPoolLike(Protocol):
+    async def acquire(self) -> _AsyncSourceIngestionConnectionLike: ...
+
+    async def release(
+        self, connection: _AsyncSourceIngestionConnectionLike
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -86,27 +119,85 @@ class _ProjectAccessAdapter(SourceIngestionProjectAccessPort):
 
 
 class _SourceIngestionFirstPhaseUnitOfWork:
-    """Composition boundary placeholder for source ingestion first phase.
+    """Deferred UoW used inside one shared source-ingestion transaction.
 
-    Current Postgres repositories own method-level persistence.
-    This UoW is a composition boundary placeholder and will be replaced by a
-    shared transaction UoW in the next persistence hardening patch.
+    Lower application use cases call commit()/rollback(), but actual database
+    transaction lifecycle is owned by _TransactionalSourceIngestionFirstPhaseRunner
+    so source document, workflow checkpoints, and source units share one boundary.
     """
 
     def __init__(
         self,
         *,
-        source_management: object,
-        saga_state: object,
+        source_management: PostgresSourceManagementRepository,
+        saga_state: PostgresKnowledgeExtractionSagaStateRepository,
     ) -> None:
         self.source_management = source_management
         self.saga_state = saga_state
+        self.commit_request_count = 0
+        self.rollback_request_count = 0
 
     async def commit(self) -> None:
-        return None
+        self.commit_request_count += 1
 
     async def rollback(self) -> None:
-        return None
+        self.rollback_request_count += 1
+
+
+class _TransactionalSourceIngestionFirstPhaseRunner(
+    SourceIngestionFirstPhaseRunnerPort
+):
+    def __init__(
+        self,
+        *,
+        pool: _AsyncSourceIngestionPoolLike,
+        starter: StartSourceIngestionWorkflow,
+    ) -> None:
+        self._pool = pool
+        self._starter = starter
+
+    async def execute(
+        self,
+        command: RunSourceIngestionFirstPhaseCommand,
+    ) -> RunSourceIngestionFirstPhaseResult:
+        connection = await self._pool.acquire()
+        transaction = connection.transaction()
+        await transaction.start()
+
+        try:
+            source_management = PostgresSourceManagementRepository(connection)
+            saga_state = PostgresKnowledgeExtractionSagaStateRepository(connection)
+            unit_of_work = _SourceIngestionFirstPhaseUnitOfWork(
+                source_management=source_management,
+                saga_state=saga_state,
+            )
+
+            document_persister = PersistAcceptedSourceIngestionPlan(
+                unit_of_work=cast(
+                    PersistAcceptedSourceIngestionPlanUnitOfWorkPort,
+                    unit_of_work,
+                ),
+            )
+            source_unit_creator = CreateSourceUnitsForIngestion(
+                unit_of_work=cast(
+                    CreateSourceUnitsForIngestionUnitOfWorkPort,
+                    unit_of_work,
+                ),
+            )
+            runner = RunSourceIngestionFirstPhase(
+                starter=self._starter,
+                document_persister=document_persister,
+                source_unit_creator=source_unit_creator,
+            )
+
+            result = await runner.execute(command)
+            await transaction.commit()
+            return result
+        except Exception:
+            await transaction.rollback()
+            raise
+        finally:
+            await self._pool.release(connection)
 
 
 def make_source_ingestion_first_phase(
@@ -114,7 +205,7 @@ def make_source_ingestion_first_phase(
     pool: object,
     project_repo: object,
     user_repo: UserRepository,
-) -> RunSourceIngestionFirstPhase:
+) -> SourceIngestionFirstPhaseRunnerPort:
     project_access = _ProjectAccessAdapter(
         project_repo=project_repo,
         user_repo=user_repo,
@@ -122,28 +213,7 @@ def make_source_ingestion_first_phase(
     admission_policy = SourceIngestionAdmissionPolicy(project_access=project_access)
     starter = StartSourceIngestionWorkflow(admission_policy=admission_policy)
 
-    source_management = PostgresSourceManagementRepository(
-        cast(AsyncSourceManagementConnectionLike, pool),
-    )
-    saga_state = PostgresKnowledgeExtractionSagaStateRepository(
-        cast(AsyncKnowledgeExtractionSagaConnectionLike, pool),
-    )
-    unit_of_work = _SourceIngestionFirstPhaseUnitOfWork(
-        source_management=source_management,
-        saga_state=saga_state,
-    )
-
-    document_persister = PersistAcceptedSourceIngestionPlan(
-        unit_of_work=cast(
-            PersistAcceptedSourceIngestionPlanUnitOfWorkPort, unit_of_work
-        ),
-    )
-    source_unit_creator = CreateSourceUnitsForIngestion(
-        unit_of_work=cast(CreateSourceUnitsForIngestionUnitOfWorkPort, unit_of_work),
-    )
-
-    return RunSourceIngestionFirstPhase(
+    return _TransactionalSourceIngestionFirstPhaseRunner(
+        pool=cast(_AsyncSourceIngestionPoolLike, pool),
         starter=starter,
-        document_persister=document_persister,
-        source_unit_creator=source_unit_creator,
     )
