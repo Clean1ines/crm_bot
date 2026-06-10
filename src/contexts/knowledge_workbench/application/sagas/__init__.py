@@ -42,6 +42,12 @@ from .persist_accepted_source_ingestion_plan import (
     PersistAcceptedSourceIngestionPlanResult,
     PersistAcceptedSourceIngestionPlanUnitOfWorkPort,
 )
+from .plan_draft_observation_extraction_work import (
+    DraftObservationExtractionWorkPlan,
+    PlanDraftObservationExtractionWork,
+    PlanDraftObservationExtractionWorkCommand,
+    PlanDraftObservationExtractionWorkResult,
+)
 from .run_source_ingestion_first_phase import (
     CreateSourceUnitsForIngestionPort,
     PersistAcceptedSourceIngestionPlanPort,
@@ -102,6 +108,10 @@ __all__ = (
     "KnowledgeExtractionSourcePhaseReconciler",
     "KnowledgeExtractionWorkflowState",
     "KnowledgeExtractionWorkflowStatus",
+    "DraftObservationExtractionWorkPlan",
+    "PlanDraftObservationExtractionWork",
+    "PlanDraftObservationExtractionWorkCommand",
+    "PlanDraftObservationExtractionWorkResult",
     "PersistAcceptedSourceIngestionPlan",
     "PersistAcceptedSourceIngestionPlanCommand",
     "PersistAcceptedSourceIngestionPlanResult",
