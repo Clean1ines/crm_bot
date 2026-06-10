@@ -215,3 +215,39 @@ def test_saga_checkpoint_replacement_uses_public_helper() -> None:
             offenders.append(str(path))
 
     assert offenders == []
+
+
+def test_knowledge_extraction_saga_wires_scheduling_phase_without_infrastructure() -> (
+    None
+):
+    path = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "knowledge_extraction_saga.py",
+    )
+    assert path.is_file()
+
+    text = path.read_text(encoding="utf-8")
+    required_markers = [
+        "AdvanceToDraftObservationSchedulingPhase",
+        "AdvanceToDraftObservationSchedulingPhaseCommand",
+        "SourceManagementRepositoryPort",
+        "list_source_units_for_document",
+        "PROMPT_A_WORK_SCHEDULED",
+    ]
+    forbidden_markers = [
+        "execution_runtime.infrastructure",
+        "capacity_runtime",
+        "llm_runtime",
+        "artifact_runtime",
+        "Postgres",
+        "asyncpg",
+        "queue",
+        "worker",
+        "lease",
+    ]
+
+    missing = [marker for marker in required_markers if marker not in text]
+    offenders = [marker for marker in forbidden_markers if marker in text]
+
+    assert not missing, "\n".join(missing)
+    assert not offenders, "\n".join(offenders)

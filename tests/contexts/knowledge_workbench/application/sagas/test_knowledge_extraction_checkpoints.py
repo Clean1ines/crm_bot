@@ -201,6 +201,5 @@ def test_checkpoint_helper_source_guard() -> None:
         assert marker not in phase_transition_text
 
 
-
 def _marker(*parts: str) -> str:
     return "".join(parts)
