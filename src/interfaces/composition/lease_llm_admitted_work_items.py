@@ -18,9 +18,12 @@ from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKi
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     LlmCapacityAllocationSlot,
-    LlmCapacityProjectionCommand,
     LlmCapacityProjectionResult,
-    ProjectLlmCapacityToCapacityRuntime,
+)
+from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
+    SelectActiveLlmModelCapacity,
+    SelectActiveLlmModelCapacityCommand,
+    SelectActiveLlmModelCapacityResult,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
@@ -53,7 +56,8 @@ class LlmAdmittedLeasedWorkItem:
 class LeaseLlmAdmittedWorkItemsCommand:
     work_kind: WorkKind
     profile: LlmTaskCapacityProfile
-    accounts: tuple[LlmProviderAccountCapacity, ...]
+    account_capacities: tuple[LlmProviderAccountCapacity, ...]
+    active_model_ref: str
     requested_items: int
     worker: WorkerRef
     lease_token_prefix: str
@@ -65,13 +69,16 @@ class LeaseLlmAdmittedWorkItemsCommand:
             raise TypeError("work_kind must be WorkKind")
         if not isinstance(self.profile, LlmTaskCapacityProfile):
             raise TypeError("profile must be LlmTaskCapacityProfile")
-        if not isinstance(self.accounts, tuple):
-            raise TypeError("accounts must be tuple")
-        if not self.accounts:
-            raise ValueError("accounts must be non-empty")
-        for account in self.accounts:
+        if not isinstance(self.account_capacities, tuple):
+            raise TypeError("account_capacities must be tuple")
+        if not self.account_capacities:
+            raise ValueError("account_capacities must be non-empty")
+        for account in self.account_capacities:
             if not isinstance(account, LlmProviderAccountCapacity):
-                raise TypeError("accounts must contain LlmProviderAccountCapacity")
+                raise TypeError(
+                    "account_capacities must contain LlmProviderAccountCapacity",
+                )
+        _require_non_empty_text(self.active_model_ref, field_name="active_model_ref")
         if not isinstance(self.requested_items, int):
             raise TypeError("requested_items must be int")
         if self.requested_items <= 0:
@@ -93,14 +100,22 @@ class LeaseLlmAdmittedWorkItemsCommand:
 
 @dataclass(frozen=True, slots=True)
 class LeaseLlmAdmittedWorkItemsResult:
-    llm_capacity_projection: LlmCapacityProjectionResult
+    active_model_capacity_selection: SelectActiveLlmModelCapacityResult
     lease_result: LeaseAdmittedWorkItemsResult
     leased: tuple[LlmAdmittedLeasedWorkItem, ...]
 
+    @property
+    def llm_capacity_projection(self) -> LlmCapacityProjectionResult:
+        return self.active_model_capacity_selection.projection
+
     def __post_init__(self) -> None:
-        if not isinstance(self.llm_capacity_projection, LlmCapacityProjectionResult):
+        if not isinstance(
+            self.active_model_capacity_selection,
+            SelectActiveLlmModelCapacityResult,
+        ):
             raise TypeError(
-                "llm_capacity_projection must be LlmCapacityProjectionResult",
+                "active_model_capacity_selection must be "
+                "SelectActiveLlmModelCapacityResult",
             )
         if not isinstance(self.lease_result, LeaseAdmittedWorkItemsResult):
             raise TypeError("lease_result must be LeaseAdmittedWorkItemsResult")
@@ -119,19 +134,21 @@ class LeaseLlmAdmittedWorkItemsResult:
 class LeaseLlmAdmittedWorkItems:
     lease_repository: WorkItemLeaseRepositoryPort
     capacity_policy: CapacityAdmissionPolicy
-    llm_capacity_projector: ProjectLlmCapacityToCapacityRuntime
+    active_model_capacity_selector: SelectActiveLlmModelCapacity
 
     async def execute(
         self,
         command: LeaseLlmAdmittedWorkItemsCommand,
     ) -> LeaseLlmAdmittedWorkItemsResult:
-        projection = self.llm_capacity_projector.execute(
-            LlmCapacityProjectionCommand(
+        selection = self.active_model_capacity_selector.execute(
+            SelectActiveLlmModelCapacityCommand(
                 profile=command.profile,
-                accounts=command.accounts,
+                account_capacities=command.account_capacities,
+                active_model_ref=command.active_model_ref,
                 requested_items=command.requested_items,
             ),
         )
+        projection = selection.projection
 
         lease_result = await LeaseAdmittedWorkItems(
             repository=self.lease_repository,
@@ -158,10 +175,17 @@ class LeaseLlmAdmittedWorkItems:
             for index, leased_record in enumerate(lease_result.leased)
         )
         return LeaseLlmAdmittedWorkItemsResult(
-            llm_capacity_projection=projection,
+            active_model_capacity_selection=selection,
             lease_result=lease_result,
             leased=assigned,
         )
+
+
+def _require_non_empty_text(value: str, *, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
+    if not value.strip():
+        raise ValueError(f"{field_name} must be non-empty")
 
 
 def _require_timezone_aware(value: datetime, *, field_name: str) -> None:

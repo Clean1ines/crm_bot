@@ -18,6 +18,9 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     ProjectLlmCapacityToCapacityRuntime,
 )
+from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
+    SelectActiveLlmModelCapacity,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
 )
@@ -204,13 +207,14 @@ def _account(
     account_ref: str = "org-1",
     minute_requests: int = 2,
     minute_tokens: int = 7000,
+    model_ref: str = "qwen/qwen3-32b",
     daily_requests: int = 100,
     daily_tokens: int = 50000,
 ) -> LlmProviderAccountCapacity:
     return LlmProviderAccountCapacity(
         provider="groq",
         account_ref=account_ref,
-        model_ref="qwen-32b",
+        model_ref=model_ref,
         remaining_minute_requests=minute_requests,
         remaining_minute_tokens=minute_tokens,
         remaining_daily_requests=daily_requests,
@@ -248,7 +252,8 @@ def _connection_with_due_items(count: int) -> FakeConnection:
 
 def _command(
     *,
-    accounts: tuple[LlmProviderAccountCapacity, ...] = (_account(),),
+    account_capacities: tuple[LlmProviderAccountCapacity, ...] = (_account(),),
+    active_model_ref: str = "qwen/qwen3-32b",
     requested_items: int = 2,
     now: datetime | None = None,
     started_at: datetime | None = None,
@@ -256,7 +261,8 @@ def _command(
     return PrepareLlmDispatchBatchCommand(
         work_kind=_work_kind(),
         profile=_profile(),
-        accounts=accounts,
+        account_capacities=account_capacities,
+        active_model_ref=active_model_ref,
         requested_items=requested_items,
         worker=_worker(),
         lease_token_prefix="lease-prefix",
@@ -270,7 +276,9 @@ def _runner(pool: FakePool) -> PrepareLlmDispatchBatch:
     return PrepareLlmDispatchBatch(
         pool=pool,
         capacity_policy=CapacityAdmissionPolicy(),
-        llm_capacity_projector=ProjectLlmCapacityToCapacityRuntime(),
+        active_model_capacity_selector=SelectActiveLlmModelCapacity(
+            projector=ProjectLlmCapacityToCapacityRuntime(),
+        ),
     )
 
 
@@ -327,7 +335,7 @@ async def test_capacity_exhausted_creates_no_attempts() -> None:
 
     result = await _runner(pool).execute(
         _command(
-            accounts=(
+            account_capacities=(
                 _account(
                     minute_requests=0,
                     minute_tokens=0,
@@ -366,3 +374,109 @@ def test_rejects_started_at_before_now() -> None:
             now=datetime(2026, 6, 10, 12, 1, tzinfo=timezone.utc),
             started_at=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
         )
+
+
+@pytest.mark.asyncio
+async def test_prepare_uses_only_active_qwen_model_capacity() -> None:
+    connection = _connection_with_due_items(5)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="qwen_1",
+                    minute_requests=10,
+                    minute_tokens=7000,
+                    model_ref="qwen/qwen3-32b",
+                ),
+                _account(
+                    account_ref="qwen_2",
+                    minute_requests=10,
+                    minute_tokens=3500,
+                    model_ref="qwen/qwen3-32b",
+                ),
+                _account(
+                    account_ref="fallback_openai",
+                    minute_requests=10,
+                    minute_tokens=35000,
+                    model_ref="openai/gpt-oss-120b",
+                ),
+            ),
+            active_model_ref="qwen/qwen3-32b",
+            requested_items=10,
+        ),
+    )
+
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 3
+    assert len(result.lease_result.leased) == 3
+    assert len(result.attempt_result.started_attempts) == 3
+    assert len(connection.dispatches) == 3
+    assert {
+        dispatch["llm_allocation_payload"]["model_ref"]
+        for dispatch in connection.dispatches.values()
+    } == {"qwen/qwen3-32b"}
+
+
+@pytest.mark.asyncio
+async def test_prepare_ignores_fallback_capacities_when_qwen_is_active() -> None:
+    connection = _connection_with_due_items(10)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="qwen_1",
+                    minute_requests=10,
+                    minute_tokens=3500,
+                    model_ref="qwen/qwen3-32b",
+                ),
+                _account(
+                    account_ref="fallback_openai",
+                    minute_requests=10,
+                    minute_tokens=35000,
+                    model_ref="openai/gpt-oss-120b",
+                ),
+                _account(
+                    account_ref="fallback_llama",
+                    minute_requests=10,
+                    minute_tokens=35000,
+                    model_ref="llama-3.3-70b-versatile",
+                ),
+            ),
+            active_model_ref="qwen/qwen3-32b",
+            requested_items=10,
+        ),
+    )
+
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 1
+    assert len(result.attempt_result.started_attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_absent_active_model_starts_no_attempts() -> None:
+    connection = _connection_with_due_items(5)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="qwen_1",
+                    minute_requests=10,
+                    minute_tokens=35000,
+                    model_ref="qwen/qwen3-32b",
+                ),
+            ),
+            active_model_ref="openai/gpt-oss-120b",
+            requested_items=10,
+        ),
+    )
+
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 0
+    assert result.lease_result.leased == ()
+    assert result.attempt_result.started_attempts == ()
+    assert connection.attempts == {}
+    assert connection.dispatches == {}
+    assert connection.transactions[0].committed is True

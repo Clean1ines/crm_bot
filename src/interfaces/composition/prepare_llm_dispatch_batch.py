@@ -8,16 +8,16 @@ from typing import Protocol, cast
 import asyncpg
 
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
+from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_dispatch_repository import (
     PostgresWorkItemAttemptDispatchRepository,
 )
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
     PostgresWorkItemLeaseRepository,
 )
-from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
-from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
-from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
-    ProjectLlmCapacityToCapacityRuntime,
+from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
+    SelectActiveLlmModelCapacity,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
@@ -62,7 +62,8 @@ class AsyncPool(Protocol):
 class PrepareLlmDispatchBatchCommand:
     work_kind: WorkKind
     profile: LlmTaskCapacityProfile
-    accounts: tuple[LlmProviderAccountCapacity, ...]
+    account_capacities: tuple[LlmProviderAccountCapacity, ...]
+    active_model_ref: str
     requested_items: int
     worker: WorkerRef
     lease_token_prefix: str
@@ -74,7 +75,8 @@ class PrepareLlmDispatchBatchCommand:
         LeaseLlmAdmittedWorkItemsCommand(
             work_kind=self.work_kind,
             profile=self.profile,
-            accounts=self.accounts,
+            account_capacities=self.account_capacities,
+            active_model_ref=self.active_model_ref,
             requested_items=self.requested_items,
             worker=self.worker,
             lease_token_prefix=self.lease_token_prefix,
@@ -109,7 +111,7 @@ class PrepareLlmDispatchBatchResult:
 class PrepareLlmDispatchBatch:
     pool: AsyncPool
     capacity_policy: CapacityAdmissionPolicy
-    llm_capacity_projector: ProjectLlmCapacityToCapacityRuntime
+    active_model_capacity_selector: SelectActiveLlmModelCapacity
 
     async def execute(
         self,
@@ -127,12 +129,13 @@ class PrepareLlmDispatchBatch:
                 lease_result = await LeaseLlmAdmittedWorkItems(
                     lease_repository=lease_repository,
                     capacity_policy=self.capacity_policy,
-                    llm_capacity_projector=self.llm_capacity_projector,
+                    active_model_capacity_selector=self.active_model_capacity_selector,
                 ).execute(
                     LeaseLlmAdmittedWorkItemsCommand(
                         work_kind=command.work_kind,
                         profile=command.profile,
-                        accounts=command.accounts,
+                        account_capacities=command.account_capacities,
+                        active_model_ref=command.active_model_ref,
                         requested_items=command.requested_items,
                         worker=command.worker,
                         lease_token_prefix=command.lease_token_prefix,

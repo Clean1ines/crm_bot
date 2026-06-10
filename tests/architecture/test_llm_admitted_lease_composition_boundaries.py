@@ -9,7 +9,7 @@ def test_composition_required_markers_exist() -> None:
 
     required = (
         "LeaseLlmAdmittedWorkItems",
-        "ProjectLlmCapacityToCapacityRuntime",
+        "SelectActiveLlmModelCapacity",
         "LeaseAdmittedWorkItems",
         "LlmCapacityAllocationSlot",
         "LlmAdmittedLeasedWorkItem",
@@ -73,3 +73,37 @@ def test_llm_runtime_domain_still_does_not_import_capacity_runtime() -> None:
             offenders.append(str(path))
 
     assert offenders == []
+
+
+def test_lease_composition_uses_active_model_selector() -> None:
+    source = Path(
+        "src/interfaces/composition/lease_llm_admitted_work_items.py"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    required = (
+        "SelectActiveLlmModelCapacity",
+        "SelectActiveLlmModelCapacityCommand",
+        "active_model_ref",
+        "account_capacities",
+        "active_model_capacity_selection",
+    )
+    for marker in required:
+        assert marker in source
+
+
+def test_lease_composition_does_not_call_projector_directly() -> None:
+    source = Path(
+        "src/interfaces/composition/lease_llm_admitted_work_items.py"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    forbidden = (
+        "LlmCapacityProjectionCommand(",
+        "ProjectLlmCapacityToCapacityRuntime",
+        "llm_capacity_projector",
+    )
+    for marker in forbidden:
+        assert marker not in source

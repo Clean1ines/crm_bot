@@ -76,3 +76,31 @@ def test_llm_runtime_domain_still_does_not_import_capacity_runtime() -> None:
             offenders.append(str(path))
 
     assert offenders == []
+
+
+def test_prepare_batch_uses_active_model_selector() -> None:
+    source = Path("src/interfaces/composition/prepare_llm_dispatch_batch.py").read_text(
+        encoding="utf-8",
+    )
+
+    required = (
+        "SelectActiveLlmModelCapacity",
+        "active_model_ref",
+        "account_capacities",
+        "active_model_capacity_selector",
+    )
+    for marker in required:
+        assert marker in source
+
+
+def test_prepare_batch_does_not_depend_on_direct_projector() -> None:
+    source = Path("src/interfaces/composition/prepare_llm_dispatch_batch.py").read_text(
+        encoding="utf-8",
+    )
+
+    forbidden = (
+        "ProjectLlmCapacityToCapacityRuntime",
+        "llm_capacity_projector",
+    )
+    for marker in forbidden:
+        assert marker not in source
