@@ -29,6 +29,13 @@ from .knowledge_extraction_source_phase_reconciliation import (
     SourcePhaseReconciliationResult,
     SourcePhaseReconciliationStatus,
 )
+from .source_ingestion_admission import (
+    SourceIngestionActor,
+    SourceIngestionAdmissionDecision,
+    SourceIngestionAdmissionPolicy,
+    SourceIngestionAdmissionStatus,
+    SourceIngestionProjectAccessPort,
+)
 
 __all__ = (
     "DraftObservationExtractionSchedulingDecision",
@@ -50,6 +57,11 @@ __all__ = (
     "KnowledgeExtractionWorkflowStatus",
     "ReconcileKnowledgeExtractionSagaCommand",
     "ReconcileKnowledgeExtractionSagaResult",
+    "SourceIngestionActor",
+    "SourceIngestionAdmissionDecision",
+    "SourceIngestionAdmissionPolicy",
+    "SourceIngestionAdmissionStatus",
+    "SourceIngestionProjectAccessPort",
     "SourcePhaseReconciliationResult",
     "SourcePhaseReconciliationStatus",
 )

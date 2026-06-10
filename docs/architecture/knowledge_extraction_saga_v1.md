@@ -1,5 +1,26 @@
 # Knowledge Extraction Saga v1
 
+## Source Ingestion Admission Boundary
+
+Source ingestion is a costly and state-mutating operation. It can create source documents, source units, processing state, downstream work, and later LLM-related artifacts, so saga v1 must start from an explicit admission decision.
+
+Admission rules for saga v1:
+
+- Source ingestion must be allowed only for authenticated platform admins or project `owner` / `admin`.
+- `manager` is not allowed to start ingestion in saga v1 unless this is explicitly changed later.
+- A manager may be allowed by an HTTP route for other project operations, but that must not be treated as permission to start source ingestion.
+- The HTTP route may perform an early access check, but the saga/application boundary must not trust HTTP-only authorization.
+- Source ingestion admission must be represented as an application policy/port, not as a direct HTTP/router/db import inside the saga.
+- The first production vertical slice is source ingestion admission and source document/source unit persistence, not Draft Observation Extraction.
+
+
+## Draft Observation Extraction Phase Warning
+
+Draft Observation Extraction is a later phase. It must not be wired until source ingestion admission plus source document/source unit persistence are complete.
+
+Existing Prompt A enum names are legacy-compatible phase keys, not recommended new naming for the source ingestion boundary.
+
+
 ## 1. Purpose
 
 This document fixes the canonical architecture contract for `KnowledgeExtractionSaga v1` before any production saga code, migrations, worker wiring, or outbox consumer is added.
