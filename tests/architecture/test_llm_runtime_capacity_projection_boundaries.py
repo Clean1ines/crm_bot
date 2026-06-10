@@ -100,3 +100,19 @@ def test_projection_does_not_call_groq_or_read_env() -> None:
 
     for marker in forbidden:
         assert marker not in source
+
+
+def test_projection_source_exposes_allocation_slots() -> None:
+    source = Path(
+        "src/contexts/llm_runtime/application/capacity/"
+        "project_llm_capacity_to_capacity_runtime.py",
+    ).read_text(encoding="utf-8")
+
+    required = (
+        "LlmCapacityAllocationSlot",
+        "allocations",
+        "slot_index",
+        "to_payload",
+    )
+    for marker in required:
+        assert marker in source
