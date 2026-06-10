@@ -141,6 +141,18 @@ def _work_kind() -> WorkKind:
     return WorkKind("knowledge_workbench.draft_observation_extraction")
 
 
+def _expected_payload(
+    *, workflow_run_id: str, unit_ref: str, ordinal: int
+) -> dict[str, object]:
+    return {
+        "workflow_run_id": workflow_run_id,
+        "source_document_ref": _document_ref().value,
+        "source_unit_ref": unit_ref,
+        "source_unit_ordinal": ordinal,
+        "phase": "draft_observation_extraction",
+    }
+
+
 @pytest.mark.asyncio
 async def test_schedules_created_work_items_for_source_units() -> None:
     unit_of_work = FakeWorkItemSchedulingRepository()
@@ -152,7 +164,25 @@ async def test_schedules_created_work_items_for_source_units() -> None:
     assert result.already_exists_count == 0
     assert result.conflict_count == 0
     assert result.is_conflict_free
+    assert len(result.scheduled_items) == 2
     assert len(unit_of_work.saved) == 2
+
+    first_item = result.scheduled_items[0]
+    first_payload = _expected_payload(
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        unit_ref="source-document:project-1:abc.unit.0",
+        ordinal=0,
+    )
+    assert first_item.source_unit_ref == "source-document:project-1:abc.unit.0"
+    assert first_item.source_unit_ordinal == 0
+    assert first_item.work_item_id == _work_item_id(
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        unit_ref="source-document:project-1:abc.unit.0",
+    )
+    assert first_item.work_kind == "knowledge_workbench.draft_observation_extraction"
+    assert first_item.idempotency_key == first_item.work_item_id
+    assert first_item.payload_hash == work_item_schedule_payload_hash(first_payload)
+    assert first_item.schedule_status == "created"
 
     saved_ids = tuple(saved.item.work_item_id for saved in unit_of_work.saved)
     assert saved_ids == (
@@ -185,6 +215,16 @@ async def test_repeated_execution_is_already_exists() -> None:
     assert second.already_exists_count == 2
     assert second.conflict_count == 0
     assert len(unit_of_work.saved) == 2
+    assert tuple(item.schedule_status for item in second.scheduled_items) == (
+        "already_exists",
+        "already_exists",
+    )
+    assert tuple(item.work_item_id for item in second.scheduled_items) == tuple(
+        item.work_item_id for item in first.scheduled_items
+    )
+    assert tuple(item.payload_hash for item in second.scheduled_items) == tuple(
+        item.payload_hash for item in first.scheduled_items
+    )
 
 
 @pytest.mark.asyncio
@@ -214,6 +254,10 @@ async def test_conflict_is_surfaced() -> None:
     assert result.already_exists_count == 0
     assert result.conflict_count == 1
     assert result.is_conflict_free is False
+    assert len(result.scheduled_items) == 1
+    assert result.scheduled_items[0].schedule_status == "conflict"
+    assert result.scheduled_items[0].source_unit_ref == unit_ref
+    assert result.scheduled_items[0].work_item_id == work_item_id
     assert unit_of_work.saved == []
 
 
@@ -227,6 +271,7 @@ async def test_empty_source_units_is_safe_no_op() -> None:
     assert result.created_count == 0
     assert result.already_exists_count == 0
     assert result.conflict_count == 0
+    assert result.scheduled_items == ()
     assert result.is_conflict_free
     assert unit_of_work.saved == []
 
@@ -276,6 +321,11 @@ async def test_schedule_draft_observation_extraction_work_source_guard() -> None
         "created_count",
         "already_exists_count",
         "conflict_count",
+        "DraftObservationScheduledWorkItemSummary",
+        "scheduled_items",
+        "payload_hash",
+        "schedule_status",
+        "work_item_schedule_payload_hash",
     )
     forbidden_markers = (
         "capacity_runtime",

@@ -412,6 +412,24 @@ async def test_reconcile_advances_from_source_units_created_to_prompt_work_sched
         KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
     )
     assert len(scheduling_repository.saved) == 2
+    checkpoint = state_repository.saved_checkpoints[-1]
+    scheduled_items = checkpoint.checkpoint_payload["scheduled_items"]
+    assert isinstance(scheduled_items, list)
+    assert len(scheduled_items) == 2
+    assert (
+        scheduled_items[0]["source_unit_ref"] == "source-document:project-1:abc.unit.0"
+    )
+    assert scheduled_items[0]["source_unit_ordinal"] == 0
+    assert scheduled_items[0]["work_item_id"] == _work_item_id(
+        unit_ref="source-document:project-1:abc.unit.0",
+    )
+    assert scheduled_items[0]["work_kind"] == (
+        "knowledge_workbench.draft_observation_extraction"
+    )
+    assert scheduled_items[0]["idempotency_key"] == scheduled_items[0]["work_item_id"]
+    assert isinstance(scheduled_items[0]["payload_hash"], str)
+    assert scheduled_items[0]["payload_hash"]
+    assert scheduled_items[0]["schedule_status"] == "created"
 
 
 @pytest.mark.asyncio

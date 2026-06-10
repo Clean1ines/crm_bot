@@ -127,6 +127,11 @@ class AdvanceToDraftObservationSchedulingPhase:
                 "conflict_count": scheduling_result.conflict_count,
                 "source_unit_count": len(source_units),
                 "scheduler": "execution_runtime.ensure_work_items_scheduled",
+                "schedule_schema_version": 1,
+                "scheduled_items": [
+                    item.to_checkpoint_payload()
+                    for item in scheduling_result.scheduled_items
+                ],
             },
             updated_at=command.occurred_at,
         )

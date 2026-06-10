@@ -10,6 +10,9 @@ import pytest
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
+from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
+    work_item_schedule_payload_hash,
+)
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.advance_to_draft_observation_scheduling_phase import (
@@ -181,6 +184,16 @@ def _work_kind() -> WorkKind:
     return WorkKind("knowledge_workbench.draft_observation_extraction")
 
 
+def _expected_payload(*, unit_ref: str, ordinal: int) -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": _document_ref().value,
+        "source_unit_ref": unit_ref,
+        "source_unit_ordinal": ordinal,
+        "phase": "draft_observation_extraction",
+    }
+
+
 @pytest.mark.asyncio
 async def test_advances_phase_after_scheduling_created_work() -> None:
     unit_of_work = FakeWorkItemSchedulingRepository()
@@ -203,11 +216,30 @@ async def test_advances_phase_after_scheduling_created_work() -> None:
     assert result.created_count == 2
     assert result.already_exists_count == 0
     assert result.conflict_count == 0
-    assert result.checkpoint.checkpoint_payload["created_count"] == 2
-    assert result.checkpoint.checkpoint_payload["already_exists_count"] == 0
-    assert result.checkpoint.checkpoint_payload["scheduler"] == (
-        "execution_runtime.ensure_work_items_scheduled"
+    payload = result.checkpoint.checkpoint_payload
+    assert payload["created_count"] == 2
+    assert payload["already_exists_count"] == 0
+    assert payload["scheduler"] == "execution_runtime.ensure_work_items_scheduled"
+    assert payload["schedule_schema_version"] == 1
+    scheduled_items = payload["scheduled_items"]
+    assert isinstance(scheduled_items, list)
+    assert len(scheduled_items) == 2
+
+    first_item = scheduled_items[0]
+    assert first_item["source_unit_ref"] == "source-document:project-1:abc.unit.0"
+    assert first_item["source_unit_ordinal"] == 0
+    assert first_item["work_item_id"] == _work_item_id(
+        unit_ref="source-document:project-1:abc.unit.0",
     )
+    assert first_item["work_kind"] == "knowledge_workbench.draft_observation_extraction"
+    assert first_item["idempotency_key"] == first_item["work_item_id"]
+    assert first_item["payload_hash"] == work_item_schedule_payload_hash(
+        _expected_payload(
+            unit_ref="source-document:project-1:abc.unit.0",
+            ordinal=0,
+        ),
+    )
+    assert first_item["schedule_status"] == "created"
 
 
 @pytest.mark.asyncio
@@ -225,6 +257,13 @@ async def test_repeated_execution_uses_already_exists_and_still_advances() -> No
     assert second.already_exists_count == 2
     assert second.conflict_count == 0
     assert second.checkpoint.completed_count == 2
+    scheduled_items = second.checkpoint.checkpoint_payload["scheduled_items"]
+    assert isinstance(scheduled_items, list)
+    assert len(scheduled_items) == 2
+    assert tuple(item["schedule_status"] for item in scheduled_items) == (
+        "already_exists",
+        "already_exists",
+    )
     assert (
         second.state.current_phase
         is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
@@ -313,6 +352,9 @@ async def test_advance_to_draft_observation_scheduling_phase_source_guard() -> N
         "PROMPT_A_WORK_SCHEDULED",
         "execution_runtime.ensure_work_items_scheduled",
         "replace_or_append_checkpoint",
+        "schedule_schema_version",
+        "scheduled_items",
+        "to_checkpoint_payload",
     )
     forbidden_markers = (
         _marker("DraftObservationExtraction", "SchedulingReconciler"),
