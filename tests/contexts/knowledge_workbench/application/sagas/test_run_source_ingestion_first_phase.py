@@ -35,6 +35,11 @@ from src.contexts.knowledge_workbench.application.sagas.start_source_ingestion_w
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionPhaseStatus,
 )
+from src.contexts.knowledge_workbench.document_segmentation.domain import (
+    DocumentSegmentationBudget,
+    SegmentationModelBudgetProfile,
+    SegmentationPromptProfile,
+)
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
 )
@@ -97,6 +102,20 @@ class FakeSourceUnitCreator:
 
 def _now() -> datetime:
     return datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+
+
+def _segmentation_budget() -> DocumentSegmentationBudget:
+    return DocumentSegmentationBudget(
+        prompt=SegmentationPromptProfile(
+            prompt_name="custom_prompt",
+            prompt_token_count=7,
+        ),
+        model=SegmentationModelBudgetProfile(
+            profile_name="custom_primary_model",
+            max_request_input_tokens=100,
+            reserved_output_tokens=11,
+        ),
+    )
 
 
 def _actor() -> SourceIngestionActor:
@@ -180,6 +199,7 @@ def _command(
     content_bytes: bytes = b"# Knowledge",
     raw_text: str = "# Knowledge\n\nText",
     occurred_at: datetime | None = None,
+    segmentation_budget: DocumentSegmentationBudget | None = None,
 ) -> RunSourceIngestionFirstPhaseCommand:
     return RunSourceIngestionFirstPhaseCommand(
         project_id=project_id,
@@ -189,6 +209,7 @@ def _command(
         content_bytes=content_bytes,
         raw_text=raw_text,
         occurred_at=occurred_at or _now(),
+        segmentation_budget=segmentation_budget,
     )
 
 
@@ -464,3 +485,28 @@ def test_run_source_ingestion_first_phase_source_guard() -> None:
 
     for marker in forbidden_markers:
         assert marker not in source
+
+
+@pytest.mark.asyncio
+async def test_segmentation_budget_is_forwarded_to_source_unit_creator() -> None:
+    budget = _segmentation_budget()
+    starter = FakeStarter(result=_start_accepted_result())
+    document_persister = FakeDocumentPersister(result=_document_result())
+    source_unit_creator = FakeSourceUnitCreator(result=_source_units_result())
+    use_case = _use_case(
+        starter=starter,
+        document_persister=document_persister,
+        source_unit_creator=source_unit_creator,
+    )
+
+    await use_case.execute(_command(segmentation_budget=budget))
+
+    assert len(source_unit_creator.commands) == 1
+    assert source_unit_creator.commands[0].segmentation_budget is budget
+
+
+def test_run_source_ingestion_first_phase_command_rejects_invalid_segmentation_budget() -> (
+    None
+):
+    with pytest.raises(TypeError, match="segmentation_budget must be"):
+        _command(segmentation_budget=cast(DocumentSegmentationBudget, object()))

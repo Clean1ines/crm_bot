@@ -1,3 +1,4 @@
+from dataclasses import dataclass, replace
 from typing import Protocol, cast, runtime_checkable
 
 from src.contexts.knowledge_workbench.application.sagas.create_source_units_for_ingestion import (
@@ -20,6 +21,11 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admissi
 from src.contexts.knowledge_workbench.application.sagas.start_source_ingestion_workflow import (
     StartSourceIngestionWorkflow,
 )
+from src.contexts.knowledge_workbench.document_segmentation.domain import (
+    DocumentSegmentationBudget,
+    SegmentationModelBudgetProfile,
+    SegmentationPromptProfile,
+)
 from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_knowledge_extraction_saga_state_repository import (
     AsyncKnowledgeExtractionSagaConnectionLike,
     PostgresKnowledgeExtractionSagaStateRepository,
@@ -36,6 +42,71 @@ class SourceIngestionFirstPhaseRunnerPort(Protocol):
         self,
         command: RunSourceIngestionFirstPhaseCommand,
     ) -> RunSourceIngestionFirstPhaseResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SourceIngestionFirstPhaseSegmentationConfig:
+    prompt_name: str
+    prompt_token_count: int
+    primary_model_profile_name: str
+    max_request_input_tokens: int
+    reserved_output_tokens: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.prompt_name, str) or not self.prompt_name.strip():
+            raise ValueError("prompt_name must be non-empty")
+        if not isinstance(self.prompt_token_count, int):
+            raise TypeError("prompt_token_count must be int")
+        if self.prompt_token_count < 0:
+            raise ValueError("prompt_token_count must be >= 0")
+        if (
+            not isinstance(self.primary_model_profile_name, str)
+            or not self.primary_model_profile_name.strip()
+        ):
+            raise ValueError("primary_model_profile_name must be non-empty")
+        if not isinstance(self.max_request_input_tokens, int):
+            raise TypeError("max_request_input_tokens must be int")
+        if self.max_request_input_tokens <= 0:
+            raise ValueError("max_request_input_tokens must be > 0")
+        if not isinstance(self.reserved_output_tokens, int):
+            raise TypeError("reserved_output_tokens must be int")
+        if self.reserved_output_tokens < 0:
+            raise ValueError("reserved_output_tokens must be >= 0")
+        if (
+            self.prompt_token_count + self.reserved_output_tokens
+            >= self.max_request_input_tokens
+        ):
+            raise ValueError(
+                "prompt_token_count + reserved_output_tokens must be "
+                "< max_request_input_tokens"
+            )
+
+    def to_document_segmentation_budget(self) -> DocumentSegmentationBudget:
+        return DocumentSegmentationBudget(
+            prompt=SegmentationPromptProfile(
+                prompt_name=self.prompt_name,
+                prompt_token_count=self.prompt_token_count,
+            ),
+            model=SegmentationModelBudgetProfile(
+                profile_name=self.primary_model_profile_name,
+                max_request_input_tokens=self.max_request_input_tokens,
+                reserved_output_tokens=self.reserved_output_tokens,
+            ),
+        )
+
+
+def default_source_ingestion_first_phase_segmentation_config() -> (
+    SourceIngestionFirstPhaseSegmentationConfig
+):
+    # Production will later derive prompt_token_count from the Workbench prompt
+    # profile and tokenizer. Keep provider details outside this composition seam.
+    return SourceIngestionFirstPhaseSegmentationConfig(
+        prompt_name="draft_observation_extraction",
+        prompt_token_count=2_000,
+        primary_model_profile_name="primary_model",
+        max_request_input_tokens=6_000,
+        reserved_output_tokens=1_000,
+    )
 
 
 class _AsyncTransactionLike(Protocol):
@@ -152,9 +223,11 @@ class _TransactionalSourceIngestionFirstPhaseRunner(
         *,
         pool: _AsyncSourceIngestionPoolLike,
         starter: StartSourceIngestionWorkflow,
+        segmentation_budget: DocumentSegmentationBudget,
     ) -> None:
         self._pool = pool
         self._starter = starter
+        self._segmentation_budget = segmentation_budget
 
     async def execute(
         self,
@@ -190,7 +263,13 @@ class _TransactionalSourceIngestionFirstPhaseRunner(
                 source_unit_creator=source_unit_creator,
             )
 
-            result = await runner.execute(command)
+            effective_command = replace(
+                command,
+                segmentation_budget=(
+                    command.segmentation_budget or self._segmentation_budget
+                ),
+            )
+            result = await runner.execute(effective_command)
             await transaction.commit()
             return result
         except Exception:
@@ -205,6 +284,7 @@ def make_source_ingestion_first_phase(
     pool: object,
     project_repo: object,
     user_repo: UserRepository,
+    segmentation_config: SourceIngestionFirstPhaseSegmentationConfig | None = None,
 ) -> SourceIngestionFirstPhaseRunnerPort:
     project_access = _ProjectAccessAdapter(
         project_repo=project_repo,
@@ -213,7 +293,13 @@ def make_source_ingestion_first_phase(
     admission_policy = SourceIngestionAdmissionPolicy(project_access=project_access)
     starter = StartSourceIngestionWorkflow(admission_policy=admission_policy)
 
+    effective_segmentation_config = (
+        segmentation_config
+        or default_source_ingestion_first_phase_segmentation_config()
+    )
+
     return _TransactionalSourceIngestionFirstPhaseRunner(
         pool=cast(_AsyncSourceIngestionPoolLike, pool),
         starter=starter,
+        segmentation_budget=effective_segmentation_config.to_document_segmentation_budget(),
     )

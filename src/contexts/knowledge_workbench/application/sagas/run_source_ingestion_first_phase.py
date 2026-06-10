@@ -20,6 +20,9 @@ from src.contexts.knowledge_workbench.application.sagas.start_source_ingestion_w
     StartSourceIngestionWorkflowResult,
     StartSourceIngestionWorkflowStatus,
 )
+from src.contexts.knowledge_workbench.document_segmentation.domain import (
+    DocumentSegmentationBudget,
+)
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
 )
@@ -60,6 +63,7 @@ class RunSourceIngestionFirstPhaseCommand:
     content_bytes: bytes
     raw_text: str
     occurred_at: datetime
+    segmentation_budget: DocumentSegmentationBudget | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.project_id, field_name="project_id")
@@ -75,6 +79,11 @@ class RunSourceIngestionFirstPhaseCommand:
         _require_non_empty_bytes(self.content_bytes, field_name="content_bytes")
         _require_non_empty_text(self.raw_text, field_name="raw_text")
         _require_timezone_aware(self.occurred_at, field_name="occurred_at")
+        if self.segmentation_budget is not None and not isinstance(
+            self.segmentation_budget,
+            DocumentSegmentationBudget,
+        ):
+            raise TypeError("segmentation_budget must be DocumentSegmentationBudget")
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,6 +173,7 @@ class RunSourceIngestionFirstPhase:
                 source_document_ref=document_result.source_document_ref,
                 raw_text=command.raw_text,
                 occurred_at=command.occurred_at,
+                segmentation_budget=command.segmentation_budget,
             ),
         )
 

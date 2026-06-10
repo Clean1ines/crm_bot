@@ -146,6 +146,7 @@ async def test_upload_success_uses_source_ingestion_first_phase(
     assert command.raw_text == "# FAQ\nAnswer"
     assert command.original_filename == "faq.md"
     assert command.source_format is SourceFormat.MARKDOWN
+    assert command.segmentation_budget is None
     assert command.occurred_at.tzinfo is not None
 
 
