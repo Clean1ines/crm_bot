@@ -21,12 +21,19 @@ def test_llm_runtime_capacity_projection_is_only_capacity_runtime_import_boundar
         "src/contexts/llm_runtime/application/capacity/"
         "project_llm_capacity_to_capacity_runtime.py",
     )
+    import_markers = (
+        "from src.contexts.capacity_runtime",
+        "import src.contexts.capacity_runtime",
+    )
     offenders: list[str] = []
 
     for path in sorted(root.rglob("*.py")):
         source = path.read_text(encoding="utf-8")
-        if "capacity_runtime" in source and path != allowed:
-            offenders.append(str(path))
+        if path == allowed:
+            continue
+        for marker in import_markers:
+            if marker in source:
+                offenders.append(f"{path}: {marker}")
 
     assert offenders == []
 
@@ -116,3 +123,67 @@ def test_projection_source_exposes_allocation_slots() -> None:
     )
     for marker in required:
         assert marker in source
+
+
+def test_active_model_capacity_projection_required_markers_exist() -> None:
+    source = "\n".join(
+        (
+            Path(
+                "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
+            ).read_text(encoding="utf-8"),
+            Path(
+                "src/contexts/llm_runtime/application/capacity/"
+                "select_active_llm_model_capacity.py",
+            ).read_text(encoding="utf-8"),
+            Path(
+                "src/contexts/llm_runtime/application/capacity/"
+                "project_llm_capacity_to_capacity_runtime.py",
+            ).read_text(encoding="utf-8"),
+        ),
+    )
+
+    required = (
+        "LlmModelRouteCatalog",
+        "LlmModelRouteRole",
+        "SelectActiveLlmModelCapacity",
+        "active_model_ref",
+        "capacity projection accounts must use one active model_ref",
+    )
+    for marker in required:
+        assert marker in source
+
+
+def test_llm_capacity_projection_does_not_import_legacy_groq_router_or_clients() -> (
+    None
+):
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (
+            Path(
+                "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
+            ),
+            Path(
+                "src/contexts/llm_runtime/application/capacity/"
+                "select_active_llm_model_capacity.py",
+            ),
+            Path(
+                "src/contexts/llm_runtime/application/capacity/"
+                "project_llm_capacity_to_capacity_runtime.py",
+            ),
+        )
+    )
+
+    forbidden = (
+        "src.infrastructure.llm.groq_model_router",
+        "AsyncGroq",
+        "configured_groq_api_keys",
+        "os.environ",
+        "GROQ_API_KEY",
+        "import httpx",
+        "from httpx",
+        "import requests",
+        "from requests",
+        "requests.",
+    )
+    for marker in forbidden:
+        assert marker not in source

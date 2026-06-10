@@ -32,6 +32,14 @@ class LlmCapacityProjectionCommand:
         for account in self.accounts:
             if not isinstance(account, LlmProviderAccountCapacity):
                 raise TypeError("accounts must contain LlmProviderAccountCapacity")
+        providers = {account.provider for account in self.accounts}
+        if len(providers) != 1:
+            raise ValueError("capacity projection accounts must use one provider")
+        model_refs = {account.model_ref for account in self.accounts}
+        if len(model_refs) != 1:
+            raise ValueError(
+                "capacity projection accounts must use one active model_ref",
+            )
         if not isinstance(self.requested_items, int):
             raise TypeError("requested_items must be int")
         if self.requested_items <= 0:
@@ -140,6 +148,30 @@ class ProjectLlmCapacityToCapacityRuntime:
             max_projected_items=max_projected_items,
             allocations=allocations,
         )
+
+
+def zero_llm_capacity_projection(
+    *, requested_items: int
+) -> LlmCapacityProjectionResult:
+    return LlmCapacityProjectionResult(
+        capacity_needs=(
+            CapacityNeed(
+                resource_kind=CapacityResourceKind.EXTERNAL_IO,
+                amount=1,
+            ),
+        ),
+        capacity_snapshot=CapacitySnapshot(
+            availability=(
+                CapacityAvailability(
+                    resource_kind=CapacityResourceKind.EXTERNAL_IO,
+                    available_amount=0,
+                ),
+            ),
+        ),
+        requested_items=requested_items,
+        max_projected_items=0,
+        allocations=(),
+    )
 
 
 def _build_allocation_slots(
