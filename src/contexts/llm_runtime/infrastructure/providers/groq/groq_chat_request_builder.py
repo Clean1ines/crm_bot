@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TypeAlias
 
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelExecutionSettings,
+)
 from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.llm_runtime.domain.value_objects.llm_route import LlmRoute
 from src.contexts.llm_runtime.domain.value_objects.reasoning_effort import (
@@ -43,12 +46,18 @@ class GroqChatRequestOptions:
     max_completion_tokens: int | None = None
     temperature: float | None = 0.0
     reasoning_effort: ReasoningEffort | None = None
+    execution_settings: LlmModelExecutionSettings | None = None
 
     def __post_init__(self) -> None:
         if self.max_completion_tokens is not None and self.max_completion_tokens <= 0:
             raise ValueError("max_completion_tokens must be > 0 when provided")
         if self.temperature is not None and not 0 <= self.temperature <= 2:
             raise ValueError("temperature must be between 0 and 2 when provided")
+        if self.execution_settings is not None and not isinstance(
+            self.execution_settings,
+            LlmModelExecutionSettings,
+        ):
+            raise TypeError("execution_settings must be LlmModelExecutionSettings")
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,9 +116,23 @@ class GroqChatRequestBuilder:
                 raise ValueError("Model does not support JSON object response format")
             payload["response_format"] = {"type": "json_object"}
 
-        reasoning_effort = options.reasoning_effort
-        if reasoning_effort is None:
-            reasoning_effort = model_profile.reasoning_profile.default_effort
+        reasoning_effort: ReasoningEffort | None = None
+        if options.execution_settings is not None:
+            if options.execution_settings.reasoning_enabled:
+                reasoning_effort = options.reasoning_effort
+                if (
+                    reasoning_effort is None
+                    and options.execution_settings.reasoning_effort is not None
+                ):
+                    reasoning_effort = ReasoningEffort(
+                        options.execution_settings.reasoning_effort,
+                    )
+                if reasoning_effort is None:
+                    reasoning_effort = model_profile.reasoning_profile.default_effort
+        else:
+            reasoning_effort = options.reasoning_effort
+            if reasoning_effort is None:
+                reasoning_effort = model_profile.reasoning_profile.default_effort
 
         if reasoning_effort is not None:
             if (

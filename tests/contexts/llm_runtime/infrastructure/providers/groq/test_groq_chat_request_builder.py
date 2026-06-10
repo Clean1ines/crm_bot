@@ -4,6 +4,10 @@ from decimal import Decimal
 
 import pytest
 
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelExecutionSettings,
+    default_groq_llm_model_route_catalog,
+)
 from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.llm_runtime.domain.value_objects.llm_route import LlmRoute
 from src.contexts.llm_runtime.domain.value_objects.model_id import ModelId
@@ -109,6 +113,83 @@ def test_qwen_default_reasoning_effort_is_none_to_preserve_output_budget() -> No
     )
 
     assert request.payload["reasoning_effort"] == "none"
+
+
+def test_disabled_execution_settings_suppress_model_default_reasoning() -> None:
+    qwen_profile = build_groq_free_plan_model_profiles()[0]
+
+    request = GroqChatRequestBuilder().build(
+        route=_route(),
+        model_profile=qwen_profile,
+        messages=(_message(),),
+        options=GroqChatRequestOptions(
+            execution_settings=LlmModelExecutionSettings(reasoning_enabled=False),
+        ),
+    )
+
+    assert "reasoning_effort" not in request.payload
+
+
+def test_qwen_default_catalog_settings_suppress_reasoning() -> None:
+    qwen_profile = build_groq_free_plan_model_profiles()[0]
+    settings = default_groq_llm_model_route_catalog().execution_settings_for_model_ref(
+        "qwen/qwen3-32b",
+    )
+
+    request = GroqChatRequestBuilder().build(
+        route=_route(),
+        model_profile=qwen_profile,
+        messages=(_message(),),
+        options=GroqChatRequestOptions(execution_settings=settings),
+    )
+
+    assert "reasoning_effort" not in request.payload
+
+
+def test_execution_settings_enabled_uses_explicit_reasoning_effort() -> None:
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[2]
+
+    request = GroqChatRequestBuilder().build(
+        route=_route(model="openai/gpt-oss-20b"),
+        model_profile=gpt_oss_profile,
+        messages=(_message(),),
+        options=GroqChatRequestOptions(
+            execution_settings=LlmModelExecutionSettings(
+                reasoning_enabled=True,
+                reasoning_effort="low",
+            ),
+        ),
+    )
+
+    assert request.payload["reasoning_effort"] == "low"
+
+
+def test_options_reasoning_effort_overrides_execution_settings_reasoning_effort() -> (
+    None
+):
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[2]
+
+    request = GroqChatRequestBuilder().build(
+        route=_route(model="openai/gpt-oss-20b"),
+        model_profile=gpt_oss_profile,
+        messages=(_message(),),
+        options=GroqChatRequestOptions(
+            reasoning_effort=ReasoningEffort.HIGH,
+            execution_settings=LlmModelExecutionSettings(
+                reasoning_enabled=True,
+                reasoning_effort="low",
+            ),
+        ),
+    )
+
+    assert request.payload["reasoning_effort"] == "high"
+
+
+def test_options_reject_invalid_execution_settings_type() -> None:
+    kwargs = {"execution_settings": object()}
+
+    with pytest.raises(TypeError, match="execution_settings"):
+        GroqChatRequestOptions(**kwargs)
 
 
 def test_explicit_reasoning_effort_must_be_supported_by_model() -> None:
