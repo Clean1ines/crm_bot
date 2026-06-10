@@ -245,6 +245,17 @@ def _source_unit_read_model(unit: SourceUnit) -> dict[str, object]:
     }
 
 
+def _source_units_url(
+    *,
+    project_id: str,
+    source_document_ref: str,
+) -> str:
+    return (
+        f"/api/projects/{project_id}/knowledge/source-documents/"
+        f"{source_document_ref}/source-units"
+    )
+
+
 async def _require_project_access(
     *,
     project_id: str,
@@ -412,11 +423,22 @@ async def upload_knowledge(
     if result.status is RunSourceIngestionFirstPhaseStatus.REJECTED:
         _raise_source_ingestion_rejected(result.admission_status)
 
+    source_document_ref = result.source_document_ref
+    if source_document_ref is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Source ingestion completed without source_document_ref",
+        )
+
     return {
         "status": "source_ingestion_first_phase_completed",
         "workflow_run_id": result.workflow_run_id,
-        "source_document_ref": result.source_document_ref,
+        "source_document_ref": source_document_ref,
         "source_unit_count": result.source_unit_count,
+        "source_units_url": _source_units_url(
+            project_id=project_id,
+            source_document_ref=source_document_ref,
+        ),
     }
 
 
@@ -493,7 +515,6 @@ async def preview_knowledge():
     )
 
 
-@router.get("/usage")
 @router.get("/usage")
 async def knowledge_usage(
     project_id: str,

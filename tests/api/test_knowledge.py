@@ -151,6 +151,16 @@ def _source() -> str:
     return Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
 
 
+def test_source_units_url_uses_project_and_source_document_ref() -> None:
+    assert knowledge._source_units_url(
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+    ) == (
+        "/api/projects/project-1/knowledge/source-documents/"
+        "source-document:project-1:abc/source-units"
+    )
+
+
 @pytest.mark.asyncio
 async def test_upload_success_uses_source_ingestion_first_phase(
     monkeypatch: pytest.MonkeyPatch,
@@ -190,6 +200,10 @@ async def test_upload_success_uses_source_ingestion_first_phase(
         "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
         "source_document_ref": "source-document:project-1:abc",
         "source_unit_count": 3,
+        "source_units_url": (
+            "/api/projects/project-1/knowledge/source-documents/"
+            "source-document:project-1:abc/source-units"
+        ),
     }
     assert len(factory_calls) == 1
     assert len(runner.commands) == 1
@@ -593,6 +607,9 @@ def test_upload_boundary_has_no_legacy_patch_points() -> None:
         "_decode_workbench_upload_text",
         "_build_source_ingestion_actor",
         "SourceIngestionActor",
+        "_source_units_url",
+        "source_units_url",
+        "source-units",
     )
     forbidden = (
         "src.interfaces.composition.knowledge_upload",
@@ -621,6 +638,7 @@ def test_clear_knowledge_uses_workbench_clear_composition() -> None:
 def test_usage_endpoint_uses_model_usage_read_side_without_knowledge_service() -> None:
     source = _source()
 
+    assert source.count('@router.get("/usage")') == 1
     assert "ModelUsageRepository" in source
     assert "ModelUsageSummaryDto" in source
     assert "KnowledgeService(" not in source
@@ -886,3 +904,44 @@ def test_source_ingestion_source_units_read_side_guard() -> None:
 
     for marker in forbidden:
         assert marker not in endpoint_region
+
+
+def test_upload_response_source_units_url_source_guard() -> None:
+    source = _source()
+
+    upload_region = source.split('@router.post("")', 1)[1].split(
+        '@router.get("/source-documents/{source_document_ref}/source-units")',
+        1,
+    )[0]
+    source_units_region = source.split(
+        '@router.get("/source-documents/{source_document_ref}/source-units")',
+        1,
+    )[1].split('@router.get("/usage")', 1)[0]
+    checked_region = upload_region + source_units_region
+
+    required = (
+        "_source_units_url",
+        "source_units_url",
+        "source-units",
+    )
+    forbidden = (
+        "RunClaimExtractionStageAsync",
+        "DraftObservationExtractionSchedulingReconciler",
+        "PROMPT_A_WORK_SCHEDULED",
+        "capacity_runtime",
+        "execution_runtime",
+        "llm_runtime",
+        "artifact_runtime",
+        "worker_loop",
+        "JobDispatcher",
+        "queue",
+        "openpyxl",
+        "pandas",
+        "BeautifulSoup",
+    )
+
+    for marker in required:
+        assert marker in source
+
+    for marker in forbidden:
+        assert marker not in checked_region
