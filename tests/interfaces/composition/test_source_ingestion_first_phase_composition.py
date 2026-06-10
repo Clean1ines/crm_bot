@@ -18,7 +18,9 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segment
     SourceIngestionSegmentationProfile,
     WorkbenchModelRequestBudgetProfile,
     WorkbenchPromptProfile,
-    default_source_ingestion_segmentation_profile,
+)
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_token_estimation import (
+    RoughWorkbenchTokenEstimator,
 )
 from src.contexts.knowledge_workbench.document_segmentation.domain import (
     DocumentSegmentationBudget,
@@ -37,6 +39,7 @@ from src.interfaces.composition.source_ingestion_first_phase import (
     default_source_ingestion_first_phase_segmentation_config,
     make_source_ingestion_first_phase,
     segmentation_config_from_profile,
+    source_ingestion_segmentation_profile_with_estimated_prompt_tokens,
 )
 
 
@@ -207,6 +210,12 @@ class FakeInnerRunner:
             source_document_ref="source-document:project-1:abc",
             source_unit_count=3,
         )
+
+
+def _write_prompt_text(repo_root: Path, text: str) -> None:
+    prompt_path = repo_root / "src/agent/prompts/faq_surface_claim_observations.ru.txt"
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    prompt_path.write_text(text, encoding="utf-8")
 
 
 def _custom_segmentation_budget() -> DocumentSegmentationBudget:
@@ -483,22 +492,34 @@ def test_segmentation_config_converts_to_document_segmentation_budget() -> None:
     assert budget.max_source_segment_tokens == 68
 
 
-def test_default_segmentation_config_is_request_budget_without_provider_names() -> None:
-    config = default_source_ingestion_first_phase_segmentation_config()
+def test_default_segmentation_config_is_request_budget_without_provider_names(
+    tmp_path: Path,
+) -> None:
+    prompt_text = "alpha beta gamma delta"
+    _write_prompt_text(tmp_path, prompt_text)
+    expected_prompt_tokens = RoughWorkbenchTokenEstimator().estimate_tokens(prompt_text)
+
+    config = default_source_ingestion_first_phase_segmentation_config(
+        repo_root=tmp_path,
+    )
     budget = config.to_document_segmentation_budget()
 
     assert budget.prompt.prompt_name == "draft_observation_extraction"
-    assert budget.prompt.prompt_token_count == 2_000
+    assert budget.prompt.prompt_token_count == expected_prompt_tokens
     assert budget.model.profile_name == "primary_model"
     assert budget.model.max_request_input_tokens == 6_000
     assert budget.model.reserved_output_tokens == 1_000
-    assert budget.max_source_segment_tokens == 3_000
+    assert budget.max_source_segment_tokens == (6_000 - expected_prompt_tokens - 1_000)
 
 
 @pytest.mark.asyncio
 async def test_factory_runner_injects_default_segmentation_budget(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    prompt_text = "alpha beta gamma delta"
+    _write_prompt_text(tmp_path, prompt_text)
+    expected_prompt_tokens = RoughWorkbenchTokenEstimator().estimate_tokens(prompt_text)
     _patch_transactional_dependencies(monkeypatch)
     transaction = FakeTransaction()
     connection = FakeConnection(transaction)
@@ -508,6 +529,7 @@ async def test_factory_runner_injects_default_segmentation_budget(
         pool=pool,
         project_repo=ProjectMemberRoleRepo(role="owner"),
         user_repo=_user_repo(),
+        repo_root=tmp_path,
     )
     await runner.execute(_command())
 
@@ -515,6 +537,7 @@ async def test_factory_runner_injects_default_segmentation_budget(
     budget = FakeInnerRunner.calls[0].segmentation_budget
     assert budget is not None
     assert budget.prompt.prompt_name == "draft_observation_extraction"
+    assert budget.prompt.prompt_token_count == expected_prompt_tokens
     assert budget.model.profile_name == "primary_model"
 
 
@@ -592,6 +615,13 @@ def test_composition_segmentation_budget_source_guard() -> None:
         "segmentation_config_from_profile",
         "default_source_ingestion_segmentation_profile",
         "SourceIngestionSegmentationProfile",
+        "_load_workbench_prompt_text",
+        "source_ingestion_segmentation_profile_with_estimated_prompt_tokens",
+        "SourceIngestionPromptTokenEstimationService",
+        "RoughWorkbenchTokenEstimator",
+        "WorkbenchPromptText",
+        "Path",
+        "read_text",
     ]
     forbidden_markers = [
         "qwen",
@@ -609,6 +639,10 @@ def test_composition_segmentation_budget_source_guard() -> None:
         "worker_loop",
         "JobDispatcher",
         "queue",
+        "transformers",
+        "tiktoken",
+        "anthropic",
+        "openai",
     ]
 
     for marker in required_markers:
@@ -618,9 +652,17 @@ def test_composition_segmentation_budget_source_guard() -> None:
         assert marker not in source
 
 
-def test_default_segmentation_config_is_derived_from_profile_catalog() -> None:
-    profile = default_source_ingestion_segmentation_profile()
-    config = default_source_ingestion_first_phase_segmentation_config()
+def test_default_segmentation_config_is_derived_from_profile_catalog(
+    tmp_path: Path,
+) -> None:
+    prompt_text = "alpha beta gamma delta"
+    _write_prompt_text(tmp_path, prompt_text)
+    profile = source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
+        repo_root=tmp_path,
+    )
+    config = default_source_ingestion_first_phase_segmentation_config(
+        repo_root=tmp_path,
+    )
 
     assert config.prompt_name == profile.prompt.prompt_name
     assert config.prompt_token_count == profile.prompt.prompt_token_count
@@ -655,3 +697,87 @@ def test_segmentation_config_from_profile_maps_custom_profile() -> None:
     assert config.max_request_input_tokens == 4_000
     assert config.reserved_output_tokens == 500
     assert config.to_document_segmentation_budget().max_source_segment_tokens == 3_377
+
+
+def test_loads_prompt_text_and_estimates_prompt_tokens(tmp_path: Path) -> None:
+    prompt_text = "alpha beta gamma delta"
+    _write_prompt_text(tmp_path, prompt_text)
+
+    profile = source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
+        repo_root=tmp_path,
+    )
+
+    assert profile.prompt.prompt_token_count == (
+        RoughWorkbenchTokenEstimator().estimate_tokens(prompt_text)
+    )
+    assert (
+        profile.prompt.prompt_path
+        == "src/agent/prompts/faq_surface_claim_observations.ru.txt"
+    )
+    assert profile.prompt.node_id == "faq_claim_observations"
+
+
+def test_default_composition_config_uses_estimated_prompt_tokens(
+    tmp_path: Path,
+) -> None:
+    prompt_text = "alpha beta gamma delta"
+    _write_prompt_text(tmp_path, prompt_text)
+
+    config = default_source_ingestion_first_phase_segmentation_config(
+        repo_root=tmp_path,
+    )
+
+    assert config.prompt_token_count == (
+        RoughWorkbenchTokenEstimator().estimate_tokens(prompt_text)
+    )
+    assert config.prompt_token_count != 2_000
+
+
+@pytest.mark.asyncio
+async def test_explicit_segmentation_config_bypasses_prompt_file_loading(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _patch_transactional_dependencies(monkeypatch)
+    transaction = FakeTransaction()
+    connection = FakeConnection(transaction)
+    pool = FakePool(connection)
+    explicit_config = SourceIngestionFirstPhaseSegmentationConfig(
+        prompt_name="explicit_prompt",
+        prompt_token_count=44,
+        primary_model_profile_name="explicit_primary_model",
+        max_request_input_tokens=500,
+        reserved_output_tokens=50,
+    )
+
+    runner = make_source_ingestion_first_phase(
+        pool=pool,
+        project_repo=ProjectMemberRoleRepo(role="owner"),
+        user_repo=_user_repo(),
+        segmentation_config=explicit_config,
+        repo_root=tmp_path,
+    )
+    await runner.execute(_command())
+
+    assert len(FakeInnerRunner.calls) == 1
+    budget = FakeInnerRunner.calls[0].segmentation_budget
+    assert budget is not None
+    assert budget.prompt.prompt_name == "explicit_prompt"
+    assert budget.prompt.prompt_token_count == 44
+    assert budget.model.profile_name == "explicit_primary_model"
+
+
+def test_missing_prompt_file_raises_for_default_config(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        default_source_ingestion_first_phase_segmentation_config(
+            repo_root=tmp_path,
+        )
+
+
+def test_empty_prompt_file_raises_for_default_config(tmp_path: Path) -> None:
+    _write_prompt_text(tmp_path, "  \n\t  ")
+
+    with pytest.raises(ValueError, match="text must be non-empty"):
+        default_source_ingestion_first_phase_segmentation_config(
+            repo_root=tmp_path,
+        )

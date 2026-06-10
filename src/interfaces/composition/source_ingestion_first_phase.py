@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Protocol, cast, runtime_checkable
 
 from src.contexts.knowledge_workbench.application.sagas.create_source_units_for_ingestion import (
@@ -24,6 +25,11 @@ from src.contexts.knowledge_workbench.application.sagas.start_source_ingestion_w
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segmentation_profiles import (
     SourceIngestionSegmentationProfile,
     default_source_ingestion_segmentation_profile,
+)
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_token_estimation import (
+    RoughWorkbenchTokenEstimator,
+    SourceIngestionPromptTokenEstimationService,
+    WorkbenchPromptText,
 )
 from src.contexts.knowledge_workbench.document_segmentation.domain import (
     DocumentSegmentationBudget,
@@ -111,11 +117,53 @@ def segmentation_config_from_profile(
     )
 
 
-def default_source_ingestion_first_phase_segmentation_config() -> (
-    SourceIngestionFirstPhaseSegmentationConfig
-):
+def _load_workbench_prompt_text(
+    profile: SourceIngestionSegmentationProfile,
+    *,
+    repo_root: Path | None = None,
+) -> WorkbenchPromptText:
+    prompt_path = Path(profile.prompt.prompt_path)
+    resolved_prompt_path = (
+        prompt_path
+        if prompt_path.is_absolute()
+        else (repo_root or Path.cwd()) / prompt_path
+    )
+    prompt_text = resolved_prompt_path.read_text(encoding="utf-8")
+    return WorkbenchPromptText(
+        prompt_name=profile.prompt.prompt_name,
+        node_id=profile.prompt.node_id,
+        prompt_path=profile.prompt.prompt_path,
+        text=prompt_text,
+    )
+
+
+def source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
+    *,
+    profile: SourceIngestionSegmentationProfile | None = None,
+    repo_root: Path | None = None,
+) -> SourceIngestionSegmentationProfile:
+    base_profile = profile or default_source_ingestion_segmentation_profile()
+    prompt_text = _load_workbench_prompt_text(
+        base_profile,
+        repo_root=repo_root,
+    )
+    service = SourceIngestionPromptTokenEstimationService(
+        token_estimator=RoughWorkbenchTokenEstimator(),
+    )
+    return service.with_estimated_prompt_tokens(
+        profile=base_profile,
+        prompt_text=prompt_text,
+    )
+
+
+def default_source_ingestion_first_phase_segmentation_config(
+    *,
+    repo_root: Path | None = None,
+) -> SourceIngestionFirstPhaseSegmentationConfig:
     return segmentation_config_from_profile(
-        default_source_ingestion_segmentation_profile()
+        source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
+            repo_root=repo_root,
+        )
     )
 
 
@@ -295,6 +343,7 @@ def make_source_ingestion_first_phase(
     project_repo: object,
     user_repo: UserRepository,
     segmentation_config: SourceIngestionFirstPhaseSegmentationConfig | None = None,
+    repo_root: Path | None = None,
 ) -> SourceIngestionFirstPhaseRunnerPort:
     project_access = _ProjectAccessAdapter(
         project_repo=project_repo,
@@ -303,10 +352,13 @@ def make_source_ingestion_first_phase(
     admission_policy = SourceIngestionAdmissionPolicy(project_access=project_access)
     starter = StartSourceIngestionWorkflow(admission_policy=admission_policy)
 
-    effective_segmentation_config = (
-        segmentation_config
-        or default_source_ingestion_first_phase_segmentation_config()
-    )
+    effective_segmentation_config = segmentation_config
+    if effective_segmentation_config is None:
+        effective_segmentation_config = (
+            default_source_ingestion_first_phase_segmentation_config(
+                repo_root=repo_root,
+            )
+        )
 
     return _TransactionalSourceIngestionFirstPhaseRunner(
         pool=cast(_AsyncSourceIngestionPoolLike, pool),
