@@ -10,6 +10,15 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
     KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
 )
+from src.contexts.knowledge_workbench.document_segmentation.domain import (
+    DocumentSegment,
+    DocumentSegmentationBudget,
+    DocumentSegmentKind,
+    MarkdownSegmentationCommand,
+    MarkdownSegmentationPolicy,
+    SegmentationModelBudgetProfile,
+    SegmentationPromptProfile,
+)
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_document import (
     SourceDocument,
 )
@@ -21,6 +30,9 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.hea
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
     SourceDocumentRef,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
+    SourceFormat,
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_kind import (
     SourceUnitKind,
@@ -76,6 +88,7 @@ class CreateSourceUnitsForIngestionCommand:
     source_document_ref: str
     raw_text: str
     occurred_at: datetime
+    segmentation_budget: DocumentSegmentationBudget | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.workflow_run_id, field_name="workflow_run_id")
@@ -86,6 +99,11 @@ class CreateSourceUnitsForIngestionCommand:
         )
         _require_non_empty_text(self.raw_text, field_name="raw_text")
         _require_timezone_aware(self.occurred_at, field_name="occurred_at")
+        if self.segmentation_budget is not None and not isinstance(
+            self.segmentation_budget,
+            DocumentSegmentationBudget,
+        ):
+            raise TypeError("segmentation_budget must be DocumentSegmentationBudget")
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +145,10 @@ class CreateSourceUnitsForIngestion:
         command: CreateSourceUnitsForIngestionCommand,
     ) -> CreateSourceUnitsForIngestionResult:
         document_ref = SourceDocumentRef(command.source_document_ref)
+        effective_budget = (
+            command.segmentation_budget
+            or default_source_ingestion_segmentation_budget()
+        )
 
         try:
             document = await self._unit_of_work.source_management.load_source_document(
@@ -141,12 +163,14 @@ class CreateSourceUnitsForIngestion:
                 document=document,
                 raw_text=command.raw_text,
                 occurred_at=command.occurred_at,
+                segmentation_budget=effective_budget,
             )
 
             checkpoint = _build_source_units_created_checkpoint(
                 workflow_run_id=command.workflow_run_id,
                 source_document_ref=command.source_document_ref,
                 units=units,
+                segmentation_budget=effective_budget,
                 occurred_at=command.occurred_at,
             )
             state = KnowledgeExtractionWorkflowState(
@@ -176,27 +200,124 @@ class CreateSourceUnitsForIngestion:
         )
 
 
+def default_source_ingestion_segmentation_budget() -> DocumentSegmentationBudget:
+    # Production config will later pass real prompt/model request-budget values.
+    return DocumentSegmentationBudget(
+        prompt=SegmentationPromptProfile(
+            prompt_name="draft_observation_extraction",
+            prompt_token_count=2_000,
+        ),
+        model=SegmentationModelBudgetProfile(
+            profile_name="primary_model",
+            max_request_input_tokens=6_000,
+            reserved_output_tokens=1_000,
+        ),
+    )
+
+
 def build_source_units_from_text(
     *,
     document: SourceDocument,
     raw_text: str,
     occurred_at: datetime,
+    segmentation_budget: DocumentSegmentationBudget | None = None,
 ) -> tuple[SourceUnit, ...]:
     _require_non_empty_text(raw_text, field_name="raw_text")
     _require_timezone_aware(occurred_at, field_name="occurred_at")
 
+    effective_budget = (
+        segmentation_budget or default_source_ingestion_segmentation_budget()
+    )
+    segments = _segment_document_text(
+        document=document,
+        raw_text=raw_text,
+        segmentation_budget=effective_budget,
+    )
+
+    return build_source_units_from_segments(
+        document=document,
+        segments=segments,
+        occurred_at=occurred_at,
+    )
+
+
+def build_source_units_from_segments(
+    *,
+    document: SourceDocument,
+    segments: tuple[DocumentSegment, ...],
+    occurred_at: datetime,
+) -> tuple[SourceUnit, ...]:
+    if not segments:
+        raise ValueError("segments must be non-empty")
+    _require_timezone_aware(occurred_at, field_name="occurred_at")
+
+    return tuple(
+        _build_source_unit_from_segment(
+            document=document,
+            segment=segment,
+            occurred_at=occurred_at,
+        )
+        for segment in segments
+    )
+
+
+def _segment_document_text(
+    *,
+    document: SourceDocument,
+    raw_text: str,
+    segmentation_budget: DocumentSegmentationBudget,
+) -> tuple[DocumentSegment, ...]:
+    if document.source_format is SourceFormat.MARKDOWN:
+        return MarkdownSegmentationPolicy().segment(
+            MarkdownSegmentationCommand(
+                document_key=document.document_ref.value,
+                markdown_text=raw_text,
+                budget=segmentation_budget,
+            ),
+        )
+
+    return _fallback_non_markdown_segments(
+        document_key=document.document_ref.value,
+        raw_text=raw_text,
+    )
+
+
+def _fallback_non_markdown_segments(
+    *,
+    document_key: str,
+    raw_text: str,
+) -> tuple[DocumentSegment, ...]:
     paragraphs = _split_paragraphs(raw_text)
     if not paragraphs:
         raise ValueError("raw_text must contain at least one paragraph")
 
     return tuple(
-        _build_source_unit(
-            document=document,
-            paragraph_text=paragraph_text,
+        _build_fallback_document_segment(
+            document_key=document_key,
+            text=paragraph,
             ordinal=ordinal,
-            occurred_at=occurred_at,
         )
-        for ordinal, paragraph_text in enumerate(paragraphs)
+        for ordinal, paragraph in enumerate(paragraphs)
+    )
+
+
+def _build_fallback_document_segment(
+    *,
+    document_key: str,
+    text: str,
+    ordinal: int,
+) -> DocumentSegment:
+    text_hash = sha256(text.encode("utf-8")).hexdigest()
+    return DocumentSegment(
+        segment_key=(
+            f"segment:{document_key}:{ordinal}:"
+            f"{DocumentSegmentKind.PARAGRAPH_GROUP.value}:{text_hash}"
+        ),
+        kind=DocumentSegmentKind.PARAGRAPH_GROUP,
+        text=text,
+        heading_path=(),
+        ordinal=ordinal,
+        estimated_tokens=max(1, (len(text) + 3) // 4),
     )
 
 
@@ -220,28 +341,44 @@ def _split_paragraphs(raw_text: str) -> tuple[str, ...]:
     return tuple(paragraph for paragraph in paragraphs if paragraph)
 
 
-def _build_source_unit(
+def _build_source_unit_from_segment(
     *,
     document: SourceDocument,
-    paragraph_text: str,
-    ordinal: int,
+    segment: DocumentSegment,
     occurred_at: datetime,
 ) -> SourceUnit:
-    paragraph_hash = sha256(paragraph_text.encode("utf-8")).hexdigest()
+    segment_hash = sha256(segment.segment_key.encode("utf-8")).hexdigest()
     unit_ref = SourceUnitRef(
-        value=f"source-unit:{document.document_ref.value}:{ordinal}:{paragraph_hash}",
+        value=(
+            f"source-unit:{document.document_ref.value}:"
+            f"{segment.ordinal}:{segment_hash}"
+        ),
     )
 
     return SourceUnit(
         unit_ref=unit_ref,
         document_ref=document.document_ref,
-        unit_kind=SourceUnitKind.PARAGRAPH_GROUP,
-        text=SourceUnitText(paragraph_text),
-        heading_path=HeadingPath(()),
+        unit_kind=_source_unit_kind_from_segment_kind(segment.kind),
+        text=SourceUnitText(segment.text),
+        heading_path=HeadingPath(segment.heading_path),
         lineage=SourceUnitLineage(()),
-        ordinal=ordinal,
+        ordinal=segment.ordinal,
         created_at=occurred_at,
     )
+
+
+def _source_unit_kind_from_segment_kind(kind: DocumentSegmentKind) -> SourceUnitKind:
+    if kind is DocumentSegmentKind.DOCUMENT_PREAMBLE:
+        return SourceUnitKind.PARAGRAPH_GROUP
+    if kind is DocumentSegmentKind.SECTION:
+        return SourceUnitKind.SECTION
+    if kind is DocumentSegmentKind.SUBSECTION:
+        return SourceUnitKind.SUBSECTION
+    if kind is DocumentSegmentKind.SPLIT_FRAGMENT:
+        return SourceUnitKind.SPLIT_FRAGMENT
+    if kind is DocumentSegmentKind.PARAGRAPH_GROUP:
+        return SourceUnitKind.PARAGRAPH_GROUP
+    raise ValueError(f"Unsupported document segment kind: {kind}")
 
 
 def _build_source_units_created_checkpoint(
@@ -249,6 +386,7 @@ def _build_source_units_created_checkpoint(
     workflow_run_id: str,
     source_document_ref: str,
     units: tuple[SourceUnit, ...],
+    segmentation_budget: DocumentSegmentationBudget,
     occurred_at: datetime,
 ) -> KnowledgeExtractionPhaseCheckpoint:
     return KnowledgeExtractionPhaseCheckpoint(
@@ -262,6 +400,10 @@ def _build_source_units_created_checkpoint(
         idempotency_key=f"source-units-created:{source_document_ref}",
         checkpoint_payload={
             "source_document_ref": source_document_ref,
+            "splitter": "document_segmentation_v1",
+            "segmentation_profile": segmentation_budget.model.profile_name,
+            "prompt_name": segmentation_budget.prompt.prompt_name,
+            "max_source_segment_tokens": segmentation_budget.max_source_segment_tokens,
             "source_unit_count": len(units),
             "source_unit_refs": [unit.unit_ref.value for unit in units],
         },

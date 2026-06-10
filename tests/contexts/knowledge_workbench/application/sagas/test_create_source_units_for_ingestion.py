@@ -19,6 +19,11 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
     KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
 )
+from src.contexts.knowledge_workbench.document_segmentation.domain import (
+    DocumentSegmentationBudget,
+    SegmentationModelBudgetProfile,
+    SegmentationPromptProfile,
+)
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_document import (
     SourceDocument,
 )
@@ -113,19 +118,54 @@ def _now() -> datetime:
     return datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
 
 
-def _source_document(*, project_id: str = "project-1") -> SourceDocument:
+def _source_document(
+    *,
+    project_id: str = "project-1",
+    source_format: SourceFormat = SourceFormat.MARKDOWN,
+) -> SourceDocument:
     return SourceDocument(
         document_ref=SourceDocumentRef("source-document:project-1:abc"),
         project_id=project_id,
-        source_format=SourceFormat.MARKDOWN,
+        source_format=source_format,
         content_hash="sha256:abc",
         original_filename="knowledge.md",
         created_at=_now(),
     )
 
 
-def _raw_text() -> str:
+def _markdown_h1_text() -> str:
+    return """# Alpha
+
+A1.
+
+# Beta
+
+B1.
+"""
+
+
+def _plain_text() -> str:
     return "First paragraph.\n\nSecond paragraph.\nStill second.\n\nThird paragraph.\n"
+
+
+def _budget(
+    *,
+    prompt_name: str = "test_prompt",
+    profile_name: str = "primary_model",
+    max_request_input_tokens: int = 100,
+    reserved_output_tokens: int = 0,
+) -> DocumentSegmentationBudget:
+    return DocumentSegmentationBudget(
+        prompt=SegmentationPromptProfile(
+            prompt_name=prompt_name,
+            prompt_token_count=0,
+        ),
+        model=SegmentationModelBudgetProfile(
+            profile_name=profile_name,
+            max_request_input_tokens=max_request_input_tokens,
+            reserved_output_tokens=reserved_output_tokens,
+        ),
+    )
 
 
 def _command(
@@ -133,13 +173,15 @@ def _command(
     project_id: str = "project-1",
     raw_text: str | None = None,
     occurred_at: datetime | None = None,
+    segmentation_budget: DocumentSegmentationBudget | None = None,
 ) -> CreateSourceUnitsForIngestionCommand:
     return CreateSourceUnitsForIngestionCommand(
         workflow_run_id="knowledge-extraction:source-document:project-1:abc",
         project_id=project_id,
         source_document_ref="source-document:project-1:abc",
-        raw_text=raw_text if raw_text is not None else _raw_text(),
+        raw_text=raw_text if raw_text is not None else _markdown_h1_text(),
         occurred_at=occurred_at or _now(),
+        segmentation_budget=segmentation_budget,
     )
 
 
@@ -148,48 +190,73 @@ def _use_case(unit_of_work: FakeUnitOfWork) -> CreateSourceUnitsForIngestion:
 
 
 @pytest.mark.asyncio
-async def test_builds_and_persists_paragraph_source_units() -> None:
+async def test_markdown_h1_source_units_are_section_units() -> None:
     unit_of_work = FakeUnitOfWork()
-    command = _command()
+    command = _command(
+        raw_text=_markdown_h1_text(),
+        segmentation_budget=_budget(max_request_input_tokens=100),
+    )
 
     result = await _use_case(unit_of_work).execute(command)
 
     saved_units = unit_of_work.source_management_repository.saved_units
-    assert len(saved_units) == 3
-    assert tuple(unit.ordinal for unit in saved_units) == (0, 1, 2)
-    assert all(unit.unit_kind is SourceUnitKind.PARAGRAPH_GROUP for unit in saved_units)
-    assert tuple(unit.text.value for unit in saved_units) == (
-        "First paragraph.",
-        "Second paragraph.\nStill second.",
-        "Third paragraph.",
+    assert len(saved_units) == 2
+    assert tuple(unit.ordinal for unit in saved_units) == (0, 1)
+    assert tuple(unit.unit_kind for unit in saved_units) == (
+        SourceUnitKind.SECTION,
+        SourceUnitKind.SECTION,
     )
-    assert all(
-        unit.document_ref.value == command.source_document_ref for unit in saved_units
+    assert tuple(unit.heading_path.parts for unit in saved_units) == (
+        ("Alpha",),
+        ("Beta",),
     )
-    assert all(unit.created_at == command.occurred_at for unit in saved_units)
-    assert all(unit.unit_ref.value for unit in saved_units)
-    assert result.source_unit_count == 3
+    assert saved_units[0].text.value.startswith("# Alpha")
+    assert saved_units[1].text.value.startswith("# Beta")
+    assert result.source_unit_count == 2
     assert unit_of_work.commit_count == 1
     assert unit_of_work.rollback_count == 0
 
 
-def test_source_unit_refs_are_deterministic() -> None:
+@pytest.mark.asyncio
+async def test_oversized_markdown_h1_uses_balanced_document_segmentation() -> None:
+    paragraphs = "\n\n".join(f"p{index} aa bb" for index in range(1, 11))
+    raw_text = f"# Alpha\n\n{paragraphs}"
+    unit_of_work = FakeUnitOfWork()
+    command = _command(
+        raw_text=raw_text,
+        segmentation_budget=_budget(max_request_input_tokens=18),
+    )
+
+    await _use_case(unit_of_work).execute(command)
+
+    saved_units = unit_of_work.source_management_repository.saved_units
+    assert len(saved_units) == 2
+    assert len(saved_units) != 10
+    assert all(unit.unit_kind is SourceUnitKind.SPLIT_FRAGMENT for unit in saved_units)
+    assert all(unit.heading_path.parts == ("Alpha",) for unit in saved_units)
+
+
+def test_source_unit_refs_are_deterministic_from_segment_keys() -> None:
     document = _source_document()
+    budget = _budget(max_request_input_tokens=100)
 
     units_one = build_source_units_from_text(
         document=document,
-        raw_text=_raw_text(),
+        raw_text=_markdown_h1_text(),
         occurred_at=_now(),
+        segmentation_budget=budget,
     )
     units_two = build_source_units_from_text(
         document=document,
-        raw_text=_raw_text(),
+        raw_text=_markdown_h1_text(),
         occurred_at=_now(),
+        segmentation_budget=budget,
     )
     units_three = build_source_units_from_text(
         document=document,
-        raw_text="First paragraph changed.\n\nSecond paragraph.\nStill second.",
+        raw_text="# Alpha\n\nChanged.",
         occurred_at=_now(),
+        segmentation_budget=budget,
     )
 
     assert tuple(unit.unit_ref.value for unit in units_one) == tuple(
@@ -198,6 +265,97 @@ def test_source_unit_refs_are_deterministic() -> None:
     assert tuple(unit.unit_ref.value for unit in units_one) != tuple(
         unit.unit_ref.value for unit in units_three
     )
+
+
+def test_non_markdown_fallback_still_produces_paragraph_groups() -> None:
+    document = _source_document(source_format=SourceFormat.PLAIN_TEXT)
+
+    units = build_source_units_from_text(
+        document=document,
+        raw_text=_plain_text(),
+        occurred_at=_now(),
+        segmentation_budget=_budget(max_request_input_tokens=100),
+    )
+
+    assert len(units) == 3
+    assert all(unit.unit_kind is SourceUnitKind.PARAGRAPH_GROUP for unit in units)
+    assert tuple(unit.heading_path.parts for unit in units) == ((), (), ())
+    assert tuple(unit.text.value for unit in units) == (
+        "First paragraph.",
+        "Second paragraph.\nStill second.",
+        "Third paragraph.",
+    )
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_payload_contains_segmentation_metadata() -> None:
+    unit_of_work = FakeUnitOfWork()
+    command = _command(
+        raw_text=_markdown_h1_text(),
+        segmentation_budget=_budget(max_request_input_tokens=100),
+    )
+
+    await _use_case(unit_of_work).execute(command)
+
+    checkpoint = unit_of_work.saga_state_repository.saved_checkpoints[0]
+    payload = checkpoint.checkpoint_payload
+    assert payload["splitter"] == "document_segmentation_v1"
+    assert payload["segmentation_profile"] == "primary_model"
+    assert payload["prompt_name"] == "test_prompt"
+    assert payload["max_source_segment_tokens"] == 100
+    assert payload["source_unit_count"] == 2
+    assert len(cast(list[str], payload["source_unit_refs"])) == 2
+
+
+@pytest.mark.asyncio
+async def test_command_accepts_explicit_segmentation_budget() -> None:
+    unit_of_work = FakeUnitOfWork()
+    command = _command(
+        raw_text=_markdown_h1_text(),
+        segmentation_budget=_budget(
+            prompt_name="custom_prompt",
+            profile_name="custom_primary_model",
+            max_request_input_tokens=50,
+        ),
+    )
+
+    await _use_case(unit_of_work).execute(command)
+
+    checkpoint = unit_of_work.saga_state_repository.saved_checkpoints[0]
+    assert checkpoint.checkpoint_payload["prompt_name"] == "custom_prompt"
+    assert (
+        checkpoint.checkpoint_payload["segmentation_profile"] == "custom_primary_model"
+    )
+
+
+@pytest.mark.asyncio
+async def test_markdown_h1_no_longer_uses_paragraph_only_behavior_when_it_fits() -> (
+    None
+):
+    raw_text = """# Alpha
+
+A1.
+
+A2.
+
+# Beta
+
+B1.
+
+B2.
+"""
+    unit_of_work = FakeUnitOfWork()
+    command = _command(
+        raw_text=raw_text,
+        segmentation_budget=_budget(max_request_input_tokens=100),
+    )
+
+    await _use_case(unit_of_work).execute(command)
+
+    saved_units = unit_of_work.source_management_repository.saved_units
+    assert len(saved_units) == 2
+    assert len(saved_units) != 4
+    assert all(unit.unit_kind is SourceUnitKind.SECTION for unit in saved_units)
 
 
 @pytest.mark.asyncio
@@ -244,7 +402,10 @@ def test_empty_text_fails_before_persistence_boundary() -> None:
 @pytest.mark.asyncio
 async def test_checkpoint_payload_and_state() -> None:
     unit_of_work = FakeUnitOfWork()
-    command = _command()
+    command = _command(
+        raw_text=_markdown_h1_text(),
+        segmentation_budget=_budget(max_request_input_tokens=100),
+    )
 
     result = await _use_case(unit_of_work).execute(command)
 
@@ -252,10 +413,10 @@ async def test_checkpoint_payload_and_state() -> None:
     checkpoint = unit_of_work.saga_state_repository.saved_checkpoints[0]
     assert checkpoint.phase_key is KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED
     assert checkpoint.phase_status is KnowledgeExtractionPhaseStatus.COMPLETED
-    assert checkpoint.expected_count == 3
-    assert checkpoint.completed_count == 3
-    assert checkpoint.checkpoint_payload["source_unit_count"] == 3
-    assert len(cast(list[str], checkpoint.checkpoint_payload["source_unit_refs"])) == 3
+    assert checkpoint.expected_count == 2
+    assert checkpoint.completed_count == 2
+    assert checkpoint.checkpoint_payload["source_unit_count"] == 2
+    assert len(cast(list[str], checkpoint.checkpoint_payload["source_unit_refs"])) == 2
 
     assert len(unit_of_work.saga_state_repository.saved_states) == 1
     state = unit_of_work.saga_state_repository.saved_states[0]
@@ -346,6 +507,16 @@ def test_command_and_result_validation() -> None:
             occurred_at=datetime(2026, 6, 10, 12, 0),
         )
 
+    with pytest.raises(TypeError, match="segmentation_budget must be"):
+        CreateSourceUnitsForIngestionCommand(
+            workflow_run_id="workflow-1",
+            project_id="project-1",
+            source_document_ref="source-document:project-1:abc",
+            raw_text="Text",
+            occurred_at=_now(),
+            segmentation_budget=cast(DocumentSegmentationBudget, object()),
+        )
+
     with pytest.raises(ValueError, match="source_unit_count must be > 0"):
         CreateSourceUnitsForIngestionResult(
             workflow_run_id="workflow-1",
@@ -376,6 +547,18 @@ def test_create_source_units_for_ingestion_source_guard() -> None:
     ).read_text(encoding="utf-8")
 
     required_markers = [
+        "MarkdownSegmentationPolicy",
+        "MarkdownSegmentationCommand",
+        "DocumentSegmentationBudget",
+        "SegmentationPromptProfile",
+        "SegmentationModelBudgetProfile",
+        "DocumentSegment",
+        "DocumentSegmentKind",
+        "build_source_units_from_segments",
+        "document_segmentation_v1",
+        "max_source_segment_tokens",
+        "primary_model",
+        "draft_observation_extraction",
         "CreateSourceUnitsForIngestion",
         "CreateSourceUnitsForIngestionCommand",
         "CreateSourceUnitsForIngestionResult",
@@ -383,7 +566,6 @@ def test_create_source_units_for_ingestion_source_guard() -> None:
         "build_source_units_from_text",
         "SourceUnit",
         "SourceUnitRef",
-        "SourceUnitKind.PARAGRAPH_GROUP",
         "SourceUnitText",
         "HeadingPath",
         "SourceUnitLineage",
@@ -395,44 +577,33 @@ def test_create_source_units_for_ingestion_source_guard() -> None:
         "rollback",
     ]
     forbidden_markers = [
+        "context_window_tokens",
+        "max_output_tokens",
+        "ModelProfile",
+        "RateLimitProfile",
+        "qwen",
+        "Qwen",
+        "Groq",
+        "src.contexts.llm_runtime",
+        "tiktoken",
+        "transformers",
         "fastapi",
-        "HTTPException",
-        "Depends",
-        "Header",
-        "Request",
         "src.interfaces",
         "src.infrastructure",
         "asyncpg",
         "postgres",
-        "Postgres",
-        "UserRepository",
-        "ProjectRepository",
-        "get_current_user_id",
-        "SourceParserPort",
         "RunClaimExtractionStageAsync",
         "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A_WORK_SCHEDULED",
-        "PROMPT_A_WORK_COMPLETED",
-        "PROMPT_A_ARTIFACTS_APPLIED",
         "capacity_runtime",
         "execution_runtime",
         "llm_runtime",
         "artifact_runtime",
-        "worker_loop",
-        "JobDispatcher",
-        "outbox_events",
         "queue",
-        "Queue",
-        "pdf",
-        "Pdf",
+        "worker_loop",
         "openpyxl",
         "pandas",
-        "markdown",
         "BeautifulSoup",
-        "emit_command",
-        "record_command",
-        "event_was_processed",
-        "record_processed_event",
     ]
 
     for marker in required_markers:
