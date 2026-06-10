@@ -7,8 +7,8 @@ FAQ uploads are delegated lazily to the Workbench upload composition.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 from fastapi import (
     APIRouter,
     Body,
@@ -22,6 +22,20 @@ from fastapi import (
 )
 
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
+from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
+    RunSourceIngestionFirstPhaseCommand,
+    RunSourceIngestionFirstPhaseStatus,
+)
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
+    SourceIngestionActor,
+    SourceIngestionAdmissionStatus,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
+    SourceFormat,
+)
+from src.interfaces.composition.source_ingestion_first_phase import (
+    make_source_ingestion_first_phase,
+)
 from src.infrastructure.config.settings import settings
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
@@ -132,6 +146,67 @@ async def _read_upload_bytes(file: UploadFile) -> bytearray:
         buffer.extend(chunk)
         if len(buffer) > max_bytes:
             raise HTTPException(status_code=413, detail=UPLOAD_TOO_LARGE_DETAIL)
+
+
+def _decode_workbench_upload_text(file_content: bytes | bytearray) -> str:
+    try:
+        text = bytes(file_content).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Knowledge upload must be UTF-8 text for source ingestion v1",
+        ) from exc
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Knowledge upload text is empty")
+
+    return text
+
+
+async def _build_source_ingestion_actor(
+    *,
+    authorization: str | None,
+    user_repo: UserRepository,
+) -> SourceIngestionActor:
+    from src.interfaces.http.dependencies import get_current_user_id
+
+    user_id = await get_current_user_id(authorization)
+    is_platform_admin = getattr(user_repo, "is_platform_admin", None)
+    platform_admin = False
+    if is_platform_admin is not None:
+        platform_admin = bool(await _maybe_await(is_platform_admin(user_id)))
+
+    return SourceIngestionActor(
+        actor_user_id=user_id,
+        is_platform_admin=platform_admin,
+    )
+
+
+def _source_format_from_upload_name(file_name: str | None) -> SourceFormat:
+    normalized = (file_name or "").strip().lower()
+    suffix = ""
+    if "." in normalized:
+        suffix = "." + normalized.rsplit(".", 1)[-1]
+
+    if suffix in {".md", ".markdown"}:
+        return SourceFormat.MARKDOWN
+    if suffix == ".pdf":
+        return SourceFormat.PDF
+    if suffix == ".html":
+        return SourceFormat.HTML
+    if suffix in {".txt", ".json"}:
+        return SourceFormat.PLAIN_TEXT
+    return SourceFormat.PLAIN_TEXT
+
+
+def _raise_source_ingestion_rejected(
+    admission_status: SourceIngestionAdmissionStatus,
+) -> None:
+    if admission_status is SourceIngestionAdmissionStatus.PROJECT_NOT_FOUND:
+        raise HTTPException(status_code=404, detail=admission_status.value)
+    if admission_status is SourceIngestionAdmissionStatus.ACTOR_NOT_AUTHENTICATED:
+        raise HTTPException(status_code=401, detail=admission_status.value)
+    raise HTTPException(status_code=403, detail=admission_status.value)
 
 
 def _jsonable(value: object) -> object:
@@ -251,10 +326,9 @@ async def upload_knowledge(
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
-    queue_repo=Depends(get_queue_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Uploads a document through the Workbench-first knowledge upload path."""
+    """Uploads UTF-8 text into the source ingestion first-phase workflow."""
 
     _validate_workbench_upload_file_name(file.filename)
 
@@ -282,34 +356,45 @@ async def upload_knowledge(
             ),
         ) from exc
 
-    await _require_project_access(
-        project_id=project_id,
+    raw_text = _decode_workbench_upload_text(file_content)
+    actor = await _build_source_ingestion_actor(
         authorization=authorization,
+        user_repo=user_repo,
+    )
+    source_format = _source_format_from_upload_name(file.filename)
+
+    runner = make_source_ingestion_first_phase(
+        pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_upload import (
-        upload_faq_workbench_knowledge_file,
-    )
-
-    from src.domain.project_plane.knowledge_workbench import DomainInvariantError
 
     try:
-        result = await upload_faq_workbench_knowledge_file(
-            pool=pool,
-            queue_repo=queue_repo,
-            project_id=project_id,
-            file_name=file.filename,
-            file_content=file_content,
-            logger=logger,
+        result = await runner.execute(
+            RunSourceIngestionFirstPhaseCommand(
+                project_id=project_id,
+                actor=actor,
+                original_filename=file.filename,
+                source_format=source_format,
+                content_bytes=bytes(file_content),
+                raw_text=raw_text,
+                occurred_at=datetime.now(timezone.utc),
+            )
         )
-    except DomainInvariantError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if hasattr(result, "to_dict"):
-        return result.to_dict()
-    return _jsonable(result)
+
+    if result.status is RunSourceIngestionFirstPhaseStatus.REJECTED:
+        _raise_source_ingestion_rejected(result.admission_status)
+
+    return {
+        "status": "source_ingestion_first_phase_completed",
+        "workflow_run_id": result.workflow_run_id,
+        "source_document_ref": result.source_document_ref,
+        "source_unit_count": result.source_unit_count,
+    }
 
 
 @router.get("/{document_id}/progress")

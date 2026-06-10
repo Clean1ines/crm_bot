@@ -3,11 +3,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import cast
 
 import pytest
-from fastapi import HTTPException
-from starlette.datastructures import UploadFile
-
+from fastapi import HTTPException, UploadFile
+from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
+    RunSourceIngestionFirstPhaseCommand,
+    RunSourceIngestionFirstPhaseResult,
+    RunSourceIngestionFirstPhaseStatus,
+)
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
+    SourceIngestionAdmissionStatus,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
+    SourceFormat,
+)
+from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.interfaces.http import dependencies, knowledge
 
 
@@ -36,12 +47,40 @@ class _FakeUserRepo:
         return self.platform_admin
 
 
-class _Result:
-    def __init__(self, payload: dict[str, object]) -> None:
-        self._payload = payload
+def _user_repo(*, platform_admin: bool = False) -> UserRepository:
+    return cast(UserRepository, _FakeUserRepo(platform_admin=platform_admin))
 
-    def to_dict(self) -> dict[str, object]:
-        return self._payload
+
+class _FakeSourceIngestionRunner:
+    def __init__(self, result: RunSourceIngestionFirstPhaseResult) -> None:
+        self.result = result
+        self.commands: list[RunSourceIngestionFirstPhaseCommand] = []
+
+    async def execute(
+        self,
+        command: RunSourceIngestionFirstPhaseCommand,
+    ) -> RunSourceIngestionFirstPhaseResult:
+        self.commands.append(command)
+        return self.result
+
+
+def _completed_source_ingestion_result() -> RunSourceIngestionFirstPhaseResult:
+    return RunSourceIngestionFirstPhaseResult(
+        status=RunSourceIngestionFirstPhaseStatus.COMPLETED,
+        admission_status=SourceIngestionAdmissionStatus.ALLOWED,
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        source_document_ref="source-document:project-1:abc",
+        source_unit_count=3,
+    )
+
+
+def _rejected_source_ingestion_result(
+    status: SourceIngestionAdmissionStatus,
+) -> RunSourceIngestionFirstPhaseResult:
+    return RunSourceIngestionFirstPhaseResult(
+        status=RunSourceIngestionFirstPhaseStatus.REJECTED,
+        admission_status=status,
+    )
 
 
 def _upload_file(
@@ -57,53 +96,250 @@ def _source() -> str:
 
 
 @pytest.mark.asyncio
-async def test_upload_success_uses_workbench_upload_composition(
+async def test_upload_success_uses_source_ingestion_first_phase(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_current_user_id(authorization: str | None) -> str:
         assert authorization == "Bearer valid-token"
         return "user-1"
 
-    calls: dict[str, object] = {}
+    runner = _FakeSourceIngestionRunner(_completed_source_ingestion_result())
+    factory_calls: list[dict[str, object]] = []
 
-    async def fake_workbench_upload(**kwargs: object) -> _Result:
-        calls.update(kwargs)
-        return _Result(
-            {
-                "document_id": "document-1",
-                "status": "queued",
-                "preprocessing_mode": "faq",
-            }
-        )
-
-    import src.interfaces.composition.faq_workbench_upload as upload_composition
+    def fake_make_source_ingestion_first_phase(
+        **kwargs: object,
+    ) -> _FakeSourceIngestionRunner:
+        factory_calls.append(kwargs)
+        return runner
 
     monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
     monkeypatch.setattr(
-        upload_composition,
-        "upload_faq_workbench_knowledge_file",
-        fake_workbench_upload,
+        knowledge,
+        "make_source_ingestion_first_phase",
+        fake_make_source_ingestion_first_phase,
     )
 
     response = await knowledge.upload_knowledge(
         project_id="project-1",
-        file=_upload_file(),
+        file=_upload_file(file_name="faq.md", content=b"# FAQ\nAnswer"),
         preprocessing_mode="faq",
         authorization="Bearer valid-token",
         pool=object(),
         project_repo=_FakeProjectRepo(),
-        queue_repo=object(),
-        user_repo=_FakeUserRepo(),
+        user_repo=_user_repo(platform_admin=True),
     )
 
     assert response == {
-        "document_id": "document-1",
-        "status": "queued",
-        "preprocessing_mode": "faq",
+        "status": "source_ingestion_first_phase_completed",
+        "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_count": 3,
     }
-    assert calls["project_id"] == "project-1"
-    assert calls["file_name"] == "faq.md"
-    assert calls["file_content"] == b"# FAQ\nAnswer"
+    assert len(factory_calls) == 1
+    assert len(runner.commands) == 1
+
+    command = runner.commands[0]
+    assert command.project_id == "project-1"
+    assert command.actor.actor_user_id == "user-1"
+    assert command.actor.is_platform_admin is True
+    assert command.content_bytes == b"# FAQ\nAnswer"
+    assert command.raw_text == "# FAQ\nAnswer"
+    assert command.original_filename == "faq.md"
+    assert command.source_format is SourceFormat.MARKDOWN
+    assert command.occurred_at.tzinfo is not None
+
+
+@pytest.mark.asyncio
+async def test_upload_rejected_missing_project_maps_to_404(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    runner = _FakeSourceIngestionRunner(
+        _rejected_source_ingestion_result(
+            SourceIngestionAdmissionStatus.PROJECT_NOT_FOUND,
+        )
+    )
+
+    def fake_make_source_ingestion_first_phase(
+        **kwargs: object,
+    ) -> _FakeSourceIngestionRunner:
+        return runner
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "make_source_ingestion_first_phase",
+        fake_make_source_ingestion_first_phase,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.upload_knowledge(
+            project_id="missing-project",
+            file=_upload_file(),
+            preprocessing_mode="faq",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "PROJECT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_upload_rejected_unauthenticated_maps_to_401(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    runner = _FakeSourceIngestionRunner(
+        _rejected_source_ingestion_result(
+            SourceIngestionAdmissionStatus.ACTOR_NOT_AUTHENTICATED,
+        )
+    )
+
+    def fake_make_source_ingestion_first_phase(
+        **kwargs: object,
+    ) -> _FakeSourceIngestionRunner:
+        return runner
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "make_source_ingestion_first_phase",
+        fake_make_source_ingestion_first_phase,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.upload_knowledge(
+            project_id="project-1",
+            file=_upload_file(),
+            preprocessing_mode="faq",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "ACTOR_NOT_AUTHENTICATED"
+
+
+@pytest.mark.asyncio
+async def test_upload_rejected_role_denied_maps_to_403(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    runner = _FakeSourceIngestionRunner(
+        _rejected_source_ingestion_result(
+            SourceIngestionAdmissionStatus.ACTOR_ROLE_NOT_ALLOWED,
+        )
+    )
+
+    def fake_make_source_ingestion_first_phase(
+        **kwargs: object,
+    ) -> _FakeSourceIngestionRunner:
+        return runner
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "make_source_ingestion_first_phase",
+        fake_make_source_ingestion_first_phase,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.upload_knowledge(
+            project_id="project-1",
+            file=_upload_file(),
+            preprocessing_mode="faq",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "ACTOR_ROLE_NOT_ALLOWED"
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_non_utf8_before_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory_called = False
+
+    def fake_make_source_ingestion_first_phase(
+        **kwargs: object,
+    ) -> _FakeSourceIngestionRunner:
+        nonlocal factory_called
+        factory_called = True
+        return _FakeSourceIngestionRunner(_completed_source_ingestion_result())
+
+    monkeypatch.setattr(
+        knowledge,
+        "make_source_ingestion_first_phase",
+        fake_make_source_ingestion_first_phase,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.upload_knowledge(
+            project_id="project-1",
+            file=_upload_file(file_name="binary.pdf", content=b"\xff\xfe"),
+            preprocessing_mode="faq",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert (
+        exc_info.value.detail
+        == "Knowledge upload must be UTF-8 text for source ingestion v1"
+    )
+    assert factory_called is False
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_empty_text_before_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    factory_called = False
+
+    def fake_make_source_ingestion_first_phase(
+        **kwargs: object,
+    ) -> _FakeSourceIngestionRunner:
+        nonlocal factory_called
+        factory_called = True
+        return _FakeSourceIngestionRunner(_completed_source_ingestion_result())
+
+    monkeypatch.setattr(
+        knowledge,
+        "make_source_ingestion_first_phase",
+        fake_make_source_ingestion_first_phase,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.upload_knowledge(
+            project_id="project-1",
+            file=_upload_file(file_name="empty.txt", content=b" \n\t"),
+            preprocessing_mode="faq",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Knowledge upload text is empty"
+    assert factory_called is False
 
 
 @pytest.mark.asyncio
@@ -113,7 +349,7 @@ async def test_upload_missing_token_uses_shared_auth_contract() -> None:
             project_id="project-1",
             authorization=None,
             project_repo=_FakeProjectRepo(),
-            user_repo=_FakeUserRepo(),
+            user_repo=_user_repo(),
         )
 
     assert exc_info.value.status_code == 401
@@ -127,7 +363,7 @@ async def test_upload_invalid_token_uses_shared_auth_contract() -> None:
             project_id="project-1",
             authorization="Bearer wrong-token",
             project_repo=_FakeProjectRepo(),
-            user_repo=_FakeUserRepo(),
+            user_repo=_user_repo(),
         )
 
     assert exc_info.value.status_code == 401
@@ -147,7 +383,7 @@ async def test_upload_authorized_via_project_role(
         project_id="project-1",
         authorization="Bearer valid-token",
         project_repo=_FakeProjectRepo(has_role=True),
-        user_repo=_FakeUserRepo(platform_admin=False),
+        user_repo=_user_repo(platform_admin=False),
     )
 
 
@@ -164,7 +400,7 @@ async def test_upload_authorized_via_platform_admin(
         project_id="project-1",
         authorization="Bearer valid-token",
         project_repo=_FakeProjectRepo(has_role=False),
-        user_repo=_FakeUserRepo(platform_admin=True),
+        user_repo=_user_repo(platform_admin=True),
     )
 
 
@@ -182,7 +418,7 @@ async def test_upload_forbidden_for_non_owner_non_admin(
             project_id="project-1",
             authorization="Bearer valid-token",
             project_repo=_FakeProjectRepo(has_role=False),
-            user_repo=_FakeUserRepo(platform_admin=False),
+            user_repo=_user_repo(platform_admin=False),
         )
 
     assert exc_info.value.status_code == 403
@@ -201,7 +437,7 @@ async def test_upload_project_not_found(monkeypatch: pytest.MonkeyPatch) -> None
             project_id="missing-project",
             authorization="Bearer valid-token",
             project_repo=_FakeProjectRepo(exists=False),
-            user_repo=_FakeUserRepo(),
+            user_repo=_user_repo(),
         )
 
     assert exc_info.value.status_code == 404
@@ -254,7 +490,7 @@ async def test_upload_file_read_error_maps_to_http_400(
 
     with pytest.raises(HTTPException) as exc_info:
         try:
-            await knowledge._read_upload_bytes(BrokenUpload())
+            await knowledge._read_upload_bytes(cast(UploadFile, BrokenUpload()))
         except HTTPException:
             raise
         except Exception as exc:
@@ -281,8 +517,7 @@ async def test_non_faq_upload_modes_fail_closed(
             authorization="Bearer valid-token",
             pool=object(),
             project_repo=_FakeProjectRepo(),
-            queue_repo=object(),
-            user_repo=_FakeUserRepo(),
+            user_repo=_user_repo(),
         )
 
     assert exc_info.value.status_code == 400
@@ -295,13 +530,25 @@ def test_upload_boundary_has_no_legacy_patch_points() -> None:
     assert not hasattr(knowledge, "ChunkerService")
     assert not hasattr(knowledge, "jwt")
 
+    required = (
+        "make_source_ingestion_first_phase",
+        "RunSourceIngestionFirstPhaseCommand",
+        "_decode_workbench_upload_text",
+        "_build_source_ingestion_actor",
+        "SourceIngestionActor",
+    )
     forbidden = (
         "src.interfaces.composition.knowledge_upload",
         "upload_knowledge_file",
+        "upload_faq_workbench_knowledge_file",
         "KnowledgeService(",
         "process_knowledge_upload",
         "TASK_PROCESS_KNOWLEDGE_UPLOAD",
     )
+
+    for marker in required:
+        assert marker in source
+
     for marker in forbidden:
         assert marker not in source
 
@@ -339,8 +586,7 @@ async def test_unknown_upload_mode_also_fails_closed(
             authorization="Bearer valid-token",
             pool=object(),
             project_repo=_FakeProjectRepo(),
-            queue_repo=object(),
-            user_repo=_FakeUserRepo(),
+            user_repo=_user_repo(),
         )
 
     assert exc_info.value.status_code == 400
