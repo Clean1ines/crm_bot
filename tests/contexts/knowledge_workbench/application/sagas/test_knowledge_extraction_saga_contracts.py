@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -95,7 +96,7 @@ def test_checkpoint_validates_counts_and_freezes_payload() -> None:
 
     assert checkpoint.checkpoint_payload["source_units"] == 2
     with pytest.raises(TypeError):
-        checkpoint.checkpoint_payload["source_units"] = 4
+        cast(dict[str, object], checkpoint.checkpoint_payload)["source_units"] = 4
 
     with pytest.raises(ValueError):
         KnowledgeExtractionPhaseCheckpoint(
@@ -404,4 +405,22 @@ def test_source_guard() -> None:
     offenders = [marker for marker in forbidden_markers if marker in text]
 
     assert not missing, "\n".join(missing)
+    assert not offenders, "\n".join(offenders)
+
+
+def test_application_sagas_do_not_import_infrastructure_runtime_boundaries() -> None:
+    paths = tuple(sorted(SAGA_DIR.glob("*.py")))
+    text = "\n".join(path.read_text(encoding="utf-8") for path in paths)
+
+    forbidden_markers = (
+        "src.infrastructure",
+        "asyncpg",
+        "postgres",
+        "Postgres",
+        "worker_loop",
+        "JobDispatcher",
+    )
+
+    offenders = [marker for marker in forbidden_markers if marker in text]
+
     assert not offenders, "\n".join(offenders)

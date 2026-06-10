@@ -29,6 +29,12 @@ from .knowledge_extraction_source_phase_reconciliation import (
     SourcePhaseReconciliationResult,
     SourcePhaseReconciliationStatus,
 )
+from .persist_accepted_source_ingestion_plan import (
+    PersistAcceptedSourceIngestionPlan,
+    PersistAcceptedSourceIngestionPlanCommand,
+    PersistAcceptedSourceIngestionPlanResult,
+    PersistAcceptedSourceIngestionPlanUnitOfWorkPort,
+)
 from .source_ingestion_admission import (
     SourceIngestionActor,
     SourceIngestionAdmissionDecision,
@@ -62,6 +68,10 @@ __all__ = (
     "KnowledgeExtractionSourcePhaseReconciler",
     "KnowledgeExtractionWorkflowState",
     "KnowledgeExtractionWorkflowStatus",
+    "PersistAcceptedSourceIngestionPlan",
+    "PersistAcceptedSourceIngestionPlanCommand",
+    "PersistAcceptedSourceIngestionPlanResult",
+    "PersistAcceptedSourceIngestionPlanUnitOfWorkPort",
     "ReconcileKnowledgeExtractionSagaCommand",
     "ReconcileKnowledgeExtractionSagaResult",
     "SourceIngestionActor",
