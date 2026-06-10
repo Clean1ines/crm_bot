@@ -53,6 +53,11 @@ from .map_draft_observation_plans_to_execution_schedule import (
     MapDraftObservationPlansToExecutionScheduleCommand,
     MapDraftObservationPlansToExecutionScheduleResult,
 )
+from .schedule_draft_observation_extraction_work import (
+    ScheduleDraftObservationExtractionWork,
+    ScheduleDraftObservationExtractionWorkCommand,
+    ScheduleDraftObservationExtractionWorkResult,
+)
 from .run_source_ingestion_first_phase import (
     CreateSourceUnitsForIngestionPort,
     PersistAcceptedSourceIngestionPlanPort,
@@ -118,6 +123,9 @@ __all__ = (
     "PlanDraftObservationExtractionWorkCommand",
     "PlanDraftObservationExtractionWorkResult",
     "MapDraftObservationPlansToExecutionScheduleResult",
+    "ScheduleDraftObservationExtractionWorkResult",
+    "ScheduleDraftObservationExtractionWorkCommand",
+    "ScheduleDraftObservationExtractionWork",
     "MapDraftObservationPlansToExecutionScheduleCommand",
     "MapDraftObservationPlansToExecutionSchedule",
     "PersistAcceptedSourceIngestionPlan",

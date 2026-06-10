@@ -115,3 +115,36 @@ def test_draft_observation_plan_mapper_imports_only_execution_schedule_dto() -> 
 
     assert not missing, "\n".join(missing)
     assert not offenders, "\n".join(offenders)
+
+
+def test_draft_observation_scheduler_service_imports_only_application_boundaries() -> (
+    None
+):
+    path = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "schedule_draft_observation_extraction_work.py",
+    )
+    assert path.is_file()
+
+    text = path.read_text(encoding="utf-8")
+    required_markers = [
+        "execution_runtime.application.use_cases.ensure_work_items_scheduled",
+        "execution_runtime.application.ports.work_item_scheduling_unit_of_work_port",
+    ]
+    forbidden_markers = [
+        "execution_runtime.infrastructure",
+        "capacity_runtime",
+        "llm_runtime",
+        "artifact_runtime",
+        "Postgres",
+        "asyncpg",
+        "queue",
+        "worker",
+        "lease",
+    ]
+
+    missing = [marker for marker in required_markers if marker not in text]
+    offenders = [marker for marker in forbidden_markers if marker in text]
+
+    assert not missing, "\n".join(missing)
+    assert not offenders, "\n".join(offenders)
