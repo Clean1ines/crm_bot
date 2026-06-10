@@ -281,7 +281,6 @@ def test_source_ingestion_admission_source_guard() -> None:
         "ProjectRepository",
         "get_current_user_id",
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A_WORK_SCHEDULED",
         "execution_runtime",
         "llm_runtime",

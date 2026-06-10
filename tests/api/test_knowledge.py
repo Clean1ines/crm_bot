@@ -882,7 +882,6 @@ def test_source_ingestion_source_units_read_side_guard() -> None:
     )
     forbidden = (
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A_WORK_SCHEDULED",
         "capacity_runtime",
         "execution_runtime",
@@ -926,7 +925,6 @@ def test_upload_response_source_units_url_source_guard() -> None:
     )
     forbidden = (
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A_WORK_SCHEDULED",
         "capacity_runtime",
         "execution_runtime",
@@ -974,7 +972,6 @@ def test_knowledge_http_routes_are_not_duplicated() -> None:
     )[0]
     forbidden = (
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A_WORK_SCHEDULED",
         "capacity_runtime",
         "execution_runtime",

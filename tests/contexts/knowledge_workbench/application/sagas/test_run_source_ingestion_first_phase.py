@@ -453,7 +453,6 @@ def test_run_source_ingestion_first_phase_source_guard() -> None:
         "get_current_user_id",
         "SourceParserPort",
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A",
         "capacity_runtime",
         "execution_runtime",

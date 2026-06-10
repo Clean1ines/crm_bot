@@ -74,7 +74,6 @@ def test_draft_observation_extraction_planner_does_not_import_runtime_layers() -
         "worker",
         "lease",
         "PROMPT_A_WORK_SCHEDULED",
-        "DraftObservationExtractionSchedulingReconciler",
     ]
 
     missing = [marker for marker in required_markers if marker not in text]

@@ -108,15 +108,6 @@ class KnowledgeExtractionCommandEmitterPort(Protocol):
     ) -> None: ...
 
 
-class DraftObservationExtractionWorkIndexPort(Protocol):
-    async def count_scheduled_draft_observation_work_items(
-        self,
-        *,
-        workflow_run_id: str,
-        source_document_ref: str,
-    ) -> int: ...
-
-
 def _require_non_empty(value: str, field_name: str) -> None:
     if not value or not value.strip():
         raise ValueError(f"{field_name} must be non-empty")

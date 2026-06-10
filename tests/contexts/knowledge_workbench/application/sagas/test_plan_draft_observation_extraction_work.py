@@ -190,7 +190,6 @@ def test_plan_draft_observation_extraction_work_source_guard() -> None:
         "Groq",
         "qwen",
         "PROMPT_A_WORK_SCHEDULED",
-        "DraftObservationExtractionSchedulingReconciler",
     )
 
     for marker in required_markers:

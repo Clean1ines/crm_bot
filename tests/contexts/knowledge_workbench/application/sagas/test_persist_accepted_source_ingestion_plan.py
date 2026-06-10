@@ -341,7 +341,6 @@ def test_persist_accepted_source_ingestion_plan_source_guard() -> None:
         "SourceUnit",
         "save_source_units",
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A",
         "capacity_runtime",
         "execution_runtime",

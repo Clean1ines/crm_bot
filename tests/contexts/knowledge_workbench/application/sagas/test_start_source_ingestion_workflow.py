@@ -277,7 +277,6 @@ def test_start_source_ingestion_workflow_source_guard() -> None:
         "PostgresSourceManagementRepository",
         "KnowledgeExtractionSagaStateRepositoryPort",
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A",
         "execution_runtime",
         "llm_runtime",

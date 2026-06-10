@@ -278,7 +278,6 @@ def test_document_segmentation_source_guard() -> None:
         "asyncpg",
         "postgres",
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A",
         "capacity_runtime",
         "execution_runtime",

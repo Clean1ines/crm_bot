@@ -593,7 +593,6 @@ def test_create_source_units_for_ingestion_source_guard() -> None:
         "asyncpg",
         "postgres",
         "RunClaimExtractionStageAsync",
-        "DraftObservationExtractionSchedulingReconciler",
         "PROMPT_A_WORK_SCHEDULED",
         "capacity_runtime",
         "execution_runtime",
