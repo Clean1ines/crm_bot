@@ -42,6 +42,15 @@ from .persist_accepted_source_ingestion_plan import (
     PersistAcceptedSourceIngestionPlanResult,
     PersistAcceptedSourceIngestionPlanUnitOfWorkPort,
 )
+from .run_source_ingestion_first_phase import (
+    CreateSourceUnitsForIngestionPort,
+    PersistAcceptedSourceIngestionPlanPort,
+    RunSourceIngestionFirstPhase,
+    RunSourceIngestionFirstPhaseCommand,
+    RunSourceIngestionFirstPhaseResult,
+    RunSourceIngestionFirstPhaseStatus,
+    StartSourceIngestionWorkflowPort,
+)
 from .source_ingestion_admission import (
     SourceIngestionActor,
     SourceIngestionAdmissionDecision,
@@ -86,6 +95,13 @@ __all__ = (
     "PersistAcceptedSourceIngestionPlanUnitOfWorkPort",
     "ReconcileKnowledgeExtractionSagaCommand",
     "ReconcileKnowledgeExtractionSagaResult",
+    "CreateSourceUnitsForIngestionPort",
+    "PersistAcceptedSourceIngestionPlanPort",
+    "RunSourceIngestionFirstPhase",
+    "RunSourceIngestionFirstPhaseCommand",
+    "RunSourceIngestionFirstPhaseResult",
+    "RunSourceIngestionFirstPhaseStatus",
+    "StartSourceIngestionWorkflowPort",
     "SourceIngestionActor",
     "SourceIngestionAdmissionDecision",
     "SourceIngestionAdmissionPolicy",
