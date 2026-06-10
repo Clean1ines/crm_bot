@@ -30,13 +30,22 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admissi
     SourceIngestionActor,
     SourceIngestionAdmissionStatus,
 )
+from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
+    SourceUnit,
+)
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
+    SourceDocumentRef,
 )
 from src.interfaces.composition.source_ingestion_first_phase import (
     make_source_ingestion_first_phase,
 )
 from src.infrastructure.config.settings import settings
+from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
+    PostgresSourceManagementRepository,
+)
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import (
@@ -50,6 +59,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
+_SOURCE_UNIT_TEXT_PREVIEW_LIMIT = 500
 
 
 async def _maybe_await(value: object) -> object:
@@ -220,6 +230,19 @@ def _jsonable(value: object) -> object:
     if isinstance(enum_value, str):
         return enum_value
     return value
+
+
+def _source_unit_read_model(unit: SourceUnit) -> dict[str, object]:
+    text = unit.text.value
+    return {
+        "source_unit_ref": unit.unit_ref.value,
+        "ordinal": unit.ordinal,
+        "unit_kind": unit.unit_kind.name,
+        "heading_path": list(unit.heading_path.parts),
+        "text_preview": text[:_SOURCE_UNIT_TEXT_PREVIEW_LIMIT],
+        "text_length": len(text),
+        "created_at": unit.created_at.isoformat(),
+    }
 
 
 async def _require_project_access(
@@ -394,6 +417,36 @@ async def upload_knowledge(
         "workflow_run_id": result.workflow_run_id,
         "source_document_ref": result.source_document_ref,
         "source_unit_count": result.source_unit_count,
+    }
+
+
+@router.get("/source-documents/{source_document_ref}/source-units")
+async def source_ingestion_source_units(
+    project_id: str,
+    source_document_ref: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns persisted source units created by source ingestion first phase."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    document_ref = SourceDocumentRef(source_document_ref)
+    repository = PostgresSourceManagementRepository(pool)
+    source_units = await repository.list_source_units_for_document(document_ref)
+
+    return {
+        "project_id": project_id,
+        "source_document_ref": document_ref.value,
+        "source_unit_count": len(source_units),
+        "source_units": [_source_unit_read_model(unit) for unit in source_units],
     }
 
 

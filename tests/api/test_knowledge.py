@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import cast
@@ -14,6 +15,27 @@ from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_fir
 )
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
     SourceIngestionAdmissionStatus,
+)
+from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
+    SourceUnit,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.heading_path import (
+    HeadingPath,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
+    SourceDocumentRef,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_kind import (
+    SourceUnitKind,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_lineage import (
+    SourceUnitLineage,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_text import (
+    SourceUnitText,
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
@@ -51,6 +73,19 @@ def _user_repo(*, platform_admin: bool = False) -> UserRepository:
     return cast(UserRepository, _FakeUserRepo(platform_admin=platform_admin))
 
 
+class _FakeSourceManagementRepository:
+    def __init__(self, units: tuple[SourceUnit, ...]) -> None:
+        self.units = units
+        self.document_refs: list[SourceDocumentRef] = []
+
+    async def list_source_units_for_document(
+        self,
+        document_ref: SourceDocumentRef,
+    ) -> tuple[SourceUnit, ...]:
+        self.document_refs.append(document_ref)
+        return self.units
+
+
 class _FakeSourceIngestionRunner:
     def __init__(self, result: RunSourceIngestionFirstPhaseResult) -> None:
         self.result = result
@@ -80,6 +115,27 @@ def _rejected_source_ingestion_result(
     return RunSourceIngestionFirstPhaseResult(
         status=RunSourceIngestionFirstPhaseStatus.REJECTED,
         admission_status=status,
+    )
+
+
+def _source_unit(
+    *,
+    unit_ref: str,
+    ordinal: int,
+    unit_kind: SourceUnitKind,
+    heading_path: tuple[str, ...],
+    text: str,
+    document_ref: str = "source-document:project-1:abc",
+) -> SourceUnit:
+    return SourceUnit(
+        unit_ref=SourceUnitRef(unit_ref),
+        document_ref=SourceDocumentRef(document_ref),
+        unit_kind=unit_kind,
+        text=SourceUnitText(text),
+        heading_path=HeadingPath(heading_path),
+        lineage=SourceUnitLineage(),
+        ordinal=ordinal,
+        created_at=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
     )
 
 
@@ -592,3 +648,241 @@ async def test_unknown_upload_mode_also_fails_closed(
 
     assert exc_info.value.status_code == 400
     assert "Only FAQ Workbench uploads are supported" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_source_ingestion_source_units_lists_persisted_units(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        assert authorization == "Bearer valid-token"
+        return "user-1"
+
+    first_text = "# Alpha\n\nShort source unit"
+    second_text = "# Alpha / Huge\n\nFragment"
+    repository = _FakeSourceManagementRepository(
+        (
+            _source_unit(
+                unit_ref="source-document:project-1:abc.unit.0",
+                ordinal=0,
+                unit_kind=SourceUnitKind.SECTION,
+                heading_path=("Alpha",),
+                text=first_text,
+            ),
+            _source_unit(
+                unit_ref="source-document:project-1:abc.unit.1",
+                ordinal=1,
+                unit_kind=SourceUnitKind.SPLIT_FRAGMENT,
+                heading_path=("Alpha", "Huge"),
+                text=second_text,
+            ),
+        )
+    )
+
+    def fake_repository_factory(pool: object) -> _FakeSourceManagementRepository:
+        assert pool == "pool"
+        return repository
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresSourceManagementRepository",
+        fake_repository_factory,
+    )
+
+    response = await knowledge.source_ingestion_source_units(
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        pool="pool",
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+
+    assert response["project_id"] == "project-1"
+    assert response["source_document_ref"] == "source-document:project-1:abc"
+    assert response["source_unit_count"] == 2
+
+    source_units = response["source_units"]
+    assert isinstance(source_units, list)
+    assert source_units[0]["source_unit_ref"] == (
+        "source-document:project-1:abc.unit.0"
+    )
+    assert source_units[0]["ordinal"] == 0
+    assert source_units[0]["unit_kind"] == "SECTION"
+    assert source_units[0]["heading_path"] == ["Alpha"]
+    assert source_units[0]["text_preview"] == first_text
+    assert source_units[0]["text_length"] == len(first_text)
+    assert source_units[0]["created_at"] == "2026-06-10T12:00:00+00:00"
+    assert "text" not in source_units[0]
+
+    assert source_units[1]["unit_kind"] == "SPLIT_FRAGMENT"
+    assert source_units[1]["heading_path"] == ["Alpha", "Huge"]
+    assert repository.document_refs == [
+        SourceDocumentRef("source-document:project-1:abc")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_source_ingestion_source_units_empty_list_returns_200(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    repository = _FakeSourceManagementRepository(())
+
+    def fake_repository_factory(pool: object) -> _FakeSourceManagementRepository:
+        return repository
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresSourceManagementRepository",
+        fake_repository_factory,
+    )
+
+    response = await knowledge.source_ingestion_source_units(
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+
+    assert response == {
+        "project_id": "project-1",
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_count": 0,
+        "source_units": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_source_ingestion_source_units_requires_project_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    repository_factory_called = False
+
+    def fake_repository_factory(pool: object) -> _FakeSourceManagementRepository:
+        nonlocal repository_factory_called
+        repository_factory_called = True
+        return _FakeSourceManagementRepository(())
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresSourceManagementRepository",
+        fake_repository_factory,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.source_ingestion_source_units(
+            project_id="project-1",
+            source_document_ref="source-document:project-1:abc",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(has_role=False),
+            user_repo=_user_repo(platform_admin=False),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Insufficient permissions"
+    assert repository_factory_called is False
+
+
+@pytest.mark.asyncio
+async def test_source_ingestion_source_units_preview_is_capped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    long_text = "x" * 600
+    repository = _FakeSourceManagementRepository(
+        (
+            _source_unit(
+                unit_ref="source-document:project-1:abc.unit.0",
+                ordinal=0,
+                unit_kind=SourceUnitKind.SECTION,
+                heading_path=("Alpha",),
+                text=long_text,
+            ),
+        )
+    )
+
+    def fake_repository_factory(pool: object) -> _FakeSourceManagementRepository:
+        return repository
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresSourceManagementRepository",
+        fake_repository_factory,
+    )
+
+    response = await knowledge.source_ingestion_source_units(
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+
+    source_units = response["source_units"]
+    assert isinstance(source_units, list)
+    preview = source_units[0]["text_preview"]
+    assert isinstance(preview, str)
+    assert len(preview) == 500
+    assert source_units[0]["text_length"] == 600
+    assert "text" not in source_units[0]
+
+
+def test_source_ingestion_source_units_read_side_guard() -> None:
+    source = _source()
+    route_marker = '@router.get("/source-documents/{source_document_ref}/source-units")'
+    assert route_marker in source
+    endpoint_region = source.split(route_marker, 1)[1].split(
+        '@router.get("/{document_id}/progress")',
+        1,
+    )[0]
+
+    endpoint_required = (
+        "SourceDocumentRef",
+        "list_source_units_for_document",
+        "_source_unit_read_model",
+    )
+    source_required = (
+        "source-units",
+        "text_preview",
+        "text_length",
+    )
+    forbidden = (
+        "RunClaimExtractionStageAsync",
+        "DraftObservationExtractionSchedulingReconciler",
+        "PROMPT_A_WORK_SCHEDULED",
+        "capacity_runtime",
+        "execution_runtime",
+        "llm_runtime",
+        "artifact_runtime",
+        "worker_loop",
+        "JobDispatcher",
+        "queue",
+        "openpyxl",
+        "pandas",
+        "BeautifulSoup",
+    )
+
+    for marker in endpoint_required:
+        assert marker in endpoint_region
+
+    for marker in source_required:
+        assert marker in source
+
+    for marker in forbidden:
+        assert marker not in endpoint_region
