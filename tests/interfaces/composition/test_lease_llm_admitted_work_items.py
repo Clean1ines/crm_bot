@@ -30,6 +30,9 @@ from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity impo
 from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
 )
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    default_groq_llm_model_route_catalog,
+)
 from src.interfaces.composition.lease_llm_admitted_work_items import (
     LeaseLlmAdmittedWorkItems,
     LeaseLlmAdmittedWorkItemsCommand,
@@ -142,6 +145,7 @@ def _use_case(repository: FakeLeaseRepository) -> LeaseLlmAdmittedWorkItems:
         active_model_capacity_selector=SelectActiveLlmModelCapacity(
             projector=ProjectLlmCapacityToCapacityRuntime(),
         ),
+        route_catalog=default_groq_llm_model_route_catalog(),
     )
 
 
@@ -188,6 +192,31 @@ async def test_assigns_allocation_slots_to_leased_work_items() -> None:
             "model_ref": "qwen/qwen3-32b",
             "slot_index": 0,
         },
+        "llm_execution_settings": {"reasoning_enabled": False},
+    }
+
+
+@pytest.mark.asyncio
+async def test_qwen_active_model_uses_reasoning_disabled_execution_settings() -> None:
+    repository = FakeLeaseRepository(queue=[_record("work-1")])
+
+    result = await _use_case(repository).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="account_1",
+                    minute_requests=1,
+                    minute_tokens=3500,
+                ),
+            ),
+            requested_items=1,
+        ),
+    )
+
+    item = result.leased[0]
+    assert item.execution_settings.to_provider_options() == {"reasoning_enabled": False}
+    assert item.to_dispatch_payload()["llm_execution_settings"] == {
+        "reasoning_enabled": False,
     }
 
 
@@ -461,6 +490,29 @@ async def test_mixed_model_capacities_do_not_raise_in_composition() -> None:
 
     assert result.llm_capacity_projection.max_projected_items == 1
     assert len(result.leased) == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_active_model_in_catalog_raises_before_assignment() -> None:
+    repository = FakeLeaseRepository(queue=[_record("work-1")])
+
+    with pytest.raises(ValueError, match="model_ref is not in route catalog"):
+        await _use_case(repository).execute(
+            _command(
+                account_capacities=(
+                    _account(
+                        account_ref="custom_1",
+                        minute_requests=10,
+                        minute_tokens=3500,
+                        model_ref="custom/model",
+                    ),
+                ),
+                active_model_ref="custom/model",
+                requested_items=1,
+            ),
+        )
+
+    assert repository.lease_tokens == []
 
 
 def test_direct_projector_still_rejects_mixed_model_capacities() -> None:

@@ -22,6 +22,9 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     LlmCapacityAllocationSlot,
 )
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelExecutionSettings,
+)
 from src.interfaces.composition.lease_llm_admitted_work_items import (
     LlmAdmittedLeasedWorkItem,
 )
@@ -48,6 +51,10 @@ def _started_at() -> datetime:
 
 def _work_kind() -> WorkKind:
     return WorkKind("knowledge_workbench.draft_observation_extraction")
+
+
+def _execution_settings() -> LlmModelExecutionSettings:
+    return LlmModelExecutionSettings(reasoning_enabled=False)
 
 
 def _leased_item(
@@ -77,6 +84,7 @@ def _leased_item(
             model_ref="qwen-32b",
             slot_index=0,
         ),
+        execution_settings=_execution_settings(),
     )
 
 
@@ -111,6 +119,7 @@ def _invalid_leased_item(
             model_ref="qwen-32b",
             slot_index=0,
         ),
+        execution_settings=_execution_settings(),
     )
 
 
@@ -160,6 +169,26 @@ async def test_saves_schedule_payload_and_llm_allocation_payload() -> None:
             "model_ref": "qwen-32b",
             "slot_index": 0,
         },
+        "llm_execution_settings": {"reasoning_enabled": False},
+    }
+
+
+@pytest.mark.asyncio
+async def test_started_dispatch_attempt_preserves_llm_execution_settings() -> None:
+    repository = FakeDispatchRepository()
+
+    result = await StartLlmAdmittedWorkItemAttempts(repository=repository).execute(
+        StartLlmAdmittedWorkItemAttemptsCommand(
+            leased_items=(_leased_item(),),
+            started_at=_started_at(),
+        ),
+    )
+
+    assert result.started_attempts[0].dispatch_payload["llm_execution_settings"] == {
+        "reasoning_enabled": False,
+    }
+    assert repository.saved[0].dispatch_payload["llm_execution_settings"] == {
+        "reasoning_enabled": False,
     }
 
 

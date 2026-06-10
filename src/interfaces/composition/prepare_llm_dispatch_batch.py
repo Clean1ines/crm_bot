@@ -19,6 +19,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_l
 from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
     SelectActiveLlmModelCapacity,
 )
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelRouteCatalog,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
 )
@@ -112,6 +115,11 @@ class PrepareLlmDispatchBatch:
     pool: AsyncPool
     capacity_policy: CapacityAdmissionPolicy
     active_model_capacity_selector: SelectActiveLlmModelCapacity
+    route_catalog: LlmModelRouteCatalog
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.route_catalog, LlmModelRouteCatalog):
+            raise TypeError("route_catalog must be LlmModelRouteCatalog")
 
     async def execute(
         self,
@@ -130,6 +138,7 @@ class PrepareLlmDispatchBatch:
                     lease_repository=lease_repository,
                     capacity_policy=self.capacity_policy,
                     active_model_capacity_selector=self.active_model_capacity_selector,
+                    route_catalog=self.route_catalog,
                 ).execute(
                     LeaseLlmAdmittedWorkItemsCommand(
                         work_kind=command.work_kind,

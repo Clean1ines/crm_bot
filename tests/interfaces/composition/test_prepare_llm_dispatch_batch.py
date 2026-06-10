@@ -27,6 +27,9 @@ from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity impo
 from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
 )
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    default_groq_llm_model_route_catalog,
+)
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatch,
     PrepareLlmDispatchBatchCommand,
@@ -279,6 +282,7 @@ def _runner(pool: FakePool) -> PrepareLlmDispatchBatch:
         active_model_capacity_selector=SelectActiveLlmModelCapacity(
             projector=ProjectLlmCapacityToCapacityRuntime(),
         ),
+        route_catalog=default_groq_llm_model_route_catalog(),
     )
 
 
@@ -307,6 +311,24 @@ async def test_commits_lease_and_attempt_start_in_one_transaction() -> None:
     assert len(connection.dispatches) == 2
     assert len(result.lease_result.leased) == 2
     assert len(result.attempt_result.started_attempts) == 2
+
+
+@pytest.mark.asyncio
+async def test_transactional_dispatch_batch_persists_qwen_reasoning_disabled() -> None:
+    connection = _connection_with_due_items(1)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(_command(requested_items=1))
+
+    assert len(result.attempt_result.started_attempts) == 1
+    dispatch = next(iter(connection.dispatches.values()))
+    assert dispatch["dispatch_payload"]["llm_execution_settings"] == {
+        "reasoning_enabled": False,
+    }
+    assert (
+        dispatch["dispatch_payload"]["llm_execution_settings"]["reasoning_enabled"]
+        is False
+    )
 
 
 @pytest.mark.asyncio

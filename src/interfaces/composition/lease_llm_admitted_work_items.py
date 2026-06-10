@@ -31,24 +31,32 @@ from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity impo
 from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
 )
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelExecutionSettings,
+    LlmModelRouteCatalog,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class LlmAdmittedLeasedWorkItem:
     leased: LeasedWorkItemRecord
     allocation: LlmCapacityAllocationSlot
+    execution_settings: LlmModelExecutionSettings
 
     def __post_init__(self) -> None:
         if not isinstance(self.leased, LeasedWorkItemRecord):
             raise TypeError("leased must be LeasedWorkItemRecord")
         if not isinstance(self.allocation, LlmCapacityAllocationSlot):
             raise TypeError("allocation must be LlmCapacityAllocationSlot")
+        if not isinstance(self.execution_settings, LlmModelExecutionSettings):
+            raise TypeError("execution_settings must be LlmModelExecutionSettings")
 
     def to_dispatch_payload(self) -> dict[str, object]:
         return {
             "work_item_id": self.leased.work_item.work_item_id,
             "schedule_payload": dict(self.leased.schedule_payload),
             "llm_allocation": self.allocation.to_payload(),
+            "llm_execution_settings": self.execution_settings.to_provider_options(),
         }
 
 
@@ -135,6 +143,11 @@ class LeaseLlmAdmittedWorkItems:
     lease_repository: WorkItemLeaseRepositoryPort
     capacity_policy: CapacityAdmissionPolicy
     active_model_capacity_selector: SelectActiveLlmModelCapacity
+    route_catalog: LlmModelRouteCatalog
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.route_catalog, LlmModelRouteCatalog):
+            raise TypeError("route_catalog must be LlmModelRouteCatalog")
 
     async def execute(
         self,
@@ -149,6 +162,10 @@ class LeaseLlmAdmittedWorkItems:
             ),
         )
         projection = selection.projection
+
+        execution_settings = self.route_catalog.execution_settings_for_model_ref(
+            command.active_model_ref,
+        )
 
         lease_result = await LeaseAdmittedWorkItems(
             repository=self.lease_repository,
@@ -171,6 +188,7 @@ class LeaseLlmAdmittedWorkItems:
             LlmAdmittedLeasedWorkItem(
                 leased=leased_record,
                 allocation=projection.allocations[index],
+                execution_settings=execution_settings,
             )
             for index, leased_record in enumerate(lease_result.leased)
         )

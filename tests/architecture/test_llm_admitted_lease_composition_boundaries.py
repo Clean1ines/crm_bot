@@ -5,7 +5,14 @@ COMPOSITION_PATH = Path("src/interfaces/composition/lease_llm_admitted_work_item
 
 
 def test_composition_required_markers_exist() -> None:
-    source = COMPOSITION_PATH.read_text(encoding="utf-8")
+    source = "\n".join(
+        (
+            COMPOSITION_PATH.read_text(encoding="utf-8"),
+            Path(
+                "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
+            ).read_text(encoding="utf-8"),
+        ),
+    )
 
     required = (
         "LeaseLlmAdmittedWorkItems",
@@ -15,6 +22,11 @@ def test_composition_required_markers_exist() -> None:
         "LlmAdmittedLeasedWorkItem",
         "to_dispatch_payload",
         "CapacityWorkClass.LLM_BOUND",
+        "LlmModelExecutionSettings",
+        "LlmModelRouteCatalog",
+        "execution_settings_for_model_ref",
+        "llm_execution_settings",
+        "reasoning_enabled",
     )
     for marker in required:
         assert marker in source
@@ -34,6 +46,8 @@ def test_composition_does_not_call_provider_or_read_env() -> None:
         "Authorization",
         "api_key",
         "client.",
+        "AsyncGroq",
+        "groq_model_router",
     )
     for marker in forbidden:
         assert marker not in source
