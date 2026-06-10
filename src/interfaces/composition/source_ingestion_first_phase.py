@@ -21,6 +21,10 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admissi
 from src.contexts.knowledge_workbench.application.sagas.start_source_ingestion_workflow import (
     StartSourceIngestionWorkflow,
 )
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segmentation_profiles import (
+    SourceIngestionSegmentationProfile,
+    default_source_ingestion_segmentation_profile,
+)
 from src.contexts.knowledge_workbench.document_segmentation.domain import (
     DocumentSegmentationBudget,
     SegmentationModelBudgetProfile,
@@ -95,17 +99,23 @@ class SourceIngestionFirstPhaseSegmentationConfig:
         )
 
 
+def segmentation_config_from_profile(
+    profile: SourceIngestionSegmentationProfile,
+) -> SourceIngestionFirstPhaseSegmentationConfig:
+    return SourceIngestionFirstPhaseSegmentationConfig(
+        prompt_name=profile.prompt.prompt_name,
+        prompt_token_count=profile.prompt.prompt_token_count,
+        primary_model_profile_name=profile.primary_model.profile_name,
+        max_request_input_tokens=profile.primary_model.max_request_input_tokens,
+        reserved_output_tokens=profile.primary_model.reserved_output_tokens,
+    )
+
+
 def default_source_ingestion_first_phase_segmentation_config() -> (
     SourceIngestionFirstPhaseSegmentationConfig
 ):
-    # Production will later derive prompt_token_count from the Workbench prompt
-    # profile and tokenizer. Keep provider details outside this composition seam.
-    return SourceIngestionFirstPhaseSegmentationConfig(
-        prompt_name="draft_observation_extraction",
-        prompt_token_count=2_000,
-        primary_model_profile_name="primary_model",
-        max_request_input_tokens=6_000,
-        reserved_output_tokens=1_000,
+    return segmentation_config_from_profile(
+        default_source_ingestion_segmentation_profile()
     )
 
 

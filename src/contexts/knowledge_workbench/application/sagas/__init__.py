@@ -58,6 +58,12 @@ from .source_ingestion_admission import (
     SourceIngestionAdmissionStatus,
     SourceIngestionProjectAccessPort,
 )
+from .source_ingestion_segmentation_profiles import (
+    SourceIngestionSegmentationProfile,
+    WorkbenchModelRequestBudgetProfile,
+    WorkbenchPromptProfile,
+    default_source_ingestion_segmentation_profile,
+)
 from .start_source_ingestion_workflow import (
     SourceIngestionAcceptedPlan,
     StartSourceIngestionWorkflow,
@@ -113,5 +119,9 @@ __all__ = (
     "StartSourceIngestionWorkflowResult",
     "StartSourceIngestionWorkflowStatus",
     "SourcePhaseReconciliationResult",
+    "SourceIngestionSegmentationProfile",
+    "WorkbenchModelRequestBudgetProfile",
+    "WorkbenchPromptProfile",
+    "default_source_ingestion_segmentation_profile",
     "SourcePhaseReconciliationStatus",
 )

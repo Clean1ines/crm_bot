@@ -14,6 +14,12 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admissi
     SourceIngestionActor,
     SourceIngestionAdmissionStatus,
 )
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segmentation_profiles import (
+    SourceIngestionSegmentationProfile,
+    WorkbenchModelRequestBudgetProfile,
+    WorkbenchPromptProfile,
+    default_source_ingestion_segmentation_profile,
+)
 from src.contexts.knowledge_workbench.document_segmentation.domain import (
     DocumentSegmentationBudget,
     SegmentationModelBudgetProfile,
@@ -30,6 +36,7 @@ from src.interfaces.composition.source_ingestion_first_phase import (
     _SourceIngestionFirstPhaseUnitOfWork,
     default_source_ingestion_first_phase_segmentation_config,
     make_source_ingestion_first_phase,
+    segmentation_config_from_profile,
 )
 
 
@@ -582,6 +589,9 @@ def test_composition_segmentation_budget_source_guard() -> None:
         "SegmentationPromptProfile",
         "SegmentationModelBudgetProfile",
         "replace",
+        "segmentation_config_from_profile",
+        "default_source_ingestion_segmentation_profile",
+        "SourceIngestionSegmentationProfile",
     ]
     forbidden_markers = [
         "qwen",
@@ -606,3 +616,42 @@ def test_composition_segmentation_budget_source_guard() -> None:
 
     for marker in forbidden_markers:
         assert marker not in source
+
+
+def test_default_segmentation_config_is_derived_from_profile_catalog() -> None:
+    profile = default_source_ingestion_segmentation_profile()
+    config = default_source_ingestion_first_phase_segmentation_config()
+
+    assert config.prompt_name == profile.prompt.prompt_name
+    assert config.prompt_token_count == profile.prompt.prompt_token_count
+    assert config.primary_model_profile_name == profile.primary_model.profile_name
+    assert (
+        config.max_request_input_tokens
+        == profile.primary_model.max_request_input_tokens
+    )
+    assert config.reserved_output_tokens == profile.primary_model.reserved_output_tokens
+
+
+def test_segmentation_config_from_profile_maps_custom_profile() -> None:
+    profile = SourceIngestionSegmentationProfile(
+        prompt=WorkbenchPromptProfile(
+            prompt_name="custom_prompt",
+            node_id="custom_node",
+            prompt_path="src/agent/prompts/custom_prompt.txt",
+            prompt_token_count=123,
+        ),
+        primary_model=WorkbenchModelRequestBudgetProfile(
+            profile_name="custom_primary_model",
+            max_request_input_tokens=4_000,
+            reserved_output_tokens=500,
+        ),
+    )
+
+    config = segmentation_config_from_profile(profile)
+
+    assert config.prompt_name == "custom_prompt"
+    assert config.prompt_token_count == 123
+    assert config.primary_model_profile_name == "custom_primary_model"
+    assert config.max_request_input_tokens == 4_000
+    assert config.reserved_output_tokens == 500
+    assert config.to_document_segmentation_budget().max_source_segment_tokens == 3_377
