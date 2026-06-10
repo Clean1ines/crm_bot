@@ -169,7 +169,7 @@ def _manager(
 ) -> ApplyDraftClaimObservationArtifactAsync:
     return ApplyDraftClaimObservationArtifactAsync(
         parser=DraftClaimObservationArtifactParser(),
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     )
 
 

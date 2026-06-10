@@ -70,8 +70,6 @@ class FakeClaimExtractionWorkItemUnitOfWork:
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ClaimExtractionRuntimeEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -160,7 +158,7 @@ def test_continue_with_degraded_model_requeues_work_item_immediately() -> None:
     artifact = _decision_artifact(decision)
 
     result = ApplyClaimExtractionDailyExhaustedDecision(
-        unit_of_work=unit_of_work
+        repository=unit_of_work
     ).execute(
         ApplyClaimExtractionDailyExhaustedDecisionCommand(
             blocked_work_item=_blocked_work_item(),
@@ -203,7 +201,7 @@ def test_resume_after_daily_reset_defers_work_item_until_reset() -> None:
     resume_after = WaitUntil(_now() + timedelta(hours=12))
 
     result = ApplyClaimExtractionDailyExhaustedDecision(
-        unit_of_work=unit_of_work
+        repository=unit_of_work
     ).execute(
         ApplyClaimExtractionDailyExhaustedDecisionCommand(
             blocked_work_item=_blocked_work_item(),
@@ -238,7 +236,7 @@ def test_daily_exhausted_decision_rolls_back_when_commit_fails() -> None:
     decision = ClaimExtractionDailyExhaustedDecision.CONTINUE_WITH_DEGRADED_MODEL
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        ApplyClaimExtractionDailyExhaustedDecision(unit_of_work=unit_of_work).execute(
+        ApplyClaimExtractionDailyExhaustedDecision(repository=unit_of_work).execute(
             ApplyClaimExtractionDailyExhaustedDecisionCommand(
                 blocked_work_item=_blocked_work_item(),
                 decision=decision,

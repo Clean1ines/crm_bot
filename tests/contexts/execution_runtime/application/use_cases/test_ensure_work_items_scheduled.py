@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.execution_runtime.application.ports.work_item_scheduling_unit_of_work_port import (
-    WorkItemSchedulingUnitOfWorkPort,
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     EnsureWorkItemScheduledStatus,
@@ -32,12 +32,10 @@ class SavedScheduledWorkItem:
 
 
 @dataclass(slots=True)
-class FakeWorkItemSchedulingUnitOfWork:
+class FakeWorkItemSchedulingRepository:
     existing_items: dict[str, WorkItem] = field(default_factory=dict)
     schedule_payload_hashes: dict[str, str] = field(default_factory=dict)
     saved: list[SavedScheduledWorkItem] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_save: bool = False
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
@@ -67,12 +65,6 @@ class FakeWorkItemSchedulingUnitOfWork:
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
 
-    async def commit(self) -> None:
-        self.committed = True
-
-    async def rollback(self) -> None:
-        self.rolled_back = True
-
 
 def _work_kind() -> WorkKind:
     return WorkKind("knowledge_workbench.draft_observation_extraction")
@@ -100,9 +92,9 @@ def _plan(
 @pytest.mark.asyncio
 async def test_creates_ready_work_item_when_absent() -> None:
     plan = _plan()
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork()
+    unit_of_work = FakeWorkItemSchedulingRepository()
 
-    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(repository=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,)),
     )
 
@@ -119,22 +111,20 @@ async def test_creates_ready_work_item_when_absent() -> None:
     assert saved.idempotency_key == plan.idempotency_key
     assert saved.payload_hash == work_item_schedule_payload_hash(plan.payload)
     assert saved.payload == plan.payload
-    assert unit_of_work.committed
-    assert not unit_of_work.rolled_back
 
 
 @pytest.mark.asyncio
 async def test_repeated_schedule_with_same_payload_is_already_exists() -> None:
     plan = _plan()
     existing = WorkItem(work_item_id=plan.work_item_id, work_kind=plan.work_kind)
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork(
+    unit_of_work = FakeWorkItemSchedulingRepository(
         existing_items={plan.work_item_id: existing},
         schedule_payload_hashes={
             plan.work_item_id: work_item_schedule_payload_hash(plan.payload),
         },
     )
 
-    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(repository=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,)),
     )
 
@@ -144,20 +134,18 @@ async def test_repeated_schedule_with_same_payload_is_already_exists() -> None:
     assert result.outcomes[0].status is (EnsureWorkItemScheduledStatus.ALREADY_EXISTS)
     assert result.outcomes[0].existing_work_item == existing
     assert unit_of_work.saved == []
-    assert unit_of_work.committed
-    assert not unit_of_work.rolled_back
 
 
 @pytest.mark.asyncio
 async def test_existing_with_different_payload_hash_is_conflict() -> None:
     plan = _plan(payload={"source_unit_ref": "new"})
     existing = WorkItem(work_item_id=plan.work_item_id, work_kind=plan.work_kind)
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork(
+    unit_of_work = FakeWorkItemSchedulingRepository(
         existing_items={plan.work_item_id: existing},
         schedule_payload_hashes={plan.work_item_id: "different-hash"},
     )
 
-    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(repository=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,)),
     )
 
@@ -167,8 +155,6 @@ async def test_existing_with_different_payload_hash_is_conflict() -> None:
     assert result.outcomes[0].status is EnsureWorkItemScheduledStatus.CONFLICT
     assert result.outcomes[0].existing_work_item == existing
     assert unit_of_work.saved == []
-    assert unit_of_work.committed
-    assert not unit_of_work.rolled_back
 
 
 @pytest.mark.asyncio
@@ -192,7 +178,7 @@ async def test_mixed_created_already_exists_and_conflict_counts() -> None:
         work_item_id=conflict.work_item_id,
         work_kind=conflict.work_kind,
     )
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork(
+    unit_of_work = FakeWorkItemSchedulingRepository(
         existing_items={
             already_exists.work_item_id: existing_same,
             conflict.work_item_id: existing_conflict,
@@ -205,7 +191,7 @@ async def test_mixed_created_already_exists_and_conflict_counts() -> None:
         },
     )
 
-    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(repository=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=(created, already_exists, conflict)),
     )
 
@@ -231,17 +217,15 @@ async def test_duplicate_work_item_id_in_command_is_rejected() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rollback_on_save_failure() -> None:
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork(fail_on_save=True)
+async def test_save_failure_re_raises_without_transaction_handling() -> None:
+    unit_of_work = FakeWorkItemSchedulingRepository(fail_on_save=True)
 
     with pytest.raises(RuntimeError, match="save failed"):
-        await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+        await EnsureWorkItemsScheduled(repository=unit_of_work).execute(
             EnsureWorkItemsScheduledCommand(plans=(_plan(),)),
         )
 
     assert unit_of_work.saved == []
-    assert not unit_of_work.committed
-    assert unit_of_work.rolled_back
 
 
 @pytest.mark.asyncio
@@ -255,10 +239,10 @@ async def test_payload_hash_is_deterministic() -> None:
 
 
 @pytest.mark.asyncio
-async def test_use_case_accepts_scheduling_unit_of_work_port() -> None:
-    unit_of_work: WorkItemSchedulingUnitOfWorkPort = FakeWorkItemSchedulingUnitOfWork()
+async def test_use_case_accepts_scheduling_repository_port() -> None:
+    unit_of_work: WorkItemSchedulingRepositoryPort = FakeWorkItemSchedulingRepository()
 
-    result = await EnsureWorkItemsScheduled(unit_of_work=unit_of_work).execute(
+    result = await EnsureWorkItemsScheduled(repository=unit_of_work).execute(
         EnsureWorkItemsScheduledCommand(plans=()),
     )
 
@@ -273,7 +257,7 @@ async def test_ensure_work_items_scheduled_source_guard() -> None:
     ).read_text(encoding="utf-8")
     port = Path(
         "src/contexts/execution_runtime/application/ports/"
-        "work_item_scheduling_unit_of_work_port.py",
+        "work_item_scheduling_repository_port.py",
     ).read_text(encoding="utf-8")
     combined = use_case + port
 
@@ -284,7 +268,7 @@ async def test_ensure_work_items_scheduled_source_guard() -> None:
         "EnsureWorkItemScheduledStatus",
         "EnsureWorkItemScheduledOutcome",
         "work_item_schedule_payload_hash",
-        "WorkItemSchedulingUnitOfWorkPort",
+        "WorkItemSchedulingRepositoryPort",
         "save_scheduled_work_item",
         "get_schedule_payload_hash",
     )
@@ -308,3 +292,15 @@ async def test_ensure_work_items_scheduled_source_guard() -> None:
 
     for marker in forbidden_markers:
         assert marker not in combined
+
+
+def test_ensure_work_items_scheduled_does_not_commit_or_rollback() -> None:
+    source = Path(
+        "src/contexts/execution_runtime/application/use_cases/"
+        "ensure_work_items_scheduled.py",
+    ).read_text(encoding="utf-8")
+
+    assert ".commit(" not in source
+    assert ".rollback(" not in source
+    assert "async def commit" not in source
+    assert "async def rollback" not in source

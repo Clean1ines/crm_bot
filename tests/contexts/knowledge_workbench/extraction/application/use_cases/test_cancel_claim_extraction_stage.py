@@ -140,7 +140,7 @@ def test_cancels_ready_leased_deferred_and_user_action_required() -> None:
 
     result = CancelClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert [item.status for item in result.cancelled_work_items] == [
@@ -171,7 +171,7 @@ def test_keeps_completed_and_terminal_items_untouched() -> None:
 
     result = CancelClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert result.cancelled_work_items == ()
@@ -188,7 +188,7 @@ def test_does_not_delete_artifacts() -> None:
     )
     unit_of_work = FakeStageCancellationUnitOfWork()
 
-    CancelClaimExtractionStage(reader=reader, unit_of_work=unit_of_work).execute(
+    CancelClaimExtractionStage(reader=reader, repository=unit_of_work).execute(
         _command(),
     )
 
@@ -203,7 +203,7 @@ def test_appends_stage_cancelled_event_and_commits_once() -> None:
 
     result = CancelClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert len(unit_of_work.events) == 1
@@ -226,7 +226,7 @@ def test_rolls_back_on_save_failure() -> None:
     with pytest.raises(RuntimeError, match="save failed"):
         CancelClaimExtractionStage(
             reader=reader,
-            unit_of_work=unit_of_work,
+            repository=unit_of_work,
         ).execute(_command())
 
     assert unit_of_work.committed_count == 0

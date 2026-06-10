@@ -93,12 +93,6 @@ class FakeTransaction:
     async def start(self) -> None:
         self.start_count += 1
 
-    async def commit(self) -> None:
-        self.commit_count += 1
-
-    async def rollback(self) -> None:
-        self.rollback_count += 1
-
 
 class FakeConnection:
     def __init__(self, transaction: FakeTransaction) -> None:

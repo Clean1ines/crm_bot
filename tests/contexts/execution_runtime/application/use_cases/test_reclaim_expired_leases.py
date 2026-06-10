@@ -36,8 +36,6 @@ class FakeWorkItemUnitOfWork:
     saved_attempts: list[WorkItemAttempt] = field(default_factory=list)
     appended_events: list[WorkItemEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -101,7 +99,7 @@ def test_reclaim_expired_leases_commits_only_expired_leased_items() -> None:
     )
     ready = _ready_item("ready-work")
 
-    result = ReclaimExpiredLeases(unit_of_work=unit_of_work).execute(
+    result = ReclaimExpiredLeases(repository=unit_of_work).execute(
         ReclaimExpiredLeasesCommand(
             items=(expired, active, ready),
             now=_now() + timedelta(seconds=30),
@@ -139,7 +137,7 @@ def test_reclaim_expired_leases_does_not_commit_when_nothing_changed() -> None:
         lease_expires_delta=timedelta(seconds=90),
     )
 
-    result = ReclaimExpiredLeases(unit_of_work=unit_of_work).execute(
+    result = ReclaimExpiredLeases(repository=unit_of_work).execute(
         ReclaimExpiredLeasesCommand(
             items=(active, _ready_item("ready-work")),
             now=_now() + timedelta(seconds=30),
@@ -162,7 +160,7 @@ def test_reclaim_expired_leases_rolls_back_when_commit_fails() -> None:
     )
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        ReclaimExpiredLeases(unit_of_work=unit_of_work).execute(
+        ReclaimExpiredLeases(repository=unit_of_work).execute(
             ReclaimExpiredLeasesCommand(
                 items=(expired,),
                 now=_now() + timedelta(seconds=30),

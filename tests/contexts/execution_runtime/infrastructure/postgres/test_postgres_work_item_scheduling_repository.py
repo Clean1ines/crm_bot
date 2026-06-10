@@ -10,25 +10,17 @@ import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
-from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_unit_of_work import (
-    PostgresWorkItemSchedulingUnitOfWork,
+from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
+    PostgresWorkItemSchedulingRepository,
 )
 
 
 @dataclass(slots=True)
 class FakeTransaction:
     started: bool = False
-    committed: bool = False
-    rolled_back: bool = False
 
     async def start(self) -> None:
         self.started = True
-
-    async def commit(self) -> None:
-        self.committed = True
-
-    async def rollback(self) -> None:
-        self.rolled_back = True
 
 
 class FakeUniqueViolationError(Exception):
@@ -108,67 +100,65 @@ def _work_item(work_item_id: str = "work-1") -> WorkItem:
 @pytest.mark.asyncio
 async def test_save_scheduled_work_item_and_load_it_back() -> None:
     connection = FakeConnection()
-    unit_of_work = PostgresWorkItemSchedulingUnitOfWork(
+    repository = PostgresWorkItemSchedulingRepository(
         cast(asyncpg.Connection, connection)
     )
     item = _work_item()
 
-    await unit_of_work.save_scheduled_work_item(
+    await repository.save_scheduled_work_item(
         item=item,
         idempotency_key="idem-1",
         payload_hash="hash-1",
         payload={"source": "unit-1"},
     )
-    await unit_of_work.commit()
 
-    loaded = await PostgresWorkItemSchedulingUnitOfWork(
+    loaded = await PostgresWorkItemSchedulingRepository(
         cast(asyncpg.Connection, connection),
     ).get_work_item(
         "work-1",
     )
 
     assert loaded == item
-    assert connection.transaction_obj.started
-    assert connection.transaction_obj.committed
+    assert connection.executed_queries
 
 
 @pytest.mark.asyncio
 async def test_get_schedule_payload_hash_returns_stored_hash() -> None:
     connection = FakeConnection()
-    unit_of_work = PostgresWorkItemSchedulingUnitOfWork(
+    repository = PostgresWorkItemSchedulingRepository(
         cast(asyncpg.Connection, connection)
     )
     item = _work_item()
 
-    await unit_of_work.save_scheduled_work_item(
+    await repository.save_scheduled_work_item(
         item=item,
         idempotency_key="idem-1",
         payload_hash="hash-1",
         payload={"source": "unit-1"},
     )
 
-    assert await unit_of_work.get_schedule_payload_hash("work-1") == "hash-1"
+    assert await repository.get_schedule_payload_hash("work-1") == "hash-1"
 
 
 @pytest.mark.asyncio
 async def test_missing_work_item_returns_none() -> None:
     connection = FakeConnection()
-    unit_of_work = PostgresWorkItemSchedulingUnitOfWork(
+    repository = PostgresWorkItemSchedulingRepository(
         cast(asyncpg.Connection, connection)
     )
 
-    assert await unit_of_work.get_work_item("missing") is None
+    assert await repository.get_work_item("missing") is None
 
 
 @pytest.mark.asyncio
 async def test_duplicate_work_item_id_raises_instead_of_silent_ignore() -> None:
     connection = FakeConnection()
-    unit_of_work = PostgresWorkItemSchedulingUnitOfWork(
+    repository = PostgresWorkItemSchedulingRepository(
         cast(asyncpg.Connection, connection)
     )
     item = _work_item()
 
-    await unit_of_work.save_scheduled_work_item(
+    await repository.save_scheduled_work_item(
         item=item,
         idempotency_key="idem-1",
         payload_hash="hash-1",
@@ -179,7 +169,7 @@ async def test_duplicate_work_item_id_raises_instead_of_silent_ignore() -> None:
         FakeUniqueViolationError,
         match="duplicate execution_work_items.work_item_id",
     ):
-        await unit_of_work.save_scheduled_work_item(
+        await repository.save_scheduled_work_item(
             item=item,
             idempotency_key="idem-1",
             payload_hash="hash-2",
@@ -193,11 +183,11 @@ async def test_duplicate_work_item_id_raises_instead_of_silent_ignore() -> None:
 @pytest.mark.asyncio
 async def test_duplicate_idempotency_key_for_different_work_item_raises() -> None:
     connection = FakeConnection()
-    unit_of_work = PostgresWorkItemSchedulingUnitOfWork(
+    repository = PostgresWorkItemSchedulingRepository(
         cast(asyncpg.Connection, connection)
     )
 
-    await unit_of_work.save_scheduled_work_item(
+    await repository.save_scheduled_work_item(
         item=_work_item("work-1"),
         idempotency_key="idem-1",
         payload_hash="hash-1",
@@ -208,7 +198,7 @@ async def test_duplicate_idempotency_key_for_different_work_item_raises() -> Non
         FakeUniqueViolationError,
         match="duplicate execution_work_item_schedules.idempotency_key",
     ):
-        await unit_of_work.save_scheduled_work_item(
+        await repository.save_scheduled_work_item(
             item=_work_item("work-2"),
             idempotency_key="idem-1",
             payload_hash="hash-2",
@@ -222,11 +212,11 @@ async def test_duplicate_idempotency_key_for_different_work_item_raises() -> Non
 @pytest.mark.asyncio
 async def test_payload_is_stored_as_jsonb_compatible_json() -> None:
     connection = FakeConnection()
-    unit_of_work = PostgresWorkItemSchedulingUnitOfWork(
+    repository = PostgresWorkItemSchedulingRepository(
         cast(asyncpg.Connection, connection)
     )
 
-    await unit_of_work.save_scheduled_work_item(
+    await repository.save_scheduled_work_item(
         item=_work_item(),
         idempotency_key="idem-1",
         payload_hash="hash-1",
@@ -239,7 +229,7 @@ async def test_payload_is_stored_as_jsonb_compatible_json() -> None:
 def test_implementation_has_no_silent_conflict_sql() -> None:
     source = Path(
         "src/contexts/execution_runtime/infrastructure/postgres/"
-        "postgres_work_item_scheduling_unit_of_work.py",
+        "postgres_work_item_scheduling_repository.py",
     ).read_text(encoding="utf-8")
 
     assert "ON CONFLICT" not in source
@@ -249,7 +239,7 @@ def test_implementation_has_no_silent_conflict_sql() -> None:
 def test_implementation_does_not_import_workbench_capacity_llm_or_artifact() -> None:
     source = Path(
         "src/contexts/execution_runtime/infrastructure/postgres/"
-        "postgres_work_item_scheduling_unit_of_work.py",
+        "postgres_work_item_scheduling_repository.py",
     ).read_text(encoding="utf-8")
 
     forbidden_markers = (
@@ -266,3 +256,14 @@ def test_implementation_does_not_import_workbench_capacity_llm_or_artifact() -> 
 
     for marker in forbidden_markers:
         assert marker not in source
+
+
+def test_postgres_scheduling_repository_has_no_transaction_methods() -> None:
+    source = Path(
+        "src/contexts/execution_runtime/infrastructure/postgres/"
+        "postgres_work_item_scheduling_repository.py",
+    ).read_text(encoding="utf-8")
+
+    assert "async def commit" not in source
+    assert "async def rollback" not in source
+    assert "transaction()" not in source

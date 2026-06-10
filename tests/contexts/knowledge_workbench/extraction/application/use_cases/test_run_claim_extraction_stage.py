@@ -57,8 +57,6 @@ class FakeWorkItemUnitOfWork:
     saved_work_items: list[WorkItem] = field(default_factory=list)
     saved_attempts: list[WorkItemAttempt] = field(default_factory=list)
     events: list[WorkItemEvent] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_save: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -222,7 +220,7 @@ def test_stage_runner_creates_saves_and_indexes_claim_extraction_work_items() ->
     source_units = (_source_unit("unit-1"), _source_unit("unit-2", ordinal=1))
 
     result = RunClaimExtractionStage(
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
         stage_work_item_index=stage_index,
     ).execute(_command(source_units=source_units))
 
@@ -251,7 +249,7 @@ def test_stage_runner_accepts_fake_creator_and_passes_source_units_and_prompt_id
     stage_index = FakeStageWorkItemIndex()
 
     result = RunClaimExtractionStage(
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
         stage_work_item_index=stage_index,
         work_item_creator=creator,
     ).execute(
@@ -275,7 +273,7 @@ def test_stage_runner_rolls_back_when_work_item_save_fails() -> None:
 
     with pytest.raises(RuntimeError, match="save failed"):
         RunClaimExtractionStage(
-            unit_of_work=unit_of_work,
+            repository=unit_of_work,
             stage_work_item_index=stage_index,
         ).execute(_command())
 
@@ -290,7 +288,7 @@ def test_stage_runner_rolls_back_when_stage_index_save_fails() -> None:
 
     with pytest.raises(RuntimeError, match="index save failed"):
         RunClaimExtractionStage(
-            unit_of_work=unit_of_work,
+            repository=unit_of_work,
             stage_work_item_index=stage_index,
         ).execute(_command())
 

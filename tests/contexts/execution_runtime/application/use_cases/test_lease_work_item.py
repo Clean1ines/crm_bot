@@ -31,8 +31,6 @@ class FakeWorkItemUnitOfWork:
     saved_attempts: list[WorkItemAttempt] = field(default_factory=list)
     appended_events: list[WorkItemEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -84,7 +82,7 @@ def _command(item: WorkItem | None = None) -> LeaseWorkItemCommand:
 def test_lease_work_item_commits_item_attempt_and_event() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
 
-    result = LeaseWorkItem(unit_of_work=unit_of_work).execute(_command())
+    result = LeaseWorkItem(repository=unit_of_work).execute(_command())
 
     assert result.item.status is WorkItemStatus.LEASED
     assert result.item.attempt_count == 1
@@ -117,7 +115,7 @@ def test_lease_work_item_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeWorkItemUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        LeaseWorkItem(unit_of_work=unit_of_work).execute(_command())
+        LeaseWorkItem(repository=unit_of_work).execute(_command())
 
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back

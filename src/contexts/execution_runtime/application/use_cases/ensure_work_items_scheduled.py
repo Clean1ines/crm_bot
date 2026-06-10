@@ -6,8 +6,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from src.contexts.execution_runtime.application.ports.work_item_scheduling_unit_of_work_port import (
-    WorkItemSchedulingUnitOfWorkPort,
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
@@ -104,7 +104,7 @@ class EnsureWorkItemsScheduledCommand:
 
 @dataclass(frozen=True, slots=True)
 class EnsureWorkItemsScheduled:
-    unit_of_work: WorkItemSchedulingUnitOfWorkPort
+    repository: WorkItemSchedulingRepositoryPort
 
     async def execute(
         self,
@@ -112,13 +112,8 @@ class EnsureWorkItemsScheduled:
     ) -> EnsureWorkItemsScheduledResult:
         outcomes: list[EnsureWorkItemScheduledOutcome] = []
 
-        try:
-            for plan in command.plans:
-                outcomes.append(await self._ensure_plan(plan))
-            await self.unit_of_work.commit()
-        except Exception:
-            await self.unit_of_work.rollback()
-            raise
+        for plan in command.plans:
+            outcomes.append(await self._ensure_plan(plan))
 
         return EnsureWorkItemsScheduledResult(outcomes=tuple(outcomes))
 
@@ -126,7 +121,7 @@ class EnsureWorkItemsScheduled:
         self,
         plan: WorkItemSchedulePlan,
     ) -> EnsureWorkItemScheduledOutcome:
-        existing = await self.unit_of_work.get_work_item(plan.work_item_id)
+        existing = await self.repository.get_work_item(plan.work_item_id)
         payload_hash = work_item_schedule_payload_hash(plan.payload)
 
         if existing is None:
@@ -134,7 +129,7 @@ class EnsureWorkItemsScheduled:
                 work_item_id=plan.work_item_id,
                 work_kind=plan.work_kind,
             )
-            await self.unit_of_work.save_scheduled_work_item(
+            await self.repository.save_scheduled_work_item(
                 item=item,
                 idempotency_key=plan.idempotency_key,
                 payload_hash=payload_hash,
@@ -145,7 +140,7 @@ class EnsureWorkItemsScheduled:
                 status=EnsureWorkItemScheduledStatus.CREATED,
             )
 
-        existing_payload_hash = await self.unit_of_work.get_schedule_payload_hash(
+        existing_payload_hash = await self.repository.get_schedule_payload_hash(
             plan.work_item_id,
         )
         if existing_payload_hash == payload_hash:

@@ -125,12 +125,6 @@ class FakeAsyncDraftClaimObservationApplicationUnitOfWork:
     async def append_event(self, event: DraftClaimObservationApplicationEvent) -> None:
         self.events = self.events + (event,)
 
-    async def commit(self) -> None:
-        self.committed = True
-
-    async def rollback(self) -> None:
-        self.rolled_back = True
-
 
 def _accept_unit_of_work(
     unit_of_work: DraftClaimObservationApplicationUnitOfWorkPort,

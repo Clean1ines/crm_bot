@@ -97,7 +97,7 @@ def test_draft_observation_plan_mapper_imports_only_execution_schedule_dto() -> 
     ]
     forbidden_markers = [
         "EnsureWorkItemsScheduled",
-        "WorkItemSchedulingUnitOfWorkPort",
+        "WorkItemSchedulingRepositoryPort",
         "execution_runtime.infrastructure",
         "capacity_runtime",
         "llm_runtime",
@@ -128,7 +128,7 @@ def test_draft_observation_scheduler_service_imports_only_application_boundaries
     text = path.read_text(encoding="utf-8")
     required_markers = [
         "execution_runtime.application.use_cases.ensure_work_items_scheduled",
-        "execution_runtime.application.ports.work_item_scheduling_unit_of_work_port",
+        "execution_runtime.application.ports.work_item_scheduling_repository_port",
     ]
     forbidden_markers = [
         "execution_runtime.infrastructure",
@@ -167,7 +167,7 @@ def test_draft_observation_phase_transition_delegates_to_scheduler_without_runti
     ]
     forbidden_markers = [
         "EnsureWorkItemsScheduled",
-        "WorkItemSchedulingUnitOfWorkPort",
+        "WorkItemSchedulingRepositoryPort",
         "WorkItemSchedulePlan",
         "execution_runtime.application",
         "execution_runtime.infrastructure",

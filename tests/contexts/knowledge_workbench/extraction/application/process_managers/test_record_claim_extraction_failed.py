@@ -78,8 +78,6 @@ class FakeClaimExtractionWorkItemUnitOfWork:
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ClaimExtractionRuntimeEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -241,7 +239,7 @@ def _terminal_command(
 def test_record_claim_extraction_failed_commits_retryable_failure() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
 
-    result = RecordClaimExtractionFailed(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionFailed(repository=unit_of_work).execute(
         _retryable_command(),
     )
 
@@ -278,7 +276,7 @@ def test_record_claim_extraction_failed_commits_retryable_failure() -> None:
 def test_record_claim_extraction_failed_commits_terminal_failure() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
 
-    result = RecordClaimExtractionFailed(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionFailed(repository=unit_of_work).execute(
         _terminal_command(),
     )
 
@@ -296,7 +294,7 @@ def test_record_claim_extraction_failed_can_store_error_artifact() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
     error_artifact = _error_artifact()
 
-    result = RecordClaimExtractionFailed(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionFailed(repository=unit_of_work).execute(
         _retryable_command(error_artifact=error_artifact),
     )
 
@@ -314,7 +312,7 @@ def test_record_claim_extraction_failed_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        RecordClaimExtractionFailed(unit_of_work=unit_of_work).execute(
+        RecordClaimExtractionFailed(repository=unit_of_work).execute(
             _retryable_command(),
         )
 

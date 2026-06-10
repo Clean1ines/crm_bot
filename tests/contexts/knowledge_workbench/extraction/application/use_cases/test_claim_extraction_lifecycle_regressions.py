@@ -98,8 +98,6 @@ class FakeResumeReader:
 @dataclass(slots=True)
 class FakeWorkItemUnitOfWork:
     saved_work_items: list[WorkItem] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
         self.saved_work_items.append(item)
@@ -134,8 +132,6 @@ class FakeCancelReader:
 class FakeCancelUnitOfWork:
     saved_work_items: list[WorkItem] = field(default_factory=list)
     events: list[object] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
         self.saved_work_items.append(item)
@@ -222,7 +218,7 @@ def test_resume_persists_leased_work_item_as_ready_before_counting_it_ready() ->
 
     result = ResumeClaimExtractionStage(
         reader=FakeResumeReader(work_items=(leased,)),
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(
         ResumeClaimExtractionStageCommand(
             workflow_run_id="workflow-1",
@@ -259,7 +255,7 @@ def test_resume_completed_artifact_still_prevents_leased_work_item_reactivation(
             artifacts=(_completed_artifact("unit-1"),),
             work_items=(leased,),
         ),
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(
         ResumeClaimExtractionStageCommand(
             workflow_run_id="workflow-1",
@@ -290,7 +286,7 @@ def test_cancel_user_action_required_uses_shared_state_machine_path() -> None:
 
     result = CancelClaimExtractionStage(
         reader=FakeCancelReader(work_items=(user_action_item,)),
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(
         CancelClaimExtractionStageCommand(
             workflow_run_id="workflow-1",

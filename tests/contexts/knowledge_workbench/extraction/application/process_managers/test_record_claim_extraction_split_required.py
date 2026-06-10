@@ -78,8 +78,6 @@ class FakeClaimExtractionWorkItemUnitOfWork:
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ClaimExtractionRuntimeEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -223,7 +221,7 @@ def _command(
 def test_record_claim_extraction_split_required_supersedes_parent_work_item() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
 
-    result = RecordClaimExtractionSplitRequired(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionSplitRequired(repository=unit_of_work).execute(
         _command(),
     )
 
@@ -255,7 +253,7 @@ def test_record_claim_extraction_split_required_accepts_output_too_large() -> No
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
     task = _llm_task(error_kind=LlmErrorKind.OUTPUT_TOO_LARGE)
 
-    result = RecordClaimExtractionSplitRequired(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionSplitRequired(repository=unit_of_work).execute(
         _command(llm_task=task),
     )
 
@@ -267,7 +265,7 @@ def test_record_claim_extraction_split_required_rolls_back_when_commit_fails() -
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        RecordClaimExtractionSplitRequired(unit_of_work=unit_of_work).execute(
+        RecordClaimExtractionSplitRequired(repository=unit_of_work).execute(
             _command(),
         )
 

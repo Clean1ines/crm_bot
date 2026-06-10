@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
 import json
 from collections.abc import Mapping
+from datetime import datetime
 
 import asyncpg
 
-from src.contexts.execution_runtime.application.ports.work_item_scheduling_unit_of_work_port import (
-    WorkItemSchedulingUnitOfWorkPort,
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
@@ -19,25 +19,18 @@ from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKi
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 
 
-class UnitOfWorkClosedError(RuntimeError):
-    """Raised when a closed scheduling Unit of Work is used again."""
+class PostgresWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
+    """Asyncpg repository for generic Execution Runtime work item scheduling.
 
-
-class PostgresWorkItemSchedulingUnitOfWork(WorkItemSchedulingUnitOfWorkPort):
-    """Asyncpg scheduling UoW for generic Execution Runtime work items.
-
-    The UoW owns a transaction lazily when the first write happens. Pure read
-    idempotency checks may complete without opening a transaction; in that case
-    commit/rollback only close the UoW.
+    Transaction lifecycle is owned by the application operation that composes this
+    repository with other repositories. This adapter only persists scheduling data
+    on the provided connection.
     """
 
     def __init__(self, connection: asyncpg.Connection) -> None:
         self._connection = connection
-        self._transaction: asyncpg.transaction.Transaction | None = None
-        self._closed = False
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
-        self._ensure_not_closed()
         row = await self._connection.fetchrow(
             """
             SELECT
@@ -60,7 +53,6 @@ class PostgresWorkItemSchedulingUnitOfWork(WorkItemSchedulingUnitOfWorkPort):
         return _hydrate_work_item(row)
 
     async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
-        self._ensure_not_closed()
         value = await self._connection.fetchval(
             """
             SELECT payload_hash
@@ -81,7 +73,6 @@ class PostgresWorkItemSchedulingUnitOfWork(WorkItemSchedulingUnitOfWorkPort):
         payload_hash: str,
         payload: Mapping[str, object],
     ) -> None:
-        await self._ensure_open_transaction()
         await self._connection.execute(
             """
             INSERT INTO execution_work_items (
@@ -122,39 +113,6 @@ class PostgresWorkItemSchedulingUnitOfWork(WorkItemSchedulingUnitOfWorkPort):
             payload_hash,
             json.dumps(payload, default=str, separators=(",", ":"), sort_keys=True),
         )
-
-    async def commit(self) -> None:
-        self._ensure_not_closed()
-        if self._transaction is None:
-            self._closed = True
-            return
-
-        try:
-            await self._transaction.commit()
-        except Exception:
-            await self._transaction.rollback()
-            self._closed = True
-            raise
-
-        self._closed = True
-
-    async def rollback(self) -> None:
-        self._ensure_not_closed()
-        if self._transaction is not None:
-            await self._transaction.rollback()
-        self._closed = True
-
-    async def _ensure_open_transaction(self) -> None:
-        self._ensure_not_closed()
-        if self._transaction is None:
-            self._transaction = self._connection.transaction()
-            await self._transaction.start()
-
-    def _ensure_not_closed(self) -> None:
-        if self._closed:
-            raise UnitOfWorkClosedError(
-                "Work item scheduling UnitOfWork is already closed"
-            )
 
 
 def _hydrate_work_item(row: Mapping[str, object]) -> WorkItem:

@@ -59,8 +59,6 @@ class FakeArtifactUnitOfWork:
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ArtifactEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_artifact(self, artifact: PipelineArtifact) -> None:
@@ -115,7 +113,7 @@ def test_validate_artifact_commits_validated_artifact_and_event() -> None:
     unit_of_work = FakeArtifactUnitOfWork()
     occurred_at = _now() + timedelta(seconds=1)
 
-    result = ValidateArtifact(unit_of_work=unit_of_work).execute(
+    result = ValidateArtifact(repository=unit_of_work).execute(
         ValidateArtifactCommand(
             artifact=_artifact(),
             occurred_at=occurred_at,
@@ -134,7 +132,7 @@ def test_reject_artifact_commits_rejected_artifact_and_event() -> None:
     unit_of_work = FakeArtifactUnitOfWork()
     occurred_at = _now() + timedelta(seconds=1)
 
-    result = RejectArtifact(unit_of_work=unit_of_work).execute(
+    result = RejectArtifact(repository=unit_of_work).execute(
         RejectArtifactCommand(
             artifact=_artifact(),
             occurred_at=occurred_at,
@@ -152,7 +150,7 @@ def test_supersede_artifact_commits_superseded_artifact_and_event() -> None:
     unit_of_work = FakeArtifactUnitOfWork()
     occurred_at = _now() + timedelta(seconds=1)
 
-    result = SupersedeArtifact(unit_of_work=unit_of_work).execute(
+    result = SupersedeArtifact(repository=unit_of_work).execute(
         SupersedeArtifactCommand(
             artifact=_artifact(),
             occurred_at=occurred_at,
@@ -170,7 +168,7 @@ def test_expire_artifact_commits_expired_artifact_and_event() -> None:
     unit_of_work = FakeArtifactUnitOfWork()
     occurred_at = _now() + timedelta(seconds=1)
 
-    result = ExpireArtifact(unit_of_work=unit_of_work).execute(
+    result = ExpireArtifact(repository=unit_of_work).execute(
         ExpireArtifactCommand(
             artifact=_artifact(),
             occurred_at=occurred_at,
@@ -188,7 +186,7 @@ def test_lifecycle_use_case_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeArtifactUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        ValidateArtifact(unit_of_work=unit_of_work).execute(
+        ValidateArtifact(repository=unit_of_work).execute(
             ValidateArtifactCommand(
                 artifact=_artifact(),
                 occurred_at=_now() + timedelta(seconds=1),
@@ -226,7 +224,7 @@ def test_terminal_artifact_cannot_transition_again_through_use_case() -> None:
     terminal = _artifact().reject(updated_at=_now() + timedelta(seconds=1))
 
     with pytest.raises(ValueError):
-        ValidateArtifact(unit_of_work=unit_of_work).execute(
+        ValidateArtifact(repository=unit_of_work).execute(
             ValidateArtifactCommand(
                 artifact=terminal,
                 occurred_at=_now() + timedelta(seconds=2),

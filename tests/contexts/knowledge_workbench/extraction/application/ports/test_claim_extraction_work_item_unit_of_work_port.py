@@ -67,8 +67,6 @@ class FakeClaimExtractionWorkItemUnitOfWork:
     saved_llm_attempts: list[LlmAttempt] = field(default_factory=list)
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ClaimExtractionRuntimeEvent] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
         self.saved_work_items.append(item)

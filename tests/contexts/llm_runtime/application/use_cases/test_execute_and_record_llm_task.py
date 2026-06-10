@@ -73,8 +73,6 @@ class FakeLlmTaskUnitOfWork:
     saved_attempts: list[LlmAttempt] = field(default_factory=list)
     appended_events: list[LlmTaskEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_task(self, task: LlmTask) -> None:
@@ -176,7 +174,7 @@ def test_execute_and_record_success_commits_task_attempt_and_success_event() -> 
                 usage=TokenUsage(input_tokens=10, output_tokens=5),
             ),
         ),
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     )
 
     outcome = use_case.execute(_command())
@@ -217,7 +215,7 @@ def test_execute_and_record_route_change_commits_retryable_task_and_failed_event
         provider=FakeProvider(
             LlmProviderFailure(error_kind=LlmErrorKind.REQUEST_TOO_LARGE),
         ),
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     )
 
     outcome = use_case.execute(
@@ -237,7 +235,7 @@ def test_execute_and_record_rolls_back_when_recording_fails() -> None:
         provider=FakeProvider(
             LlmProviderSuccess(raw_text="ok"),
         ),
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     )
 
     with pytest.raises(RuntimeError, match="commit failed"):

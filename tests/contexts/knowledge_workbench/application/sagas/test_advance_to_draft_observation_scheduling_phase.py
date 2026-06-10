@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.execution_runtime.application.ports.work_item_scheduling_unit_of_work_port import (
-    WorkItemSchedulingUnitOfWorkPort,
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
@@ -58,12 +58,10 @@ class SavedScheduledWorkItem:
 
 
 @dataclass(slots=True)
-class FakeWorkItemSchedulingUnitOfWork:
+class FakeWorkItemSchedulingRepository:
     existing_items: dict[str, WorkItem] = field(default_factory=dict)
     schedule_payload_hashes: dict[str, str] = field(default_factory=dict)
     saved: list[SavedScheduledWorkItem] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         return self.existing_items.get(work_item_id)
@@ -89,12 +87,6 @@ class FakeWorkItemSchedulingUnitOfWork:
         )
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
-
-    async def commit(self) -> None:
-        self.committed = True
-
-    async def rollback(self) -> None:
-        self.rolled_back = True
 
 
 def _now() -> datetime:
@@ -157,11 +149,11 @@ def _source_units() -> tuple[SourceUnit, ...]:
 
 
 def _service(
-    unit_of_work: WorkItemSchedulingUnitOfWorkPort,
+    unit_of_work: WorkItemSchedulingRepositoryPort,
 ) -> AdvanceToDraftObservationSchedulingPhase:
     return AdvanceToDraftObservationSchedulingPhase(
         scheduling_service=ScheduleDraftObservationExtractionWork(
-            scheduling_unit_of_work=unit_of_work,
+            scheduling_repository=unit_of_work,
         ),
     )
 
@@ -191,7 +183,7 @@ def _work_kind() -> WorkKind:
 
 @pytest.mark.asyncio
 async def test_advances_phase_after_scheduling_created_work() -> None:
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork()
+    unit_of_work = FakeWorkItemSchedulingRepository()
 
     result = await _service(unit_of_work).execute(_command())
 
@@ -216,13 +208,11 @@ async def test_advances_phase_after_scheduling_created_work() -> None:
     assert result.checkpoint.checkpoint_payload["scheduler"] == (
         "execution_runtime.ensure_work_items_scheduled"
     )
-    assert unit_of_work.committed
-    assert not unit_of_work.rolled_back
 
 
 @pytest.mark.asyncio
 async def test_repeated_execution_uses_already_exists_and_still_advances() -> None:
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork()
+    unit_of_work = FakeWorkItemSchedulingRepository()
     service = _service(unit_of_work)
     original_state = _state()
 
@@ -246,7 +236,7 @@ async def test_repeated_execution_uses_already_exists_and_still_advances() -> No
 async def test_conflict_raises_and_does_not_produce_checkpoint() -> None:
     unit_ref = "source-document:project-1:abc.unit.0"
     work_item_id = _work_item_id(unit_ref=unit_ref)
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork(
+    unit_of_work = FakeWorkItemSchedulingRepository(
         existing_items={
             work_item_id: WorkItem(
                 work_item_id=work_item_id,
@@ -294,7 +284,7 @@ async def test_existing_checkpoint_is_replaced_not_duplicated() -> None:
     )
     state = _state(checkpoints=(old_checkpoint,))
 
-    result = await _service(FakeWorkItemSchedulingUnitOfWork()).execute(
+    result = await _service(FakeWorkItemSchedulingRepository()).execute(
         _command(state=state)
     )
 
@@ -351,3 +341,16 @@ async def test_advance_to_draft_observation_scheduling_phase_source_guard() -> N
 
 def _marker(*parts: str) -> str:
     return "".join(parts)
+
+
+def test_advance_to_draft_observation_scheduling_phase_has_no_transaction_ownership() -> (
+    None
+):
+    source = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "advance_to_draft_observation_scheduling_phase.py",
+    ).read_text(encoding="utf-8")
+
+    assert ".commit(" not in source
+    assert ".rollback(" not in source
+    assert "scheduling_unit_of_work" not in source

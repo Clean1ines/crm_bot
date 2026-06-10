@@ -147,7 +147,7 @@ def test_map_draft_observation_plans_to_execution_schedule_source_guard() -> Non
     )
     forbidden_markers = (
         "EnsureWorkItemsScheduled",
-        "WorkItemSchedulingUnitOfWorkPort",
+        "WorkItemSchedulingRepositoryPort",
         "capacity_runtime",
         "llm_runtime",
         "artifact_runtime",

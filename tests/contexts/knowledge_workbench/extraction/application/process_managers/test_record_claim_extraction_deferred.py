@@ -81,8 +81,6 @@ class FakeClaimExtractionWorkItemUnitOfWork:
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ClaimExtractionRuntimeEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -226,9 +224,7 @@ def test_record_claim_extraction_deferred_releases_lease_and_commits_wait_state(
 ):
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
 
-    result = RecordClaimExtractionDeferred(unit_of_work=unit_of_work).execute(
-        _command()
-    )
+    result = RecordClaimExtractionDeferred(repository=unit_of_work).execute(_command())
 
     assert result.deferred_work_item.status is WorkItemStatus.DEFERRED
     assert result.deferred_work_item.next_attempt_at is not None
@@ -261,7 +257,7 @@ def test_record_claim_extraction_deferred_can_store_error_artifact() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
     error_artifact = _error_artifact()
 
-    result = RecordClaimExtractionDeferred(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionDeferred(repository=unit_of_work).execute(
         _command(error_artifact=error_artifact),
     )
 
@@ -281,7 +277,7 @@ def test_record_claim_extraction_deferred_uses_generic_deferred_event_for_non_mi
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
     task = _llm_task(error_kind=LlmErrorKind.NETWORK_ERROR)
 
-    result = RecordClaimExtractionDeferred(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionDeferred(repository=unit_of_work).execute(
         _command(
             llm_task=task,
             error_artifact=None,
@@ -296,7 +292,7 @@ def test_record_claim_extraction_deferred_rolls_back_when_commit_fails() -> None
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        RecordClaimExtractionDeferred(unit_of_work=unit_of_work).execute(_command())
+        RecordClaimExtractionDeferred(repository=unit_of_work).execute(_command())
 
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back

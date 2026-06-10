@@ -81,8 +81,6 @@ class FakeClaimExtractionWorkItemUnitOfWork:
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ClaimExtractionRuntimeEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -226,7 +224,7 @@ def _command(
 def test_daily_exhausted_requires_user_choice_and_releases_lease() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
 
-    result = RecordClaimExtractionDailyExhausted(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionDailyExhausted(repository=unit_of_work).execute(
         _command(),
     )
 
@@ -259,7 +257,7 @@ def test_daily_exhausted_can_store_reviewable_decision_artifact() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
     error_artifact = _error_artifact()
 
-    result = RecordClaimExtractionDailyExhausted(unit_of_work=unit_of_work).execute(
+    result = RecordClaimExtractionDailyExhausted(repository=unit_of_work).execute(
         _command(error_artifact=error_artifact),
     )
 
@@ -277,7 +275,7 @@ def test_daily_exhausted_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        RecordClaimExtractionDailyExhausted(unit_of_work=unit_of_work).execute(
+        RecordClaimExtractionDailyExhausted(repository=unit_of_work).execute(
             _command(),
         )
 

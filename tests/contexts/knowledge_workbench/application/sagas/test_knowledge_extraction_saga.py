@@ -7,14 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.execution_runtime.application.ports.work_item_scheduling_unit_of_work_port import (
-    WorkItemSchedulingUnitOfWorkPort,
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
-from src.contexts.knowledge_workbench.application.sagas.advance_to_draft_observation_scheduling_phase import (
-    AdvanceToDraftObservationSchedulingPhase,
-)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga import (
     KnowledgeExtractionSaga,
     ReconcileKnowledgeExtractionSagaCommand,
@@ -27,6 +24,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
     KnowledgeExtractionEventCursorRecord,
     KnowledgeExtractionSagaStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_reconcile_unit_of_work import (
+    KnowledgeExtractionSagaReconcileUnitOfWorkPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionPhaseCheckpoint,
     KnowledgeExtractionPhaseKey,
@@ -35,9 +35,6 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_source_phase_reconciliation import (
     KnowledgeExtractionSourcePhaseReconciler,
-)
-from src.contexts.knowledge_workbench.application.sagas.schedule_draft_observation_extraction_work import (
-    ScheduleDraftObservationExtractionWork,
 )
 from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
     SourceManagementRepositoryPort,
@@ -80,12 +77,10 @@ class SavedScheduledWorkItem:
 
 
 @dataclass(slots=True)
-class FakeWorkItemSchedulingUnitOfWork:
+class FakeWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
     existing_items: dict[str, WorkItem] = field(default_factory=dict)
     schedule_payload_hashes: dict[str, str] = field(default_factory=dict)
     saved: list[SavedScheduledWorkItem] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         return self.existing_items.get(work_item_id)
@@ -111,12 +106,6 @@ class FakeWorkItemSchedulingUnitOfWork:
         )
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
-
-    async def commit(self) -> None:
-        self.committed = True
-
-    async def rollback(self) -> None:
-        self.rolled_back = True
 
 
 class FakeStateRepository(KnowledgeExtractionSagaStateRepositoryPort):
@@ -243,6 +232,62 @@ class FakeSourceManagementRepository(SourceManagementRepositoryPort):
         return None
 
 
+class FakeSagaReconcileUnitOfWork(KnowledgeExtractionSagaReconcileUnitOfWorkPort):
+    def __init__(
+        self,
+        *,
+        state_repository: FakeStateRepository,
+        source_management_repository: SourceManagementRepositoryPort | None = None,
+        scheduling_repository: WorkItemSchedulingRepositoryPort | None = None,
+        command_log: FakeCommandLog | None = None,
+        event_cursor: FakeEventCursor | None = None,
+        command_emitter: FakeCommandEmitter | None = None,
+    ) -> None:
+        self._state_repository = state_repository
+        self._command_log = command_log or FakeCommandLog()
+        self._event_cursor = event_cursor or FakeEventCursor()
+        self._command_emitter = command_emitter or FakeCommandEmitter()
+        self._source_management_repository = (
+            source_management_repository
+            or FakeSourceManagementRepository(document=None, units=())
+        )
+        self._scheduling_repository = (
+            scheduling_repository or FakeWorkItemSchedulingRepository()
+        )
+        self.commit_count = 0
+        self.rollback_count = 0
+
+    @property
+    def saga_state_repository(self) -> KnowledgeExtractionSagaStateRepositoryPort:
+        return self._state_repository
+
+    @property
+    def command_log(self) -> KnowledgeExtractionCommandLogPort:
+        return self._command_log
+
+    @property
+    def event_cursor(self) -> KnowledgeExtractionEventCursorPort:
+        return self._event_cursor
+
+    @property
+    def command_emitter(self) -> KnowledgeExtractionCommandEmitterPort:
+        return self._command_emitter
+
+    @property
+    def source_management_repository(self) -> SourceManagementRepositoryPort:
+        return self._source_management_repository
+
+    @property
+    def work_item_scheduling_repository(self) -> WorkItemSchedulingRepositoryPort:
+        return self._scheduling_repository
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
+
+
 def _now() -> datetime:
     return datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
 
@@ -308,33 +353,14 @@ def _source_units() -> tuple[SourceUnit, ...]:
     )
 
 
-def _scheduling_phase(
-    unit_of_work: WorkItemSchedulingUnitOfWorkPort,
-) -> AdvanceToDraftObservationSchedulingPhase:
-    return AdvanceToDraftObservationSchedulingPhase(
-        scheduling_service=ScheduleDraftObservationExtractionWork(
-            scheduling_unit_of_work=unit_of_work,
-        ),
-    )
-
-
 def _saga(
     *,
-    state_repository: FakeStateRepository,
-    source_management_repository: SourceManagementRepositoryPort | None = None,
+    unit_of_work: KnowledgeExtractionSagaReconcileUnitOfWorkPort,
     source_phase_reconciler: KnowledgeExtractionSourcePhaseReconciler | None = None,
-    draft_observation_scheduling_phase: (
-        AdvanceToDraftObservationSchedulingPhase | None
-    ) = None,
 ) -> KnowledgeExtractionSaga:
     return KnowledgeExtractionSaga(
-        state_repository=state_repository,
-        command_log=FakeCommandLog(),
-        event_cursor=FakeEventCursor(),
-        command_emitter=FakeCommandEmitter(),
+        unit_of_work=unit_of_work,
         source_phase_reconciler=source_phase_reconciler,
-        source_management_repository=source_management_repository,
-        draft_observation_scheduling_phase=draft_observation_scheduling_phase,
     )
 
 
@@ -365,16 +391,19 @@ async def test_reconcile_advances_from_source_units_created_to_prompt_work_sched
         document=_source_document(),
         units=_source_units(),
     )
-    scheduling_unit_of_work = FakeWorkItemSchedulingUnitOfWork()
-
-    result = await _saga(
+    scheduling_repository = FakeWorkItemSchedulingRepository()
+    unit_of_work = FakeSagaReconcileUnitOfWork(
         state_repository=state_repository,
         source_management_repository=source_repository,
-        draft_observation_scheduling_phase=_scheduling_phase(scheduling_unit_of_work),
-    ).reconcile(_command())
+        scheduling_repository=scheduling_repository,
+    )
+
+    result = await _saga(unit_of_work=unit_of_work).reconcile(_command())
 
     assert result.current_phase is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
     assert result.status is KnowledgeExtractionWorkflowStatus.RUNNING
+    assert unit_of_work.commit_count == 1
+    assert unit_of_work.rollback_count == 0
     assert any(
         checkpoint.phase_key is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
         for checkpoint in state_repository.saved_checkpoints
@@ -382,7 +411,7 @@ async def test_reconcile_advances_from_source_units_created_to_prompt_work_sched
     assert state_repository.saved_states[-1].current_phase is (
         KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
     )
-    assert len(scheduling_unit_of_work.saved) == 2
+    assert len(scheduling_repository.saved) == 2
 
 
 @pytest.mark.asyncio
@@ -392,12 +421,13 @@ async def test_repeated_reconcile_does_not_duplicate_work_items() -> None:
         document=_source_document(),
         units=_source_units(),
     )
-    scheduling_unit_of_work = FakeWorkItemSchedulingUnitOfWork()
-    saga = _saga(
+    scheduling_repository = FakeWorkItemSchedulingRepository()
+    unit_of_work = FakeSagaReconcileUnitOfWork(
         state_repository=state_repository,
         source_management_repository=source_repository,
-        draft_observation_scheduling_phase=_scheduling_phase(scheduling_unit_of_work),
+        scheduling_repository=scheduling_repository,
     )
+    saga = _saga(unit_of_work=unit_of_work)
 
     first = await saga.reconcile(_command())
     state_repository.state = _state()
@@ -405,21 +435,36 @@ async def test_repeated_reconcile_does_not_duplicate_work_items() -> None:
 
     assert first.current_phase is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
     assert second.current_phase is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
-    assert len(scheduling_unit_of_work.saved) == 2
+    assert len(scheduling_repository.saved) == 2
+    assert unit_of_work.commit_count == 2
+    assert unit_of_work.rollback_count == 0
 
 
 @pytest.mark.asyncio
-async def test_missing_optional_scheduling_dependencies_keeps_source_units_created() -> (
+async def test_empty_source_units_advance_to_prompt_work_scheduled_without_work_items() -> (
     None
 ):
     state_repository = FakeStateRepository(_state())
+    source_repository = FakeSourceManagementRepository(
+        document=_source_document(),
+        units=(),
+    )
+    scheduling_repository = FakeWorkItemSchedulingRepository()
+    unit_of_work = FakeSagaReconcileUnitOfWork(
+        state_repository=state_repository,
+        source_management_repository=source_repository,
+        scheduling_repository=scheduling_repository,
+    )
 
-    result = await _saga(state_repository=state_repository).reconcile(_command())
+    result = await _saga(unit_of_work=unit_of_work).reconcile(_command())
 
     assert result.status is KnowledgeExtractionWorkflowStatus.RUNNING
-    assert result.current_phase is KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED
-    assert state_repository.saved_checkpoints == []
-    assert state_repository.saved_states == []
+    assert result.current_phase is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+    assert state_repository.saved_checkpoints
+    assert state_repository.saved_states
+    assert scheduling_repository.saved == []
+    assert unit_of_work.commit_count == 1
+    assert unit_of_work.rollback_count == 0
 
 
 @pytest.mark.asyncio
@@ -431,25 +476,30 @@ async def test_does_not_schedule_when_source_reconciliation_pauses_workflow() ->
         document=_source_document(),
         units=(),
     )
-    scheduling_unit_of_work = FakeWorkItemSchedulingUnitOfWork()
-
-    result = await _saga(
+    scheduling_repository = FakeWorkItemSchedulingRepository()
+    unit_of_work = FakeSagaReconcileUnitOfWork(
         state_repository=state_repository,
         source_management_repository=source_repository,
+        scheduling_repository=scheduling_repository,
+    )
+
+    result = await _saga(
+        unit_of_work=unit_of_work,
         source_phase_reconciler=KnowledgeExtractionSourcePhaseReconciler(
             source_repository=source_repository,
         ),
-        draft_observation_scheduling_phase=_scheduling_phase(scheduling_unit_of_work),
     ).reconcile(_command())
 
     assert result.status is KnowledgeExtractionWorkflowStatus.PAUSED
     assert result.current_phase is KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED
     assert source_repository.list_calls == 1
-    assert scheduling_unit_of_work.saved == []
+    assert scheduling_repository.saved == []
+    assert unit_of_work.commit_count == 1
+    assert unit_of_work.rollback_count == 0
 
 
 @pytest.mark.asyncio
-async def test_scheduling_conflict_propagates() -> None:
+async def test_scheduling_conflict_propagates_and_rolls_back() -> None:
     unit_ref = "source-document:project-1:abc.unit.0"
     work_item_id = _work_item_id(unit_ref=unit_ref)
     state_repository = FakeStateRepository(_state())
@@ -457,7 +507,7 @@ async def test_scheduling_conflict_propagates() -> None:
         document=_source_document(),
         units=(_source_unit(unit_ref=unit_ref, ordinal=0),),
     )
-    scheduling_unit_of_work = FakeWorkItemSchedulingUnitOfWork(
+    scheduling_repository = FakeWorkItemSchedulingRepository(
         existing_items={
             work_item_id: WorkItem(
                 work_item_id=work_item_id,
@@ -466,54 +516,88 @@ async def test_scheduling_conflict_propagates() -> None:
         },
         schedule_payload_hashes={work_item_id: "different-payload-hash"},
     )
+    unit_of_work = FakeSagaReconcileUnitOfWork(
+        state_repository=state_repository,
+        source_management_repository=source_repository,
+        scheduling_repository=scheduling_repository,
+    )
 
     with pytest.raises(ValueError, match="draft observation scheduling conflict"):
-        await _saga(
-            state_repository=state_repository,
-            source_management_repository=source_repository,
-            draft_observation_scheduling_phase=_scheduling_phase(
-                scheduling_unit_of_work,
-            ),
-        ).reconcile(_command())
+        await _saga(unit_of_work=unit_of_work).reconcile(_command())
+
+    assert unit_of_work.commit_count == 0
+    assert unit_of_work.rollback_count == 1
 
 
 @pytest.mark.asyncio
-async def test_knowledge_extraction_saga_scheduling_source_guard() -> None:
+async def test_knowledge_extraction_saga_rolls_back_on_scheduling_exception() -> None:
+    class FailingSchedulingRepository(FakeWorkItemSchedulingRepository):
+        async def save_scheduled_work_item(
+            self,
+            *,
+            item: WorkItem,
+            idempotency_key: str,
+            payload_hash: str,
+            payload: Mapping[str, object],
+        ) -> None:
+            raise RuntimeError("scheduling failed")
+
+    state_repository = FakeStateRepository(_state())
+    source_repository = FakeSourceManagementRepository(
+        document=_source_document(),
+        units=(
+            _source_unit(
+                unit_ref="source-document:project-1:abc.unit.0",
+                ordinal=0,
+            ),
+        ),
+    )
+    unit_of_work = FakeSagaReconcileUnitOfWork(
+        state_repository=state_repository,
+        source_management_repository=source_repository,
+        scheduling_repository=FailingSchedulingRepository(),
+    )
+
+    with pytest.raises(RuntimeError, match="scheduling failed"):
+        await _saga(unit_of_work=unit_of_work).reconcile(_command())
+
+    assert unit_of_work.commit_count == 0
+    assert unit_of_work.rollback_count == 1
+
+
+def test_knowledge_extraction_saga_scheduling_source_guard() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
         "knowledge_extraction_saga.py",
     ).read_text(encoding="utf-8")
 
-    required_markers = (
-        "AdvanceToDraftObservationSchedulingPhase",
-        "AdvanceToDraftObservationSchedulingPhaseCommand",
-        "SourceManagementRepositoryPort",
-        "list_source_units_for_document",
-        "PROMPT_A_WORK_SCHEDULED",
-        "SOURCE_UNITS_CREATED",
+    assert "KnowledgeExtractionSagaReconcileUnitOfWorkPort" in source
+    assert "unit_of_work: KnowledgeExtractionSagaReconcileUnitOfWorkPort" in source
+    assert "self._unit_of_work = unit_of_work" in source
+    assert "await self._unit_of_work.commit()" in source
+    assert "await self._unit_of_work.rollback()" in source
+    assert "ScheduleDraftObservationExtractionWork" in source
+
+    forbidden_old_constructor_markers = (
+        "state_repository:",
+        "source_management_repository:",
+        "draft_observation_scheduling_phase:",
+        "scheduling_unit_of_work",
+        "WorkItemSchedulingUnitOfWorkPort",
     )
-    forbidden_markers = (
-        _marker("DraftObservationExtraction", "SchedulingReconciler"),
-        _marker("DraftObservationExtraction", "WorkIndexPort"),
-        "capacity_runtime",
-        "llm_runtime",
-        "artifact_runtime",
-        "execution_runtime.infrastructure",
-        "Postgres",
-        "asyncpg",
-        "queue",
-        "worker",
-        "lease",
-        "Groq",
-        "qwen",
-    )
-
-    missing = [marker for marker in required_markers if marker not in source]
-    offenders = [marker for marker in forbidden_markers if marker in source]
-
-    assert not missing, "\n".join(missing)
-    assert not offenders, "\n".join(offenders)
+    for marker in forbidden_old_constructor_markers:
+        assert marker not in source, marker
 
 
-def _marker(*parts: str) -> str:
-    return "".join(parts)
+def test_knowledge_extraction_saga_single_uow_source_guard() -> None:
+    source = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "knowledge_extraction_saga.py",
+    ).read_text(encoding="utf-8")
+
+    assert "unit_of_work: KnowledgeExtractionSagaReconcileUnitOfWorkPort" in source
+    assert "await self._unit_of_work.commit()" in source
+    assert "await self._unit_of_work.rollback()" in source
+    assert "state_repository:" not in source
+    assert "source_management_repository:" not in source
+    assert "draft_observation_scheduling_phase:" not in source

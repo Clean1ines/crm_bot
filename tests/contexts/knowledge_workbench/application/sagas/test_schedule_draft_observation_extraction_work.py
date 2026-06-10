@@ -8,8 +8,8 @@ from typing import cast
 
 import pytest
 
-from src.contexts.execution_runtime.application.ports.work_item_scheduling_unit_of_work_port import (
-    WorkItemSchedulingUnitOfWorkPort,
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     work_item_schedule_payload_hash,
@@ -52,12 +52,10 @@ class SavedScheduledWorkItem:
 
 
 @dataclass(slots=True)
-class FakeWorkItemSchedulingUnitOfWork:
+class FakeWorkItemSchedulingRepository:
     existing_items: dict[str, WorkItem] = field(default_factory=dict)
     schedule_payload_hashes: dict[str, str] = field(default_factory=dict)
     saved: list[SavedScheduledWorkItem] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         return self.existing_items.get(work_item_id)
@@ -83,12 +81,6 @@ class FakeWorkItemSchedulingUnitOfWork:
         )
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
-
-    async def commit(self) -> None:
-        self.committed = True
-
-    async def rollback(self) -> None:
-        self.rolled_back = True
 
 
 def _now() -> datetime:
@@ -132,10 +124,10 @@ def _command(
 
 
 def _service(
-    unit_of_work: WorkItemSchedulingUnitOfWorkPort,
+    unit_of_work: WorkItemSchedulingRepositoryPort,
 ) -> ScheduleDraftObservationExtractionWork:
     return ScheduleDraftObservationExtractionWork(
-        scheduling_unit_of_work=unit_of_work,
+        scheduling_repository=unit_of_work,
     )
 
 
@@ -151,7 +143,7 @@ def _work_kind() -> WorkKind:
 
 @pytest.mark.asyncio
 async def test_schedules_created_work_items_for_source_units() -> None:
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork()
+    unit_of_work = FakeWorkItemSchedulingRepository()
 
     result = await _service(unit_of_work).execute(_command())
 
@@ -161,8 +153,6 @@ async def test_schedules_created_work_items_for_source_units() -> None:
     assert result.conflict_count == 0
     assert result.is_conflict_free
     assert len(unit_of_work.saved) == 2
-    assert unit_of_work.committed
-    assert not unit_of_work.rolled_back
 
     saved_ids = tuple(saved.item.work_item_id for saved in unit_of_work.saved)
     assert saved_ids == (
@@ -183,7 +173,7 @@ async def test_schedules_created_work_items_for_source_units() -> None:
 
 @pytest.mark.asyncio
 async def test_repeated_execution_is_already_exists() -> None:
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork()
+    unit_of_work = FakeWorkItemSchedulingRepository()
     service = _service(unit_of_work)
 
     first = await service.execute(_command())
@@ -205,7 +195,7 @@ async def test_conflict_is_surfaced() -> None:
         workflow_run_id=workflow_run_id,
         unit_ref=unit_ref,
     )
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork(
+    unit_of_work = FakeWorkItemSchedulingRepository(
         existing_items={
             work_item_id: WorkItem(
                 work_item_id=work_item_id,
@@ -229,7 +219,7 @@ async def test_conflict_is_surfaced() -> None:
 
 @pytest.mark.asyncio
 async def test_empty_source_units_is_safe_no_op() -> None:
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork()
+    unit_of_work = FakeWorkItemSchedulingRepository()
 
     result = await _service(unit_of_work).execute(_command(source_units=()))
 
@@ -239,8 +229,6 @@ async def test_empty_source_units_is_safe_no_op() -> None:
     assert result.conflict_count == 0
     assert result.is_conflict_free
     assert unit_of_work.saved == []
-    assert unit_of_work.committed
-    assert not unit_of_work.rolled_back
 
 
 @pytest.mark.asyncio
@@ -258,7 +246,7 @@ async def test_invalid_command_is_rejected() -> None:
 
 @pytest.mark.asyncio
 async def test_repeated_execution_uses_same_payload_hashes() -> None:
-    unit_of_work = FakeWorkItemSchedulingUnitOfWork()
+    unit_of_work = FakeWorkItemSchedulingRepository()
     service = _service(unit_of_work)
 
     await service.execute(_command())
@@ -284,7 +272,7 @@ async def test_schedule_draft_observation_extraction_work_source_guard() -> None
         "PlanDraftObservationExtractionWork",
         "MapDraftObservationPlansToExecutionSchedule",
         "EnsureWorkItemsScheduled",
-        "WorkItemSchedulingUnitOfWorkPort",
+        "WorkItemSchedulingRepositoryPort",
         "created_count",
         "already_exists_count",
         "conflict_count",
@@ -310,3 +298,17 @@ async def test_schedule_draft_observation_extraction_work_source_guard() -> None
 
     for marker in forbidden_markers:
         assert marker not in source
+
+
+def test_schedule_draft_observation_service_uses_repository_without_transaction_ownership() -> (
+    None
+):
+    source = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "schedule_draft_observation_extraction_work.py",
+    ).read_text(encoding="utf-8")
+
+    assert "scheduling_repository: WorkItemSchedulingRepositoryPort" in source
+    assert "scheduling_unit_of_work" not in source
+    assert ".commit(" not in source
+    assert ".rollback(" not in source

@@ -35,8 +35,6 @@ class FakeLlmTaskUnitOfWork:
     saved_attempts: list[LlmAttempt] = field(default_factory=list)
     appended_events: list[LlmTaskEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_task(self, task: LlmTask) -> None:
@@ -102,7 +100,7 @@ def test_record_llm_task_execution_commits_task_attempt_and_events_atomically() 
     attempt = _attempt()
     event = LlmTaskSucceeded(task_id=task.task_id, occurred_at=_now())
 
-    RecordLlmTaskExecution(unit_of_work=unit_of_work).execute(
+    RecordLlmTaskExecution(repository=unit_of_work).execute(
         RecordLlmTaskExecutionCommand(
             task=task,
             attempt=attempt,
@@ -127,7 +125,7 @@ def test_record_llm_task_execution_can_commit_task_without_attempt_or_events() -
     unit_of_work = FakeLlmTaskUnitOfWork()
     task = _task()
 
-    RecordLlmTaskExecution(unit_of_work=unit_of_work).execute(
+    RecordLlmTaskExecution(repository=unit_of_work).execute(
         RecordLlmTaskExecutionCommand(task=task),
     )
 
@@ -142,7 +140,7 @@ def test_record_llm_task_execution_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeLlmTaskUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        RecordLlmTaskExecution(unit_of_work=unit_of_work).execute(
+        RecordLlmTaskExecution(repository=unit_of_work).execute(
             RecordLlmTaskExecutionCommand(
                 task=_task(),
                 attempt=_attempt(),

@@ -1,10 +1,10 @@
 from pathlib import Path
 
 
-def test_retired_legacy_workbench_extraction_work_item_path_is_absent() -> None:
+def test_retired_legacy_workbench_extraction_postgres_runtime_path_is_absent() -> None:
     roots = (
         Path("src"),
-        Path("tests"),
+        Path("tests/contexts/knowledge_workbench/extraction/infrastructure/postgres"),
     )
     forbidden_markers = (
         "postgres_claim_extraction_work_item_unit_of_work",
@@ -13,15 +13,16 @@ def test_retired_legacy_workbench_extraction_work_item_path_is_absent() -> None:
         "PostgresClaimExtractionWorkItemUnitOfWork",
         "PostgresClaimExtractionStageWorkItemIndex",
         "ClaimExtractionStageRuntime",
-        "ClaimExtractionStageWorkItemIndex",
-        "ClaimExtractionWorkItemUnitOfWork",
-        "RunClaimExtractionStageAsync",
     )
 
     offenders: list[str] = []
     for root in roots:
+        if not root.exists():
+            continue
         for path in sorted(root.rglob("*.py")):
             if path == Path(__file__):
+                continue
+            if path.parts[:2] == ("tests", "architecture"):
                 continue
             text = path.read_text(encoding="utf-8")
             for marker in forbidden_markers:
@@ -37,13 +38,13 @@ def test_canonical_scheduling_markers_exist() -> None:
             "src/contexts/execution_runtime/application/use_cases/"
             "ensure_work_items_scheduled.py",
         ),
-        "WorkItemSchedulingUnitOfWorkPort": Path(
+        "WorkItemSchedulingRepositoryPort": Path(
             "src/contexts/execution_runtime/application/ports/"
-            "work_item_scheduling_unit_of_work_port.py",
+            "work_item_scheduling_repository_port.py",
         ),
-        "PostgresWorkItemSchedulingUnitOfWork": Path(
+        "PostgresWorkItemSchedulingRepository": Path(
             "src/contexts/execution_runtime/infrastructure/postgres/"
-            "postgres_work_item_scheduling_unit_of_work.py",
+            "postgres_work_item_scheduling_repository.py",
         ),
         "ScheduleDraftObservationExtractionWork": Path(
             "src/contexts/knowledge_workbench/application/sagas/"

@@ -77,8 +77,6 @@ class FakeClaimExtractionWorkItemUnitOfWork:
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ClaimExtractionRuntimeEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
     fail_on_action: str | None = None
 
@@ -257,7 +255,7 @@ def _command(
 def test_record_claim_extraction_success_commits_runtime_write_set_atomically() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork()
 
-    result = RecordClaimExtractionSuccess(unit_of_work=unit_of_work).execute(_command())
+    result = RecordClaimExtractionSuccess(repository=unit_of_work).execute(_command())
 
     assert result.completed_work_item.status is WorkItemStatus.COMPLETED
     assert isinstance(result.work_item_event, WorkItemCompleted)
@@ -317,7 +315,7 @@ def test_record_claim_extraction_success_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        RecordClaimExtractionSuccess(unit_of_work=unit_of_work).execute(_command())
+        RecordClaimExtractionSuccess(repository=unit_of_work).execute(_command())
 
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back
@@ -331,7 +329,7 @@ def test_record_claim_extraction_success_rolls_back_when_save_or_append_fails(
     unit_of_work = FakeClaimExtractionWorkItemUnitOfWork(fail_on_action=fail_on_action)
 
     with pytest.raises(RuntimeError, match=f"{fail_on_action} failed"):
-        RecordClaimExtractionSuccess(unit_of_work=unit_of_work).execute(_command())
+        RecordClaimExtractionSuccess(repository=unit_of_work).execute(_command())
 
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back

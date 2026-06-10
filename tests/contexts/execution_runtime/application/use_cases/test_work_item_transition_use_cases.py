@@ -53,8 +53,6 @@ class FakeWorkItemUnitOfWork:
     saved_attempts: list[WorkItemAttempt] = field(default_factory=list)
     appended_events: list[WorkItemEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
@@ -115,7 +113,7 @@ def _assert_transition_committed(unit_of_work: FakeWorkItemUnitOfWork) -> None:
 def test_complete_work_item_commits_completed_item_and_event() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
 
-    result = CompleteWorkItem(unit_of_work=unit_of_work).execute(
+    result = CompleteWorkItem(repository=unit_of_work).execute(
         CompleteWorkItemCommand(
             item=_leased_item(),
             occurred_at=_now(),
@@ -133,7 +131,7 @@ def test_defer_work_item_commits_deferred_item_and_event() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
     wait_until = WaitUntil(_now() + timedelta(seconds=60))
 
-    result = DeferWorkItem(unit_of_work=unit_of_work).execute(
+    result = DeferWorkItem(repository=unit_of_work).execute(
         DeferWorkItemCommand(
             item=_leased_item(),
             wait_until=wait_until,
@@ -155,7 +153,7 @@ def test_fail_work_item_commits_retryable_failure() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
     next_attempt_at = WaitUntil(_now() + timedelta(seconds=10))
 
-    result = FailWorkItem(unit_of_work=unit_of_work).execute(
+    result = FailWorkItem(repository=unit_of_work).execute(
         FailWorkItemCommand(
             item=_leased_item(),
             mode=WorkItemFailureMode.RETRYABLE,
@@ -176,7 +174,7 @@ def test_fail_work_item_commits_retryable_failure() -> None:
 def test_fail_work_item_commits_terminal_failure() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
 
-    result = FailWorkItem(unit_of_work=unit_of_work).execute(
+    result = FailWorkItem(repository=unit_of_work).execute(
         FailWorkItemCommand(
             item=_leased_item(),
             mode=WorkItemFailureMode.TERMINAL,
@@ -196,7 +194,7 @@ def test_fail_work_item_commits_terminal_failure() -> None:
 def test_cancel_work_item_commits_cancelled_item_and_event() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
 
-    result = CancelWorkItem(unit_of_work=unit_of_work).execute(
+    result = CancelWorkItem(repository=unit_of_work).execute(
         CancelWorkItemCommand(
             item=_leased_item(),
             reason="cancelled_by_user",
@@ -215,7 +213,7 @@ def test_transition_use_case_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeWorkItemUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        CompleteWorkItem(unit_of_work=unit_of_work).execute(
+        CompleteWorkItem(repository=unit_of_work).execute(
             CompleteWorkItemCommand(
                 item=_leased_item(),
                 occurred_at=_now(),

@@ -43,8 +43,6 @@ class FakeArtifactUnitOfWork:
     saved_artifacts: list[PipelineArtifact] = field(default_factory=list)
     appended_events: list[ArtifactEvent] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
     fail_on_commit: bool = False
 
     def save_artifact(self, artifact: PipelineArtifact) -> None:
@@ -90,7 +88,7 @@ def _command() -> PersistArtifactCommand:
 def test_persist_artifact_commits_stored_artifact_and_event() -> None:
     unit_of_work = FakeArtifactUnitOfWork()
 
-    result = PersistArtifact(unit_of_work=unit_of_work).execute(_command())
+    result = PersistArtifact(repository=unit_of_work).execute(_command())
 
     assert result.artifact.artifact_ref == ArtifactRef("artifact-1")
     assert result.artifact.artifact_kind == ArtifactKind("llm_runtime.raw_output")
@@ -129,7 +127,7 @@ def test_persist_artifact_preserves_lineage() -> None:
         occurred_at=_now(),
     )
 
-    result = PersistArtifact(unit_of_work=unit_of_work).execute(command)
+    result = PersistArtifact(repository=unit_of_work).execute(command)
 
     assert result.artifact.lineage.parent_refs == (parent_ref,)
     assert result.artifact.visibility is ArtifactVisibility.REVIEWABLE
@@ -140,7 +138,7 @@ def test_persist_artifact_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeArtifactUnitOfWork(fail_on_commit=True)
 
     with pytest.raises(RuntimeError, match="commit failed"):
-        PersistArtifact(unit_of_work=unit_of_work).execute(_command())
+        PersistArtifact(repository=unit_of_work).execute(_command())
 
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back

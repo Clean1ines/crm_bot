@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.contexts.execution_runtime.application.ports.work_item_scheduling_unit_of_work_port import (
-    WorkItemSchedulingUnitOfWorkPort,
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     EnsureWorkItemsScheduled,
@@ -68,7 +68,7 @@ class ScheduleDraftObservationExtractionWorkResult:
 
 @dataclass(frozen=True, slots=True)
 class ScheduleDraftObservationExtractionWork:
-    scheduling_unit_of_work: WorkItemSchedulingUnitOfWorkPort
+    scheduling_repository: WorkItemSchedulingRepositoryPort
 
     async def execute(
         self,
@@ -87,7 +87,7 @@ class ScheduleDraftObservationExtractionWork:
             ),
         )
         scheduling_result = await EnsureWorkItemsScheduled(
-            unit_of_work=self.scheduling_unit_of_work,
+            repository=self.scheduling_repository,
         ).execute(
             EnsureWorkItemsScheduledCommand(
                 plans=execution_schedule.schedule_plans,

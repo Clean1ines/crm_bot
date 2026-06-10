@@ -103,8 +103,6 @@ class FakeWorkItemUnitOfWork:
     saved_work_items: list[WorkItem] = field(default_factory=list)
     saved_attempts: list[WorkItemAttempt] = field(default_factory=list)
     events: list[WorkItemEvent] = field(default_factory=list)
-    committed: bool = False
-    rolled_back: bool = False
 
     def save_work_item(self, item: WorkItem) -> None:
         self.saved_work_items.append(item)
@@ -224,7 +222,7 @@ def test_completed_artifact_prevents_duplicate_work_item_creation() -> None:
 
     result = ResumeClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert result.summary.completed_count == 1
@@ -241,7 +239,7 @@ def test_missing_item_is_recreated() -> None:
 
     result = ResumeClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert result.summary.missing_count == 1
@@ -261,7 +259,7 @@ def test_deferred_item_remains_deferred_if_wait_until_future() -> None:
 
     result = ResumeClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert result.summary.deferred_count == 1
@@ -279,7 +277,7 @@ def test_retryable_item_can_be_returned_to_ready() -> None:
 
     result = ResumeClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert result.summary.ready_count == 1
@@ -297,7 +295,7 @@ def test_cancelled_terminal_item_is_not_resumed_automatically() -> None:
 
     result = ResumeClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert result.summary.blocked_reason == "terminal_or_cancelled_work_item"
@@ -315,7 +313,7 @@ def test_cancelled_terminal_artifact_is_not_used_as_completed_resume_artifact() 
 
     result = ResumeClaimExtractionStage(
         reader=reader,
-        unit_of_work=unit_of_work,
+        repository=unit_of_work,
     ).execute(_command())
 
     assert result.summary.completed_count == 0
@@ -347,7 +345,7 @@ def test_resume_reader_receives_workflow_and_stage_refs() -> None:
     reader = FakeResumeReader()
     unit_of_work = FakeWorkItemUnitOfWork()
 
-    ResumeClaimExtractionStage(reader=reader, unit_of_work=unit_of_work).execute(
+    ResumeClaimExtractionStage(reader=reader, repository=unit_of_work).execute(
         _command(),
     )
 

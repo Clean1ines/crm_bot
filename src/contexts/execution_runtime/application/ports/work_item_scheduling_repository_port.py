@@ -6,8 +6,8 @@ from typing import Protocol
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 
 
-class WorkItemSchedulingUnitOfWorkPort(Protocol):
-    """Async transaction boundary for idempotent Execution Runtime scheduling."""
+class WorkItemSchedulingRepositoryPort(Protocol):
+    """Persistence boundary for idempotent Execution Runtime scheduling."""
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         """Return a scheduled work item by deterministic identity."""
@@ -24,9 +24,3 @@ class WorkItemSchedulingUnitOfWorkPort(Protocol):
         payload: Mapping[str, object],
     ) -> None:
         """Persist a newly scheduled READY work item and scheduling metadata."""
-
-    async def commit(self) -> None:
-        """Commit transaction."""
-
-    async def rollback(self) -> None:
-        """Rollback transaction."""
