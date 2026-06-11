@@ -34,7 +34,7 @@ class RejectArtifact:
     def __init__(self, *, unit_of_work: ArtifactUnitOfWorkPort) -> None:
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: RejectArtifactCommand) -> RejectArtifactResult:
+    async def execute(self, command: RejectArtifactCommand) -> RejectArtifactResult:
         artifact = command.artifact.reject(updated_at=command.occurred_at)
         event = ArtifactRejected(
             artifact_ref=artifact.artifact_ref,
@@ -42,11 +42,11 @@ class RejectArtifact:
         )
 
         try:
-            self._unit_of_work.save_artifact(artifact)
-            self._unit_of_work.append_event(event)
-            self._unit_of_work.commit()
+            await self._unit_of_work.save_artifact(artifact)
+            await self._unit_of_work.append_event(event)
+            await self._unit_of_work.commit()
         except Exception:
-            self._unit_of_work.rollback()
+            await self._unit_of_work.rollback()
             raise
 
         return RejectArtifactResult(artifact=artifact, event=event)

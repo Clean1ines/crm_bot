@@ -24,16 +24,16 @@ ArtifactEvent: TypeAlias = (
 
 
 class ArtifactUnitOfWorkPort(Protocol):
-    """Transaction boundary for Artifact Runtime persistence lifecycle changes."""
+    """Async transaction boundary for Artifact Runtime persistence lifecycle changes."""
 
-    def save_artifact(self, artifact: PipelineArtifact) -> None:
+    async def save_artifact(self, artifact: PipelineArtifact) -> None:
         """Persist artifact state."""
 
-    def append_event(self, event: ArtifactEvent) -> None:
+    async def append_event(self, event: ArtifactEvent) -> None:
         """Append durable artifact event to be committed with state change."""
 
-    def commit(self) -> None:
+    async def commit(self) -> None:
         """Commit transaction."""
 
-    def rollback(self) -> None:
+    async def rollback(self) -> None:
         """Rollback transaction."""

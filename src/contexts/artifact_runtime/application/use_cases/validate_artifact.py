@@ -36,7 +36,7 @@ class ValidateArtifact:
     def __init__(self, *, unit_of_work: ArtifactUnitOfWorkPort) -> None:
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: ValidateArtifactCommand) -> ValidateArtifactResult:
+    async def execute(self, command: ValidateArtifactCommand) -> ValidateArtifactResult:
         artifact = command.artifact.validate(updated_at=command.occurred_at)
         event = ArtifactValidated(
             artifact_ref=artifact.artifact_ref,
@@ -44,11 +44,11 @@ class ValidateArtifact:
         )
 
         try:
-            self._unit_of_work.save_artifact(artifact)
-            self._unit_of_work.append_event(event)
-            self._unit_of_work.commit()
+            await self._unit_of_work.save_artifact(artifact)
+            await self._unit_of_work.append_event(event)
+            await self._unit_of_work.commit()
         except Exception:
-            self._unit_of_work.rollback()
+            await self._unit_of_work.rollback()
             raise
 
         return ValidateArtifactResult(artifact=artifact, event=event)

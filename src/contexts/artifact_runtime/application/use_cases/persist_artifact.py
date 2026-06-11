@@ -62,7 +62,7 @@ class PersistArtifact:
     def __init__(self, *, unit_of_work: ArtifactUnitOfWorkPort) -> None:
         self._unit_of_work = unit_of_work
 
-    def execute(self, command: PersistArtifactCommand) -> PersistArtifactResult:
+    async def execute(self, command: PersistArtifactCommand) -> PersistArtifactResult:
         artifact = PipelineArtifact(
             artifact_ref=command.artifact_ref,
             artifact_kind=command.artifact_kind,
@@ -80,11 +80,11 @@ class PersistArtifact:
         )
 
         try:
-            self._unit_of_work.save_artifact(artifact)
-            self._unit_of_work.append_event(event)
-            self._unit_of_work.commit()
+            await self._unit_of_work.save_artifact(artifact)
+            await self._unit_of_work.append_event(event)
+            await self._unit_of_work.commit()
         except Exception:
-            self._unit_of_work.rollback()
+            await self._unit_of_work.rollback()
             raise
 
         return PersistArtifactResult(
