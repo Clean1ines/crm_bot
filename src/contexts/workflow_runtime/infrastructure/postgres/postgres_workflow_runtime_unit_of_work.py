@@ -11,6 +11,15 @@ from src.contexts.workflow_runtime.application.ports.event_cursor_repository_por
 from src.contexts.workflow_runtime.application.ports.outbox_repository_port import (
     OutboxRepositoryPort,
 )
+from src.contexts.workflow_runtime.application.ports.progress_snapshot_repository_port import (
+    ProgressSnapshotRepositoryPort,
+)
+from src.contexts.workflow_runtime.application.ports.resource_usage_repository_port import (
+    ResourceUsageRepositoryPort,
+)
+from src.contexts.workflow_runtime.application.ports.timeline_repository_port import (
+    TimelineRepositoryPort,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -23,6 +32,15 @@ from src.contexts.workflow_runtime.infrastructure.postgres.postgres_event_cursor
 from src.contexts.workflow_runtime.infrastructure.postgres.postgres_outbox_repository import (
     PostgresOutboxRepository,
 )
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_progress_snapshot_repository import (
+    PostgresProgressSnapshotRepository,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_resource_usage_repository import (
+    PostgresResourceUsageRepository,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_timeline_repository import (
+    PostgresTimelineRepository,
+)
 
 
 class PostgresWorkflowRuntimeUnitOfWork(WorkflowRuntimeUnitOfWorkPort):
@@ -34,6 +52,9 @@ class PostgresWorkflowRuntimeUnitOfWork(WorkflowRuntimeUnitOfWorkPort):
         self._command_log: PostgresCommandLogRepository | None = None
         self._outbox: PostgresOutboxRepository | None = None
         self._event_cursors: PostgresEventCursorRepository | None = None
+        self._progress_snapshots: PostgresProgressSnapshotRepository | None = None
+        self._timeline: PostgresTimelineRepository | None = None
+        self._resource_usage: PostgresResourceUsageRepository | None = None
 
     async def start(self) -> None:
         self._ensure_not_closed()
@@ -61,6 +82,29 @@ class PostgresWorkflowRuntimeUnitOfWork(WorkflowRuntimeUnitOfWorkPort):
         if self._event_cursors is None:
             self._event_cursors = PostgresEventCursorRepository(self._connection)
         return self._event_cursors
+
+    @property
+    def progress_snapshots(self) -> ProgressSnapshotRepositoryPort:
+        self._ensure_started()
+        if self._progress_snapshots is None:
+            self._progress_snapshots = PostgresProgressSnapshotRepository(
+                self._connection
+            )
+        return self._progress_snapshots
+
+    @property
+    def timeline(self) -> TimelineRepositoryPort:
+        self._ensure_started()
+        if self._timeline is None:
+            self._timeline = PostgresTimelineRepository(self._connection)
+        return self._timeline
+
+    @property
+    def resource_usage(self) -> ResourceUsageRepositoryPort:
+        self._ensure_started()
+        if self._resource_usage is None:
+            self._resource_usage = PostgresResourceUsageRepository(self._connection)
+        return self._resource_usage
 
     async def commit(self) -> None:
         self._ensure_not_closed()

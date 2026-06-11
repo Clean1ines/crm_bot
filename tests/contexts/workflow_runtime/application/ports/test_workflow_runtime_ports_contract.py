@@ -12,6 +12,15 @@ from src.contexts.workflow_runtime.application.ports.event_cursor_repository_por
 from src.contexts.workflow_runtime.application.ports.outbox_repository_port import (
     OutboxRepositoryPort,
 )
+from src.contexts.workflow_runtime.application.ports.progress_snapshot_repository_port import (
+    ProgressSnapshotRepositoryPort,
+)
+from src.contexts.workflow_runtime.application.ports.resource_usage_repository_port import (
+    ResourceUsageRepositoryPort,
+)
+from src.contexts.workflow_runtime.application.ports.timeline_repository_port import (
+    TimelineRepositoryPort,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -22,6 +31,16 @@ from src.contexts.workflow_runtime.domain.entities.workflow_command import (
 from src.contexts.workflow_runtime.domain.entities.workflow_event import WorkflowEvent
 from src.contexts.workflow_runtime.domain.entities.workflow_event_cursor import (
     WorkflowEventCursor,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_progress_snapshot import (
+    WorkflowProgressSnapshot,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_resource_usage_snapshot import (
+    WorkflowResourceUsageSnapshot,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry import (
+    WorkflowTimelineEntry,
+    WorkflowTimelineSeverity,
 )
 from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
     WorkflowCommandId,
@@ -147,6 +166,71 @@ class FakeEventCursorRepository:
 
 
 @dataclass(slots=True)
+class FakeProgressSnapshotRepository:
+    snapshot: WorkflowProgressSnapshot | None = None
+
+    async def get_snapshot(
+        self,
+        workflow_run_id: str,
+    ) -> WorkflowProgressSnapshot | None:
+        if (
+            self.snapshot is not None
+            and self.snapshot.workflow_run_id == workflow_run_id
+        ):
+            return self.snapshot
+        return None
+
+    async def save_snapshot(
+        self,
+        snapshot: WorkflowProgressSnapshot,
+    ) -> WorkflowProgressSnapshot:
+        self.snapshot = snapshot
+        return snapshot
+
+
+@dataclass(slots=True)
+class FakeTimelineRepository:
+    entries: list[WorkflowTimelineEntry] = field(default_factory=list)
+
+    async def append_entry(
+        self,
+        entry: WorkflowTimelineEntry,
+    ) -> WorkflowTimelineEntry:
+        self.entries.append(entry)
+        return entry
+
+    async def list_recent_entries(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+    ) -> tuple[WorkflowTimelineEntry, ...]:
+        return tuple(
+            entry for entry in self.entries if entry.workflow_run_id == workflow_run_id
+        )[:limit]
+
+
+@dataclass(slots=True)
+class FakeResourceUsageRepository:
+    usage: WorkflowResourceUsageSnapshot | None = None
+
+    async def get_usage(
+        self,
+        workflow_run_id: str,
+    ) -> WorkflowResourceUsageSnapshot | None:
+        if self.usage is not None and self.usage.workflow_run_id == workflow_run_id:
+            return self.usage
+        return None
+
+    async def save_usage(
+        self,
+        usage: WorkflowResourceUsageSnapshot,
+    ) -> WorkflowResourceUsageSnapshot:
+        self.usage = usage
+        return usage
+
+
+@dataclass(slots=True)
 class FakeWorkflowRuntimeUnitOfWork:
     command_log: FakeCommandLogRepository = field(
         default_factory=FakeCommandLogRepository,
@@ -154,6 +238,13 @@ class FakeWorkflowRuntimeUnitOfWork:
     outbox: FakeOutboxRepository = field(default_factory=FakeOutboxRepository)
     event_cursors: FakeEventCursorRepository = field(
         default_factory=FakeEventCursorRepository,
+    )
+    progress_snapshots: FakeProgressSnapshotRepository = field(
+        default_factory=FakeProgressSnapshotRepository,
+    )
+    timeline: FakeTimelineRepository = field(default_factory=FakeTimelineRepository)
+    resource_usage: FakeResourceUsageRepository = field(
+        default_factory=FakeResourceUsageRepository,
     )
     committed: bool = False
     rolled_back: bool = False
@@ -191,6 +282,38 @@ async def _exercise_unit_of_work(
     loaded_cursor = await unit_of_work.event_cursors.get_cursor(cursor.consumer_ref)
     assert loaded_cursor == cursor
 
+    snapshot = WorkflowProgressSnapshot(
+        workflow_run_id="workflow-1",
+        current_phase="SOURCE_INGESTION",
+        workflow_status="RUNNING",
+        updated_at=_now(),
+    )
+    await unit_of_work.progress_snapshots.save_snapshot(snapshot)
+    assert await unit_of_work.progress_snapshots.get_snapshot("workflow-1") == snapshot
+
+    entry = WorkflowTimelineEntry(
+        timeline_entry_id="entry-1",
+        workflow_run_id="workflow-1",
+        event_type="SOURCE_UNITS_CREATED",
+        phase="SOURCE_INGESTION",
+        severity=WorkflowTimelineSeverity.INFO,
+        message="Source units created",
+        payload_summary={},
+        occurred_at=_now(),
+    )
+    await unit_of_work.timeline.append_entry(entry)
+    assert await unit_of_work.timeline.list_recent_entries(
+        workflow_run_id="workflow-1",
+        limit=10,
+    ) == (entry,)
+
+    usage = WorkflowResourceUsageSnapshot(
+        workflow_run_id="workflow-1",
+        updated_at=_now(),
+    )
+    await unit_of_work.resource_usage.save_usage(usage)
+    assert await unit_of_work.resource_usage.get_usage("workflow-1") == usage
+
     await unit_of_work.commit()
 
 
@@ -200,6 +323,9 @@ def test_ports_are_runtime_checkable_protocols() -> None:
     assert isinstance(unit_of_work.command_log, CommandLogRepositoryPort)
     assert isinstance(unit_of_work.outbox, OutboxRepositoryPort)
     assert isinstance(unit_of_work.event_cursors, EventCursorRepositoryPort)
+    assert isinstance(unit_of_work.progress_snapshots, ProgressSnapshotRepositoryPort)
+    assert isinstance(unit_of_work.timeline, TimelineRepositoryPort)
+    assert isinstance(unit_of_work.resource_usage, ResourceUsageRepositoryPort)
     assert isinstance(unit_of_work, WorkflowRuntimeUnitOfWorkPort)
 
 
