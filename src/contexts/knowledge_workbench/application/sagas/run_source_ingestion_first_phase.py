@@ -20,6 +20,11 @@ from src.contexts.knowledge_workbench.application.sagas.start_source_ingestion_w
     StartSourceIngestionWorkflowResult,
     StartSourceIngestionWorkflowStatus,
 )
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_workflow_effects import (
+    BuildSourceIngestionWorkflowEffects,
+    BuildSourceIngestionWorkflowEffectsCommand,
+    SourceIngestionWorkflowEffects,
+)
 from src.contexts.knowledge_workbench.document_segmentation.domain import (
     DocumentSegmentationBudget,
 )
@@ -93,6 +98,7 @@ class RunSourceIngestionFirstPhaseResult:
     workflow_run_id: str | None = None
     source_document_ref: str | None = None
     source_unit_count: int = 0
+    workflow_effects: SourceIngestionWorkflowEffects | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, RunSourceIngestionFirstPhaseStatus):
@@ -113,6 +119,14 @@ class RunSourceIngestionFirstPhaseResult:
             )
             if self.source_unit_count <= 0:
                 raise ValueError("completed result requires source_unit_count > 0")
+            if self.workflow_effects is None:
+                raise ValueError("completed result requires workflow_effects")
+            if self.workflow_effects.workflow_run_id != self.workflow_run_id:
+                raise ValueError("workflow_effects workflow_run_id mismatch")
+            if self.workflow_effects.source_document_ref != self.source_document_ref:
+                raise ValueError("workflow_effects source_document_ref mismatch")
+            if self.workflow_effects.source_unit_count != self.source_unit_count:
+                raise ValueError("workflow_effects source_unit_count mismatch")
             return
 
         if self.workflow_run_id is not None:
@@ -121,6 +135,8 @@ class RunSourceIngestionFirstPhaseResult:
             raise ValueError("rejected result must not include source_document_ref")
         if self.source_unit_count != 0:
             raise ValueError("rejected result requires source_unit_count == 0")
+        if self.workflow_effects is not None:
+            raise ValueError("rejected result must not include workflow_effects")
 
 
 class RunSourceIngestionFirstPhase:
@@ -177,12 +193,25 @@ class RunSourceIngestionFirstPhase:
             ),
         )
 
+        workflow_effects = BuildSourceIngestionWorkflowEffects().execute(
+            BuildSourceIngestionWorkflowEffectsCommand(
+                workflow_run_id=document_result.workflow_run_id,
+                project_id=command.project_id,
+                source_document_ref=document_result.source_document_ref,
+                source_unit_count=source_units_result.source_unit_count,
+                source_format=accepted_plan.source_format,
+                content_hash=accepted_plan.content_hash,
+                occurred_at=command.occurred_at,
+            )
+        )
+
         return RunSourceIngestionFirstPhaseResult(
             status=RunSourceIngestionFirstPhaseStatus.COMPLETED,
             admission_status=SourceIngestionAdmissionStatus.ALLOWED,
             workflow_run_id=document_result.workflow_run_id,
             source_document_ref=document_result.source_document_ref,
             source_unit_count=source_units_result.source_unit_count,
+            workflow_effects=workflow_effects,
         )
 
 

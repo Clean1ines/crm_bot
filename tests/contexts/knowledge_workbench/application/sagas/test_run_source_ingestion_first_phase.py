@@ -26,6 +26,10 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admissi
     SourceIngestionAdmissionDecision,
     SourceIngestionAdmissionStatus,
 )
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
+    KnowledgeExtractionCanonicalCommandType,
+    KnowledgeExtractionCanonicalEventType,
+)
 from src.contexts.knowledge_workbench.application.sagas.start_source_ingestion_workflow import (
     SourceIngestionAcceptedPlan,
     StartSourceIngestionWorkflowCommand,
@@ -252,6 +256,7 @@ async def test_rejected_admission_stops_immediately() -> None:
     assert len(starter.commands) == 1
     assert document_persister.commands == []
     assert source_unit_creator.commands == []
+    assert result.workflow_effects is None
 
 
 @pytest.mark.asyncio
@@ -281,6 +286,18 @@ async def test_accepted_path_calls_all_steps_in_order() -> None:
     assert result.workflow_run_id == _document_result().workflow_run_id
     assert result.source_document_ref == _document_result().source_document_ref
     assert result.source_unit_count == _source_units_result().source_unit_count
+    assert result.workflow_effects is not None
+    assert (
+        result.workflow_effects.next_command_effects[0].command_type
+        is KnowledgeExtractionCanonicalCommandType.SCHEDULE_CLAIM_BUILDER_SECTION_WORK
+    )
+    assert tuple(
+        event_effect.event_type
+        for event_effect in result.workflow_effects.event_effects
+    ) == (
+        KnowledgeExtractionCanonicalEventType.SOURCE_DOCUMENT_PERSISTED,
+        KnowledgeExtractionCanonicalEventType.SOURCE_UNITS_CREATED,
+    )
 
 
 @pytest.mark.asyncio
