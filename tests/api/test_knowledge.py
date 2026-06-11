@@ -139,6 +139,7 @@ class _FakeWorkflowAfterUploadRunner:
                 blocked_reason=None,
                 source_document_ref=None,
                 source_unit_count=0,
+                source_ingestion_admission_status=source_result.admission_status,
             )
 
         return RunKnowledgeExtractionWorkflowAfterUploadResult(
@@ -150,6 +151,7 @@ class _FakeWorkflowAfterUploadRunner:
             blocked_reason="COMMAND_HANDLER_NOT_IMPLEMENTED",
             source_document_ref=source_result.source_document_ref,
             source_unit_count=source_result.source_unit_count,
+            source_ingestion_admission_status=source_result.admission_status,
         )
 
 
@@ -342,8 +344,8 @@ async def test_upload_rejected_missing_project_maps_to_404(
             user_repo=_user_repo(),
         )
 
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Source ingestion was rejected"
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "PROJECT_NOT_FOUND"
 
 
 @pytest.mark.asyncio
@@ -387,8 +389,8 @@ async def test_upload_rejected_unauthenticated_maps_to_401(
             user_repo=_user_repo(),
         )
 
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Source ingestion was rejected"
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "ACTOR_NOT_AUTHENTICATED"
 
 
 @pytest.mark.asyncio
@@ -433,7 +435,7 @@ async def test_upload_rejected_role_denied_maps_to_403(
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Source ingestion was rejected"
+    assert exc_info.value.detail == "ACTOR_ROLE_NOT_ALLOWED"
 
 
 @pytest.mark.asyncio

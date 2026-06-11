@@ -18,6 +18,9 @@ from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_fir
     RunSourceIngestionFirstPhaseResult,
     RunSourceIngestionFirstPhaseStatus,
 )
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
+    SourceIngestionAdmissionStatus,
+)
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     PostgresSourceManagementRepository,
 )
@@ -68,6 +71,7 @@ class RunKnowledgeExtractionWorkflowAfterUploadResult:
     blocked_reason: str | None
     source_document_ref: str | None = None
     source_unit_count: int = 0
+    source_ingestion_admission_status: SourceIngestionAdmissionStatus | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.workflow_run_id, str):
@@ -96,6 +100,20 @@ class RunKnowledgeExtractionWorkflowAfterUploadResult:
             raise TypeError("source_unit_count must be int")
         if self.source_unit_count < 0:
             raise ValueError("source_unit_count must be >= 0")
+        if self.source_ingestion_admission_status is not None and not isinstance(
+            self.source_ingestion_admission_status,
+            SourceIngestionAdmissionStatus,
+        ):
+            raise TypeError(
+                "source_ingestion_admission_status must be SourceIngestionAdmissionStatus"
+            )
+        if (
+            self.source_ingestion_completed is False
+            and self.source_ingestion_admission_status is None
+        ):
+            raise ValueError(
+                "rejected source ingestion requires source_ingestion_admission_status"
+            )
 
 
 class RunKnowledgeExtractionWorkflowAfterUpload:
@@ -125,6 +143,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 blocked_reason=None,
                 source_document_ref=source_result.source_document_ref,
                 source_unit_count=source_result.source_unit_count,
+                source_ingestion_admission_status=source_result.admission_status,
             )
 
         workflow_run_id = source_result.workflow_run_id
@@ -136,6 +155,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             max_drain_commands=command.max_drain_commands,
             source_document_ref=source_result.source_document_ref,
             source_unit_count=source_result.source_unit_count,
+            source_ingestion_admission_status=source_result.admission_status,
         )
         return RunKnowledgeExtractionWorkflowAfterUploadResult(
             workflow_run_id=workflow_run_id,
@@ -146,6 +166,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             blocked_reason=drain_result.blocked_reason,
             source_document_ref=source_result.source_document_ref,
             source_unit_count=source_result.source_unit_count,
+            source_ingestion_admission_status=source_result.admission_status,
         )
 
     async def _drain_until_blocked_or_idle(
@@ -155,6 +176,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         max_drain_commands: int,
         source_document_ref: str | None,
         source_unit_count: int,
+        source_ingestion_admission_status: SourceIngestionAdmissionStatus | None,
     ) -> RunKnowledgeExtractionWorkflowAfterUploadResult:
         remaining_commands = max_drain_commands
         inspected_count = 0
@@ -189,6 +211,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             blocked_reason=blocked_reason,
             source_document_ref=source_document_ref,
             source_unit_count=source_unit_count,
+            source_ingestion_admission_status=source_ingestion_admission_status,
         )
 
     async def _run_one_drain_transaction(

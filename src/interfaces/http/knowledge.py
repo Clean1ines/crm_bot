@@ -431,10 +431,13 @@ async def upload_knowledge(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if not result.source_ingestion_completed:
-        raise HTTPException(
-            status_code=403,
-            detail="Source ingestion was rejected",
-        )
+        admission_status = result.source_ingestion_admission_status
+        if admission_status is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Source ingestion rejected without admission status",
+            )
+        _raise_source_ingestion_rejected(admission_status)
 
     source_document_ref = result.source_document_ref
     if source_document_ref is None:

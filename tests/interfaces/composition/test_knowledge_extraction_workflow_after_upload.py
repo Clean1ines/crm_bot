@@ -505,6 +505,10 @@ async def test_completed_source_ingestion_triggers_drain_and_blocks_on_prepare_b
         == KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
     )
     assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+    assert (
+        result.source_ingestion_admission_status
+        is SourceIngestionAdmissionStatus.ALLOWED
+    )
     assert connection.scheduled_work_item_count == 1
     assert pool.acquire_count == 2
     assert len(FakePostgresWorkflowRuntimeUnitOfWork.instances) == 2
@@ -572,5 +576,31 @@ async def test_rejected_source_ingestion_does_not_run_drain(
     assert result.drained_dispatched_count == 0
     assert result.blocked_command_type is None
     assert result.blocked_reason is None
+    assert result.source_ingestion_admission_status is (
+        SourceIngestionAdmissionStatus.ACTOR_ROLE_NOT_ALLOWED
+    )
     assert pool.acquire_count == 0
     assert FakePostgresWorkflowRuntimeUnitOfWork.instances == []
+
+
+@pytest.mark.asyncio
+async def test_rejected_source_ingestion_preserves_admission_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_drain_dependencies(monkeypatch)
+    runner = RunKnowledgeExtractionWorkflowAfterUpload(
+        source_ingestion_runner=FakeSourceIngestionRunner(completed=False),
+        pool=FakePool(FakeConnection()),
+    )
+
+    result = await runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=_source_ingestion_command(),
+            max_drain_commands=10,
+        )
+    )
+
+    assert result.source_ingestion_completed is False
+    assert result.source_ingestion_admission_status is (
+        SourceIngestionAdmissionStatus.ACTOR_ROLE_NOT_ALLOWED
+    )
