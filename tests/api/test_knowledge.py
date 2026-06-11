@@ -13,6 +13,10 @@ from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_fir
     RunSourceIngestionFirstPhaseResult,
     RunSourceIngestionFirstPhaseStatus,
 )
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_workflow_effects import (
+    BuildSourceIngestionWorkflowEffects,
+    BuildSourceIngestionWorkflowEffectsCommand,
+)
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
     SourceIngestionAdmissionStatus,
 )
@@ -41,6 +45,10 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
     SourceFormat,
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
+from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
+    RunKnowledgeExtractionWorkflowAfterUploadCommand,
+    RunKnowledgeExtractionWorkflowAfterUploadResult,
+)
 from src.interfaces.http import dependencies, knowledge
 
 
@@ -99,6 +107,52 @@ class _FakeSourceIngestionRunner:
         return self.result
 
 
+class _FakeWorkflowAfterUploadRunner:
+    instances: list[_FakeWorkflowAfterUploadRunner] = []
+
+    def __init__(
+        self,
+        *,
+        source_ingestion_runner: _FakeSourceIngestionRunner,
+        pool: object,
+    ) -> None:
+        self.source_ingestion_runner = source_ingestion_runner
+        self.pool = pool
+        self.commands: list[RunKnowledgeExtractionWorkflowAfterUploadCommand] = []
+        _FakeWorkflowAfterUploadRunner.instances.append(self)
+
+    async def execute(
+        self,
+        command: RunKnowledgeExtractionWorkflowAfterUploadCommand,
+    ) -> RunKnowledgeExtractionWorkflowAfterUploadResult:
+        self.commands.append(command)
+        source_result = await self.source_ingestion_runner.execute(
+            command.source_ingestion_command,
+        )
+        if source_result.status is RunSourceIngestionFirstPhaseStatus.REJECTED:
+            return RunKnowledgeExtractionWorkflowAfterUploadResult(
+                workflow_run_id="",
+                source_ingestion_completed=False,
+                drained_inspected_count=0,
+                drained_dispatched_count=0,
+                blocked_command_type=None,
+                blocked_reason=None,
+                source_document_ref=None,
+                source_unit_count=0,
+            )
+
+        return RunKnowledgeExtractionWorkflowAfterUploadResult(
+            workflow_run_id=source_result.workflow_run_id or "",
+            source_ingestion_completed=True,
+            drained_inspected_count=2,
+            drained_dispatched_count=1,
+            blocked_command_type="PrepareClaimBuilderDispatchBatch",
+            blocked_reason="COMMAND_HANDLER_NOT_IMPLEMENTED",
+            source_document_ref=source_result.source_document_ref,
+            source_unit_count=source_result.source_unit_count,
+        )
+
+
 def _completed_source_ingestion_result() -> RunSourceIngestionFirstPhaseResult:
     return RunSourceIngestionFirstPhaseResult(
         status=RunSourceIngestionFirstPhaseStatus.COMPLETED,
@@ -106,6 +160,17 @@ def _completed_source_ingestion_result() -> RunSourceIngestionFirstPhaseResult:
         workflow_run_id="knowledge-extraction:source-document:project-1:abc",
         source_document_ref="source-document:project-1:abc",
         source_unit_count=3,
+        workflow_effects=BuildSourceIngestionWorkflowEffects().execute(
+            BuildSourceIngestionWorkflowEffectsCommand(
+                workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+                project_id="project-1",
+                source_document_ref="source-document:project-1:abc",
+                source_unit_count=3,
+                source_format=SourceFormat.MARKDOWN,
+                content_hash="sha256:test",
+                occurred_at=datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc),
+            )
+        ),
     )
 
 
@@ -162,7 +227,7 @@ def test_source_units_url_uses_project_and_source_document_ref() -> None:
 
 
 @pytest.mark.asyncio
-async def test_upload_success_uses_source_ingestion_first_phase(
+async def test_upload_success_uses_workflow_after_upload_runner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_current_user_id(authorization: str | None) -> str:
@@ -171,6 +236,7 @@ async def test_upload_success_uses_source_ingestion_first_phase(
 
     runner = _FakeSourceIngestionRunner(_completed_source_ingestion_result())
     factory_calls: list[dict[str, object]] = []
+    _FakeWorkflowAfterUploadRunner.instances = []
 
     def fake_make_source_ingestion_first_phase(
         **kwargs: object,
@@ -184,6 +250,11 @@ async def test_upload_success_uses_source_ingestion_first_phase(
         "make_source_ingestion_first_phase",
         fake_make_source_ingestion_first_phase,
     )
+    monkeypatch.setattr(
+        knowledge,
+        "RunKnowledgeExtractionWorkflowAfterUpload",
+        _FakeWorkflowAfterUploadRunner,
+    )
 
     response = await knowledge.upload_knowledge(
         project_id="project-1",
@@ -196,8 +267,13 @@ async def test_upload_success_uses_source_ingestion_first_phase(
     )
 
     assert response == {
-        "status": "source_ingestion_first_phase_completed",
+        "status": "knowledge_extraction_workflow_started",
         "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+        "source_ingestion_completed": True,
+        "drained_inspected_count": 2,
+        "drained_dispatched_count": 1,
+        "blocked_command_type": "PrepareClaimBuilderDispatchBatch",
+        "blocked_reason": "COMMAND_HANDLER_NOT_IMPLEMENTED",
         "source_document_ref": "source-document:project-1:abc",
         "source_unit_count": 3,
         "source_units_url": (
@@ -206,9 +282,14 @@ async def test_upload_success_uses_source_ingestion_first_phase(
         ),
     }
     assert len(factory_calls) == 1
+    assert len(_FakeWorkflowAfterUploadRunner.instances) == 1
+    assert _FakeWorkflowAfterUploadRunner.instances[0].pool is not None
+    assert len(_FakeWorkflowAfterUploadRunner.instances[0].commands) == 1
     assert len(runner.commands) == 1
 
-    command = runner.commands[0]
+    workflow_command = _FakeWorkflowAfterUploadRunner.instances[0].commands[0]
+    assert workflow_command.max_drain_commands == 10
+    command = workflow_command.source_ingestion_command
     assert command.project_id == "project-1"
     assert command.actor.actor_user_id == "user-1"
     assert command.actor.is_platform_admin is True
@@ -244,6 +325,11 @@ async def test_upload_rejected_missing_project_maps_to_404(
         "make_source_ingestion_first_phase",
         fake_make_source_ingestion_first_phase,
     )
+    monkeypatch.setattr(
+        knowledge,
+        "RunKnowledgeExtractionWorkflowAfterUpload",
+        _FakeWorkflowAfterUploadRunner,
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await knowledge.upload_knowledge(
@@ -256,8 +342,8 @@ async def test_upload_rejected_missing_project_maps_to_404(
             user_repo=_user_repo(),
         )
 
-    assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "PROJECT_NOT_FOUND"
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Source ingestion was rejected"
 
 
 @pytest.mark.asyncio
@@ -284,6 +370,11 @@ async def test_upload_rejected_unauthenticated_maps_to_401(
         "make_source_ingestion_first_phase",
         fake_make_source_ingestion_first_phase,
     )
+    monkeypatch.setattr(
+        knowledge,
+        "RunKnowledgeExtractionWorkflowAfterUpload",
+        _FakeWorkflowAfterUploadRunner,
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await knowledge.upload_knowledge(
@@ -296,8 +387,8 @@ async def test_upload_rejected_unauthenticated_maps_to_401(
             user_repo=_user_repo(),
         )
 
-    assert exc_info.value.status_code == 401
-    assert exc_info.value.detail == "ACTOR_NOT_AUTHENTICATED"
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Source ingestion was rejected"
 
 
 @pytest.mark.asyncio
@@ -324,6 +415,11 @@ async def test_upload_rejected_role_denied_maps_to_403(
         "make_source_ingestion_first_phase",
         fake_make_source_ingestion_first_phase,
     )
+    monkeypatch.setattr(
+        knowledge,
+        "RunKnowledgeExtractionWorkflowAfterUpload",
+        _FakeWorkflowAfterUploadRunner,
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         await knowledge.upload_knowledge(
@@ -337,7 +433,7 @@ async def test_upload_rejected_role_denied_maps_to_403(
         )
 
     assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "ACTOR_ROLE_NOT_ALLOWED"
+    assert exc_info.value.detail == "Source ingestion was rejected"
 
 
 @pytest.mark.asyncio

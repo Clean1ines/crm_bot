@@ -7,8 +7,9 @@ from pathlib import Path
 def test_knowledge_upload_http_boundary_is_workbench_only() -> None:
     source = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
 
-    assert "src.interfaces.composition.faq_workbench_upload" in source
-    assert "upload_faq_workbench_knowledge_file" in source
+    assert "RunKnowledgeExtractionWorkflowAfterUpload" in source
+    assert "RunKnowledgeExtractionWorkflowAfterUploadCommand" in source
+    assert "make_source_ingestion_first_phase" in source
     assert "Only FAQ Workbench uploads are supported" in source
 
     forbidden = (
@@ -17,6 +18,8 @@ def test_knowledge_upload_http_boundary_is_workbench_only() -> None:
         "KnowledgeService(",
         "process_knowledge_upload",
         "TASK_PROCESS_KNOWLEDGE_UPLOAD",
+        "result = await runner.execute(",
+        "ScheduleClaimBuilderSectionWork(",
     )
     for marker in forbidden:
         assert marker not in source
@@ -43,3 +46,17 @@ def test_knowledge_http_module_imports_without_legacy_upload_path() -> None:
     module = importlib.import_module("src.interfaces.http.knowledge")
 
     assert module is not None
+
+
+def test_knowledge_upload_http_boundary_uses_workflow_after_upload_runner() -> None:
+    source = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
+
+    assert "RunKnowledgeExtractionWorkflowAfterUpload" in source
+    assert "RunKnowledgeExtractionWorkflowAfterUploadCommand" in source
+    assert "workflow_runner = RunKnowledgeExtractionWorkflowAfterUpload" in source
+    assert "await workflow_runner.execute(" in source
+    assert "blocked_command_type" in source
+    assert "drained_dispatched_count" in source
+    assert "source_document_ref" in source
+    assert "source_unit_count" in source
+    assert "result = await runner.execute(" not in source

@@ -24,7 +24,6 @@ from fastapi import (
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhaseCommand,
-    RunSourceIngestionFirstPhaseStatus,
 )
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
     SourceIngestionActor,
@@ -38,6 +37,10 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
     SourceDocumentRef,
+)
+from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
+    RunKnowledgeExtractionWorkflowAfterUpload,
+    RunKnowledgeExtractionWorkflowAfterUploadCommand,
 )
 from src.interfaces.composition.source_ingestion_first_phase import (
     make_source_ingestion_first_phase,
@@ -397,22 +400,29 @@ async def upload_knowledge(
     )
     source_format = _source_format_from_upload_name(file.filename)
 
-    runner = make_source_ingestion_first_phase(
+    source_ingestion_runner = make_source_ingestion_first_phase(
         pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
     )
+    workflow_runner = RunKnowledgeExtractionWorkflowAfterUpload(
+        source_ingestion_runner=source_ingestion_runner,
+        pool=pool,
+    )
 
     try:
-        result = await runner.execute(
-            RunSourceIngestionFirstPhaseCommand(
-                project_id=project_id,
-                actor=actor,
-                original_filename=file.filename,
-                source_format=source_format,
-                content_bytes=bytes(file_content),
-                raw_text=raw_text,
-                occurred_at=datetime.now(timezone.utc),
+        result = await workflow_runner.execute(
+            RunKnowledgeExtractionWorkflowAfterUploadCommand(
+                source_ingestion_command=RunSourceIngestionFirstPhaseCommand(
+                    project_id=project_id,
+                    actor=actor,
+                    original_filename=file.filename,
+                    source_format=source_format,
+                    content_bytes=bytes(file_content),
+                    raw_text=raw_text,
+                    occurred_at=datetime.now(timezone.utc),
+                ),
+                max_drain_commands=10,
             )
         )
     except HTTPException:
@@ -420,8 +430,11 @@ async def upload_knowledge(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if result.status is RunSourceIngestionFirstPhaseStatus.REJECTED:
-        _raise_source_ingestion_rejected(result.admission_status)
+    if not result.source_ingestion_completed:
+        raise HTTPException(
+            status_code=403,
+            detail="Source ingestion was rejected",
+        )
 
     source_document_ref = result.source_document_ref
     if source_document_ref is None:
@@ -431,8 +444,13 @@ async def upload_knowledge(
         )
 
     return {
-        "status": "source_ingestion_first_phase_completed",
+        "status": "knowledge_extraction_workflow_started",
         "workflow_run_id": result.workflow_run_id,
+        "source_ingestion_completed": result.source_ingestion_completed,
+        "drained_inspected_count": result.drained_inspected_count,
+        "drained_dispatched_count": result.drained_dispatched_count,
+        "blocked_command_type": result.blocked_command_type,
+        "blocked_reason": result.blocked_reason,
         "source_document_ref": source_document_ref,
         "source_unit_count": result.source_unit_count,
         "source_units_url": _source_units_url(

@@ -66,6 +66,8 @@ class RunKnowledgeExtractionWorkflowAfterUploadResult:
     drained_dispatched_count: int
     blocked_command_type: str | None
     blocked_reason: str | None
+    source_document_ref: str | None = None
+    source_unit_count: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.workflow_run_id, str):
@@ -85,6 +87,15 @@ class RunKnowledgeExtractionWorkflowAfterUploadResult:
             raise ValueError("blocked_command_type must be non-empty when set")
         if self.blocked_reason is not None and not self.blocked_reason.strip():
             raise ValueError("blocked_reason must be non-empty when set")
+        if (
+            self.source_document_ref is not None
+            and not self.source_document_ref.strip()
+        ):
+            raise ValueError("source_document_ref must be non-empty when set")
+        if not isinstance(self.source_unit_count, int):
+            raise TypeError("source_unit_count must be int")
+        if self.source_unit_count < 0:
+            raise ValueError("source_unit_count must be >= 0")
 
 
 class RunKnowledgeExtractionWorkflowAfterUpload:
@@ -112,6 +123,8 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 drained_dispatched_count=0,
                 blocked_command_type=None,
                 blocked_reason=None,
+                source_document_ref=source_result.source_document_ref,
+                source_unit_count=source_result.source_unit_count,
             )
 
         workflow_run_id = source_result.workflow_run_id
@@ -121,6 +134,8 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         drain_result = await self._drain_until_blocked_or_idle(
             workflow_run_id=workflow_run_id,
             max_drain_commands=command.max_drain_commands,
+            source_document_ref=source_result.source_document_ref,
+            source_unit_count=source_result.source_unit_count,
         )
         return RunKnowledgeExtractionWorkflowAfterUploadResult(
             workflow_run_id=workflow_run_id,
@@ -129,6 +144,8 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             drained_dispatched_count=drain_result.drained_dispatched_count,
             blocked_command_type=drain_result.blocked_command_type,
             blocked_reason=drain_result.blocked_reason,
+            source_document_ref=source_result.source_document_ref,
+            source_unit_count=source_result.source_unit_count,
         )
 
     async def _drain_until_blocked_or_idle(
@@ -136,6 +153,8 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         *,
         workflow_run_id: str,
         max_drain_commands: int,
+        source_document_ref: str | None,
+        source_unit_count: int,
     ) -> RunKnowledgeExtractionWorkflowAfterUploadResult:
         remaining_commands = max_drain_commands
         inspected_count = 0
@@ -168,6 +187,8 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             drained_dispatched_count=dispatched_count,
             blocked_command_type=blocked_command_type,
             blocked_reason=blocked_reason,
+            source_document_ref=source_document_ref,
+            source_unit_count=source_unit_count,
         )
 
     async def _run_one_drain_transaction(
