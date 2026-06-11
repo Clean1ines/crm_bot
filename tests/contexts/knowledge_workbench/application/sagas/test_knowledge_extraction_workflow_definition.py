@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
+    KnowledgeExtractionPhaseKey,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT,
+    LEGACY_PHASE_MIGRATION_MAP,
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
+    KnowledgeExtractionOperationContract,
     KnowledgeExtractionReadModelName,
     KnowledgeExtractionRecoveryScope,
+    command_types_used_by_operations,
+    event_types_used_by_operations,
+    operation_by_key,
+    operations_for_phase,
 )
 
 
-def _operation(operation_key: str):
+def _operation(operation_key: str) -> KnowledgeExtractionOperationContract:
     for operation in DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT.operations:
         if operation.operation_key == operation_key:
             return operation
@@ -50,6 +59,63 @@ def test_primary_command_types_are_unique() -> None:
     assert len(command_types) == len(set(command_types))
 
 
+def test_every_canonical_command_type_is_bound_to_operation() -> None:
+    assert command_types_used_by_operations() == frozenset(
+        KnowledgeExtractionCanonicalCommandType
+    )
+
+
+def test_every_canonical_event_type_is_used_by_operation() -> None:
+    assert event_types_used_by_operations() == frozenset(
+        KnowledgeExtractionCanonicalEventType
+    )
+
+
+def test_start_workflow_operation_exists() -> None:
+    operation = _operation("start_knowledge_extraction_workflow")
+
+    assert operation.phase is KnowledgeExtractionCanonicalPhase.WORKFLOW_STARTED
+    assert (
+        operation.command_type
+        is KnowledgeExtractionCanonicalCommandType.START_KNOWLEDGE_EXTRACTION_WORKFLOW
+    )
+    assert (
+        operation.success_event_type
+        is KnowledgeExtractionCanonicalEventType.KNOWLEDGE_EXTRACTION_WORKFLOW_STARTED
+    )
+    assert operation.next_command_types == (
+        KnowledgeExtractionCanonicalCommandType.INGEST_SOURCE_DOCUMENT,
+    )
+    assert operation.owner_contexts == (
+        "knowledge_workbench",
+        "workflow_runtime",
+    )
+    assert operation.unit_of_work_name == "KnowledgeExtractionWorkflowStartUnitOfWork"
+    assert operation.idempotency_key_template == (
+        "knowledge-extraction-start:{workflow_run_id}"
+    )
+    assert operation.affected_read_models == (
+        KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+        KnowledgeExtractionReadModelName.TIMELINE,
+    )
+    assert operation.recovery_scopes == (KnowledgeExtractionRecoveryScope.WORKFLOW,)
+    assert operation.frontend_visibility is True
+
+
+def test_ingest_source_document_has_source_document_persisted_intermediate_event() -> (
+    None
+):
+    operation = _operation("ingest_source_document")
+
+    assert operation.intermediate_event_types == (
+        KnowledgeExtractionCanonicalEventType.SOURCE_DOCUMENT_PERSISTED,
+    )
+    assert (
+        operation.success_event_type
+        is KnowledgeExtractionCanonicalEventType.SOURCE_UNITS_CREATED
+    )
+
+
 def test_claim_builder_section_execution_operation_contract() -> None:
     operation = _operation("execute_claim_builder_section")
 
@@ -77,6 +143,17 @@ def test_claim_builder_section_execution_failure_events() -> None:
     }
 
 
+def test_execute_claim_builder_section_has_started_and_capacity_intermediate_events() -> (
+    None
+):
+    operation = _operation("execute_claim_builder_section")
+
+    assert operation.intermediate_event_types == (
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_STARTED,
+        KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED,
+    )
+
+
 def test_claim_builder_section_execution_read_models() -> None:
     operation = _operation("execute_claim_builder_section")
 
@@ -97,6 +174,18 @@ def test_claim_builder_section_execution_recovery_scopes() -> None:
         KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
         KnowledgeExtractionRecoveryScope.CLAIM_BUILDER_SECTION,
     }
+
+
+def test_generate_embeddings_has_batch_completed_intermediate_event() -> None:
+    operation = _operation("generate_draft_claim_embeddings")
+
+    assert operation.intermediate_event_types == (
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_EMBEDDING_BATCH_COMPLETED,
+    )
+    assert (
+        operation.success_event_type
+        is KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_EMBEDDINGS_GENERATED
+    )
 
 
 def test_contract_has_embedding_and_clustering_operations() -> None:
@@ -126,6 +215,24 @@ def test_contract_stops_at_cluster_preview_and_review_pause() -> None:
     assert (
         DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT.operations[-1].operation_key
         == "pause_for_cluster_contract_review"
+    )
+
+
+def test_operation_by_key_returns_contract() -> None:
+    assert operation_by_key("execute_claim_builder_section") == _operation(
+        "execute_claim_builder_section"
+    )
+
+
+def test_operations_for_phase_returns_claim_builder_section_operations() -> None:
+    operations = operations_for_phase(
+        KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION
+    )
+
+    assert tuple(operation.operation_key for operation in operations) == (
+        "prepare_claim_builder_dispatch_batch",
+        "execute_claim_builder_section",
+        "reconcile_claim_builder_progress",
     )
 
 
@@ -164,3 +271,62 @@ def test_no_persist_or_materialize_prompt_a_commands_exist() -> None:
     assert forbidden_names.isdisjoint(
         KnowledgeExtractionCanonicalCommandType.__members__
     )
+
+
+def test_legacy_phase_migration_map_covers_all_current_phase_keys() -> None:
+    mapped_phase_keys = {
+        mapping.legacy_phase_key for mapping in LEGACY_PHASE_MIGRATION_MAP
+    }
+
+    assert mapped_phase_keys == {
+        phase_key.value for phase_key in KnowledgeExtractionPhaseKey
+    }
+
+
+def test_legacy_prompt_a_phases_map_to_claim_builder_phases() -> None:
+    mapping_by_key = {
+        mapping.legacy_phase_key: mapping for mapping in LEGACY_PHASE_MIGRATION_MAP
+    }
+
+    assert (
+        mapping_by_key[
+            KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED.value
+        ].canonical_phase
+        is KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_WORK_SCHEDULING
+    )
+    assert (
+        mapping_by_key[
+            KnowledgeExtractionPhaseKey.PROMPT_A_WORK_COMPLETED.value
+        ].canonical_phase
+        is KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION
+    )
+    assert (
+        mapping_by_key[
+            KnowledgeExtractionPhaseKey.PROMPT_A_ARTIFACTS_APPLIED.value
+        ].canonical_phase
+        is KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION
+    )
+
+
+def test_late_phases_are_out_of_current_contract() -> None:
+    late_phase_keys = {
+        KnowledgeExtractionPhaseKey.PROMPT_B_WORK_SCHEDULED.value,
+        KnowledgeExtractionPhaseKey.PROMPT_B_WORK_COMPLETED.value,
+        KnowledgeExtractionPhaseKey.FINAL_KNOWLEDGE_PREPARED.value,
+        KnowledgeExtractionPhaseKey.REVIEW_COMPLETED.value,
+        KnowledgeExtractionPhaseKey.PUBLISHED.value,
+        KnowledgeExtractionPhaseKey.RETRIEVAL_EMBEDDINGS_BUILT.value,
+        KnowledgeExtractionPhaseKey.INTERMEDIATE_ARTIFACTS_CLEANED.value,
+        KnowledgeExtractionPhaseKey.DONE.value,
+    }
+    mapping_by_key = {
+        mapping.legacy_phase_key: mapping for mapping in LEGACY_PHASE_MIGRATION_MAP
+    }
+
+    for legacy_phase_key in late_phase_keys:
+        mapping = mapping_by_key[legacy_phase_key]
+        assert (
+            mapping.canonical_phase
+            is KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY
+        )
+        assert mapping.migration_status == "out_of_current_contract"

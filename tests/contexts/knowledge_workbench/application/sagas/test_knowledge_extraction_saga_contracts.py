@@ -7,6 +7,10 @@ from typing import cast
 
 import pytest
 
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
+)
+from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.knowledge_workbench.application.sagas import (
     KnowledgeExtractionCommandEmitterPort,
     KnowledgeExtractionCommandLogPort,
@@ -21,6 +25,24 @@ from src.contexts.knowledge_workbench.application.sagas import (
     KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
     ReconcileKnowledgeExtractionSagaCommand,
+)
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_reconcile_unit_of_work import (
+    KnowledgeExtractionSagaReconcileUnitOfWorkPort,
+)
+from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
+    SourceManagementRepositoryPort,
+)
+from src.contexts.knowledge_workbench.source_management.domain.entities.source_document import (
+    SourceDocument,
+)
+from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
+    SourceUnit,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
+    SourceDocumentRef,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
 )
 
 
@@ -307,6 +329,96 @@ class _FakeCommandEmitter(KnowledgeExtractionCommandEmitterPort):
         )
 
 
+class _UnusedSourceManagementRepository(SourceManagementRepositoryPort):
+    async def save_source_document(self, document: SourceDocument) -> None:
+        raise AssertionError("source management repository should not be used")
+
+    async def load_source_document(
+        self,
+        document_ref: SourceDocumentRef,
+    ) -> SourceDocument | None:
+        raise AssertionError("source management repository should not be used")
+
+    async def save_source_units(self, units: tuple[SourceUnit, ...]) -> None:
+        raise AssertionError("source management repository should not be used")
+
+    async def list_source_units_for_document(
+        self,
+        document_ref: SourceDocumentRef,
+    ) -> tuple[SourceUnit, ...]:
+        raise AssertionError("source management repository should not be used")
+
+    async def load_source_unit(self, unit_ref: SourceUnitRef) -> SourceUnit | None:
+        raise AssertionError("source management repository should not be used")
+
+
+class _UnusedWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
+    async def get_work_item(self, work_item_id: str) -> WorkItem | None:
+        raise AssertionError("work item scheduling repository should not be used")
+
+    async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
+        raise AssertionError("work item scheduling repository should not be used")
+
+    async def save_scheduled_work_item(
+        self,
+        *,
+        item: WorkItem,
+        idempotency_key: str,
+        payload_hash: str,
+        payload: Mapping[str, object],
+    ) -> None:
+        raise AssertionError("work item scheduling repository should not be used")
+
+
+class _FakeSagaReconcileUnitOfWork(KnowledgeExtractionSagaReconcileUnitOfWorkPort):
+    def __init__(
+        self,
+        *,
+        state_repository: KnowledgeExtractionSagaStateRepositoryPort,
+        command_log: KnowledgeExtractionCommandLogPort | None = None,
+        event_cursor: KnowledgeExtractionEventCursorPort | None = None,
+        command_emitter: KnowledgeExtractionCommandEmitterPort | None = None,
+    ) -> None:
+        self._state_repository = state_repository
+        self._command_log = command_log or _FakeCommandLog()
+        self._event_cursor = event_cursor or _FakeEventCursor()
+        self._command_emitter = command_emitter or _FakeCommandEmitter()
+        self._source_management_repository = _UnusedSourceManagementRepository()
+        self._work_item_scheduling_repository = _UnusedWorkItemSchedulingRepository()
+        self.commit_count = 0
+        self.rollback_count = 0
+
+    @property
+    def saga_state_repository(self) -> KnowledgeExtractionSagaStateRepositoryPort:
+        return self._state_repository
+
+    @property
+    def command_log(self) -> KnowledgeExtractionCommandLogPort:
+        return self._command_log
+
+    @property
+    def event_cursor(self) -> KnowledgeExtractionEventCursorPort:
+        return self._event_cursor
+
+    @property
+    def command_emitter(self) -> KnowledgeExtractionCommandEmitterPort:
+        return self._command_emitter
+
+    @property
+    def source_management_repository(self) -> SourceManagementRepositoryPort:
+        return self._source_management_repository
+
+    @property
+    def work_item_scheduling_repository(self) -> WorkItemSchedulingRepositoryPort:
+        return self._work_item_scheduling_repository
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
+
+
 @pytest.mark.asyncio
 async def test_saga_reconcile_returns_existing_state_without_emitting_commands() -> (
     None
@@ -316,15 +428,14 @@ async def test_saga_reconcile_returns_existing_state_without_emitting_commands()
         project_id="project-1",
         source_document_ref="source-document-1",
         status=KnowledgeExtractionWorkflowStatus.RUNNING,
-        current_phase=KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED,
+        current_phase=KnowledgeExtractionPhaseKey.DOCUMENT_ACCEPTED,
     )
     command_emitter = _FakeCommandEmitter()
-    saga = KnowledgeExtractionSaga(
+    unit_of_work = _FakeSagaReconcileUnitOfWork(
         state_repository=_FakeStateRepository(state),
-        command_log=_FakeCommandLog(),
-        event_cursor=_FakeEventCursor(),
         command_emitter=command_emitter,
     )
+    saga = KnowledgeExtractionSaga(unit_of_work=unit_of_work)
 
     result = await saga.reconcile(
         ReconcileKnowledgeExtractionSagaCommand(
@@ -335,19 +446,19 @@ async def test_saga_reconcile_returns_existing_state_without_emitting_commands()
 
     assert result.workflow_run_id == "workflow-1"
     assert result.status is KnowledgeExtractionWorkflowStatus.RUNNING
-    assert result.current_phase is KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED
+    assert result.current_phase is KnowledgeExtractionPhaseKey.DOCUMENT_ACCEPTED
     assert result.emitted_command_count == 0
     assert command_emitter.commands == []
+    assert unit_of_work.commit_count == 1
+    assert unit_of_work.rollback_count == 0
 
 
 @pytest.mark.asyncio
 async def test_saga_reconcile_rejects_missing_state() -> None:
-    saga = KnowledgeExtractionSaga(
+    unit_of_work = _FakeSagaReconcileUnitOfWork(
         state_repository=_FakeStateRepository(None),
-        command_log=_FakeCommandLog(),
-        event_cursor=_FakeEventCursor(),
-        command_emitter=_FakeCommandEmitter(),
     )
+    saga = KnowledgeExtractionSaga(unit_of_work=unit_of_work)
 
     with pytest.raises(ValueError):
         await saga.reconcile(
@@ -356,6 +467,9 @@ async def test_saga_reconcile_rejects_missing_state() -> None:
                 occurred_at=_now(),
             )
         )
+
+    assert unit_of_work.commit_count == 0
+    assert unit_of_work.rollback_count == 1
 
 
 def test_source_guard() -> None:
