@@ -97,11 +97,45 @@ class FakeConnection:
 
         raise AssertionError(query)
 
+    async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
+        if "FROM workflow_runtime_command_log" not in query:
+            raise AssertionError(query)
+        workflow_run_id = _arg_str(args, 0)
+        status = _arg_str(args, 1)
+        limit = _arg_int(args, 2)
+        rows = [
+            row
+            for row in self.rows_by_command_id.values()
+            if row["workflow_run_id"] == workflow_run_id and row["status"] == status
+        ]
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                _row_datetime(row, "run_after"),
+                _row_datetime(row, "created_at"),
+            ),
+        )
+        return rows[:limit]
+
 
 def _arg_str(args: tuple[object, ...], index: int) -> str:
     value = args[index]
     if not isinstance(value, str):
         raise TypeError("expected string argument")
+    return value
+
+
+def _arg_int(args: tuple[object, ...], index: int) -> int:
+    value = args[index]
+    if not isinstance(value, int):
+        raise TypeError("expected int argument")
+    return value
+
+
+def _row_datetime(row: Mapping[str, object], key: str) -> datetime:
+    value = row[key]
+    if not isinstance(value, datetime):
+        raise TypeError("expected datetime row value")
     return value
 
 
@@ -159,3 +193,30 @@ async def test_mark_command_completed_marks_command_completed() -> None:
 
     assert completed.status is WorkflowCommandStatus.COMPLETED
     assert completed.updated_at == _later()
+
+
+@pytest.mark.asyncio
+async def test_list_pending_commands_returns_due_pending_commands_ordered() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+
+    second = await repository.append_pending_command(
+        _command(command_id="command-2", idempotency_key="key-2")
+    )
+    first = await repository.append_pending_command(
+        _command(command_id="command-1", idempotency_key="key-1")
+    )
+    connection.rows_by_command_id[first.command_id.value]["run_after"] = _now()
+    connection.rows_by_command_id[second.command_id.value]["run_after"] = _later()
+
+    pending = await repository.list_pending_commands(
+        workflow_run_id="workflow-1",
+        limit=10,
+    )
+
+    assert tuple(command.command_id for command in pending) == (
+        first.command_id,
+        second.command_id,
+    )
+    assert pending[0].run_after == _now()
+    assert pending[1].run_after == _later()

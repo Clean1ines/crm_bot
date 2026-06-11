@@ -537,6 +537,15 @@ def operation_by_key(operation_key: str) -> KnowledgeExtractionOperationContract
     raise KeyError(operation_key)
 
 
+def operation_by_command_type(
+    command_type: KnowledgeExtractionCanonicalCommandType,
+) -> KnowledgeExtractionOperationContract:
+    for operation in DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT.operations:
+        if operation.command_type is command_type:
+            return operation
+    raise KeyError(command_type)
+
+
 def operations_for_phase(
     phase: KnowledgeExtractionCanonicalPhase,
 ) -> tuple[KnowledgeExtractionOperationContract, ...]:

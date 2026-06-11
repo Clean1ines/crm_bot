@@ -122,6 +122,45 @@ class PostgresCommandLogRepository(CommandLogRepositoryPort):
             raise KeyError(command_id.value)
         return _hydrate_command(row)
 
+    async def list_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+    ) -> tuple[WorkflowCommand, ...]:
+        if not workflow_run_id.strip():
+            raise ValueError("workflow_run_id must be non-empty")
+        if limit <= 0:
+            raise ValueError("limit must be > 0")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT
+                command_id,
+                command_type,
+                workflow_run_id,
+                idempotency_key,
+                payload,
+                status,
+                run_after,
+                created_at,
+                updated_at,
+                causation_event_id,
+                correlation_id,
+                attempt_count
+            FROM workflow_runtime_command_log
+            WHERE workflow_run_id = $1
+              AND status = $2
+              AND run_after <= NOW()
+            ORDER BY run_after ASC, created_at ASC
+            LIMIT $3
+            """,
+            workflow_run_id,
+            WorkflowCommandStatus.PENDING.value,
+            limit,
+        )
+        return tuple(_hydrate_command(row) for row in rows)
+
     async def _load_by_idempotency_key(
         self,
         idempotency_key: WorkflowIdempotencyKey,

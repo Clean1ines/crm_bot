@@ -117,6 +117,18 @@ class FakeCommandLogRepository:
             attempt_count=self.command.attempt_count,
         )
 
+    async def list_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+    ) -> tuple[WorkflowCommand, ...]:
+        if self.command is None:
+            return ()
+        if self.command.workflow_run_id != workflow_run_id:
+            return ()
+        return (self.command,)[:limit]
+
 
 @dataclass(slots=True)
 class FakeOutboxRepository:

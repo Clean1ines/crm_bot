@@ -24,3 +24,10 @@ class CommandLogRepositoryPort(Protocol):
         command_id: WorkflowCommandId,
         completed_at: datetime,
     ) -> WorkflowCommand: ...
+
+    async def list_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+    ) -> tuple[WorkflowCommand, ...]: ...

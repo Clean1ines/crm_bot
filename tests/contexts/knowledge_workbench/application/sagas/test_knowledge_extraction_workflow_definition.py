@@ -14,6 +14,7 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionRecoveryScope,
     command_types_used_by_operations,
     event_types_used_by_operations,
+    operation_by_command_type,
     operation_by_key,
     operations_for_phase,
 )
@@ -222,6 +223,12 @@ def test_operation_by_key_returns_contract() -> None:
     assert operation_by_key("execute_claim_builder_section") == _operation(
         "execute_claim_builder_section"
     )
+
+
+def test_operation_by_command_type_returns_contract() -> None:
+    assert operation_by_command_type(
+        KnowledgeExtractionCanonicalCommandType.SCHEDULE_CLAIM_BUILDER_SECTION_WORK
+    ) == _operation("schedule_claim_builder_section_work")
 
 
 def test_operations_for_phase_returns_claim_builder_section_operations() -> None:
