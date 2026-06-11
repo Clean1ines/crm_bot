@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import cast
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
 from src.contexts.artifact_runtime.application.use_cases.persist_artifact import (
     PersistArtifact,
@@ -17,7 +17,7 @@ from src.contexts.artifact_runtime.domain.value_objects.artifact_lineage import 
 )
 from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
     ArtifactPayload,
-    JsonInputValue,
+    JsonInputValue as ArtifactJsonInputValue,
 )
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
 from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility import (
@@ -33,9 +33,10 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
     LlmDispatchExecutionResult,
     LlmDispatchExecutionStatus,
 )
-
-
-LLM_DISPATCH_OUTPUT_ARTIFACT_KIND = ArtifactKind("llm_dispatch_output")
+from src.contexts.llm_runtime.application.results.llm_dispatch_output_artifact_payload import (
+    LLM_DISPATCH_OUTPUT_ARTIFACT_KIND_VALUE,
+    LlmDispatchOutputArtifactPayload,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +76,7 @@ class PersistSuccessfulLlmDispatchArtifacts:
         result = await self.persist_artifact.execute(
             PersistArtifactCommand(
                 artifact_ref=artifact_ref,
-                artifact_kind=LLM_DISPATCH_OUTPUT_ARTIFACT_KIND,
+                artifact_kind=ArtifactKind(LLM_DISPATCH_OUTPUT_ARTIFACT_KIND_VALUE),
                 payload=ArtifactPayload(_artifact_payload(command)),
                 visibility=ArtifactVisibility.INTERNAL,
                 retention_policy=RetentionPolicy.temporary(),
@@ -90,37 +91,22 @@ class PersistSuccessfulLlmDispatchArtifacts:
 
 def _artifact_payload(
     command: PersistSuccessfulLlmDispatchArtifactsCommand,
-) -> Mapping[str, JsonInputValue]:
+) -> Mapping[str, ArtifactJsonInputValue]:
     output_payload = command.llm_result.output_payload
     if not output_payload:
         raise ValueError("llm_result.output_payload is required")
 
-    return {
-        "attempt_id": command.dispatch.attempt_id,
-        "work_item_id": command.dispatch.work_item_id,
-        "attempt_number": command.dispatch.attempt_number,
-        "worker_ref": command.dispatch.worker_ref,
-        "dispatch_payload": _json_object(command.dispatch.dispatch_payload),
-        "output_payload": _json_object(output_payload),
-        "finished_at": command.llm_result.finished_at.isoformat(),
-    }
+    payload = LlmDispatchOutputArtifactPayload(
+        attempt_id=command.dispatch.attempt_id,
+        work_item_id=command.dispatch.work_item_id,
+        attempt_number=command.dispatch.attempt_number,
+        worker_ref=command.dispatch.worker_ref,
+        dispatch_payload=command.dispatch.dispatch_payload,
+        output_payload=output_payload,
+        finished_at=command.llm_result.finished_at.isoformat(),
+    ).to_mapping()
 
-
-def _json_object(payload: Mapping[str, object]) -> dict[str, JsonInputValue]:
-    normalized: dict[str, JsonInputValue] = {}
-    for key, value in payload.items():
-        normalized[key] = _json_value(value)
-    return normalized
-
-
-def _json_value(value: object) -> JsonInputValue:
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    if isinstance(value, Mapping):
-        return _json_object(cast(Mapping[str, object], value))
-    if isinstance(value, list | tuple):
-        return [_json_value(item) for item in value]
-    raise TypeError("artifact payload contains non-json value")
+    return cast(Mapping[str, ArtifactJsonInputValue], payload)
 
 
 def _require_timezone_aware(value: datetime, *, field_name: str) -> None:

@@ -29,6 +29,9 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
     LlmDispatchExecutionResult,
     LlmDispatchExecutionStatus,
 )
+from src.contexts.llm_runtime.application.results.llm_dispatch_output_artifact_payload import (
+    LlmDispatchOutputArtifactPayload,
+)
 from src.interfaces.composition.persist_successful_llm_dispatch_artifacts import (
     PersistSuccessfulLlmDispatchArtifacts,
     PersistSuccessfulLlmDispatchArtifactsCommand,
@@ -78,6 +81,14 @@ def _dispatch_payload() -> dict[str, object]:
                     "content": "Extract facts",
                 },
             ),
+            "prompt_a_provenance": {
+                "workflow_run_id": "run-1",
+                "stage_run_id": "draft_observation_extraction",
+                "source_unit_ref": "source-unit-1",
+                "work_item_id": "work-1",
+                "prompt_id": "faq_claim_observations",
+                "prompt_version": "v1",
+            },
         },
         "llm_allocation": {
             "slot_index": 0,
@@ -166,6 +177,14 @@ async def test_artifact_payload_includes_attempt_work_item_dispatch_and_output_m
     )
 
     payload = _plain_json_value(unit_of_work.saved_artifacts[0].payload.value)
+    parsed_payload = LlmDispatchOutputArtifactPayload.from_mapping(
+        unit_of_work.saved_artifacts[0].payload.value,
+    )
+    assert parsed_payload.raw_text() == "{}"
+    assert parsed_payload.prompt_a_provenance_seed()["prompt_id"] == (
+        "faq_claim_observations"
+    )
+
     assert payload == {
         "attempt_id": "attempt-1",
         "work_item_id": "work-1",
@@ -180,6 +199,14 @@ async def test_artifact_payload_includes_attempt_work_item_dispatch_and_output_m
                         "content": "Extract facts",
                     },
                 ],
+                "prompt_a_provenance": {
+                    "workflow_run_id": "run-1",
+                    "stage_run_id": "draft_observation_extraction",
+                    "source_unit_ref": "source-unit-1",
+                    "work_item_id": "work-1",
+                    "prompt_id": "faq_claim_observations",
+                    "prompt_version": "v1",
+                },
             },
             "llm_allocation": {
                 "slot_index": 0,

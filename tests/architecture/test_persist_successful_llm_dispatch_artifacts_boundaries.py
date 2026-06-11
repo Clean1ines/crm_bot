@@ -17,6 +17,8 @@ def test_persist_successful_llm_dispatch_artifacts_required_markers_exist() -> N
         "PersistSuccessfulLlmDispatchArtifactsResult",
         "PersistArtifact",
         "LlmDispatchExecutionStatus.SUCCEEDED",
+        "LlmDispatchOutputArtifactPayload",
+        "LLM_DISPATCH_OUTPUT_ARTIFACT_KIND_VALUE",
         "llm_dispatch_output",
     )
     for marker in required:
