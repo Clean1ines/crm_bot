@@ -373,13 +373,13 @@ def _command() -> ReconcileKnowledgeExtractionSagaCommand:
 
 def _work_item_id(*, unit_ref: str) -> str:
     return (
-        "knowledge-workbench:draft-observation-extraction:"
+        "knowledge-workbench:claim-builder:section-extraction:"
         f"{_workflow_run_id()}:{unit_ref}"
     )
 
 
 def _work_kind() -> WorkKind:
-    return WorkKind("knowledge_workbench.draft_observation_extraction")
+    return WorkKind("knowledge_workbench.claim_builder.section_extraction")
 
 
 @pytest.mark.asyncio
@@ -400,16 +400,18 @@ async def test_reconcile_advances_from_source_units_created_to_prompt_work_sched
 
     result = await _saga(unit_of_work=unit_of_work).reconcile(_command())
 
-    assert result.current_phase is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+    assert (
+        result.current_phase is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
+    )
     assert result.status is KnowledgeExtractionWorkflowStatus.RUNNING
     assert unit_of_work.commit_count == 1
     assert unit_of_work.rollback_count == 0
     assert any(
-        checkpoint.phase_key is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+        checkpoint.phase_key is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
         for checkpoint in state_repository.saved_checkpoints
     )
     assert state_repository.saved_states[-1].current_phase is (
-        KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+        KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
     )
     assert len(scheduling_repository.saved) == 2
     checkpoint = state_repository.saved_checkpoints[-1]
@@ -424,7 +426,7 @@ async def test_reconcile_advances_from_source_units_created_to_prompt_work_sched
         unit_ref="source-document:project-1:abc.unit.0",
     )
     assert scheduled_items[0]["work_kind"] == (
-        "knowledge_workbench.draft_observation_extraction"
+        "knowledge_workbench.claim_builder.section_extraction"
     )
     assert scheduled_items[0]["idempotency_key"] == scheduled_items[0]["work_item_id"]
     assert isinstance(scheduled_items[0]["payload_hash"], str)
@@ -451,8 +453,12 @@ async def test_repeated_reconcile_does_not_duplicate_work_items() -> None:
     state_repository.state = _state()
     second = await saga.reconcile(_command())
 
-    assert first.current_phase is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
-    assert second.current_phase is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+    assert (
+        first.current_phase is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
+    )
+    assert (
+        second.current_phase is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
+    )
     assert len(scheduling_repository.saved) == 2
     assert unit_of_work.commit_count == 2
     assert unit_of_work.rollback_count == 0
@@ -477,7 +483,9 @@ async def test_empty_source_units_advance_to_prompt_work_scheduled_without_work_
     result = await _saga(unit_of_work=unit_of_work).reconcile(_command())
 
     assert result.status is KnowledgeExtractionWorkflowStatus.RUNNING
-    assert result.current_phase is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+    assert (
+        result.current_phase is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
+    )
     assert state_repository.saved_checkpoints
     assert state_repository.saved_states
     assert scheduling_repository.saved == []
@@ -540,7 +548,7 @@ async def test_scheduling_conflict_propagates_and_rolls_back() -> None:
         scheduling_repository=scheduling_repository,
     )
 
-    with pytest.raises(ValueError, match="draft observation scheduling conflict"):
+    with pytest.raises(ValueError, match="claim_builder work scheduling conflict"):
         await _saga(unit_of_work=unit_of_work).reconcile(_command())
 
     assert unit_of_work.commit_count == 0
@@ -594,7 +602,7 @@ def test_knowledge_extraction_saga_scheduling_source_guard() -> None:
     assert "self._unit_of_work = unit_of_work" in source
     assert "await self._unit_of_work.commit()" in source
     assert "await self._unit_of_work.rollback()" in source
-    assert "ScheduleDraftObservationExtractionWork" in source
+    assert "ScheduleClaimBuilderSectionWork" in source
 
     forbidden_old_constructor_markers = (
         "state_repository:",

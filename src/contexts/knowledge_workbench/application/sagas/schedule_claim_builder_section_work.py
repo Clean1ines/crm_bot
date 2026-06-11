@@ -11,14 +11,14 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
     EnsureWorkItemsScheduledCommand,
     work_item_schedule_payload_hash,
 )
-from src.contexts.knowledge_workbench.application.sagas.map_draft_observation_plans_to_execution_schedule import (
-    MapDraftObservationPlansToExecutionSchedule,
-    MapDraftObservationPlansToExecutionScheduleCommand,
+from src.contexts.knowledge_workbench.application.sagas.map_claim_builder_section_plans_to_execution_schedule import (
+    MapClaimBuilderSectionPlansToExecutionSchedule,
+    MapClaimBuilderSectionPlansToExecutionScheduleCommand,
 )
-from src.contexts.knowledge_workbench.application.sagas.plan_draft_observation_extraction_work import (
-    DraftObservationExtractionWorkPlan,
-    PlanDraftObservationExtractionWork,
-    PlanDraftObservationExtractionWorkCommand,
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    ClaimBuilderSectionWorkPlan,
+    PlanClaimBuilderSectionWork,
+    PlanClaimBuilderSectionWorkCommand,
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
@@ -29,7 +29,7 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 
 
 @dataclass(frozen=True, slots=True)
-class ScheduleDraftObservationExtractionWorkCommand:
+class ScheduleClaimBuilderSectionWorkCommand:
     workflow_run_id: str
     source_document_ref: SourceDocumentRef
     source_units: tuple[SourceUnit, ...]
@@ -46,7 +46,7 @@ class ScheduleDraftObservationExtractionWorkCommand:
 
 
 @dataclass(frozen=True, slots=True)
-class DraftObservationScheduledWorkItemSummary:
+class ClaimBuilderScheduledWorkItemSummary:
     source_unit_ref: str
     source_unit_ordinal: int
     work_item_id: str
@@ -80,12 +80,12 @@ class DraftObservationScheduledWorkItemSummary:
 
 
 @dataclass(frozen=True, slots=True)
-class ScheduleDraftObservationExtractionWorkResult:
+class ScheduleClaimBuilderSectionWorkResult:
     planned_count: int
     created_count: int
     already_exists_count: int
     conflict_count: int
-    scheduled_items: tuple[DraftObservationScheduledWorkItemSummary, ...]
+    scheduled_items: tuple[ClaimBuilderScheduledWorkItemSummary, ...]
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -102,10 +102,10 @@ class ScheduleDraftObservationExtractionWorkResult:
         if not isinstance(self.scheduled_items, tuple):
             raise TypeError("scheduled_items must be tuple")
         for item in self.scheduled_items:
-            if not isinstance(item, DraftObservationScheduledWorkItemSummary):
+            if not isinstance(item, ClaimBuilderScheduledWorkItemSummary):
                 raise TypeError(
                     "scheduled_items must contain only "
-                    "DraftObservationScheduledWorkItemSummary",
+                    "ClaimBuilderScheduledWorkItemSummary",
                 )
         if len(self.scheduled_items) != self.planned_count:
             raise ValueError("scheduled_items length must equal planned_count")
@@ -116,22 +116,22 @@ class ScheduleDraftObservationExtractionWorkResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ScheduleDraftObservationExtractionWork:
+class ScheduleClaimBuilderSectionWork:
     scheduling_repository: WorkItemSchedulingRepositoryPort
 
     async def execute(
         self,
-        command: ScheduleDraftObservationExtractionWorkCommand,
-    ) -> ScheduleDraftObservationExtractionWorkResult:
-        workbench_plans = PlanDraftObservationExtractionWork().execute(
-            PlanDraftObservationExtractionWorkCommand(
+        command: ScheduleClaimBuilderSectionWorkCommand,
+    ) -> ScheduleClaimBuilderSectionWorkResult:
+        workbench_plans = PlanClaimBuilderSectionWork().execute(
+            PlanClaimBuilderSectionWorkCommand(
                 workflow_run_id=command.workflow_run_id,
                 source_document_ref=command.source_document_ref,
                 source_units=command.source_units,
             ),
         )
-        execution_schedule = MapDraftObservationPlansToExecutionSchedule().execute(
-            MapDraftObservationPlansToExecutionScheduleCommand(
+        execution_schedule = MapClaimBuilderSectionPlansToExecutionSchedule().execute(
+            MapClaimBuilderSectionPlansToExecutionScheduleCommand(
                 plans=workbench_plans.plans,
             ),
         )
@@ -143,7 +143,7 @@ class ScheduleDraftObservationExtractionWork:
             ),
         )
 
-        return ScheduleDraftObservationExtractionWorkResult(
+        return ScheduleClaimBuilderSectionWorkResult(
             planned_count=len(execution_schedule.schedule_plans),
             created_count=scheduling_result.created_count,
             already_exists_count=scheduling_result.already_exists_count,
@@ -157,19 +157,19 @@ class ScheduleDraftObservationExtractionWork:
 
 def _build_scheduled_item_summaries(
     *,
-    workbench_plans: tuple[DraftObservationExtractionWorkPlan, ...],
+    workbench_plans: tuple[ClaimBuilderSectionWorkPlan, ...],
     scheduling_outcomes: tuple[EnsureWorkItemScheduledOutcome, ...],
-) -> tuple[DraftObservationScheduledWorkItemSummary, ...]:
+) -> tuple[ClaimBuilderScheduledWorkItemSummary, ...]:
     workbench_plan_by_work_item_id = {
         plan.work_item_id: plan for plan in workbench_plans
     }
 
-    summaries: list[DraftObservationScheduledWorkItemSummary] = []
+    summaries: list[ClaimBuilderScheduledWorkItemSummary] = []
     for outcome in scheduling_outcomes:
         plan = outcome.plan
         workbench_plan = workbench_plan_by_work_item_id[plan.work_item_id]
         summaries.append(
-            DraftObservationScheduledWorkItemSummary(
+            ClaimBuilderScheduledWorkItemSummary(
                 source_unit_ref=workbench_plan.source_unit_ref.value,
                 source_unit_ordinal=workbench_plan.source_unit_ordinal,
                 work_item_id=plan.work_item_id,

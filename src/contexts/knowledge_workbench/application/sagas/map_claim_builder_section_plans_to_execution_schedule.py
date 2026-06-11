@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     WorkItemSchedulePlan,
 )
-from src.contexts.knowledge_workbench.application.sagas.plan_draft_observation_extraction_work import (
-    DraftObservationExtractionWorkPlan,
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    ClaimBuilderSectionWorkPlan,
 )
 
 
 @dataclass(frozen=True, slots=True)
-class MapDraftObservationPlansToExecutionScheduleCommand:
-    plans: tuple[DraftObservationExtractionWorkPlan, ...]
+class MapClaimBuilderSectionPlansToExecutionScheduleCommand:
+    plans: tuple[ClaimBuilderSectionWorkPlan, ...]
 
     def __post_init__(self) -> None:
         if not isinstance(self.plans, tuple):
@@ -20,9 +20,9 @@ class MapDraftObservationPlansToExecutionScheduleCommand:
 
         seen_work_item_ids: set[str] = set()
         for plan in self.plans:
-            if not isinstance(plan, DraftObservationExtractionWorkPlan):
+            if not isinstance(plan, ClaimBuilderSectionWorkPlan):
                 raise TypeError(
-                    "plans must contain only DraftObservationExtractionWorkPlan",
+                    "plans must contain only ClaimBuilderSectionWorkPlan",
                 )
             if plan.work_item_id in seen_work_item_ids:
                 raise ValueError("work_item_id must be unique")
@@ -30,7 +30,7 @@ class MapDraftObservationPlansToExecutionScheduleCommand:
 
 
 @dataclass(frozen=True, slots=True)
-class MapDraftObservationPlansToExecutionScheduleResult:
+class MapClaimBuilderSectionPlansToExecutionScheduleResult:
     schedule_plans: tuple[WorkItemSchedulePlan, ...]
 
     def __post_init__(self) -> None:
@@ -41,21 +41,21 @@ class MapDraftObservationPlansToExecutionScheduleResult:
                 raise TypeError("schedule_plans must contain only WorkItemSchedulePlan")
 
 
-class MapDraftObservationPlansToExecutionSchedule:
+class MapClaimBuilderSectionPlansToExecutionSchedule:
     def execute(
         self,
-        command: MapDraftObservationPlansToExecutionScheduleCommand,
-    ) -> MapDraftObservationPlansToExecutionScheduleResult:
+        command: MapClaimBuilderSectionPlansToExecutionScheduleCommand,
+    ) -> MapClaimBuilderSectionPlansToExecutionScheduleResult:
         schedule_plans = tuple(
             _map_plan_to_schedule_plan(plan) for plan in command.plans
         )
-        return MapDraftObservationPlansToExecutionScheduleResult(
+        return MapClaimBuilderSectionPlansToExecutionScheduleResult(
             schedule_plans=schedule_plans,
         )
 
 
 def _map_plan_to_schedule_plan(
-    plan: DraftObservationExtractionWorkPlan,
+    plan: ClaimBuilderSectionWorkPlan,
 ) -> WorkItemSchedulePlan:
     return WorkItemSchedulePlan(
         work_item_id=plan.work_item_id,
@@ -66,15 +66,15 @@ def _map_plan_to_schedule_plan(
             "source_document_ref": plan.source_document_ref.value,
             "source_unit_ref": plan.source_unit_ref.value,
             "source_unit_ordinal": plan.source_unit_ordinal,
-            "phase": "draft_observation_extraction",
+            "phase": "claim_builder_section_extraction",
             "provider_messages": _provider_messages(plan),
-            "prompt_a_provenance": _prompt_a_provenance(plan),
+            "claim_builder_provenance": _claim_builder_provenance(plan),
         },
     )
 
 
 def _provider_messages(
-    plan: DraftObservationExtractionWorkPlan,
+    plan: ClaimBuilderSectionWorkPlan,
 ) -> tuple[dict[str, str], ...]:
     return (
         {
@@ -95,12 +95,12 @@ def _provider_messages(
     )
 
 
-def _prompt_a_provenance(
-    plan: DraftObservationExtractionWorkPlan,
+def _claim_builder_provenance(
+    plan: ClaimBuilderSectionWorkPlan,
 ) -> dict[str, str]:
     return {
         "workflow_run_id": plan.workflow_run_id,
-        "stage_run_id": "draft_observation_extraction",
+        "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": plan.source_unit_ref.value,
         "work_item_id": plan.work_item_id,
         "prompt_id": "faq_claim_observations",

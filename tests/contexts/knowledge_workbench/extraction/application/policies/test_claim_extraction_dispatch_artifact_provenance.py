@@ -30,7 +30,7 @@ def _dispatch_payload(
 ) -> dict[str, object]:
     seed: dict[str, object] = {
         "workflow_run_id": "workflow-1",
-        "stage_run_id": "draft_observation_extraction",
+        "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": "document-1.unit.0",
         "work_item_id": "work-item-1",
         "prompt_id": "faq_claim_observations",
@@ -74,7 +74,7 @@ def _llm_dispatch_output_payload(
 def _provenance() -> ClaimExtractionDispatchArtifactProvenance:
     return ClaimExtractionDispatchArtifactProvenance(
         workflow_run_id="workflow-1",
-        stage_run_id="draft_observation_extraction",
+        stage_run_id="claim_builder_section_extraction",
         source_unit_ref=SourceUnitRef("document-1.unit.0"),
         work_item_id="work-item-1",
         work_item_attempt_id="attempt-1",
@@ -160,7 +160,7 @@ def test_payload_fields_expose_dispatch_centric_string_values() -> None:
     assert set(fields) == set(DISPATCH_PROVENANCE_PAYLOAD_FIELD_NAMES)
     assert fields == {
         "workflow_run_id": "workflow-1",
-        "stage_run_id": "draft_observation_extraction",
+        "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": "document-1.unit.0",
         "work_item_id": "work-item-1",
         "work_item_attempt_id": "attempt-1",

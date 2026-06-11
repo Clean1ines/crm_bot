@@ -80,7 +80,7 @@ def default_source_ingestion_segmentation_profile() -> (
     # document_segmentation.
     return SourceIngestionSegmentationProfile(
         prompt=WorkbenchPromptProfile(
-            prompt_name="draft_observation_extraction",
+            prompt_name="claim_builder_section_extraction",
             node_id="faq_claim_observations",
             prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
             prompt_token_count=2_000,

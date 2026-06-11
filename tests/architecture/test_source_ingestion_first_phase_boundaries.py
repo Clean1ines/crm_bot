@@ -53,14 +53,14 @@ def test_source_ingestion_composition_does_not_import_future_runtime_or_later_ph
 def test_draft_observation_extraction_planner_does_not_import_runtime_layers() -> None:
     path = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "plan_draft_observation_extraction_work.py",
+        "plan_claim_builder_section_work.py",
     )
     assert path.is_file()
 
     text = path.read_text(encoding="utf-8")
     required_markers = [
         "WorkKind",
-        "knowledge_workbench.draft_observation_extraction",
+        "knowledge_workbench.claim_builder.section_extraction",
     ]
     forbidden_markers = [
         "capacity_runtime",
@@ -73,7 +73,7 @@ def test_draft_observation_extraction_planner_does_not_import_runtime_layers() -
         "queue",
         "worker",
         "lease",
-        "PROMPT_A_WORK_SCHEDULED",
+        "CLAIM_BUILDER_WORK_SCHEDULED",
     ]
 
     missing = [marker for marker in required_markers if marker not in text]
@@ -86,7 +86,7 @@ def test_draft_observation_extraction_planner_does_not_import_runtime_layers() -
 def test_draft_observation_plan_mapper_imports_only_execution_schedule_dto() -> None:
     path = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "map_draft_observation_plans_to_execution_schedule.py",
+        "map_claim_builder_section_plans_to_execution_schedule.py",
     )
     assert path.is_file()
 
@@ -121,7 +121,7 @@ def test_draft_observation_scheduler_service_imports_only_application_boundaries
 ):
     path = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "schedule_draft_observation_extraction_work.py",
+        "schedule_claim_builder_section_work.py",
     )
     assert path.is_file()
 
@@ -154,15 +154,15 @@ def test_draft_observation_phase_transition_delegates_to_scheduler_without_runti
 ):
     path = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "advance_to_draft_observation_scheduling_phase.py",
+        "advance_to_claim_builder_work_scheduling_phase.py",
     )
     assert path.is_file()
 
     text = path.read_text(encoding="utf-8")
     required_markers = [
-        "ScheduleDraftObservationExtractionWork",
-        "ScheduleDraftObservationExtractionWorkCommand",
-        "PROMPT_A_WORK_SCHEDULED",
+        "ScheduleClaimBuilderSectionWork",
+        "ScheduleClaimBuilderSectionWorkCommand",
+        "CLAIM_BUILDER_WORK_SCHEDULED",
         "execution_runtime.ensure_work_items_scheduled",
     ]
     forbidden_markers = [
@@ -228,11 +228,11 @@ def test_knowledge_extraction_saga_wires_scheduling_phase_without_infrastructure
 
     text = path.read_text(encoding="utf-8")
     required_markers = [
-        "AdvanceToDraftObservationSchedulingPhase",
-        "AdvanceToDraftObservationSchedulingPhaseCommand",
+        "AdvanceToClaimBuilderWorkSchedulingPhase",
+        "AdvanceToClaimBuilderWorkSchedulingPhaseCommand",
         "SourceManagementRepositoryPort",
         "list_source_units_for_document",
-        "PROMPT_A_WORK_SCHEDULED",
+        "CLAIM_BUILDER_WORK_SCHEDULED",
     ]
     forbidden_markers = [
         "execution_runtime.infrastructure",

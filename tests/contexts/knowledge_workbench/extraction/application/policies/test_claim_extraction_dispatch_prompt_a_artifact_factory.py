@@ -45,7 +45,7 @@ def _updated_at() -> datetime:
 def _provenance() -> ClaimExtractionDispatchArtifactProvenance:
     return ClaimExtractionDispatchArtifactProvenance(
         workflow_run_id="workflow-1",
-        stage_run_id="draft_observation_extraction",
+        stage_run_id="claim_builder_section_extraction",
         source_unit_ref=SourceUnitRef("document-1.unit.0"),
         work_item_id="work-item-1",
         work_item_attempt_id="attempt-1",
@@ -125,7 +125,7 @@ def test_raw_artifact_payload_contains_dispatch_provenance_and_raw_output() -> N
 
     assert payload == {
         "workflow_run_id": "workflow-1",
-        "stage_run_id": "draft_observation_extraction",
+        "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": "document-1.unit.0",
         "work_item_id": "work-item-1",
         "work_item_attempt_id": "attempt-1",
@@ -143,7 +143,7 @@ def test_parsed_artifact_payload_contains_dispatch_provenance_raw_ref_and_claims
 
     assert payload == {
         "workflow_run_id": "workflow-1",
-        "stage_run_id": "draft_observation_extraction",
+        "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": "document-1.unit.0",
         "work_item_id": "work-item-1",
         "work_item_attempt_id": "attempt-1",

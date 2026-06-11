@@ -13,9 +13,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
     KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
 )
-from src.contexts.knowledge_workbench.application.sagas.schedule_draft_observation_extraction_work import (
-    ScheduleDraftObservationExtractionWork,
-    ScheduleDraftObservationExtractionWorkCommand,
+from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_section_work import (
+    ScheduleClaimBuilderSectionWork,
+    ScheduleClaimBuilderSectionWorkCommand,
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
@@ -26,7 +26,7 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 
 
 @dataclass(frozen=True, slots=True)
-class AdvanceToDraftObservationSchedulingPhaseCommand:
+class AdvanceToClaimBuilderWorkSchedulingPhaseCommand:
     state: KnowledgeExtractionWorkflowState
     source_units: tuple[SourceUnit, ...]
     occurred_at: datetime
@@ -51,7 +51,7 @@ class AdvanceToDraftObservationSchedulingPhaseCommand:
 
 
 @dataclass(frozen=True, slots=True)
-class AdvanceToDraftObservationSchedulingPhaseResult:
+class AdvanceToClaimBuilderWorkSchedulingPhaseResult:
     state: KnowledgeExtractionWorkflowState
     checkpoint: KnowledgeExtractionPhaseCheckpoint
     planned_count: int
@@ -78,40 +78,42 @@ class AdvanceToDraftObservationSchedulingPhaseResult:
 
         if (
             self.checkpoint.phase_key
-            is not KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+            is not KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
         ):
-            raise ValueError("checkpoint phase_key must be PROMPT_A_WORK_SCHEDULED")
+            raise ValueError(
+                "checkpoint phase_key must be CLAIM_BUILDER_WORK_SCHEDULED"
+            )
         if (
             self.state.current_phase
-            is not KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+            is not KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
         ):
-            raise ValueError("state current_phase must be PROMPT_A_WORK_SCHEDULED")
+            raise ValueError("state current_phase must be CLAIM_BUILDER_WORK_SCHEDULED")
 
 
 @dataclass(frozen=True, slots=True)
-class AdvanceToDraftObservationSchedulingPhase:
-    scheduling_service: ScheduleDraftObservationExtractionWork
+class AdvanceToClaimBuilderWorkSchedulingPhase:
+    scheduling_service: ScheduleClaimBuilderSectionWork
 
     async def execute(
         self,
-        command: AdvanceToDraftObservationSchedulingPhaseCommand,
-    ) -> AdvanceToDraftObservationSchedulingPhaseResult:
+        command: AdvanceToClaimBuilderWorkSchedulingPhaseCommand,
+    ) -> AdvanceToClaimBuilderWorkSchedulingPhaseResult:
         state = command.state
         source_units = command.source_units
 
         scheduling_result = await self.scheduling_service.execute(
-            ScheduleDraftObservationExtractionWorkCommand(
+            ScheduleClaimBuilderSectionWorkCommand(
                 workflow_run_id=state.workflow_run_id,
                 source_document_ref=SourceDocumentRef(state.source_document_ref),
                 source_units=source_units,
             ),
         )
         if scheduling_result.conflict_count > 0:
-            raise ValueError("draft observation scheduling conflict")
+            raise ValueError("claim_builder work scheduling conflict")
 
         checkpoint = KnowledgeExtractionPhaseCheckpoint(
             workflow_run_id=state.workflow_run_id,
-            phase_key=KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED,
+            phase_key=KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED,
             phase_status=KnowledgeExtractionPhaseStatus.COMPLETED,
             expected_count=scheduling_result.planned_count,
             completed_count=(
@@ -119,7 +121,7 @@ class AdvanceToDraftObservationSchedulingPhase:
             ),
             failed_count=0,
             blocked_count=0,
-            idempotency_key=f"prompt-a-work-scheduled:{state.workflow_run_id}",
+            idempotency_key=f"claim-builder-work-scheduled:{state.workflow_run_id}",
             checkpoint_payload={
                 "planned_count": scheduling_result.planned_count,
                 "created_count": scheduling_result.created_count,
@@ -140,7 +142,7 @@ class AdvanceToDraftObservationSchedulingPhase:
             project_id=state.project_id,
             source_document_ref=state.source_document_ref,
             status=KnowledgeExtractionWorkflowStatus.RUNNING,
-            current_phase=KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED,
+            current_phase=KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED,
             checkpoints=replace_or_append_checkpoint(
                 state.checkpoints,
                 checkpoint,
@@ -157,7 +159,7 @@ class AdvanceToDraftObservationSchedulingPhase:
             cancelled_at=state.cancelled_at,
         )
 
-        return AdvanceToDraftObservationSchedulingPhaseResult(
+        return AdvanceToClaimBuilderWorkSchedulingPhaseResult(
             state=next_state,
             checkpoint=checkpoint,
             planned_count=scheduling_result.planned_count,

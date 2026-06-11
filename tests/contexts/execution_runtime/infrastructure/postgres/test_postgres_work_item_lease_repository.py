@@ -84,7 +84,7 @@ def _updated_at(minutes: int) -> datetime:
 
 
 def _work_kind() -> WorkKind:
-    return WorkKind("knowledge_workbench.draft_observation_extraction")
+    return WorkKind("knowledge_workbench.claim_builder.section_extraction")
 
 
 def _other_work_kind() -> WorkKind:

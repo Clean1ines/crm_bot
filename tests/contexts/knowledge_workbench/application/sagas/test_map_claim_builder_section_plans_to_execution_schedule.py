@@ -7,13 +7,13 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
     work_item_schedule_payload_hash,
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
-from src.contexts.knowledge_workbench.application.sagas.map_draft_observation_plans_to_execution_schedule import (
-    MapDraftObservationPlansToExecutionSchedule,
-    MapDraftObservationPlansToExecutionScheduleCommand,
-    MapDraftObservationPlansToExecutionScheduleResult,
+from src.contexts.knowledge_workbench.application.sagas.map_claim_builder_section_plans_to_execution_schedule import (
+    MapClaimBuilderSectionPlansToExecutionSchedule,
+    MapClaimBuilderSectionPlansToExecutionScheduleCommand,
+    MapClaimBuilderSectionPlansToExecutionScheduleResult,
 )
-from src.contexts.knowledge_workbench.application.sagas.plan_draft_observation_extraction_work import (
-    DraftObservationExtractionWorkPlan,
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    ClaimBuilderSectionWorkPlan,
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
     SourceDocumentRef,
@@ -25,15 +25,15 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 
 def _plan(
     *,
-    work_item_id: str = "knowledge-workbench:draft-observation-extraction:run-1:unit-1",
+    work_item_id: str = "knowledge-workbench:claim-builder:section-extraction:run-1:unit-1",
     workflow_run_id: str = "run-1",
     source_document_ref: str = "source-document:project-1:abc",
     source_unit_ref: str = "source-unit:project-1:abc:0",
     source_unit_ordinal: int = 0,
     source_unit_text: str = "# Unit 0\n\nBody",
     heading_path: tuple[str, ...] = ("Unit 0",),
-) -> DraftObservationExtractionWorkPlan:
-    return DraftObservationExtractionWorkPlan(
+) -> ClaimBuilderSectionWorkPlan:
+    return ClaimBuilderSectionWorkPlan(
         workflow_run_id=workflow_run_id,
         source_document_ref=SourceDocumentRef(source_document_ref),
         source_unit_ref=SourceUnitRef(source_unit_ref),
@@ -41,25 +41,25 @@ def _plan(
         source_unit_text=source_unit_text,
         heading_path=heading_path,
         work_item_id=work_item_id,
-        work_kind=WorkKind("knowledge_workbench.draft_observation_extraction"),
+        work_kind=WorkKind("knowledge_workbench.claim_builder.section_extraction"),
         idempotency_key=work_item_id,
     )
 
 
 def _command(
-    plans: tuple[DraftObservationExtractionWorkPlan, ...],
-) -> MapDraftObservationPlansToExecutionScheduleCommand:
-    return MapDraftObservationPlansToExecutionScheduleCommand(plans=plans)
+    plans: tuple[ClaimBuilderSectionWorkPlan, ...],
+) -> MapClaimBuilderSectionPlansToExecutionScheduleCommand:
+    return MapClaimBuilderSectionPlansToExecutionScheduleCommand(plans=plans)
 
 
 def test_maps_one_workbench_plan_to_execution_schedule_plan() -> None:
     plan = _plan()
 
-    result = MapDraftObservationPlansToExecutionSchedule().execute(
+    result = MapClaimBuilderSectionPlansToExecutionSchedule().execute(
         _command((plan,)),
     )
 
-    assert isinstance(result, MapDraftObservationPlansToExecutionScheduleResult)
+    assert isinstance(result, MapClaimBuilderSectionPlansToExecutionScheduleResult)
     assert len(result.schedule_plans) == 1
 
     schedule = result.schedule_plans[0]
@@ -71,7 +71,7 @@ def test_maps_one_workbench_plan_to_execution_schedule_plan() -> None:
     assert schedule.payload["source_document_ref"] == plan.source_document_ref.value
     assert schedule.payload["source_unit_ref"] == plan.source_unit_ref.value
     assert schedule.payload["source_unit_ordinal"] == plan.source_unit_ordinal
-    assert schedule.payload["phase"] == "draft_observation_extraction"
+    assert schedule.payload["phase"] == "claim_builder_section_extraction"
     provider_messages = schedule.payload["provider_messages"]
     assert isinstance(provider_messages, tuple)
     assert provider_messages[0]["role"] == "system"
@@ -80,10 +80,10 @@ def test_maps_one_workbench_plan_to_execution_schedule_plan() -> None:
     assert "source-unit:project-1:abc:0" in provider_messages[1]["content"]
     assert "Unit 0" in provider_messages[1]["content"]
 
-    prompt_a_provenance = schedule.payload["prompt_a_provenance"]
-    assert prompt_a_provenance == {
+    claim_builder_provenance = schedule.payload["claim_builder_provenance"]
+    assert claim_builder_provenance == {
         "workflow_run_id": plan.workflow_run_id,
-        "stage_run_id": "draft_observation_extraction",
+        "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": plan.source_unit_ref.value,
         "work_item_id": plan.work_item_id,
         "prompt_id": "faq_claim_observations",
@@ -98,7 +98,7 @@ def test_repeated_mapping_is_deterministic() -> None:
             _plan(work_item_id="work-1", source_unit_ordinal=1),
         ),
     )
-    use_case = MapDraftObservationPlansToExecutionSchedule()
+    use_case = MapClaimBuilderSectionPlansToExecutionSchedule()
 
     first = use_case.execute(command)
     second = use_case.execute(command)
@@ -118,7 +118,7 @@ def test_duplicate_work_item_id_is_rejected() -> None:
 
 def test_payload_hash_is_stable_through_execution_runtime_helper() -> None:
     command = _command((_plan(),))
-    use_case = MapDraftObservationPlansToExecutionSchedule()
+    use_case = MapClaimBuilderSectionPlansToExecutionSchedule()
 
     first = use_case.execute(command).schedule_plans[0]
     second = use_case.execute(command).schedule_plans[0]
@@ -128,9 +128,9 @@ def test_payload_hash_is_stable_through_execution_runtime_helper() -> None:
     ) == work_item_schedule_payload_hash(second.payload)
 
 
-def test_payload_contains_prompt_a_dispatch_seed_without_attempt_ids() -> None:
+def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> None:
     schedule = (
-        MapDraftObservationPlansToExecutionSchedule()
+        MapClaimBuilderSectionPlansToExecutionSchedule()
         .execute(
             _command((_plan(),)),
         )
@@ -144,7 +144,7 @@ def test_payload_contains_prompt_a_dispatch_seed_without_attempt_ids() -> None:
         "source_unit_ordinal",
         "phase",
         "provider_messages",
-        "prompt_a_provenance",
+        "claim_builder_provenance",
     )
     assert "work_item_attempt_id" not in schedule.payload
     assert "llm_task_id" not in schedule.payload
@@ -153,30 +153,30 @@ def test_payload_contains_prompt_a_dispatch_seed_without_attempt_ids() -> None:
     assert "text_preview" not in schedule.payload
     assert "prompt_text" not in schedule.payload
 
-    provenance = schedule.payload["prompt_a_provenance"]
+    provenance = schedule.payload["claim_builder_provenance"]
     assert "work_item_attempt_id" not in provenance
     assert "llm_task_id" not in provenance
     assert "llm_attempt_id" not in provenance
 
 
-def test_map_draft_observation_plans_to_execution_schedule_source_guard() -> None:
+def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "map_draft_observation_plans_to_execution_schedule.py",
+        "map_claim_builder_section_plans_to_execution_schedule.py",
     ).read_text(encoding="utf-8")
 
     required_markers = (
-        "MapDraftObservationPlansToExecutionSchedule",
-        "MapDraftObservationPlansToExecutionScheduleCommand",
-        "MapDraftObservationPlansToExecutionScheduleResult",
+        "MapClaimBuilderSectionPlansToExecutionSchedule",
+        "MapClaimBuilderSectionPlansToExecutionScheduleCommand",
+        "MapClaimBuilderSectionPlansToExecutionScheduleResult",
         "WorkItemSchedulePlan",
-        "DraftObservationExtractionWorkPlan",
-        "draft_observation_extraction",
+        "ClaimBuilderSectionWorkPlan",
+        "claim_builder_section_extraction",
         "source_document_ref",
         "source_unit_ref",
         "source_unit_ordinal",
         "provider_messages",
-        "prompt_a_provenance",
+        "claim_builder_provenance",
         "faq_claim_observations",
     )
     forbidden_markers = (

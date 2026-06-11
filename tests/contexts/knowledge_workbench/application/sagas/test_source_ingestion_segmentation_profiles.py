@@ -22,7 +22,7 @@ class StaticEstimator:
 def test_default_profile_describes_current_draft_observation_prompt() -> None:
     profile = default_source_ingestion_segmentation_profile()
 
-    assert profile.prompt.prompt_name == "draft_observation_extraction"
+    assert profile.prompt.prompt_name == "claim_builder_section_extraction"
     assert profile.prompt.node_id == "faq_claim_observations"
     assert (
         profile.prompt.prompt_path
@@ -37,7 +37,7 @@ def test_default_profile_describes_current_draft_observation_prompt() -> None:
 
 def test_profile_validation_rejects_impossible_budget() -> None:
     prompt = WorkbenchPromptProfile(
-        prompt_name="draft_observation_extraction",
+        prompt_name="claim_builder_section_extraction",
         node_id="faq_claim_observations",
         prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
         prompt_token_count=5_000,
@@ -63,7 +63,7 @@ def test_profile_value_objects_reject_invalid_shapes() -> None:
 
     with pytest.raises(ValueError, match="node_id must be non-empty"):
         WorkbenchPromptProfile(
-            prompt_name="draft_observation_extraction",
+            prompt_name="claim_builder_section_extraction",
             node_id=" ",
             prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
             prompt_token_count=1,

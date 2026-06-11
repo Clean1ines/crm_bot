@@ -4,11 +4,11 @@ from pathlib import Path
 def test_scheduling_service_materializes_scheduled_work_item_summary() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "schedule_draft_observation_extraction_work.py",
+        "schedule_claim_builder_section_work.py",
     ).read_text(encoding="utf-8")
 
     required_markers = (
-        "DraftObservationScheduledWorkItemSummary",
+        "ClaimBuilderScheduledWorkItemSummary",
         "scheduled_items",
         "payload_hash",
         "schedule_status",
@@ -42,14 +42,14 @@ def test_scheduling_service_materializes_scheduled_work_item_summary() -> None:
 def test_prompt_a_work_scheduled_checkpoint_persists_schedule_summary() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "advance_to_draft_observation_scheduling_phase.py",
+        "advance_to_claim_builder_work_scheduling_phase.py",
     ).read_text(encoding="utf-8")
 
     required_markers = (
         "schedule_schema_version",
         "scheduled_items",
         "to_checkpoint_payload",
-        "PROMPT_A_WORK_SCHEDULED",
+        "CLAIM_BUILDER_WORK_SCHEDULED",
     )
     forbidden_markers = (
         "capacity_runtime",
@@ -74,7 +74,7 @@ def test_prompt_a_work_scheduled_checkpoint_persists_schedule_summary() -> None:
 def test_draft_observation_schedule_payload_contains_prompt_a_dispatch_seed() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "map_draft_observation_plans_to_execution_schedule.py",
+        "map_claim_builder_section_plans_to_execution_schedule.py",
     ).read_text(encoding="utf-8")
 
     required_markers = (

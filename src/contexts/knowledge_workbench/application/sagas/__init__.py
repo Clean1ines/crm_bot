@@ -36,26 +36,26 @@ from .persist_accepted_source_ingestion_plan import (
     PersistAcceptedSourceIngestionPlanResult,
     PersistAcceptedSourceIngestionPlanUnitOfWorkPort,
 )
-from .plan_draft_observation_extraction_work import (
-    DraftObservationExtractionWorkPlan,
-    PlanDraftObservationExtractionWork,
-    PlanDraftObservationExtractionWorkCommand,
-    PlanDraftObservationExtractionWorkResult,
+from .plan_claim_builder_section_work import (
+    ClaimBuilderSectionWorkPlan,
+    PlanClaimBuilderSectionWork,
+    PlanClaimBuilderSectionWorkCommand,
+    PlanClaimBuilderSectionWorkResult,
 )
-from .map_draft_observation_plans_to_execution_schedule import (
-    MapDraftObservationPlansToExecutionSchedule,
-    MapDraftObservationPlansToExecutionScheduleCommand,
-    MapDraftObservationPlansToExecutionScheduleResult,
+from .map_claim_builder_section_plans_to_execution_schedule import (
+    MapClaimBuilderSectionPlansToExecutionSchedule,
+    MapClaimBuilderSectionPlansToExecutionScheduleCommand,
+    MapClaimBuilderSectionPlansToExecutionScheduleResult,
 )
-from .schedule_draft_observation_extraction_work import (
-    ScheduleDraftObservationExtractionWork,
-    ScheduleDraftObservationExtractionWorkCommand,
-    ScheduleDraftObservationExtractionWorkResult,
+from .schedule_claim_builder_section_work import (
+    ScheduleClaimBuilderSectionWork,
+    ScheduleClaimBuilderSectionWorkCommand,
+    ScheduleClaimBuilderSectionWorkResult,
 )
-from .advance_to_draft_observation_scheduling_phase import (
-    AdvanceToDraftObservationSchedulingPhase,
-    AdvanceToDraftObservationSchedulingPhaseCommand,
-    AdvanceToDraftObservationSchedulingPhaseResult,
+from .advance_to_claim_builder_work_scheduling_phase import (
+    AdvanceToClaimBuilderWorkSchedulingPhase,
+    AdvanceToClaimBuilderWorkSchedulingPhaseCommand,
+    AdvanceToClaimBuilderWorkSchedulingPhaseResult,
 )
 from .run_source_ingestion_first_phase import (
     CreateSourceUnitsForIngestionPort,
@@ -113,19 +113,19 @@ __all__ = (
     "KnowledgeExtractionSourcePhaseReconciler",
     "KnowledgeExtractionWorkflowState",
     "KnowledgeExtractionWorkflowStatus",
-    "DraftObservationExtractionWorkPlan",
-    "PlanDraftObservationExtractionWork",
-    "PlanDraftObservationExtractionWorkCommand",
-    "PlanDraftObservationExtractionWorkResult",
-    "MapDraftObservationPlansToExecutionScheduleResult",
-    "ScheduleDraftObservationExtractionWorkResult",
-    "ScheduleDraftObservationExtractionWorkCommand",
-    "ScheduleDraftObservationExtractionWork",
-    "AdvanceToDraftObservationSchedulingPhase",
-    "AdvanceToDraftObservationSchedulingPhaseCommand",
-    "AdvanceToDraftObservationSchedulingPhaseResult",
-    "MapDraftObservationPlansToExecutionScheduleCommand",
-    "MapDraftObservationPlansToExecutionSchedule",
+    "ClaimBuilderSectionWorkPlan",
+    "PlanClaimBuilderSectionWork",
+    "PlanClaimBuilderSectionWorkCommand",
+    "PlanClaimBuilderSectionWorkResult",
+    "MapClaimBuilderSectionPlansToExecutionScheduleResult",
+    "ScheduleClaimBuilderSectionWorkResult",
+    "ScheduleClaimBuilderSectionWorkCommand",
+    "ScheduleClaimBuilderSectionWork",
+    "AdvanceToClaimBuilderWorkSchedulingPhase",
+    "AdvanceToClaimBuilderWorkSchedulingPhaseCommand",
+    "AdvanceToClaimBuilderWorkSchedulingPhaseResult",
+    "MapClaimBuilderSectionPlansToExecutionScheduleCommand",
+    "MapClaimBuilderSectionPlansToExecutionSchedule",
     "PersistAcceptedSourceIngestionPlan",
     "PersistAcceptedSourceIngestionPlanCommand",
     "PersistAcceptedSourceIngestionPlanResult",

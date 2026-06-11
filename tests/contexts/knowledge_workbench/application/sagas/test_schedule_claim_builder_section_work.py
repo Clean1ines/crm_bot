@@ -16,9 +16,9 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
-from src.contexts.knowledge_workbench.application.sagas.schedule_draft_observation_extraction_work import (
-    ScheduleDraftObservationExtractionWork,
-    ScheduleDraftObservationExtractionWorkCommand,
+from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_section_work import (
+    ScheduleClaimBuilderSectionWork,
+    ScheduleClaimBuilderSectionWorkCommand,
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
@@ -115,8 +115,8 @@ def _command(
     *,
     source_units: tuple[SourceUnit, ...] | None = None,
     workflow_run_id: str = "knowledge-extraction:source-document:project-1:abc",
-) -> ScheduleDraftObservationExtractionWorkCommand:
-    return ScheduleDraftObservationExtractionWorkCommand(
+) -> ScheduleClaimBuilderSectionWorkCommand:
+    return ScheduleClaimBuilderSectionWorkCommand(
         workflow_run_id=workflow_run_id,
         source_document_ref=_document_ref(),
         source_units=_source_units() if source_units is None else source_units,
@@ -125,20 +125,18 @@ def _command(
 
 def _service(
     unit_of_work: WorkItemSchedulingRepositoryPort,
-) -> ScheduleDraftObservationExtractionWork:
-    return ScheduleDraftObservationExtractionWork(
+) -> ScheduleClaimBuilderSectionWork:
+    return ScheduleClaimBuilderSectionWork(
         scheduling_repository=unit_of_work,
     )
 
 
 def _work_item_id(*, workflow_run_id: str, unit_ref: str) -> str:
-    return (
-        f"knowledge-workbench:draft-observation-extraction:{workflow_run_id}:{unit_ref}"
-    )
+    return f"knowledge-workbench:claim-builder:section-extraction:{workflow_run_id}:{unit_ref}"
 
 
 def _work_kind() -> WorkKind:
-    return WorkKind("knowledge_workbench.draft_observation_extraction")
+    return WorkKind("knowledge_workbench.claim_builder.section_extraction")
 
 
 def _expected_payload(
@@ -149,7 +147,7 @@ def _expected_payload(
         "source_document_ref": _document_ref().value,
         "source_unit_ref": unit_ref,
         "source_unit_ordinal": ordinal,
-        "phase": "draft_observation_extraction",
+        "phase": "claim_builder_section_extraction",
         "provider_messages": (
             {
                 "role": "system",
@@ -167,9 +165,9 @@ def _expected_payload(
                 ),
             },
         ),
-        "prompt_a_provenance": {
+        "claim_builder_provenance": {
             "workflow_run_id": workflow_run_id,
-            "stage_run_id": "draft_observation_extraction",
+            "stage_run_id": "claim_builder_section_extraction",
             "source_unit_ref": unit_ref,
             "work_item_id": _work_item_id(
                 workflow_run_id=workflow_run_id,
@@ -203,11 +201,11 @@ async def test_schedules_created_work_items_for_source_units() -> None:
     assert first_payload["source_document_ref"] == _document_ref().value
     assert first_payload["source_unit_ref"] == "source-document:project-1:abc.unit.0"
     assert first_payload["source_unit_ordinal"] == 0
-    assert first_payload["phase"] == "draft_observation_extraction"
+    assert first_payload["phase"] == "claim_builder_section_extraction"
     assert "provider_messages" in first_payload
-    assert "prompt_a_provenance" in first_payload
+    assert "claim_builder_provenance" in first_payload
 
-    first_provenance = first_payload["prompt_a_provenance"]
+    first_provenance = first_payload["claim_builder_provenance"]
     assert isinstance(first_provenance, Mapping)
     assert first_provenance["workflow_run_id"] == (
         "knowledge-extraction:source-document:project-1:abc"
@@ -235,7 +233,9 @@ async def test_schedules_created_work_items_for_source_units() -> None:
         workflow_run_id="knowledge-extraction:source-document:project-1:abc",
         unit_ref="source-document:project-1:abc.unit.0",
     )
-    assert first_item.work_kind == "knowledge_workbench.draft_observation_extraction"
+    assert (
+        first_item.work_kind == "knowledge_workbench.claim_builder.section_extraction"
+    )
     assert first_item.idempotency_key == first_item.work_item_id
     assert first_item.payload_hash == work_item_schedule_payload_hash(first_payload)
     assert first_item.schedule_status == "created"
@@ -256,12 +256,14 @@ async def test_schedules_created_work_items_for_source_units() -> None:
         "source-document:project-1:abc.unit.1",
     )
     assert all("provider_messages" in saved.payload for saved in unit_of_work.saved)
-    assert all("prompt_a_provenance" in saved.payload for saved in unit_of_work.saved)
+    assert all(
+        "claim_builder_provenance" in saved.payload for saved in unit_of_work.saved
+    )
     assert (
         "# Unit 0\\n\\nBody"
         in unit_of_work.saved[0].payload["provider_messages"][1]["content"]
     )
-    assert unit_of_work.saved[0].payload["prompt_a_provenance"]["prompt_id"] == (
+    assert unit_of_work.saved[0].payload["claim_builder_provenance"]["prompt_id"] == (
         "faq_claim_observations"
     )
 
@@ -347,7 +349,7 @@ async def test_invalid_command_is_rejected() -> None:
         _command(workflow_run_id="  ")
 
     with pytest.raises(TypeError, match="source_units must be tuple"):
-        ScheduleDraftObservationExtractionWorkCommand(
+        ScheduleClaimBuilderSectionWorkCommand(
             workflow_run_id="run-1",
             source_document_ref=_document_ref(),
             source_units=cast(tuple[SourceUnit, ...], []),
@@ -369,24 +371,24 @@ async def test_repeated_execution_uses_same_payload_hashes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_schedule_draft_observation_extraction_work_source_guard() -> None:
+async def test_schedule_claim_builder_section_work_source_guard() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "schedule_draft_observation_extraction_work.py",
+        "schedule_claim_builder_section_work.py",
     ).read_text(encoding="utf-8")
 
     required_markers = (
-        "ScheduleDraftObservationExtractionWork",
-        "ScheduleDraftObservationExtractionWorkCommand",
-        "ScheduleDraftObservationExtractionWorkResult",
-        "PlanDraftObservationExtractionWork",
-        "MapDraftObservationPlansToExecutionSchedule",
+        "ScheduleClaimBuilderSectionWork",
+        "ScheduleClaimBuilderSectionWorkCommand",
+        "ScheduleClaimBuilderSectionWorkResult",
+        "PlanClaimBuilderSectionWork",
+        "MapClaimBuilderSectionPlansToExecutionSchedule",
         "EnsureWorkItemsScheduled",
         "WorkItemSchedulingRepositoryPort",
         "created_count",
         "already_exists_count",
         "conflict_count",
-        "DraftObservationScheduledWorkItemSummary",
+        "ClaimBuilderScheduledWorkItemSummary",
         "scheduled_items",
         "payload_hash",
         "schedule_status",
@@ -420,7 +422,7 @@ def test_schedule_draft_observation_service_uses_repository_without_transaction_
 ):
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "schedule_draft_observation_extraction_work.py",
+        "schedule_claim_builder_section_work.py",
     ).read_text(encoding="utf-8")
 
     assert "scheduling_repository: WorkItemSchedulingRepositoryPort" in source

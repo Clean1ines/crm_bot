@@ -27,7 +27,7 @@ class FakeTokenEstimator:
 
 def _prompt_text(
     *,
-    prompt_name: str = "draft_observation_extraction",
+    prompt_name: str = "claim_builder_section_extraction",
     node_id: str = "faq_claim_observations",
     prompt_path: str = "src/agent/prompts/faq_surface_claim_observations.ru.txt",
     text: str = "NODE: faq_claim_observations\nReturn JSON.",
@@ -55,7 +55,7 @@ def test_service_estimates_prompt_tokens() -> None:
     result = service.estimate_prompt_tokens(_prompt_text())
 
     assert result == VerifiedPromptTokenEstimate(
-        prompt_name="draft_observation_extraction",
+        prompt_name="claim_builder_section_extraction",
         node_id="faq_claim_observations",
         prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
         prompt_token_count=123,
@@ -130,7 +130,7 @@ def test_prompt_text_and_verified_estimate_validate_input() -> None:
 
     with pytest.raises(ValueError, match="prompt_token_count must be > 0"):
         VerifiedPromptTokenEstimate(
-            prompt_name="draft_observation_extraction",
+            prompt_name="claim_builder_section_extraction",
             node_id="faq_claim_observations",
             prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
             prompt_token_count=0,

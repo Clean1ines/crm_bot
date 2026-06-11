@@ -290,19 +290,19 @@ def test_legacy_prompt_a_phases_map_to_claim_builder_phases() -> None:
 
     assert (
         mapping_by_key[
-            KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED.value
+            KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED.value
         ].canonical_phase
         is KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_WORK_SCHEDULING
     )
     assert (
         mapping_by_key[
-            KnowledgeExtractionPhaseKey.PROMPT_A_WORK_COMPLETED.value
+            KnowledgeExtractionPhaseKey.CLAIM_BUILDER_SECTION_EXTRACTION_COMPLETED.value
         ].canonical_phase
         is KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION
     )
     assert (
         mapping_by_key[
-            KnowledgeExtractionPhaseKey.PROMPT_A_ARTIFACTS_APPLIED.value
+            KnowledgeExtractionPhaseKey.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED.value
         ].canonical_phase
         is KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION
     )

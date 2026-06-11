@@ -15,9 +15,9 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
-from src.contexts.knowledge_workbench.application.sagas.advance_to_draft_observation_scheduling_phase import (
-    AdvanceToDraftObservationSchedulingPhase,
-    AdvanceToDraftObservationSchedulingPhaseCommand,
+from src.contexts.knowledge_workbench.application.sagas.advance_to_claim_builder_work_scheduling_phase import (
+    AdvanceToClaimBuilderWorkSchedulingPhase,
+    AdvanceToClaimBuilderWorkSchedulingPhaseCommand,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionPhaseCheckpoint,
@@ -26,8 +26,8 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
     KnowledgeExtractionWorkflowState,
     KnowledgeExtractionWorkflowStatus,
 )
-from src.contexts.knowledge_workbench.application.sagas.schedule_draft_observation_extraction_work import (
-    ScheduleDraftObservationExtractionWork,
+from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_section_work import (
+    ScheduleClaimBuilderSectionWork,
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
@@ -153,9 +153,9 @@ def _source_units() -> tuple[SourceUnit, ...]:
 
 def _service(
     unit_of_work: WorkItemSchedulingRepositoryPort,
-) -> AdvanceToDraftObservationSchedulingPhase:
-    return AdvanceToDraftObservationSchedulingPhase(
-        scheduling_service=ScheduleDraftObservationExtractionWork(
+) -> AdvanceToClaimBuilderWorkSchedulingPhase:
+    return AdvanceToClaimBuilderWorkSchedulingPhase(
+        scheduling_service=ScheduleClaimBuilderSectionWork(
             scheduling_repository=unit_of_work,
         ),
     )
@@ -165,8 +165,8 @@ def _command(
     *,
     state: KnowledgeExtractionWorkflowState | None = None,
     source_units: tuple[SourceUnit, ...] | None = None,
-) -> AdvanceToDraftObservationSchedulingPhaseCommand:
-    return AdvanceToDraftObservationSchedulingPhaseCommand(
+) -> AdvanceToClaimBuilderWorkSchedulingPhaseCommand:
+    return AdvanceToClaimBuilderWorkSchedulingPhaseCommand(
         state=_state() if state is None else state,
         source_units=_source_units() if source_units is None else source_units,
         occurred_at=_later(),
@@ -175,13 +175,13 @@ def _command(
 
 def _work_item_id(*, unit_ref: str) -> str:
     return (
-        "knowledge-workbench:draft-observation-extraction:"
+        "knowledge-workbench:claim-builder:section-extraction:"
         f"{_workflow_run_id()}:{unit_ref}"
     )
 
 
 def _work_kind() -> WorkKind:
-    return WorkKind("knowledge_workbench.draft_observation_extraction")
+    return WorkKind("knowledge_workbench.claim_builder.section_extraction")
 
 
 def _expected_payload(*, unit_ref: str, ordinal: int) -> dict[str, object]:
@@ -190,7 +190,32 @@ def _expected_payload(*, unit_ref: str, ordinal: int) -> dict[str, object]:
         "source_document_ref": _document_ref().value,
         "source_unit_ref": unit_ref,
         "source_unit_ordinal": ordinal,
-        "phase": "draft_observation_extraction",
+        "phase": "claim_builder_section_extraction",
+        "provider_messages": (
+            {
+                "role": "system",
+                "content": (
+                    "Extract draft claim observations as strict JSON. "
+                    "Use prompt_id faq_claim_observations and return only JSON."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"source_unit_ref: {unit_ref}\n"
+                    f"heading_path: Unit {ordinal}\n\n"
+                    f"# Unit {ordinal}\n\nBody"
+                ),
+            },
+        ),
+        "claim_builder_provenance": {
+            "workflow_run_id": _workflow_run_id(),
+            "stage_run_id": "claim_builder_section_extraction",
+            "source_unit_ref": unit_ref,
+            "work_item_id": _work_item_id(unit_ref=unit_ref),
+            "prompt_id": "faq_claim_observations",
+            "prompt_version": "v1",
+        },
     }
 
 
@@ -202,12 +227,12 @@ async def test_advances_phase_after_scheduling_created_work() -> None:
 
     assert (
         result.state.current_phase
-        is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+        is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
     )
     assert result.state.status is KnowledgeExtractionWorkflowStatus.RUNNING
     assert (
         result.checkpoint.phase_key
-        is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+        is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
     )
     assert result.checkpoint.phase_status is KnowledgeExtractionPhaseStatus.COMPLETED
     assert result.checkpoint.expected_count == 2
@@ -231,7 +256,10 @@ async def test_advances_phase_after_scheduling_created_work() -> None:
     assert first_item["work_item_id"] == _work_item_id(
         unit_ref="source-document:project-1:abc.unit.0",
     )
-    assert first_item["work_kind"] == "knowledge_workbench.draft_observation_extraction"
+    assert (
+        first_item["work_kind"]
+        == "knowledge_workbench.claim_builder.section_extraction"
+    )
     assert first_item["idempotency_key"] == first_item["work_item_id"]
     assert first_item["payload_hash"] == work_item_schedule_payload_hash(
         _expected_payload(
@@ -266,7 +294,7 @@ async def test_repeated_execution_uses_already_exists_and_still_advances() -> No
     )
     assert (
         second.state.current_phase
-        is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+        is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
     )
     assert len(unit_of_work.saved) == 2
 
@@ -285,7 +313,7 @@ async def test_conflict_raises_and_does_not_produce_checkpoint() -> None:
         schedule_payload_hashes={work_item_id: "different-payload-hash"},
     )
 
-    with pytest.raises(ValueError, match="draft observation scheduling conflict"):
+    with pytest.raises(ValueError, match="claim_builder work scheduling conflict"):
         await _service(unit_of_work).execute(
             _command(source_units=(_source_unit(unit_ref=unit_ref, ordinal=0),)),
         )
@@ -298,7 +326,7 @@ async def test_rejects_wrong_current_phase() -> None:
     with pytest.raises(ValueError, match="current_phase must be SOURCE_UNITS_CREATED"):
         _command(
             state=_state(
-                current_phase=KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED,
+                current_phase=KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED,
             ),
         )
 
@@ -313,11 +341,11 @@ async def test_rejects_non_running_workflow() -> None:
 async def test_existing_checkpoint_is_replaced_not_duplicated() -> None:
     old_checkpoint = KnowledgeExtractionPhaseCheckpoint(
         workflow_run_id=_workflow_run_id(),
-        phase_key=KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED,
+        phase_key=KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED,
         phase_status=KnowledgeExtractionPhaseStatus.COMPLETED,
         expected_count=1,
         completed_count=1,
-        idempotency_key=f"prompt-a-work-scheduled:{_workflow_run_id()}",
+        idempotency_key=f"claim-builder-work-scheduled:{_workflow_run_id()}",
         checkpoint_payload={"old": True},
         updated_at=_now(),
     )
@@ -330,7 +358,8 @@ async def test_existing_checkpoint_is_replaced_not_duplicated() -> None:
     matching_checkpoints = tuple(
         checkpoint
         for checkpoint in result.state.checkpoints
-        if checkpoint.phase_key is KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+        if checkpoint.phase_key
+        is KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
     )
     assert len(matching_checkpoints) == 1
     assert matching_checkpoints[0].checkpoint_payload["planned_count"] == 2
@@ -338,18 +367,18 @@ async def test_existing_checkpoint_is_replaced_not_duplicated() -> None:
 
 
 @pytest.mark.asyncio
-async def test_advance_to_draft_observation_scheduling_phase_source_guard() -> None:
+async def test_advance_to_claim_builder_work_scheduling_phase_source_guard() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "advance_to_draft_observation_scheduling_phase.py",
+        "advance_to_claim_builder_work_scheduling_phase.py",
     ).read_text(encoding="utf-8")
 
     required_markers = (
-        "AdvanceToDraftObservationSchedulingPhase",
-        "AdvanceToDraftObservationSchedulingPhaseCommand",
-        "AdvanceToDraftObservationSchedulingPhaseResult",
-        "ScheduleDraftObservationExtractionWork",
-        "PROMPT_A_WORK_SCHEDULED",
+        "AdvanceToClaimBuilderWorkSchedulingPhase",
+        "AdvanceToClaimBuilderWorkSchedulingPhaseCommand",
+        "AdvanceToClaimBuilderWorkSchedulingPhaseResult",
+        "ScheduleClaimBuilderSectionWork",
+        "CLAIM_BUILDER_WORK_SCHEDULED",
         "execution_runtime.ensure_work_items_scheduled",
         "replace_or_append_checkpoint",
         "schedule_schema_version",
@@ -385,12 +414,12 @@ def _marker(*parts: str) -> str:
     return "".join(parts)
 
 
-def test_advance_to_draft_observation_scheduling_phase_has_no_transaction_ownership() -> (
+def test_advance_to_claim_builder_work_scheduling_phase_has_no_transaction_ownership() -> (
     None
 ):
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "advance_to_draft_observation_scheduling_phase.py",
+        "advance_to_claim_builder_work_scheduling_phase.py",
     ).read_text(encoding="utf-8")
 
     assert ".commit(" not in source

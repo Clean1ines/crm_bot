@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from src.contexts.knowledge_workbench.application.sagas.plan_draft_observation_extraction_work import (
-    DraftObservationExtractionWorkPlan,
-    PlanDraftObservationExtractionWork,
-    PlanDraftObservationExtractionWorkCommand,
-    PlanDraftObservationExtractionWorkResult,
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    ClaimBuilderSectionWorkPlan,
+    PlanClaimBuilderSectionWork,
+    PlanClaimBuilderSectionWorkCommand,
+    PlanClaimBuilderSectionWorkResult,
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
@@ -63,8 +63,8 @@ def _command(
     source_units: tuple[SourceUnit, ...],
     workflow_run_id: str = "knowledge-extraction:source-document:project-1:abc",
     source_document_ref: SourceDocumentRef | None = None,
-) -> PlanDraftObservationExtractionWorkCommand:
-    return PlanDraftObservationExtractionWorkCommand(
+) -> PlanClaimBuilderSectionWorkCommand:
+    return PlanClaimBuilderSectionWorkCommand(
         workflow_run_id=workflow_run_id,
         source_document_ref=source_document_ref or _document_ref(),
         source_units=source_units,
@@ -82,9 +82,9 @@ def test_creates_one_deterministic_plan_per_source_unit() -> None:
     )
     command = _command(source_units=(second, first))
 
-    result = PlanDraftObservationExtractionWork().execute(command)
+    result = PlanClaimBuilderSectionWork().execute(command)
 
-    assert isinstance(result, PlanDraftObservationExtractionWorkResult)
+    assert isinstance(result, PlanClaimBuilderSectionWorkResult)
     assert len(result.plans) == 2
     assert tuple(plan.source_unit_ordinal for plan in result.plans) == (0, 1)
     assert tuple(plan.source_unit_ref for plan in result.plans) == (
@@ -93,9 +93,10 @@ def test_creates_one_deterministic_plan_per_source_unit() -> None:
     )
 
     for plan in result.plans:
-        assert isinstance(plan, DraftObservationExtractionWorkPlan)
+        assert isinstance(plan, ClaimBuilderSectionWorkPlan)
         assert (
-            plan.work_kind.value == "knowledge_workbench.draft_observation_extraction"
+            plan.work_kind.value
+            == "knowledge_workbench.claim_builder.section_extraction"
         )
         assert command.workflow_run_id in plan.work_item_id
         assert plan.source_unit_ref.value in plan.work_item_id
@@ -114,7 +115,7 @@ def test_repeated_execution_returns_identical_plans() -> None:
         ),
     )
     command = _command(source_units=source_units)
-    use_case = PlanDraftObservationExtractionWork()
+    use_case = PlanClaimBuilderSectionWork()
 
     first = use_case.execute(command)
     second = use_case.execute(command)
@@ -135,7 +136,7 @@ def test_duplicate_source_unit_refs_are_rejected() -> None:
 
 
 def test_empty_source_units_returns_empty_plans() -> None:
-    result = PlanDraftObservationExtractionWork().execute(
+    result = PlanClaimBuilderSectionWork().execute(
         _command(source_units=()),
     )
 
@@ -160,18 +161,18 @@ def test_source_unit_document_ref_mismatch_is_rejected() -> None:
         )
 
 
-def test_plan_draft_observation_extraction_work_source_guard() -> None:
+def test_plan_claim_builder_section_work_source_guard() -> None:
     source = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "plan_draft_observation_extraction_work.py",
+        "plan_claim_builder_section_work.py",
     ).read_text(encoding="utf-8")
 
     required_markers = (
-        "PlanDraftObservationExtractionWork",
-        "PlanDraftObservationExtractionWorkCommand",
-        "PlanDraftObservationExtractionWorkResult",
-        "DraftObservationExtractionWorkPlan",
-        "knowledge_workbench.draft_observation_extraction",
+        "PlanClaimBuilderSectionWork",
+        "PlanClaimBuilderSectionWorkCommand",
+        "PlanClaimBuilderSectionWorkResult",
+        "ClaimBuilderSectionWorkPlan",
+        "knowledge_workbench.claim_builder.section_extraction",
         "idempotency_key",
         "WorkKind",
         "source_unit_text",
@@ -191,7 +192,7 @@ def test_plan_draft_observation_extraction_work_source_guard() -> None:
         "LLM",
         "Groq",
         "qwen",
-        "PROMPT_A_WORK_SCHEDULED",
+        "CLAIM_BUILDER_WORK_SCHEDULED",
     )
 
     for marker in required_markers:

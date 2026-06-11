@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from src.contexts.knowledge_workbench.application.sagas.advance_to_draft_observation_scheduling_phase import (
-    AdvanceToDraftObservationSchedulingPhase,
-    AdvanceToDraftObservationSchedulingPhaseCommand,
+from src.contexts.knowledge_workbench.application.sagas.advance_to_claim_builder_work_scheduling_phase import (
+    AdvanceToClaimBuilderWorkSchedulingPhase,
+    AdvanceToClaimBuilderWorkSchedulingPhaseCommand,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_reconcile_unit_of_work import (
     KnowledgeExtractionSagaReconcileUnitOfWorkPort,
@@ -19,8 +19,8 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_sag
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_source_phase_reconciliation import (
     KnowledgeExtractionSourcePhaseReconciler,
 )
-from src.contexts.knowledge_workbench.application.sagas.schedule_draft_observation_extraction_work import (
-    ScheduleDraftObservationExtractionWork,
+from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_section_work import (
+    ScheduleClaimBuilderSectionWork,
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
     SourceDocumentRef,
@@ -113,14 +113,14 @@ class KnowledgeExtractionSaga:
                 source_units = await self._unit_of_work.source_management_repository.list_source_units_for_document(
                     SourceDocumentRef(state.source_document_ref),
                 )
-                phase_result = await AdvanceToDraftObservationSchedulingPhase(
-                    scheduling_service=ScheduleDraftObservationExtractionWork(
+                phase_result = await AdvanceToClaimBuilderWorkSchedulingPhase(
+                    scheduling_service=ScheduleClaimBuilderSectionWork(
                         scheduling_repository=(
                             self._unit_of_work.work_item_scheduling_repository
                         ),
                     ),
                 ).execute(
-                    AdvanceToDraftObservationSchedulingPhaseCommand(
+                    AdvanceToClaimBuilderWorkSchedulingPhaseCommand(
                         state=state,
                         source_units=source_units,
                         occurred_at=command.occurred_at,
@@ -128,10 +128,10 @@ class KnowledgeExtractionSaga:
                 )
                 if (
                     phase_result.state.current_phase
-                    is not KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED
+                    is not KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED
                 ):
                     raise ValueError(
-                        "draft observation scheduling phase did not advance"
+                        "claim_builder work scheduling phase did not advance"
                     )
                 await self._unit_of_work.saga_state_repository.save_phase_checkpoint(
                     phase_result.checkpoint,

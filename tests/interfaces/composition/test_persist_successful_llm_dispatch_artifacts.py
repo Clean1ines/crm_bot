@@ -83,7 +83,7 @@ def _dispatch_payload() -> dict[str, object]:
             ),
             "prompt_a_provenance": {
                 "workflow_run_id": "run-1",
-                "stage_run_id": "draft_observation_extraction",
+                "stage_run_id": "claim_builder_section_extraction",
                 "source_unit_ref": "source-unit-1",
                 "work_item_id": "work-1",
                 "prompt_id": "faq_claim_observations",
@@ -201,7 +201,7 @@ async def test_artifact_payload_includes_attempt_work_item_dispatch_and_output_m
                 ],
                 "prompt_a_provenance": {
                     "workflow_run_id": "run-1",
-                    "stage_run_id": "draft_observation_extraction",
+                    "stage_run_id": "claim_builder_section_extraction",
                     "source_unit_ref": "source-unit-1",
                     "work_item_id": "work-1",
                     "prompt_id": "faq_claim_observations",

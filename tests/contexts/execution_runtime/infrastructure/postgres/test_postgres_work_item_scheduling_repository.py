@@ -93,7 +93,7 @@ class FakeConnection:
 def _work_item(work_item_id: str = "work-1") -> WorkItem:
     return WorkItem(
         work_item_id=work_item_id,
-        work_kind=WorkKind("knowledge_workbench.draft_observation_extraction"),
+        work_kind=WorkKind("knowledge_workbench.claim_builder.section_extraction"),
     )
 
 

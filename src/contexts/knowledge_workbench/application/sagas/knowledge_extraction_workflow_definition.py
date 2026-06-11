@@ -444,19 +444,19 @@ LEGACY_PHASE_MIGRATION_MAP = (
         replacement_reason="Source unit creation completes source ingestion.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
-        legacy_phase_key=KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED.value,
+        legacy_phase_key=KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED.value,
         canonical_phase=KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_WORK_SCHEDULING,
         migration_status="current_contract",
         replacement_reason="Prompt A scheduling is renamed claim_builder section work scheduling.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
-        legacy_phase_key=KnowledgeExtractionPhaseKey.PROMPT_A_WORK_COMPLETED.value,
+        legacy_phase_key=KnowledgeExtractionPhaseKey.CLAIM_BUILDER_SECTION_EXTRACTION_COMPLETED.value,
         canonical_phase=KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION,
         migration_status="current_contract",
         replacement_reason="Prompt A completion is folded into claim_builder section extraction.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
-        legacy_phase_key=KnowledgeExtractionPhaseKey.PROMPT_A_ARTIFACTS_APPLIED.value,
+        legacy_phase_key=KnowledgeExtractionPhaseKey.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED.value,
         canonical_phase=KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION,
         migration_status="current_contract",
         replacement_reason="Draft observation application is part of claim_builder section extraction.",

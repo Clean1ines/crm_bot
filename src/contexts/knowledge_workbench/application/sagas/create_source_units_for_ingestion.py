@@ -204,7 +204,7 @@ def default_source_ingestion_segmentation_budget() -> DocumentSegmentationBudget
     # Production config will later pass real prompt/model request-budget values.
     return DocumentSegmentationBudget(
         prompt=SegmentationPromptProfile(
-            prompt_name="draft_observation_extraction",
+            prompt_name="claim_builder_section_extraction",
             prompt_token_count=2_000,
         ),
         model=SegmentationModelBudgetProfile(

@@ -466,10 +466,16 @@ async def test_no_future_phases() -> None:
         checkpoint.phase_key
         for checkpoint in unit_of_work.saga_state_repository.saved_checkpoints
     }
-    assert KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED not in saved_phase_keys
-    assert KnowledgeExtractionPhaseKey.PROMPT_A_WORK_COMPLETED not in saved_phase_keys
     assert (
-        KnowledgeExtractionPhaseKey.PROMPT_A_ARTIFACTS_APPLIED not in saved_phase_keys
+        KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED not in saved_phase_keys
+    )
+    assert (
+        KnowledgeExtractionPhaseKey.CLAIM_BUILDER_SECTION_EXTRACTION_COMPLETED
+        not in saved_phase_keys
+    )
+    assert (
+        KnowledgeExtractionPhaseKey.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED
+        not in saved_phase_keys
     )
 
 
@@ -552,7 +558,7 @@ def test_create_source_units_for_ingestion_source_guard() -> None:
         "document_segmentation_v1",
         "max_source_segment_tokens",
         "primary_model",
-        "draft_observation_extraction",
+        "claim_builder_section_extraction",
         "CreateSourceUnitsForIngestion",
         "CreateSourceUnitsForIngestionCommand",
         "CreateSourceUnitsForIngestionResult",
@@ -587,7 +593,7 @@ def test_create_source_units_for_ingestion_source_guard() -> None:
         "asyncpg",
         "postgres",
         "RunClaimExtractionStageAsync",
-        "PROMPT_A_WORK_SCHEDULED",
+        "CLAIM_BUILDER_WORK_SCHEDULED",
         "capacity_runtime",
         "execution_runtime",
         "llm_runtime",

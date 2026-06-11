@@ -13,13 +13,13 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
     SourceUnitRef,
 )
 
-DRAFT_OBSERVATION_EXTRACTION_WORK_KIND = WorkKind(
-    "knowledge_workbench.draft_observation_extraction",
+CLAIM_BUILDER_SECTION_WORK_KIND = WorkKind(
+    "knowledge_workbench.claim_builder.section_extraction",
 )
 
 
 @dataclass(frozen=True, slots=True)
-class DraftObservationExtractionWorkPlan:
+class ClaimBuilderSectionWorkPlan:
     workflow_run_id: str
     source_document_ref: SourceDocumentRef
     source_unit_ref: SourceUnitRef
@@ -52,7 +52,7 @@ class DraftObservationExtractionWorkPlan:
 
 
 @dataclass(frozen=True, slots=True)
-class PlanDraftObservationExtractionWorkCommand:
+class PlanClaimBuilderSectionWorkCommand:
     workflow_run_id: str
     source_document_ref: SourceDocumentRef
     source_units: tuple[SourceUnit, ...]
@@ -76,24 +76,24 @@ class PlanDraftObservationExtractionWorkCommand:
 
 
 @dataclass(frozen=True, slots=True)
-class PlanDraftObservationExtractionWorkResult:
-    plans: tuple[DraftObservationExtractionWorkPlan, ...]
+class PlanClaimBuilderSectionWorkResult:
+    plans: tuple[ClaimBuilderSectionWorkPlan, ...]
 
     def __post_init__(self) -> None:
         if not isinstance(self.plans, tuple):
             raise TypeError("plans must be tuple")
         for plan in self.plans:
-            if not isinstance(plan, DraftObservationExtractionWorkPlan):
+            if not isinstance(plan, ClaimBuilderSectionWorkPlan):
                 raise TypeError(
-                    "plans must contain only DraftObservationExtractionWorkPlan",
+                    "plans must contain only ClaimBuilderSectionWorkPlan",
                 )
 
 
-class PlanDraftObservationExtractionWork:
+class PlanClaimBuilderSectionWork:
     def execute(
         self,
-        command: PlanDraftObservationExtractionWorkCommand,
-    ) -> PlanDraftObservationExtractionWorkResult:
+        command: PlanClaimBuilderSectionWorkCommand,
+    ) -> PlanClaimBuilderSectionWorkResult:
         ordered_source_units = tuple(
             sorted(command.source_units, key=lambda source_unit: source_unit.ordinal),
         )
@@ -105,7 +105,7 @@ class PlanDraftObservationExtractionWork:
             )
             for source_unit in ordered_source_units
         )
-        return PlanDraftObservationExtractionWorkResult(plans=plans)
+        return PlanClaimBuilderSectionWorkResult(plans=plans)
 
 
 def _build_plan(
@@ -113,12 +113,12 @@ def _build_plan(
     workflow_run_id: str,
     source_document_ref: SourceDocumentRef,
     source_unit: SourceUnit,
-) -> DraftObservationExtractionWorkPlan:
-    work_item_id = _draft_observation_extraction_work_item_id(
+) -> ClaimBuilderSectionWorkPlan:
+    work_item_id = _claim_builder_section_work_item_id(
         workflow_run_id=workflow_run_id,
         source_unit_ref=source_unit.unit_ref,
     )
-    return DraftObservationExtractionWorkPlan(
+    return ClaimBuilderSectionWorkPlan(
         workflow_run_id=workflow_run_id,
         source_document_ref=source_document_ref,
         source_unit_ref=source_unit.unit_ref,
@@ -126,18 +126,18 @@ def _build_plan(
         source_unit_text=source_unit.text.value,
         heading_path=source_unit.heading_path.parts,
         work_item_id=work_item_id,
-        work_kind=DRAFT_OBSERVATION_EXTRACTION_WORK_KIND,
+        work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
         idempotency_key=work_item_id,
     )
 
 
-def _draft_observation_extraction_work_item_id(
+def _claim_builder_section_work_item_id(
     *,
     workflow_run_id: str,
     source_unit_ref: SourceUnitRef,
 ) -> str:
     return (
-        "knowledge-workbench:draft-observation-extraction:"
+        "knowledge-workbench:claim-builder:section-extraction:"
         f"{workflow_run_id}:{source_unit_ref.value}"
     )
 

@@ -46,9 +46,9 @@ def test_canonical_scheduling_markers_exist() -> None:
             "src/contexts/execution_runtime/infrastructure/postgres/"
             "postgres_work_item_scheduling_repository.py",
         ),
-        "ScheduleDraftObservationExtractionWork": Path(
+        "ScheduleClaimBuilderSectionWork": Path(
             "src/contexts/knowledge_workbench/application/sagas/"
-            "schedule_draft_observation_extraction_work.py",
+            "schedule_claim_builder_section_work.py",
         ),
     }
 

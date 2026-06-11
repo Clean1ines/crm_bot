@@ -212,7 +212,9 @@ async def test_does_not_persist_source_units_or_future_phases() -> None:
         for checkpoint in unit_of_work.saga_state_repository.saved_checkpoints
     }
     assert KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED not in saved_phase_keys
-    assert KnowledgeExtractionPhaseKey.PROMPT_A_WORK_SCHEDULED not in saved_phase_keys
+    assert (
+        KnowledgeExtractionPhaseKey.CLAIM_BUILDER_WORK_SCHEDULED not in saved_phase_keys
+    )
 
 
 @pytest.mark.asyncio

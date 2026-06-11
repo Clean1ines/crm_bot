@@ -497,7 +497,7 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
     )
     budget = config.to_document_segmentation_budget()
 
-    assert budget.prompt.prompt_name == "draft_observation_extraction"
+    assert budget.prompt.prompt_name == "claim_builder_section_extraction"
     assert budget.prompt.prompt_token_count == expected_prompt_tokens
     assert budget.model.profile_name == "primary_model"
     assert budget.model.max_request_input_tokens == 6_000
@@ -529,7 +529,7 @@ async def test_factory_runner_injects_default_segmentation_budget(
     assert len(FakeInnerRunner.calls) == 1
     budget = FakeInnerRunner.calls[0].segmentation_budget
     assert budget is not None
-    assert budget.prompt.prompt_name == "draft_observation_extraction"
+    assert budget.prompt.prompt_name == "claim_builder_section_extraction"
     assert budget.prompt.prompt_token_count == expected_prompt_tokens
     assert budget.model.profile_name == "primary_model"
 
@@ -627,7 +627,7 @@ def test_composition_segmentation_budget_source_guard() -> None:
         "capacity_runtime",
         "execution_runtime",
         "artifact_runtime",
-        "PROMPT_A_WORK_SCHEDULED",
+        "CLAIM_BUILDER_WORK_SCHEDULED",
         "worker_loop",
         "JobDispatcher",
         "queue",

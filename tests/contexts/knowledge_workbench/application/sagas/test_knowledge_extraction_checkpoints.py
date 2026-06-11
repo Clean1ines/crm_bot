@@ -163,7 +163,7 @@ def test_checkpoint_helper_source_guard() -> None:
     ).read_text(encoding="utf-8")
     phase_transition_text = Path(
         "src/contexts/knowledge_workbench/application/sagas/"
-        "advance_to_draft_observation_scheduling_phase.py",
+        "advance_to_claim_builder_work_scheduling_phase.py",
     ).read_text(encoding="utf-8")
 
     helper_required = (

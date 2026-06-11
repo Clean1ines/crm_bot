@@ -22,7 +22,7 @@ def _dispatch_payload() -> dict[str, object]:
             ),
             "prompt_a_provenance": {
                 "workflow_run_id": "run-1",
-                "stage_run_id": "draft_observation_extraction",
+                "stage_run_id": "claim_builder_section_extraction",
                 "source_unit_ref": "source-unit-1",
                 "work_item_id": "work-1",
                 "prompt_id": "faq_claim_observations",
@@ -88,7 +88,7 @@ def test_to_mapping_preserves_llm_dispatch_output_payload_shape() -> None:
                 ],
                 "prompt_a_provenance": {
                     "workflow_run_id": "run-1",
-                    "stage_run_id": "draft_observation_extraction",
+                    "stage_run_id": "claim_builder_section_extraction",
                     "source_unit_ref": "source-unit-1",
                     "work_item_id": "work-1",
                     "prompt_id": "faq_claim_observations",
@@ -131,7 +131,7 @@ def test_prompt_a_provenance_seed_returns_schedule_seed() -> None:
 
     assert provenance == {
         "workflow_run_id": "run-1",
-        "stage_run_id": "draft_observation_extraction",
+        "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": "source-unit-1",
         "work_item_id": "work-1",
         "prompt_id": "faq_claim_observations",
