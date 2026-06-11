@@ -14,6 +14,10 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admissi
     SourceIngestionActor,
     SourceIngestionAdmissionStatus,
 )
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_workflow_effects import (
+    BuildSourceIngestionWorkflowEffects,
+    BuildSourceIngestionWorkflowEffectsCommand,
+)
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segmentation_profiles import (
     SourceIngestionSegmentationProfile,
     WorkbenchModelRequestBudgetProfile,
@@ -29,6 +33,12 @@ from src.contexts.knowledge_workbench.document_segmentation.domain import (
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_command import (
+    WorkflowCommandStatus,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+    WorkflowCommandId,
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.interfaces.composition import source_ingestion_first_phase as composition
@@ -92,6 +102,12 @@ class FakeTransaction:
 
     async def start(self) -> None:
         self.start_count += 1
+
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
 
 
 class FakeConnection:
@@ -159,6 +175,143 @@ class FakeSagaRepository:
         FakeSagaRepository.constructed_with.append(connection)
 
 
+class FakeWorkflowCommandLogRepository:
+    constructed_with: list[FakeConnection] = []
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        FakeWorkflowCommandLogRepository.constructed_with.append(connection)
+
+    async def append_pending_command(self, command: object) -> object:
+        self.connection.executed.append(
+            ("workflow_runtime_command_log.append", (command,))
+        )
+        return command
+
+    async def mark_command_completed(
+        self,
+        *,
+        command_id: object,
+        completed_at: datetime,
+    ) -> object:
+        self.connection.executed.append(
+            (
+                "workflow_runtime_command_log.completed",
+                (command_id, completed_at),
+            )
+        )
+        return object()
+
+
+class FakeWorkflowOutboxRepository:
+    constructed_with: list[FakeConnection] = []
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        FakeWorkflowOutboxRepository.constructed_with.append(connection)
+
+    async def append_event(self, event: object) -> object:
+        self.connection.executed.append(
+            ("workflow_runtime_outbox_events.append", (event,))
+        )
+        return event
+
+    async def list_events_after(
+        self,
+        *,
+        consumer_ref: object,
+        after_sequence_number: int,
+        limit: int,
+    ) -> tuple[object, ...]:
+        del consumer_ref, after_sequence_number, limit
+        return ()
+
+
+class FakeWorkflowEventCursorRepository:
+    constructed_with: list[FakeConnection] = []
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        FakeWorkflowEventCursorRepository.constructed_with.append(connection)
+
+    async def get_cursor(self, consumer_ref: object) -> object | None:
+        del consumer_ref
+        return None
+
+    async def save_cursor(self, cursor: object) -> object:
+        self.connection.executed.append(
+            ("workflow_runtime_event_cursors.save", (cursor,))
+        )
+        return cursor
+
+
+class FakeWorkflowProgressSnapshotRepository:
+    constructed_with: list[FakeConnection] = []
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        self.snapshot: object | None = None
+        FakeWorkflowProgressSnapshotRepository.constructed_with.append(connection)
+
+    async def get_snapshot(self, workflow_run_id: str) -> object | None:
+        self.connection.executed.append(
+            ("workflow_runtime_progress_snapshots.get", (workflow_run_id,))
+        )
+        return self.snapshot
+
+    async def save_snapshot(self, snapshot: object) -> object:
+        self.snapshot = snapshot
+        self.connection.executed.append(
+            ("workflow_runtime_progress_snapshots.save", (snapshot,))
+        )
+        return snapshot
+
+
+class FakeWorkflowTimelineRepository:
+    constructed_with: list[FakeConnection] = []
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        FakeWorkflowTimelineRepository.constructed_with.append(connection)
+
+    async def append_entry(self, entry: object) -> object:
+        self.connection.executed.append(
+            ("workflow_runtime_timeline_entries.append", (entry,))
+        )
+        return entry
+
+    async def list_recent_entries(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+    ) -> tuple[object, ...]:
+        del workflow_run_id, limit
+        return ()
+
+
+class FakeWorkflowResourceUsageRepository:
+    constructed_with: list[FakeConnection] = []
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        self.usage: object | None = None
+        FakeWorkflowResourceUsageRepository.constructed_with.append(connection)
+
+    async def get_usage(self, workflow_run_id: str) -> object | None:
+        self.connection.executed.append(
+            ("workflow_runtime_resource_usage_snapshots.get", (workflow_run_id,))
+        )
+        return self.usage
+
+    async def save_usage(self, usage: object) -> object:
+        self.usage = usage
+        self.connection.executed.append(
+            ("workflow_runtime_resource_usage_snapshots.save", (usage,))
+        )
+        return usage
+
+
 class FakeDocumentPersister:
     constructed_uows: list[_SourceIngestionFirstPhaseUnitOfWork] = []
 
@@ -177,6 +330,7 @@ class FakeSourceUnitCreator:
 
 class FakeInnerRunner:
     should_fail = False
+    rejected = False
     calls: list[RunSourceIngestionFirstPhaseCommand] = []
 
     def __init__(
@@ -197,12 +351,30 @@ class FakeInnerRunner:
         FakeInnerRunner.calls.append(command)
         if FakeInnerRunner.should_fail:
             raise RuntimeError("first phase failed")
+        if FakeInnerRunner.rejected:
+            return RunSourceIngestionFirstPhaseResult(
+                status=RunSourceIngestionFirstPhaseStatus.REJECTED,
+                admission_status=SourceIngestionAdmissionStatus.ACTOR_ROLE_NOT_ALLOWED,
+            )
+        workflow_run_id = "knowledge-extraction:source-document:project-1:abc"
+        source_document_ref = "source-document:project-1:abc"
         return RunSourceIngestionFirstPhaseResult(
             status=RunSourceIngestionFirstPhaseStatus.COMPLETED,
             admission_status=SourceIngestionAdmissionStatus.ALLOWED,
-            workflow_run_id="knowledge-extraction:source-document:project-1:abc",
-            source_document_ref="source-document:project-1:abc",
+            workflow_run_id=workflow_run_id,
+            source_document_ref=source_document_ref,
             source_unit_count=3,
+            workflow_effects=BuildSourceIngestionWorkflowEffects().execute(
+                BuildSourceIngestionWorkflowEffectsCommand(
+                    workflow_run_id=workflow_run_id,
+                    project_id="project-1",
+                    source_document_ref=source_document_ref,
+                    source_unit_count=3,
+                    source_format=SourceFormat.MARKDOWN,
+                    content_hash="sha256:test",
+                    occurred_at=command.occurred_at,
+                )
+            ),
         )
 
 
@@ -229,9 +401,16 @@ def _custom_segmentation_budget() -> DocumentSegmentationBudget:
 def _reset_fake_classes() -> None:
     FakeSourceRepository.constructed_with = []
     FakeSagaRepository.constructed_with = []
+    FakeWorkflowCommandLogRepository.constructed_with = []
+    FakeWorkflowOutboxRepository.constructed_with = []
+    FakeWorkflowEventCursorRepository.constructed_with = []
+    FakeWorkflowProgressSnapshotRepository.constructed_with = []
+    FakeWorkflowTimelineRepository.constructed_with = []
+    FakeWorkflowResourceUsageRepository.constructed_with = []
     FakeDocumentPersister.constructed_uows = []
     FakeSourceUnitCreator.constructed_uows = []
     FakeInnerRunner.should_fail = False
+    FakeInnerRunner.rejected = False
     FakeInnerRunner.calls = []
 
 
@@ -266,6 +445,36 @@ def _patch_transactional_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         composition,
         "PostgresKnowledgeExtractionSagaStateRepository",
         FakeSagaRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresCommandLogRepository",
+        FakeWorkflowCommandLogRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresOutboxRepository",
+        FakeWorkflowOutboxRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresEventCursorRepository",
+        FakeWorkflowEventCursorRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresProgressSnapshotRepository",
+        FakeWorkflowProgressSnapshotRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresTimelineRepository",
+        FakeWorkflowTimelineRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresResourceUsageRepository",
+        FakeWorkflowResourceUsageRepository,
     )
     monkeypatch.setattr(
         composition,
@@ -430,6 +639,8 @@ def test_source_ingestion_first_phase_composition_source_guard() -> None:
         "release",
         "PostgresSourceManagementRepository",
         "PostgresKnowledgeExtractionSagaStateRepository",
+        "ApplySourceIngestionWorkflowEffects",
+        "_WorkflowRuntimeDeferredUnitOfWork",
         "make_source_ingestion_first_phase",
     ]
     forbidden_markers = [
@@ -448,7 +659,6 @@ def test_source_ingestion_first_phase_composition_source_guard() -> None:
         "artifact_runtime",
         "worker_loop",
         "JobDispatcher",
-        "outbox_events",
         "queue",
         "Queue",
         "pdf",
@@ -773,3 +983,74 @@ def test_empty_prompt_file_raises_for_default_config(tmp_path: Path) -> None:
         default_source_ingestion_first_phase_segmentation_config(
             repo_root=tmp_path,
         )
+
+
+@pytest.mark.asyncio
+async def test_completed_source_ingestion_applies_workflow_runtime_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_transactional_dependencies(monkeypatch)
+    transaction = FakeTransaction()
+    connection = FakeConnection(transaction)
+    pool = FakePool(connection)
+
+    runner = make_source_ingestion_first_phase(
+        pool=pool,
+        project_repo=ProjectMemberRoleRepo(role="owner"),
+        user_repo=_user_repo(),
+    )
+    result = await runner.execute(_command())
+
+    assert result.status is RunSourceIngestionFirstPhaseStatus.COMPLETED
+    command_queries = tuple(query for query, _ in connection.executed)
+    assert any("workflow_runtime_command_log" in query for query in command_queries)
+    assert any("workflow_runtime_outbox_events" in query for query in command_queries)
+    assert any(
+        "workflow_runtime_progress_snapshots" in query for query in command_queries
+    )
+    assert any(
+        "workflow_runtime_timeline_entries" in query for query in command_queries
+    )
+    assert any(
+        "workflow_runtime_resource_usage_snapshots" in query
+        for query in command_queries
+    )
+    assert FakeWorkflowCommandLogRepository.constructed_with == [connection]
+    assert FakeWorkflowOutboxRepository.constructed_with == [connection]
+    assert FakeWorkflowProgressSnapshotRepository.constructed_with == [connection]
+    assert FakeWorkflowTimelineRepository.constructed_with == [connection]
+    assert FakeWorkflowResourceUsageRepository.constructed_with == [connection]
+
+
+@pytest.mark.asyncio
+async def test_rejected_source_ingestion_writes_no_workflow_runtime_effects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_transactional_dependencies(monkeypatch)
+    FakeInnerRunner.rejected = True
+    transaction = FakeTransaction()
+    connection = FakeConnection(transaction)
+    pool = FakePool(connection)
+
+    runner = make_source_ingestion_first_phase(
+        pool=pool,
+        project_repo=ProjectMemberRoleRepo(role="owner"),
+        user_repo=_user_repo(),
+    )
+    result = await runner.execute(_command())
+
+    assert result.status is RunSourceIngestionFirstPhaseStatus.REJECTED
+    assert not any("workflow_runtime_" in query for query, _ in connection.executed)
+    assert transaction.commit_count == 1
+
+
+def test_completed_source_ingestion_workflow_runtime_command_ids_are_deterministic() -> (
+    None
+):
+    command_id = WorkflowCommandId(
+        "workflow-command:source-ingestion:"
+        "knowledge-extraction:source-document:project-1:abc"
+    )
+
+    assert command_id.value.startswith("workflow-command:source-ingestion:")
+    assert WorkflowCommandStatus.COMPLETED.value == "COMPLETED"

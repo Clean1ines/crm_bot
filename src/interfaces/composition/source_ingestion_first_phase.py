@@ -2,6 +2,10 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol, cast, runtime_checkable
 
+from src.contexts.knowledge_workbench.application.sagas.apply_source_ingestion_workflow_effects import (
+    ApplySourceIngestionWorkflowEffects,
+    ApplySourceIngestionWorkflowEffectsCommand,
+)
 from src.contexts.knowledge_workbench.application.sagas.create_source_units_for_ingestion import (
     CreateSourceUnitsForIngestion,
     CreateSourceUnitsForIngestionUnitOfWorkPort,
@@ -43,6 +47,27 @@ from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_knowledge
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     AsyncSourceManagementConnectionLike,
     PostgresSourceManagementRepository,
+)
+from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
+    WorkflowRuntimeUnitOfWorkPort,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_command_log_repository import (
+    PostgresCommandLogRepository,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_event_cursor_repository import (
+    PostgresEventCursorRepository,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_outbox_repository import (
+    PostgresOutboxRepository,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_progress_snapshot_repository import (
+    PostgresProgressSnapshotRepository,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_resource_usage_repository import (
+    PostgresResourceUsageRepository,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_timeline_repository import (
+    PostgresTimelineRepository,
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
 
@@ -273,6 +298,59 @@ class _SourceIngestionFirstPhaseUnitOfWork:
         self.rollback_request_count += 1
 
 
+class _WorkflowRuntimeDeferredUnitOfWork(WorkflowRuntimeUnitOfWorkPort):
+    """Workflow runtime repositories bound to the outer source-ingestion transaction."""
+
+    def __init__(
+        self,
+        *,
+        command_log: PostgresCommandLogRepository,
+        outbox: PostgresOutboxRepository,
+        event_cursors: PostgresEventCursorRepository,
+        progress_snapshots: PostgresProgressSnapshotRepository,
+        timeline: PostgresTimelineRepository,
+        resource_usage: PostgresResourceUsageRepository,
+    ) -> None:
+        self._command_log = command_log
+        self._outbox = outbox
+        self._event_cursors = event_cursors
+        self._progress_snapshots = progress_snapshots
+        self._timeline = timeline
+        self._resource_usage = resource_usage
+        self.commit_request_count = 0
+        self.rollback_request_count = 0
+
+    @property
+    def command_log(self) -> PostgresCommandLogRepository:
+        return self._command_log
+
+    @property
+    def outbox(self) -> PostgresOutboxRepository:
+        return self._outbox
+
+    @property
+    def event_cursors(self) -> PostgresEventCursorRepository:
+        return self._event_cursors
+
+    @property
+    def progress_snapshots(self) -> PostgresProgressSnapshotRepository:
+        return self._progress_snapshots
+
+    @property
+    def timeline(self) -> PostgresTimelineRepository:
+        return self._timeline
+
+    @property
+    def resource_usage(self) -> PostgresResourceUsageRepository:
+        return self._resource_usage
+
+    async def commit(self) -> None:
+        self.commit_request_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_request_count += 1
+
+
 class _TransactionalSourceIngestionFirstPhaseRunner(
     SourceIngestionFirstPhaseRunnerPort
 ):
@@ -298,6 +376,14 @@ class _TransactionalSourceIngestionFirstPhaseRunner(
         try:
             source_management = PostgresSourceManagementRepository(connection)
             saga_state = PostgresKnowledgeExtractionSagaStateRepository(connection)
+            workflow_runtime_unit_of_work = _WorkflowRuntimeDeferredUnitOfWork(
+                command_log=PostgresCommandLogRepository(connection),
+                outbox=PostgresOutboxRepository(connection),
+                event_cursors=PostgresEventCursorRepository(connection),
+                progress_snapshots=PostgresProgressSnapshotRepository(connection),
+                timeline=PostgresTimelineRepository(connection),
+                resource_usage=PostgresResourceUsageRepository(connection),
+            )
             unit_of_work = _SourceIngestionFirstPhaseUnitOfWork(
                 source_management=source_management,
                 saga_state=saga_state,
@@ -328,6 +414,13 @@ class _TransactionalSourceIngestionFirstPhaseRunner(
                 ),
             )
             result = await runner.execute(effective_command)
+            if result.workflow_effects is not None:
+                await ApplySourceIngestionWorkflowEffects().execute(
+                    ApplySourceIngestionWorkflowEffectsCommand(
+                        effects=result.workflow_effects,
+                    ),
+                    unit_of_work=workflow_runtime_unit_of_work,
+                )
             await transaction.commit()
             return result
         except Exception:
