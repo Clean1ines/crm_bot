@@ -29,8 +29,8 @@ from src.contexts.artifact_runtime.domain.value_objects.artifact_visibility impo
 from src.contexts.artifact_runtime.domain.value_objects.retention_policy import (
     RetentionPolicy,
 )
-from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_prompt_a_artifact_factory import (
-    PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_dispatch_prompt_a_artifact_factory import (
+    DISPATCH_PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
 )
 from src.contexts.knowledge_workbench.extraction.application.process_managers.apply_draft_claim_observation_artifact import (
     ApplyDraftClaimObservationArtifactCommand,
@@ -107,8 +107,6 @@ def _prompt_a_parsed_payload() -> dict[str, JsonInputValue]:
         "source_unit_ref": "document-1.unit.0",
         "work_item_id": "work-item-1",
         "work_item_attempt_id": "work-attempt-1",
-        "llm_task_id": "llm-task-1",
-        "llm_attempt_id": "llm-attempt-1",
         "prompt_id": "prompt-a",
         "prompt_version": "v1",
         "raw_artifact_ref": "raw-artifact-1",
@@ -118,7 +116,7 @@ def _prompt_a_parsed_payload() -> dict[str, JsonInputValue]:
 
 def _artifact(
     *,
-    artifact_kind: ArtifactKind = PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
+    artifact_kind: ArtifactKind = DISPATCH_PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
     payload: dict[str, JsonInputValue] | None = None,
     artifact_ref: ArtifactRef = ArtifactRef("parsed-artifact-1"),
     lineage: ArtifactLineage = ArtifactLineage(
@@ -237,6 +235,39 @@ async def test_ignores_invalid_prompt_a_provenance() -> None:
     assert fake_apply.commands == []
 
 
+@pytest.mark.asyncio
+async def test_rejects_task_centric_prompt_a_parsed_artifact_after_dispatch_cutover() -> (
+    None
+):
+    payload: dict[str, JsonInputValue] = {
+        "workflow_run_id": "workflow-1",
+        "stage_run_id": "stage-1",
+        "source_unit_ref": "document-1.unit.0",
+        "work_item_id": "work-item-1",
+        "llm_task_id": "llm-task-1",
+        "llm_attempt_id": "llm-attempt-1",
+        "prompt_id": "prompt-a",
+        "prompt_version": "v1",
+        "raw_artifact_ref": "raw-artifact-1",
+        "claims": (_claim_payload(),),
+    }
+    loader = FakeArtifactLoader(_artifact(payload=payload))
+    fake_apply = FakeApplyUseCase()
+
+    result = await ApplyDraftClaimObservationArtifactOnArtifactStored(
+        artifact_loader=loader,
+        apply_use_case=fake_apply,
+    ).execute(
+        ApplyDraftClaimObservationArtifactOnArtifactStoredCommand(
+            event=_event(),
+            occurred_at=_now(),
+        )
+    )
+
+    assert result.status == "ignored_invalid_prompt_a_provenance"
+    assert fake_apply.commands == []
+
+
 def test_command_requires_timezone_aware_occurred_at() -> None:
     with pytest.raises(ValueError, match="occurred_at must be timezone-aware"):
         ApplyDraftClaimObservationArtifactOnArtifactStoredCommand(
@@ -253,8 +284,8 @@ def test_handler_source_has_no_runtime_infrastructure_or_queue_wiring() -> None:
         "class ApplyDraftClaimObservationArtifactOnArtifactStored",
         "ApplyDraftClaimObservationArtifactAsync",
         "ApplyDraftClaimObservationArtifactCommand",
-        "ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields",
-        "PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND",
+        "ClaimExtractionDispatchArtifactProvenance.from_parsed_artifact_payload_fields",
+        "DISPATCH_PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND",
         "await self._artifact_loader.load_artifact",
         "await self._apply_use_case.execute",
     )
@@ -278,6 +309,20 @@ def test_handler_source_has_no_runtime_infrastructure_or_queue_wiring() -> None:
         "frontend",
         "consolidation",
         "publication",
+        "ClaimExtractionArtifactProvenance",
+        "llm_task_id",
+        "llm_attempt_id",
+        "ClaimExtractionPromptAArtifactFactory",
+        "GroqDispatchExecutor",
+        "GroqProviderAdapter",
+        "LlmProviderPort",
+        "ExecuteLlmTask",
+        "ExecuteAndRecordLlmTask",
+        "RecordWorkItemAttemptOutcome",
+        "PersistArtifact",
+        "capacity_runtime",
+        "TODO(cutover)",
+        "legacy",
         "type: ignore",
     )
 

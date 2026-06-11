@@ -7,12 +7,12 @@ from src.contexts.artifact_runtime.domain.entities.pipeline_artifact import (
 )
 from src.contexts.artifact_runtime.domain.events.artifact_events import ArtifactStored
 from src.contexts.artifact_runtime.domain.value_objects.artifact_ref import ArtifactRef
-from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_artifact_provenance import (
-    ClaimExtractionArtifactProvenance,
-    InvalidClaimExtractionArtifactProvenance,
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_dispatch_artifact_provenance import (
+    ClaimExtractionDispatchArtifactProvenance,
+    InvalidClaimExtractionDispatchArtifactProvenance,
 )
-from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_prompt_a_artifact_factory import (
-    PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_extraction_dispatch_prompt_a_artifact_factory import (
+    DISPATCH_PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND,
 )
 from src.contexts.knowledge_workbench.extraction.application.process_managers.apply_draft_claim_observation_artifact import (
     ApplyDraftClaimObservationArtifactAsync,
@@ -68,13 +68,13 @@ class ApplyDraftClaimObservationArtifactOnArtifactStored:
             )
         if (
             getattr(artifact, "artifact_kind")
-            == PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND
+            == DISPATCH_PROMPT_A_PARSED_CLAIM_OBSERVATIONS_ARTIFACT_KIND
         ):
             try:
-                provenance = ClaimExtractionArtifactProvenance.from_parsed_artifact_payload_fields(
+                provenance = ClaimExtractionDispatchArtifactProvenance.from_parsed_artifact_payload_fields(
                     artifact.payload.value,
                 )
-            except InvalidClaimExtractionArtifactProvenance:
+            except InvalidClaimExtractionDispatchArtifactProvenance:
                 return ApplyDraftClaimObservationArtifactOnArtifactStoredResult(
                     artifact_ref=artifact_ref,
                     status="ignored_invalid_prompt_a_provenance",
