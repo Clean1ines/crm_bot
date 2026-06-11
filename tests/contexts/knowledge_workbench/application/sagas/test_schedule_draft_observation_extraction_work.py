@@ -150,6 +150,34 @@ def _expected_payload(
         "source_unit_ref": unit_ref,
         "source_unit_ordinal": ordinal,
         "phase": "draft_observation_extraction",
+        "provider_messages": (
+            {
+                "role": "system",
+                "content": (
+                    "Extract draft claim observations as strict JSON. "
+                    "Use prompt_id faq_claim_observations and return only JSON."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"source_unit_ref: {unit_ref}\n"
+                    f"heading_path: Unit {ordinal}\n\n"
+                    f"# Unit {ordinal}\n\nBody"
+                ),
+            },
+        ),
+        "prompt_a_provenance": {
+            "workflow_run_id": workflow_run_id,
+            "stage_run_id": "draft_observation_extraction",
+            "source_unit_ref": unit_ref,
+            "work_item_id": _work_item_id(
+                workflow_run_id=workflow_run_id,
+                unit_ref=unit_ref,
+            ),
+            "prompt_id": "faq_claim_observations",
+            "prompt_version": "v1",
+        },
     }
 
 
@@ -168,11 +196,39 @@ async def test_schedules_created_work_items_for_source_units() -> None:
     assert len(unit_of_work.saved) == 2
 
     first_item = result.scheduled_items[0]
-    first_payload = _expected_payload(
+    first_payload = unit_of_work.saved[0].payload
+    assert first_payload["workflow_run_id"] == (
+        "knowledge-extraction:source-document:project-1:abc"
+    )
+    assert first_payload["source_document_ref"] == _document_ref().value
+    assert first_payload["source_unit_ref"] == "source-document:project-1:abc.unit.0"
+    assert first_payload["source_unit_ordinal"] == 0
+    assert first_payload["phase"] == "draft_observation_extraction"
+    assert "provider_messages" in first_payload
+    assert "prompt_a_provenance" in first_payload
+
+    first_provenance = first_payload["prompt_a_provenance"]
+    assert isinstance(first_provenance, Mapping)
+    assert first_provenance["workflow_run_id"] == (
+        "knowledge-extraction:source-document:project-1:abc"
+    )
+    assert first_provenance["source_unit_ref"] == (
+        "source-document:project-1:abc.unit.0"
+    )
+    assert first_provenance["work_item_id"] == _work_item_id(
         workflow_run_id="knowledge-extraction:source-document:project-1:abc",
         unit_ref="source-document:project-1:abc.unit.0",
-        ordinal=0,
     )
+    assert first_provenance["prompt_id"] == "faq_claim_observations"
+    assert first_provenance["prompt_version"] == "v1"
+
+    assert "work_item_attempt_id" not in first_payload
+    assert "llm_task_id" not in first_payload
+    assert "llm_attempt_id" not in first_payload
+    assert "work_item_attempt_id" not in first_provenance
+    assert "llm_task_id" not in first_provenance
+    assert "llm_attempt_id" not in first_provenance
+
     assert first_item.source_unit_ref == "source-document:project-1:abc.unit.0"
     assert first_item.source_unit_ordinal == 0
     assert first_item.work_item_id == _work_item_id(
@@ -198,6 +254,15 @@ async def test_schedules_created_work_items_for_source_units() -> None:
     assert tuple(saved.payload["source_unit_ref"] for saved in unit_of_work.saved) == (
         "source-document:project-1:abc.unit.0",
         "source-document:project-1:abc.unit.1",
+    )
+    assert all("provider_messages" in saved.payload for saved in unit_of_work.saved)
+    assert all("prompt_a_provenance" in saved.payload for saved in unit_of_work.saved)
+    assert (
+        "# Unit 0\\n\\nBody"
+        in unit_of_work.saved[0].payload["provider_messages"][1]["content"]
+    )
+    assert unit_of_work.saved[0].payload["prompt_a_provenance"]["prompt_id"] == (
+        "faq_claim_observations"
     )
 
 

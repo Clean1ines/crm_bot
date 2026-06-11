@@ -67,5 +67,48 @@ def _map_plan_to_schedule_plan(
             "source_unit_ref": plan.source_unit_ref.value,
             "source_unit_ordinal": plan.source_unit_ordinal,
             "phase": "draft_observation_extraction",
+            "provider_messages": _provider_messages(plan),
+            "prompt_a_provenance": _prompt_a_provenance(plan),
         },
     )
+
+
+def _provider_messages(
+    plan: DraftObservationExtractionWorkPlan,
+) -> tuple[dict[str, str], ...]:
+    return (
+        {
+            "role": "system",
+            "content": (
+                "Extract draft claim observations as strict JSON. "
+                "Use prompt_id faq_claim_observations and return only JSON."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"source_unit_ref: {plan.source_unit_ref.value}\n"
+                f"heading_path: {_format_heading_path(plan.heading_path)}\n\n"
+                f"{plan.source_unit_text}"
+            ),
+        },
+    )
+
+
+def _prompt_a_provenance(
+    plan: DraftObservationExtractionWorkPlan,
+) -> dict[str, str]:
+    return {
+        "workflow_run_id": plan.workflow_run_id,
+        "stage_run_id": "draft_observation_extraction",
+        "source_unit_ref": plan.source_unit_ref.value,
+        "work_item_id": plan.work_item_id,
+        "prompt_id": "faq_claim_observations",
+        "prompt_version": "v1",
+    }
+
+
+def _format_heading_path(heading_path: tuple[str, ...]) -> str:
+    if not heading_path:
+        return "/"
+    return " / ".join(heading_path)

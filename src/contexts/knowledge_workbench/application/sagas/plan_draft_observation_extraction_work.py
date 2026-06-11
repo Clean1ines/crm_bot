@@ -24,6 +24,8 @@ class DraftObservationExtractionWorkPlan:
     source_document_ref: SourceDocumentRef
     source_unit_ref: SourceUnitRef
     source_unit_ordinal: int
+    source_unit_text: str
+    heading_path: tuple[str, ...]
     work_item_id: str
     work_kind: WorkKind
     idempotency_key: str
@@ -38,6 +40,11 @@ class DraftObservationExtractionWorkPlan:
             raise TypeError("source_unit_ordinal must be int")
         if self.source_unit_ordinal < 0:
             raise ValueError("source_unit_ordinal must be >= 0")
+        _require_non_empty_text(self.source_unit_text, field_name="source_unit_text")
+        if not isinstance(self.heading_path, tuple):
+            raise TypeError("heading_path must be tuple")
+        for heading_part in self.heading_path:
+            _require_non_empty_text(heading_part, field_name="heading_path")
         _require_non_empty_text(self.work_item_id, field_name="work_item_id")
         if not isinstance(self.work_kind, WorkKind):
             raise TypeError("work_kind must be WorkKind")
@@ -116,6 +123,8 @@ def _build_plan(
         source_document_ref=source_document_ref,
         source_unit_ref=source_unit.unit_ref,
         source_unit_ordinal=source_unit.ordinal,
+        source_unit_text=source_unit.text.value,
+        heading_path=source_unit.heading_path.parts,
         work_item_id=work_item_id,
         work_kind=DRAFT_OBSERVATION_EXTRACTION_WORK_KIND,
         idempotency_key=work_item_id,

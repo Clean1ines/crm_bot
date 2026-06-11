@@ -30,12 +30,16 @@ def _plan(
     source_document_ref: str = "source-document:project-1:abc",
     source_unit_ref: str = "source-unit:project-1:abc:0",
     source_unit_ordinal: int = 0,
+    source_unit_text: str = "# Unit 0\n\nBody",
+    heading_path: tuple[str, ...] = ("Unit 0",),
 ) -> DraftObservationExtractionWorkPlan:
     return DraftObservationExtractionWorkPlan(
         workflow_run_id=workflow_run_id,
         source_document_ref=SourceDocumentRef(source_document_ref),
         source_unit_ref=SourceUnitRef(source_unit_ref),
         source_unit_ordinal=source_unit_ordinal,
+        source_unit_text=source_unit_text,
+        heading_path=heading_path,
         work_item_id=work_item_id,
         work_kind=WorkKind("knowledge_workbench.draft_observation_extraction"),
         idempotency_key=work_item_id,
@@ -68,6 +72,23 @@ def test_maps_one_workbench_plan_to_execution_schedule_plan() -> None:
     assert schedule.payload["source_unit_ref"] == plan.source_unit_ref.value
     assert schedule.payload["source_unit_ordinal"] == plan.source_unit_ordinal
     assert schedule.payload["phase"] == "draft_observation_extraction"
+    provider_messages = schedule.payload["provider_messages"]
+    assert isinstance(provider_messages, tuple)
+    assert provider_messages[0]["role"] == "system"
+    assert provider_messages[1]["role"] == "user"
+    assert "# Unit 0\n\nBody" in provider_messages[1]["content"]
+    assert "source-unit:project-1:abc:0" in provider_messages[1]["content"]
+    assert "Unit 0" in provider_messages[1]["content"]
+
+    prompt_a_provenance = schedule.payload["prompt_a_provenance"]
+    assert prompt_a_provenance == {
+        "workflow_run_id": plan.workflow_run_id,
+        "stage_run_id": "draft_observation_extraction",
+        "source_unit_ref": plan.source_unit_ref.value,
+        "work_item_id": plan.work_item_id,
+        "prompt_id": "faq_claim_observations",
+        "prompt_version": "v1",
+    }
 
 
 def test_repeated_mapping_is_deterministic() -> None:
@@ -107,7 +128,7 @@ def test_payload_hash_is_stable_through_execution_runtime_helper() -> None:
     ) == work_item_schedule_payload_hash(second.payload)
 
 
-def test_payload_is_stable_json_serializable_schedule_metadata_only() -> None:
+def test_payload_contains_prompt_a_dispatch_seed_without_attempt_ids() -> None:
     schedule = (
         MapDraftObservationPlansToExecutionSchedule()
         .execute(
@@ -122,10 +143,20 @@ def test_payload_is_stable_json_serializable_schedule_metadata_only() -> None:
         "source_unit_ref",
         "source_unit_ordinal",
         "phase",
+        "provider_messages",
+        "prompt_a_provenance",
     )
+    assert "work_item_attempt_id" not in schedule.payload
+    assert "llm_task_id" not in schedule.payload
+    assert "llm_attempt_id" not in schedule.payload
     assert "raw_text" not in schedule.payload
     assert "text_preview" not in schedule.payload
     assert "prompt_text" not in schedule.payload
+
+    provenance = schedule.payload["prompt_a_provenance"]
+    assert "work_item_attempt_id" not in provenance
+    assert "llm_task_id" not in provenance
+    assert "llm_attempt_id" not in provenance
 
 
 def test_map_draft_observation_plans_to_execution_schedule_source_guard() -> None:
@@ -144,6 +175,9 @@ def test_map_draft_observation_plans_to_execution_schedule_source_guard() -> Non
         "source_document_ref",
         "source_unit_ref",
         "source_unit_ordinal",
+        "provider_messages",
+        "prompt_a_provenance",
+        "faq_claim_observations",
     )
     forbidden_markers = (
         "EnsureWorkItemsScheduled",

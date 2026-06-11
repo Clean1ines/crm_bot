@@ -69,3 +69,35 @@ def test_prompt_a_work_scheduled_checkpoint_persists_schedule_summary() -> None:
 
     for marker in forbidden_markers:
         assert marker not in source
+
+
+def test_draft_observation_schedule_payload_contains_prompt_a_dispatch_seed() -> None:
+    source = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "map_draft_observation_plans_to_execution_schedule.py",
+    ).read_text(encoding="utf-8")
+
+    required_markers = (
+        "provider_messages",
+        "prompt_a_provenance",
+        "faq_claim_observations",
+        "source_unit_text",
+    )
+    forbidden_markers = (
+        "GroqDispatchExecutor",
+        "GroqProviderAdapter",
+        "LlmProviderPort",
+        "ExecuteLlmTask",
+        "ExecuteAndRecordLlmTask",
+        "RecordWorkItemAttemptOutcome",
+        "PersistArtifact",
+        "ArtifactStored",
+        "outbox",
+        "capacity_runtime",
+    )
+
+    for marker in required_markers:
+        assert marker in source
+
+    for marker in forbidden_markers:
+        assert marker not in source

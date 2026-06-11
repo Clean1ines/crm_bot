@@ -174,6 +174,8 @@ def test_plan_draft_observation_extraction_work_source_guard() -> None:
         "knowledge_workbench.draft_observation_extraction",
         "idempotency_key",
         "WorkKind",
+        "source_unit_text",
+        "heading_path",
     )
     forbidden_markers = (
         "capacity_runtime",
