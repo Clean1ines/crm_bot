@@ -8,6 +8,9 @@ import pytest
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressSummary,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder_retry_action_read_repository_port import (
+    WorkItemRetryActionSummary,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_claim_builder_progress_command import (
     ClaimBuilderProgressReconcileDecision,
@@ -173,6 +176,43 @@ class FakeWorkItemProgressReadRepository:
         return self.summary
 
 
+def _retry_action_summary(
+    *,
+    retry_same_model_count: int = 0,
+    retry_fallback_model_count: int = 0,
+    retry_larger_output_model_count: int = 0,
+    split_required_count: int = 0,
+    defer_until_capacity_reset_count: int = 0,
+    next_run_after: datetime | None = None,
+) -> WorkItemRetryActionSummary:
+    return WorkItemRetryActionSummary(
+        workflow_run_id=_workflow_run_id(),
+        work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+        retry_same_model_count=retry_same_model_count,
+        retry_fallback_model_count=retry_fallback_model_count,
+        retry_larger_output_model_count=retry_larger_output_model_count,
+        split_required_count=split_required_count,
+        defer_until_capacity_reset_count=defer_until_capacity_reset_count,
+        next_run_after=next_run_after,
+    )
+
+
+@dataclass(slots=True)
+class FakeClaimBuilderRetryActionReadRepository:
+    summary: WorkItemRetryActionSummary = field(default_factory=_retry_action_summary)
+    calls: list[tuple[str, WorkKind, datetime]] = field(default_factory=list)
+
+    async def summarize_retry_actions(
+        self,
+        *,
+        workflow_run_id: str,
+        work_kind: WorkKind,
+        now: datetime,
+    ) -> WorkItemRetryActionSummary:
+        self.calls.append((workflow_run_id, work_kind, now))
+        return self.summary
+
+
 @dataclass(slots=True)
 class FakeCommandLogRepository:
     pending_commands: list[WorkflowCommand] = field(default_factory=list)
@@ -318,13 +358,18 @@ async def _execute(
     *,
     workflow_command: WorkflowCommand | None = None,
     summary: WorkItemProgressSummary | None = None,
+    retry_action_summary: WorkItemRetryActionSummary | None = None,
 ) -> tuple[
     object,
     FakeWorkItemProgressReadRepository,
+    FakeClaimBuilderRetryActionReadRepository,
     FakeWorkflowRuntimeUnitOfWork,
 ]:
     progress_repository = FakeWorkItemProgressReadRepository(
         summary=summary or _summary(ready_count=1),
+    )
+    retry_action_repository = FakeClaimBuilderRetryActionReadRepository(
+        summary=retry_action_summary or _retry_action_summary(),
     )
     workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
     result = await HandleReconcileClaimBuilderProgressCommandHandler().execute(
@@ -332,9 +377,10 @@ async def _execute(
             workflow_command=workflow_command or _workflow_command(),
         ),
         work_item_progress_read_repository=progress_repository,
+        claim_builder_retry_action_read_repository=retry_action_repository,
         workflow_unit_of_work=workflow_unit_of_work,
     )
-    return result, progress_repository, workflow_unit_of_work
+    return result, progress_repository, retry_action_repository, workflow_unit_of_work
 
 
 @pytest.mark.asyncio
@@ -367,7 +413,7 @@ async def test_rejects_mismatched_workflow_run_id() -> None:
 
 @pytest.mark.asyncio
 async def test_ready_work_appends_prepare_dispatch_batch_now() -> None:
-    result, progress_repository, workflow_unit_of_work = await _execute(
+    result, progress_repository, _, workflow_unit_of_work = await _execute(
         summary=_summary(ready_count=1, completed_count=2),
     )
 
@@ -387,7 +433,7 @@ async def test_ready_work_appends_prepare_dispatch_batch_now() -> None:
 @pytest.mark.asyncio
 async def test_future_deferred_work_appends_prepare_dispatch_batch_later() -> None:
     next_due_at = _now() + timedelta(minutes=2)
-    result, _, workflow_unit_of_work = await _execute(
+    result, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(deferred_count=1, completed_count=2, next_due_at=next_due_at),
     )
 
@@ -403,7 +449,7 @@ async def test_future_deferred_work_appends_prepare_dispatch_batch_later() -> No
 
 @pytest.mark.asyncio
 async def test_all_completed_appends_generate_draft_claim_embeddings() -> None:
-    result, _, workflow_unit_of_work = await _execute(
+    result, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(completed_count=3),
     )
 
@@ -418,7 +464,7 @@ async def test_all_completed_appends_generate_draft_claim_embeddings() -> None:
 
 @pytest.mark.asyncio
 async def test_appends_reconciled_event_progress_timeline_and_marks_completed() -> None:
-    result, _, workflow_unit_of_work = await _execute(
+    result, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(completed_count=2, terminal_failed_count=1),
     )
 
@@ -448,7 +494,7 @@ async def test_appends_reconciled_event_progress_timeline_and_marks_completed() 
 
 @pytest.mark.asyncio
 async def test_leased_work_without_due_items_blocks_without_next_command() -> None:
-    result, _, workflow_unit_of_work = await _execute(
+    result, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(leased_count=1, completed_count=2),
     )
 
@@ -460,4 +506,133 @@ async def test_leased_work_without_due_items_blocks_without_next_command() -> No
     assert workflow_unit_of_work.progress_snapshots.snapshot is not None
     assert (
         workflow_unit_of_work.progress_snapshots.snapshot.workflow_status == "BLOCKED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_retry_fallback_model_count_appends_prepare_with_fallback_strategy() -> (
+    None
+):
+    result, _, retry_repository, workflow_unit_of_work = await _execute(
+        summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
+        retry_action_summary=_retry_action_summary(retry_fallback_model_count=1),
+    )
+
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW.value
+    )
+    assert retry_repository.calls[0][1] == CLAIM_BUILDER_SECTION_WORK_KIND
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert next_command.payload["claim_builder_next_model_strategy"] == (
+        "FALLBACK_MODEL_REQUIRED"
+    )
+    assert next_command.payload["llm_dispatch_preparation_strategy"] == (
+        "FALLBACK_MODEL_REQUIRED"
+    )
+    assert next_command.payload["selected_retry_strategy"] == (
+        "FALLBACK_MODEL_REQUIRED"
+    )
+    assert (
+        next_command.payload["retry_action_summary"]["retry_fallback_model_count"] == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_retry_larger_output_count_appends_prepare_with_larger_output_strategy() -> (
+    None
+):
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
+        retry_action_summary=_retry_action_summary(
+            retry_larger_output_model_count=1,
+        ),
+    )
+
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert next_command.payload["claim_builder_next_model_strategy"] == (
+        "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+    )
+    assert next_command.payload["llm_dispatch_preparation_strategy"] == (
+        "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_retry_same_model_count_appends_prepare_with_same_model_strategy() -> (
+    None
+):
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
+        retry_action_summary=_retry_action_summary(retry_same_model_count=1),
+    )
+
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert next_command.payload["claim_builder_next_model_strategy"] == "SAME_MODEL"
+    assert next_command.payload["llm_dispatch_preparation_strategy"] == "SAME_MODEL"
+
+
+@pytest.mark.asyncio
+async def test_split_required_blocks_without_prepare_command() -> None:
+    result, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
+        retry_action_summary=_retry_action_summary(split_required_count=1),
+    )
+
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SPLIT_REQUIRED.value
+    )
+    assert result.appended_next_command_count == 0
+    assert workflow_unit_of_work.command_log.pending_commands == []
+    assert (
+        workflow_unit_of_work.outbox.events[0].payload["retry_action_summary"][
+            "split_required_count"
+        ]
+        == 1
+    )
+    assert workflow_unit_of_work.progress_snapshots.snapshot is not None
+    assert (
+        workflow_unit_of_work.progress_snapshots.snapshot.domain_counters[
+            "claim_builder_split_required_pending_count"
+        ]
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_progress_event_includes_retry_action_summary_and_selected_strategy() -> (
+    None
+):
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
+        retry_action_summary=_retry_action_summary(retry_fallback_model_count=1),
+    )
+
+    event_payload = workflow_unit_of_work.outbox.events[0].payload
+    assert event_payload["selected_retry_strategy"] == "FALLBACK_MODEL_REQUIRED"
+    assert event_payload["retry_action_summary"]["retry_fallback_model_count"] == 1
+
+    snapshot = workflow_unit_of_work.progress_snapshots.snapshot
+    assert snapshot is not None
+    assert (
+        snapshot.domain_counters["claim_builder_retry_fallback_model_pending_count"]
+        == 1
+    )
+
+    assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
+        "Claim builder retry action selected",
+    )
+
+
+@pytest.mark.asyncio
+async def test_completed_path_to_embeddings_still_works_without_retry_actions() -> None:
+    result, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(completed_count=3),
+    )
+
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED.value
+    )
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert next_command.command_type == (
+        KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS.value
     )

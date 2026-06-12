@@ -17,6 +17,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_p
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
     PostgresWorkItemSchedulingRepository,
 )
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_claim_builder_retry_action_read_repository import (
+    PostgresClaimBuilderRetryActionReadRepository,
+)
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
     DrainKnowledgeExtractionWorkflowCommands,
     DrainKnowledgeExtractionWorkflowCommandsCommand,
@@ -288,6 +291,11 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 work_item_progress_read_repository=(
                     self._work_item_progress_read_repository
                     or PostgresWorkItemProgressReadRepository(
+                        cast(asyncpg.Connection, connection)
+                    )
+                ),
+                claim_builder_retry_action_read_repository=(
+                    PostgresClaimBuilderRetryActionReadRepository(
                         cast(asyncpg.Connection, connection)
                     )
                 ),

@@ -10,6 +10,10 @@ from src.contexts.execution_runtime.application.ports.work_item_progress_read_re
     WorkItemProgressReadRepositoryPort,
     WorkItemProgressSummary,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder_retry_action_read_repository_port import (
+    ClaimBuilderRetryActionReadRepositoryPort,
+    WorkItemRetryActionSummary,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -49,6 +53,7 @@ class ClaimBuilderProgressReconcileDecision(StrEnum):
     CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED = (
         "CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED"
     )
+    CLAIM_BUILDER_SPLIT_REQUIRED = "CLAIM_BUILDER_SPLIT_REQUIRED"
     CLAIM_BUILDER_PROGRESS_BLOCKED = "CLAIM_BUILDER_PROGRESS_BLOCKED"
 
 
@@ -97,6 +102,9 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
         command: HandleReconcileClaimBuilderProgressCommand,
         *,
         work_item_progress_read_repository: WorkItemProgressReadRepositoryPort,
+        claim_builder_retry_action_read_repository: (
+            ClaimBuilderRetryActionReadRepositoryPort
+        ),
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
     ) -> HandleReconcileClaimBuilderProgressResult:
         workflow_command = command.workflow_command
@@ -116,13 +124,25 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
             work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
             now=occurred_at,
         )
-        decision = _decide(summary)
+        retry_action_summary = (
+            await claim_builder_retry_action_read_repository.summarize_retry_actions(
+                workflow_run_id=workflow_run_id,
+                work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+                now=occurred_at,
+            )
+        )
+        decision = _decide(
+            summary=summary,
+            retry_action_summary=retry_action_summary,
+            now=occurred_at,
+        )
 
         next_command = _next_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
             decision=decision,
             summary=summary,
+            retry_action_summary=retry_action_summary,
             occurred_at=occurred_at,
         )
         appended_next_command_count = 0
@@ -135,6 +155,7 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
             workflow_run_id=workflow_run_id,
             decision=decision,
             summary=summary,
+            retry_action_summary=retry_action_summary,
             next_command=next_command,
             occurred_at=occurred_at,
         )
@@ -145,6 +166,7 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
             workflow_run_id=workflow_run_id,
             decision=decision,
             summary=summary,
+            retry_action_summary=retry_action_summary,
             occurred_at=occurred_at,
         )
 
@@ -154,6 +176,7 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
                 workflow_run_id=workflow_run_id,
                 decision=decision,
                 summary=summary,
+                retry_action_summary=retry_action_summary,
                 next_command=next_command,
                 occurred_at=occurred_at,
             ),
@@ -186,8 +209,23 @@ def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
 
 
 def _decide(
+    *,
     summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
+    now: datetime,
 ) -> ClaimBuilderProgressReconcileDecision:
+    if retry_action_summary.split_required_count > 0:
+        return ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SPLIT_REQUIRED
+
+    if _selected_retry_strategy(retry_action_summary) is not None:
+        if (
+            retry_action_summary.next_run_after is not None
+            and retry_action_summary.next_run_after > now
+        ):
+            return ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER
+        if summary.due_waiting_count > 0:
+            return ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW
+
     if summary.due_waiting_count > 0:
         return ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW
 
@@ -209,29 +247,40 @@ def _next_command(
     workflow_run_id: str,
     decision: ClaimBuilderProgressReconcileDecision,
     summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
+    selected_retry_strategy = _selected_retry_strategy(retry_action_summary)
+
     if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW:
         return _prepare_dispatch_batch_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
             summary=summary,
+            retry_action_summary=retry_action_summary,
+            selected_retry_strategy=selected_retry_strategy,
             run_after=occurred_at,
             occurred_at=occurred_at,
             suffix="now",
         )
 
     if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER:
-        if summary.next_due_at is None:
+        next_due_at = retry_action_summary.next_run_after or summary.next_due_at
+        if next_due_at is None:
             raise ValueError("next_due_at is required for delayed prepare decision")
         return _prepare_dispatch_batch_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
             summary=summary,
-            run_after=summary.next_due_at,
+            retry_action_summary=retry_action_summary,
+            selected_retry_strategy=selected_retry_strategy,
+            run_after=next_due_at,
             occurred_at=occurred_at,
-            suffix=f"later:{summary.next_due_at.isoformat()}",
+            suffix=f"later:{next_due_at.isoformat()}",
         )
+
+    if decision is ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SPLIT_REQUIRED:
+        return None
 
     if (
         decision
@@ -239,6 +288,7 @@ def _next_command(
     ):
         return _generate_draft_claim_embeddings_command(
             workflow_run_id=workflow_run_id,
+            retry_action_summary=retry_action_summary,
             summary=summary,
             occurred_at=occurred_at,
         )
@@ -251,6 +301,8 @@ def _prepare_dispatch_batch_command(
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
     summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
+    selected_retry_strategy: str | None,
     run_after: datetime,
     occurred_at: datetime,
     suffix: str,
@@ -261,7 +313,12 @@ def _prepare_dispatch_batch_command(
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "scheduled_work_item_count": summary.due_waiting_count,
         "summary": summary.to_payload(),
+        "retry_action_summary": retry_action_summary.to_payload(),
+        "selected_retry_strategy": selected_retry_strategy,
     }
+    if selected_retry_strategy is not None:
+        command_payload["claim_builder_next_model_strategy"] = selected_retry_strategy
+        command_payload["llm_dispatch_preparation_strategy"] = selected_retry_strategy
     dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
     if dispatch_preparation is not None:
         if not isinstance(dispatch_preparation, Mapping):
@@ -287,6 +344,7 @@ def _generate_draft_claim_embeddings_command(
     *,
     workflow_run_id: str,
     summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
     occurred_at: datetime,
 ) -> WorkflowCommand:
     idempotency_key = f"generate-draft-claim-embeddings:{workflow_run_id}"
@@ -315,6 +373,7 @@ def _progress_reconciled_event(
     workflow_run_id: str,
     decision: ClaimBuilderProgressReconcileDecision,
     summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
     next_command: WorkflowCommand | None,
     occurred_at: datetime,
 ) -> WorkflowEvent:
@@ -324,6 +383,8 @@ def _progress_reconciled_event(
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "decision": decision.value,
         "summary": summary.to_payload(),
+        "retry_action_summary": retry_action_summary.to_payload(),
+        "selected_retry_strategy": _selected_retry_strategy(retry_action_summary),
         "next_command_type": next_command.command_type if next_command else None,
         "next_run_after": next_run_after,
     }
@@ -351,6 +412,7 @@ async def _save_progress_snapshot(
     workflow_run_id: str,
     decision: ClaimBuilderProgressReconcileDecision,
     summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
     occurred_at: datetime,
 ) -> None:
     existing = await workflow_unit_of_work.progress_snapshots.get_snapshot(
@@ -364,6 +426,18 @@ async def _save_progress_snapshot(
         summary.terminal_coverage_count
     )
     domain_counters["claim_builder_due_waiting_count"] = summary.due_waiting_count
+    domain_counters["claim_builder_retry_same_model_pending_count"] = (
+        retry_action_summary.retry_same_model_count
+    )
+    domain_counters["claim_builder_retry_fallback_model_pending_count"] = (
+        retry_action_summary.retry_fallback_model_count
+    )
+    domain_counters["claim_builder_retry_larger_output_model_pending_count"] = (
+        retry_action_summary.retry_larger_output_model_count
+    )
+    domain_counters["claim_builder_split_required_pending_count"] = (
+        retry_action_summary.split_required_count
+    )
 
     await workflow_unit_of_work.progress_snapshots.save_snapshot(
         WorkflowProgressSnapshot(
@@ -397,6 +471,7 @@ def _timeline_entry(
     workflow_run_id: str,
     decision: ClaimBuilderProgressReconcileDecision,
     summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
     next_command: WorkflowCommand | None,
     occurred_at: datetime,
 ) -> WorkflowTimelineEntry:
@@ -409,12 +484,14 @@ def _timeline_entry(
         event_type=KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED.value,
         phase="CLAIM_BUILDER_SECTION_EXTRACTION",
         severity=_severity(decision, summary),
-        message="Claim builder progress reconciled",
+        message=_timeline_message(retry_action_summary),
         payload_summary={
             "workflow_run_id": workflow_run_id,
             "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
             "decision": decision.value,
             "summary": summary.to_payload(),
+            "retry_action_summary": retry_action_summary.to_payload(),
+            "selected_retry_strategy": _selected_retry_strategy(retry_action_summary),
             "next_command_type": next_command.command_type if next_command else None,
         },
         occurred_at=occurred_at,
@@ -422,11 +499,36 @@ def _timeline_entry(
     )
 
 
+def _selected_retry_strategy(
+    retry_action_summary: WorkItemRetryActionSummary,
+) -> str | None:
+    if retry_action_summary.retry_larger_output_model_count > 0:
+        return "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+    if retry_action_summary.retry_fallback_model_count > 0:
+        return "FALLBACK_MODEL_REQUIRED"
+    if retry_action_summary.retry_same_model_count > 0:
+        return "SAME_MODEL"
+    return None
+
+
+def _timeline_message(
+    retry_action_summary: WorkItemRetryActionSummary,
+) -> str:
+    if _selected_retry_strategy(retry_action_summary) is not None:
+        return "Claim builder retry action selected"
+    if retry_action_summary.split_required_count > 0:
+        return "Claim builder split action required"
+    return "Claim builder progress reconciled"
+
+
 def _severity(
     decision: ClaimBuilderProgressReconcileDecision,
     summary: WorkItemProgressSummary,
 ) -> WorkflowTimelineSeverity:
-    if decision is ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_PROGRESS_BLOCKED:
+    if decision in {
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_PROGRESS_BLOCKED,
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SPLIT_REQUIRED,
+    }:
         return WorkflowTimelineSeverity.WARNING
     if summary.terminal_failed_count > 0:
         return WorkflowTimelineSeverity.WARNING

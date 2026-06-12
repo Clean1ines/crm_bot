@@ -8,6 +8,9 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder_retry_action_read_repository_port import (
+    ClaimBuilderRetryActionReadRepositoryPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -103,6 +106,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         work_item_progress_read_repository: (
             WorkItemProgressReadRepositoryPort | None
         ) = None,
+        claim_builder_retry_action_read_repository: (
+            ClaimBuilderRetryActionReadRepositoryPort | None
+        ) = None,
         claim_builder_output_validation_policy: (
             ClaimBuilderOutputValidationPolicy | None
         ) = None,
@@ -139,6 +145,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 ),
                 capacity_observation_repository=capacity_observation_repository,
                 work_item_progress_read_repository=work_item_progress_read_repository,
+                claim_builder_retry_action_read_repository=(
+                    claim_builder_retry_action_read_repository
+                ),
                 claim_builder_output_validation_policy=(
                     claim_builder_output_validation_policy
                 ),

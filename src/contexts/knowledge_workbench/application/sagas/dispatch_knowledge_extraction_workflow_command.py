@@ -8,6 +8,9 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder_retry_action_read_repository_port import (
+    ClaimBuilderRetryActionReadRepositoryPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -106,6 +109,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         ) = None,
         work_item_progress_read_repository: (
             WorkItemProgressReadRepositoryPort | None
+        ) = None,
+        claim_builder_retry_action_read_repository: (
+            ClaimBuilderRetryActionReadRepositoryPort | None
         ) = None,
         claim_builder_output_validation_policy: (
             ClaimBuilderOutputValidationPolicy | None
@@ -210,7 +216,10 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             command_type
             is KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS
         ):
-            if work_item_progress_read_repository is None:
+            if (
+                work_item_progress_read_repository is None
+                or claim_builder_retry_action_read_repository is None
+            ):
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
                     command_type=command_type.value,
@@ -225,6 +234,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     workflow_command=workflow_command,
                 ),
                 work_item_progress_read_repository=work_item_progress_read_repository,
+                claim_builder_retry_action_read_repository=(
+                    claim_builder_retry_action_read_repository
+                ),
                 workflow_unit_of_work=workflow_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
