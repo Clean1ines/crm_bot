@@ -40,6 +40,29 @@ def _leased_item() -> WorkItem:
     )
 
 
+def _deferred_item() -> WorkItem:
+    return WorkItemStateMachine.defer_leased(
+        _leased_item(),
+        wait_until=WaitUntil(_now() + timedelta(seconds=60)),
+        error_kind="minute_limit",
+    )
+
+
+def _retryable_failed_item() -> WorkItem:
+    return WorkItemStateMachine.fail_leased_retryable(
+        _leased_item(),
+        error_kind="network_timeout",
+        next_attempt_at=WaitUntil(_now() + timedelta(seconds=10)),
+    )
+
+
+def _terminal_failed_item() -> WorkItem:
+    return WorkItemStateMachine.fail_leased_terminal(
+        _leased_item(),
+        error_kind="invalid_payload",
+    )
+
+
 def test_work_item_statuses_are_canonical_and_business_agnostic() -> None:
     assert {status.value for status in WorkItemStatus} == {
         "ready",
@@ -189,3 +212,61 @@ def test_reclaim_expired_lease_returns_work_to_ready_without_attempt_increment()
     assert reclaimed.leased_by is None
     assert reclaimed.lease_token is None
     assert reclaimed.lease_expires_at is None
+
+
+def test_mark_split_superseded_waiting_accepts_ready_item() -> None:
+    superseded = WorkItemStateMachine.mark_split_superseded_waiting(_ready_item())
+
+    assert superseded.status is WorkItemStatus.SPLIT_SUPERSEDED
+    assert superseded.status.is_terminal
+    assert superseded.leased_by is None
+    assert superseded.lease_token is None
+    assert superseded.lease_expires_at is None
+    assert superseded.next_attempt_at is None
+    assert superseded.last_error_kind is None
+
+
+def test_mark_split_superseded_waiting_accepts_deferred_item() -> None:
+    superseded = WorkItemStateMachine.mark_split_superseded_waiting(_deferred_item())
+
+    assert superseded.status is WorkItemStatus.SPLIT_SUPERSEDED
+    assert superseded.next_attempt_at is None
+    assert superseded.last_error_kind is None
+
+
+def test_mark_split_superseded_waiting_accepts_retryable_failed_item() -> None:
+    superseded = WorkItemStateMachine.mark_split_superseded_waiting(
+        _retryable_failed_item(),
+    )
+
+    assert superseded.status is WorkItemStatus.SPLIT_SUPERSEDED
+    assert superseded.next_attempt_at is None
+    assert superseded.last_error_kind is None
+
+
+@pytest.mark.parametrize(
+    "item",
+    (
+        _leased_item(),
+        WorkItemStateMachine.complete_leased(_leased_item()),
+        _terminal_failed_item(),
+        WorkItemStateMachine.cancel(_ready_item()),
+        WorkItemStateMachine.mark_split_superseded_leased(_leased_item()),
+        WorkItemStateMachine.require_user_action_leased(
+            _leased_item(),
+            error_kind="needs_user_choice",
+        ),
+    ),
+)
+def test_mark_split_superseded_waiting_rejects_non_waiting_statuses(
+    item: WorkItem,
+) -> None:
+    with pytest.raises(InvalidWorkItemTransition):
+        WorkItemStateMachine.mark_split_superseded_waiting(item)
+
+
+def test_existing_leased_split_supersede_transition_still_works() -> None:
+    superseded = WorkItemStateMachine.mark_split_superseded_leased(_leased_item())
+
+    assert superseded.status is WorkItemStatus.SPLIT_SUPERSEDED
+    assert superseded.status.is_terminal

@@ -107,6 +107,12 @@ class FakeUnitOfWork:
         self.commit_count = 0
         self.rollback_count = 0
 
+    async def commit(self) -> None:
+        self.commit_count += 1
+
+    async def rollback(self) -> None:
+        self.rollback_count += 1
+
 
 def _now() -> datetime:
     return datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
@@ -180,7 +186,7 @@ def _command(
 
 
 def _use_case(unit_of_work: FakeUnitOfWork) -> CreateSourceUnitsForIngestion:
-    return CreateSourceUnitsForIngestion(repository=unit_of_work)
+    return CreateSourceUnitsForIngestion(unit_of_work=unit_of_work)
 
 
 @pytest.mark.asyncio

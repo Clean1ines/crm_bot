@@ -155,6 +155,22 @@ class WorkItemStateMachine:
         )
 
     @staticmethod
+    def mark_split_superseded_waiting(item: WorkItem) -> WorkItem:
+        if not item.status.is_waiting:
+            raise InvalidWorkItemTransition(
+                f"Cannot mark split superseded waiting work item from status {item.status}"
+            )
+        return replace(
+            item,
+            status=WorkItemStatus.SPLIT_SUPERSEDED,
+            leased_by=None,
+            lease_token=None,
+            lease_expires_at=None,
+            next_attempt_at=None,
+            last_error_kind=None,
+        )
+
+    @staticmethod
     def require_user_action_leased(
         item: WorkItem,
         *,
