@@ -10,6 +10,7 @@ from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKi
 from src.contexts.knowledge_workbench.application.sagas.handle_split_claim_builder_source_unit_command import (
     HandleSplitClaimBuilderSourceUnitCommand,
     HandleSplitClaimBuilderSourceUnitCommandHandler,
+    _prepare_dispatch_batch_command,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -505,10 +506,16 @@ async def test_emits_split_completed_appends_prepare_and_marks_command_completed
         next_command.command_type
         == KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
     )
+    assert _parent_ref().value in next_command.idempotency_key.value
+    assert _parent_ref().value in next_command.command_id.value
+    assert next_command.payload["parent_source_unit_ref"] == _parent_ref().value
     assert next_command.payload["scheduled_work_item_count"] == len(
         scheduling_repository.saved_work_items
     )
     assert "llm_dispatch_preparation" in next_command.payload
+
+    timeline_entry = workflow_unit_of_work.timeline.entries[0]
+    assert _parent_ref().value in timeline_entry.timeline_entry_id
 
 
 @pytest.mark.asyncio
@@ -535,3 +542,32 @@ async def test_progress_counters_updated() -> None:
     assert snapshot.domain_counters["claim_builder_split_child_work_item_count"] == len(
         scheduling_repository.saved_work_items
     )
+
+
+def test_prepare_follow_up_idempotency_differs_per_parent_source_unit() -> None:
+    first_parent_ref = SourceUnitRef("source-unit:parent-one")
+    second_parent_ref = SourceUnitRef("source-unit:parent-two")
+
+    first = _prepare_dispatch_batch_command(
+        workflow_command=_command(source_unit_refs=(first_parent_ref.value,)),
+        workflow_run_id=_workflow_run_id(),
+        source_document_ref=_document_ref(),
+        parent_source_unit_ref=first_parent_ref,
+        scheduled_child_work_item_count=2,
+        occurred_at=_now(),
+    )
+    second = _prepare_dispatch_batch_command(
+        workflow_command=_command(source_unit_refs=(second_parent_ref.value,)),
+        workflow_run_id=_workflow_run_id(),
+        source_document_ref=_document_ref(),
+        parent_source_unit_ref=second_parent_ref,
+        scheduled_child_work_item_count=2,
+        occurred_at=_now(),
+    )
+
+    assert first.command_id != second.command_id
+    assert first.idempotency_key != second.idempotency_key
+    assert first_parent_ref.value in first.command_id.value
+    assert second_parent_ref.value in second.command_id.value
+    assert first.payload["parent_source_unit_ref"] == first_parent_ref.value
+    assert second.payload["parent_source_unit_ref"] == second_parent_ref.value

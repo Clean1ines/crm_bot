@@ -209,6 +209,7 @@ class HandleSplitClaimBuilderSourceUnitCommandHandler:
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
             source_document_ref=source_document_ref,
+            parent_source_unit_ref=parent_source_unit_ref,
             scheduled_child_work_item_count=scheduled_child_work_item_count,
             occurred_at=occurred_at,
         )
@@ -370,15 +371,19 @@ def _prepare_dispatch_batch_command(
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
     source_document_ref: SourceDocumentRef,
+    parent_source_unit_ref: SourceUnitRef,
     scheduled_child_work_item_count: int,
     occurred_at: datetime,
 ) -> WorkflowCommand:
     idempotency_key = (
-        f"prepare-claim-builder-dispatch-batch-after-source-split:{workflow_run_id}"
+        "prepare-claim-builder-dispatch-batch-after-source-split:"
+        f"{workflow_run_id}:"
+        f"{parent_source_unit_ref.value}"
     )
     payload: dict[str, object] = {
         "workflow_run_id": workflow_run_id,
         "source_document_ref": source_document_ref.value,
+        "parent_source_unit_ref": parent_source_unit_ref.value,
         "scheduled_work_item_count": scheduled_child_work_item_count,
     }
 
@@ -486,7 +491,8 @@ def _timeline_entry(
     return WorkflowTimelineEntry(
         timeline_entry_id=(
             f"workflow-timeline:{workflow_command.workflow_run_id}:"
-            "ClaimBuilderSourceUnitSplitCompleted"
+            "ClaimBuilderSourceUnitSplitCompleted:"
+            f"{parent_source_unit_ref}"
         ),
         workflow_run_id=workflow_command.workflow_run_id,
         event_type=completed_event.event_type,
