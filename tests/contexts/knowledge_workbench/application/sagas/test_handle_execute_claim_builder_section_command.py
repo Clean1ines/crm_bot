@@ -30,6 +30,10 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
     ClaimBuilderOutputValidationFailureReason,
     ClaimBuilderOutputValidationPolicy,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
+    PersistValidatedDraftClaimObservationsResult,
+    ValidatedDraftClaimObservationCandidate,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -399,6 +403,22 @@ class FakeResourceUsageRepository:
 
 
 @dataclass(slots=True)
+class FakeDraftClaimObservationPersistence:
+    candidates: list[ValidatedDraftClaimObservationCandidate] = field(
+        default_factory=list,
+    )
+
+    async def persist_validated_claims(
+        self,
+        candidates: tuple[ValidatedDraftClaimObservationCandidate, ...],
+    ) -> PersistValidatedDraftClaimObservationsResult:
+        self.candidates.extend(candidates)
+        return PersistValidatedDraftClaimObservationsResult(
+            persisted_count=len(candidates),
+        )
+
+
+@dataclass(slots=True)
 class FakeWorkflowRuntimeUnitOfWork:
     command_log: FakeCommandLogRepository = field(
         default_factory=FakeCommandLogRepository,
@@ -437,6 +457,7 @@ async def _execute(
     )
     capacity_repository = FakeCapacityObservationRepository()
     workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+    draft_persistence = FakeDraftClaimObservationPersistence()
     result = await HandleExecuteClaimBuilderSectionCommandHandler().execute(
         HandleExecuteClaimBuilderSectionCommand(
             workflow_command=workflow_command or _workflow_command(),
@@ -444,9 +465,16 @@ async def _execute(
         execute_prepared_llm_dispatch_attempt=executor,
         capacity_observation_repository=capacity_repository,
         claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
+        draft_claim_observation_persistence=draft_persistence,
         workflow_unit_of_work=workflow_unit_of_work,
     )
-    return result, executor, capacity_repository, workflow_unit_of_work
+    return (
+        result,
+        executor,
+        capacity_repository,
+        workflow_unit_of_work,
+        draft_persistence,
+    )
 
 
 @pytest.mark.asyncio
@@ -479,7 +507,7 @@ async def test_rejects_mismatched_workflow_run_id() -> None:
 
 @pytest.mark.asyncio
 async def test_calls_existing_execute_prepared_llm_dispatch_attempt() -> None:
-    result, executor, _, _ = await _execute()
+    result, executor, _, _, _ = await _execute()
 
     assert result.dispatch_attempt_id == _attempt_id()
     assert result.work_item_id == _work_item_id()
@@ -491,7 +519,7 @@ async def test_calls_existing_execute_prepared_llm_dispatch_attempt() -> None:
 
 @pytest.mark.asyncio
 async def test_records_capacity_observation_feedback_contract() -> None:
-    _, _, capacity_repository, _ = await _execute()
+    _, _, capacity_repository, _, _ = await _execute()
 
     assert len(capacity_repository.observations) == 1
     observation = capacity_repository.observations[0]
@@ -503,7 +531,7 @@ async def test_records_capacity_observation_feedback_contract() -> None:
 
 @pytest.mark.asyncio
 async def test_appends_outcome_and_capacity_events() -> None:
-    _, _, _, workflow_unit_of_work = await _execute()
+    _, _, _, workflow_unit_of_work, _ = await _execute()
 
     assert tuple(event.event_type for event in workflow_unit_of_work.outbox.events) == (
         KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED.value,
@@ -522,7 +550,7 @@ async def test_appends_outcome_and_capacity_events() -> None:
 
 @pytest.mark.asyncio
 async def test_appends_reconcile_claim_builder_progress_command() -> None:
-    _, _, _, workflow_unit_of_work = await _execute()
+    _, _, _, workflow_unit_of_work, _ = await _execute()
 
     assert tuple(
         command.command_type
@@ -539,7 +567,7 @@ async def test_appends_reconcile_claim_builder_progress_command() -> None:
 
 @pytest.mark.asyncio
 async def test_marks_execute_claim_builder_section_completed() -> None:
-    result, _, _, workflow_unit_of_work = await _execute()
+    result, _, _, workflow_unit_of_work, _ = await _execute()
 
     assert result.completed_command_id == _workflow_command().command_id
     assert workflow_unit_of_work.command_log.completed_command_ids == [
@@ -549,7 +577,7 @@ async def test_marks_execute_claim_builder_section_completed() -> None:
 
 @pytest.mark.asyncio
 async def test_updates_progress_snapshot_and_timeline() -> None:
-    _, _, _, workflow_unit_of_work = await _execute()
+    _, _, _, workflow_unit_of_work, _ = await _execute()
 
     snapshot = workflow_unit_of_work.progress_snapshots.snapshot
     assert snapshot is not None
@@ -568,7 +596,7 @@ async def test_updates_progress_snapshot_and_timeline() -> None:
 
 @pytest.mark.asyncio
 async def test_deferred_outcome_updates_deferred_progress() -> None:
-    _, _, _, workflow_unit_of_work = await _execute(
+    _, _, _, workflow_unit_of_work, draft_persistence = await _execute(
         execution_result=_execution_result(LlmDispatchExecutionStatus.DEFERRED),
     )
 
@@ -616,7 +644,13 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
         },
     )
 
-    result, _, capacity_repository, workflow_unit_of_work = await _execute(
+    (
+        result,
+        _,
+        capacity_repository,
+        workflow_unit_of_work,
+        draft_persistence,
+    ) = await _execute(
         execution_result=invalid_result,
     )
 
@@ -674,7 +708,7 @@ async def test_valid_empty_output_after_retry_is_accepted_as_extracted() -> None
         },
     )
 
-    _, _, _, workflow_unit_of_work = await _execute(
+    _, _, _, workflow_unit_of_work, draft_persistence = await _execute(
         execution_result=valid_empty_result,
     )
 
@@ -718,3 +752,79 @@ def test_source_unit_text_missing_fails_explicitly() -> None:
             finished_at=_finished_at(),
             attempt_number=1,
         )
+
+
+@pytest.mark.asyncio
+async def test_valid_claims_are_persisted_as_draft_claim_observations() -> None:
+    _, _, _, workflow_unit_of_work, draft_persistence = await _execute()
+
+    assert len(draft_persistence.candidates) == 1
+    candidate = draft_persistence.candidates[0]
+    assert candidate.workflow_run_id == _workflow_run_id()
+    assert candidate.source_unit_ref == "section-1"
+    assert candidate.work_item_id == _work_item_id()
+    assert candidate.dispatch_attempt_id == _attempt_id()
+    assert candidate.provider == "groq"
+    assert candidate.model_ref == "qwen/qwen3-32b"
+    assert candidate.claim_index == 0
+    assert candidate.claim == "Product System turns documents into knowledge."
+    assert candidate.validation_decision == (
+        ClaimBuilderOutputValidationDecision.VALID_CLAIMS.value
+    )
+
+    snapshot = workflow_unit_of_work.progress_snapshots.snapshot
+    assert snapshot is not None
+    assert snapshot.domain_counters["claim_builder_persisted_draft_claim_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_retry_decision_persists_zero_draft_claims() -> None:
+    invalid_result = ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+            finished_at=_finished_at(),
+            output_payload={"raw_text": '{"claims":[]}'},
+            error_kind="claim_builder_output_validation_failed",
+            next_attempt_at=_finished_at() + timedelta(seconds=1),
+            capacity_observation={
+                **_capacity_payload(),
+                "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
+            },
+        ),
+        outcome_result=RecordWorkItemAttemptOutcomeResult(
+            work_item=WorkItem(
+                work_item_id=_work_item_id(),
+                work_kind=WorkKind(
+                    "knowledge_workbench.claim_builder.section_extraction"
+                ),
+                status=WorkItemStatus.RETRYABLE_FAILED,
+            )
+        ),
+        validation_metadata={
+            "claim_builder_attempt_outcome_kind": "RETRY_FALLBACK_MODEL",
+            "validation_decision": (
+                ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value
+            ),
+            "validation_failure_reason": (
+                ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
+            ),
+            "validated_claim_count": 0,
+            "next_model_strategy": "FALLBACK_MODEL_REQUIRED",
+            "retry_recommended": True,
+            "_validated_claims": (),
+        },
+    )
+
+    _, _, _, workflow_unit_of_work, draft_persistence = await _execute(
+        execution_result=invalid_result,
+    )
+
+    assert draft_persistence.candidates == []
+    assert tuple(event.event_type for event in workflow_unit_of_work.outbox.events) == (
+        KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value,
+    )
+    assert workflow_unit_of_work.outbox.events[1].payload["next_model_strategy"] == (
+        "FALLBACK_MODEL_REQUIRED"
+    )

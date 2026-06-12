@@ -14,12 +14,23 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
     JsonInputValue,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_attempt_decision_policy import (
+    ClaimBuilderAttemptDecision,
+    ClaimBuilderAttemptDecisionPolicy,
+    ClaimBuilderAttemptOutcomeKind,
+    DecideClaimBuilderAttemptOutcomeCommand,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationDecision,
     ClaimBuilderOutputValidationFailureReason,
     ClaimBuilderOutputValidationPolicy,
     ClaimBuilderOutputValidationResult,
     ValidateClaimBuilderOutputCommand,
+    ValidatedClaimBuilderClaim,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
+    PersistValidatedDraftClaimObservationsPort,
+    ValidatedDraftClaimObservationCandidate,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -72,6 +83,9 @@ class ExecutePreparedLlmDispatchAttemptPort(Protocol):
 @dataclass(frozen=True, slots=True)
 class ClaimBuilderLlmDispatchOutputValidator:
     policy: ClaimBuilderOutputValidationPolicy
+    decision_policy: ClaimBuilderAttemptDecisionPolicy = (
+        ClaimBuilderAttemptDecisionPolicy()
+    )
 
     def validate(
         self,
@@ -94,22 +108,40 @@ class ClaimBuilderLlmDispatchOutputValidator:
                 },
             )
 
+        raw_output_text = _raw_output_text(output_payload)
         decoded_output = _decoded_claim_builder_output(output_payload)
+        validation_result: ClaimBuilderOutputValidationResult | None
+        decoded_payload: JsonInputValue | None
         if isinstance(decoded_output, ClaimBuilderOutputValidationResult):
-            return _validation_result_to_dispatch_result(
-                validation_result=decoded_output,
-                finished_at=finished_at,
+            validation_result = decoded_output
+            decoded_payload = None
+        else:
+            decoded_payload = decoded_output
+            validation_result = self.policy.validate(
+                ValidateClaimBuilderOutputCommand(
+                    output_payload=decoded_payload,
+                    source_unit_text=_source_unit_text(dispatch_payload),
+                    empty_claims_retry_already_attempted=attempt_number > 1,
+                )
             )
 
-        validation_result = self.policy.validate(
-            ValidateClaimBuilderOutputCommand(
-                output_payload=decoded_output,
+        decision = self.decision_policy.decide(
+            DecideClaimBuilderAttemptOutcomeCommand(
+                workflow_run_id=_dispatch_workflow_run_id(dispatch_payload),
+                work_item_id=_dispatch_work_item_id(dispatch_payload),
+                dispatch_attempt_id=_dispatch_attempt_id(dispatch_payload),
+                attempt_number=attempt_number,
+                provider=_dispatch_provider(dispatch_payload),
+                model_ref=_dispatch_model_ref(dispatch_payload),
+                output_payload=decoded_payload,
+                raw_output_text=raw_output_text,
                 source_unit_text=_source_unit_text(dispatch_payload),
-                empty_claims_retry_already_attempted=attempt_number > 1,
+                is_output_truncated=_is_output_truncated(output_payload),
+                validation_result=validation_result,
             )
         )
-        return _validation_result_to_dispatch_result(
-            validation_result=validation_result,
+        return _decision_to_dispatch_result(
+            decision=decision,
             finished_at=finished_at,
         )
 
@@ -155,6 +187,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         execute_prepared_llm_dispatch_attempt: ExecutePreparedLlmDispatchAttemptPort,
         capacity_observation_repository: LlmAttemptCapacityObservationRepositoryPort,
         claim_builder_output_validation_policy: ClaimBuilderOutputValidationPolicy,
+        draft_claim_observation_persistence: PersistValidatedDraftClaimObservationsPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
     ) -> HandleExecuteClaimBuilderSectionResult:
         workflow_command = command.workflow_command
@@ -212,6 +245,14 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             )
             appended_event_count += 1
 
+        persisted_draft_claim_count = await _persist_validated_draft_claims(
+            persistence=draft_claim_observation_persistence,
+            execution_result=execution_result,
+            workflow_run_id=workflow_run_id,
+            dispatch_attempt_id=dispatch_attempt_id,
+            work_item_id=work_item_id,
+        )
+
         outcome_event = _claim_builder_attempt_outcome_event(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
@@ -220,6 +261,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             execution_result=execution_result,
             capacity_observation=capacity_observation,
             validation_metadata=execution_result.validation_metadata,
+            persisted_draft_claim_count=persisted_draft_claim_count,
         )
         await workflow_unit_of_work.outbox.append_event(outcome_event)
         appended_event_count += 1
@@ -239,6 +281,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             status=execution_result.llm_result.status,
             capacity_observation=capacity_observation,
             validation_metadata=execution_result.validation_metadata,
+            persisted_draft_claim_count=persisted_draft_claim_count,
             occurred_at=finished_at,
         )
 
@@ -251,6 +294,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                 execution_result=execution_result,
                 capacity_observation=capacity_observation,
                 validation_metadata=execution_result.validation_metadata,
+                persisted_draft_claim_count=persisted_draft_claim_count,
             ),
         )
 
@@ -354,15 +398,15 @@ def _source_text_from_user_message(content: str) -> str:
     return source_text
 
 
-def _validation_result_to_dispatch_result(
+def _decision_to_dispatch_result(
     *,
-    validation_result: ClaimBuilderOutputValidationResult,
+    decision: ClaimBuilderAttemptDecision,
     finished_at: datetime,
 ) -> LlmDispatchOutputValidationResult:
-    metadata = _validation_metadata(validation_result)
-    if validation_result.decision in {
-        ClaimBuilderOutputValidationDecision.VALID_CLAIMS,
-        ClaimBuilderOutputValidationDecision.VALID_EMPTY,
+    metadata = _decision_metadata(decision)
+    if decision.outcome_kind in {
+        ClaimBuilderAttemptOutcomeKind.VALID_CLAIMS,
+        ClaimBuilderAttemptOutcomeKind.VALID_EMPTY,
     }:
         return LlmDispatchOutputValidationResult(
             status=LlmDispatchExecutionStatus.SUCCEEDED,
@@ -371,10 +415,7 @@ def _validation_result_to_dispatch_result(
             metadata=metadata,
         )
 
-    if (
-        validation_result.decision
-        is ClaimBuilderOutputValidationDecision.TERMINAL_INVALID
-    ):
+    if decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.TERMINAL_INVALID:
         return LlmDispatchOutputValidationResult(
             status=LlmDispatchExecutionStatus.TERMINAL_FAILED,
             error_kind="claim_builder_output_validation_failed",
@@ -390,23 +431,27 @@ def _validation_result_to_dispatch_result(
     )
 
 
-def _validation_metadata(
-    validation_result: ClaimBuilderOutputValidationResult,
-) -> dict[str, object]:
-    retry_recommended = validation_result.decision in {
-        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
-        ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL,
-        ClaimBuilderOutputValidationDecision.RETRY_LARGER_OUTPUT_LIMIT_MODEL,
-    }
+def _decision_metadata(decision: ClaimBuilderAttemptDecision) -> dict[str, object]:
     return {
-        "validation_decision": validation_result.decision.value,
-        "validation_failure_reason": (
-            validation_result.failure_reason.value
-            if validation_result.failure_reason is not None
+        "claim_builder_attempt_outcome_kind": decision.outcome_kind.value,
+        "validation_decision": (
+            decision.validation_decision.value
+            if decision.validation_decision is not None
             else None
         ),
-        "validated_claim_count": len(validation_result.claims),
-        "retry_recommended": retry_recommended,
+        "validation_failure_reason": (
+            decision.validation_failure_reason.value
+            if decision.validation_failure_reason is not None
+            else None
+        ),
+        "validated_claim_count": len(decision.claims),
+        "next_model_strategy": (
+            decision.next_model_strategy.value
+            if decision.next_model_strategy is not None
+            else None
+        ),
+        "retry_recommended": decision.retry_recommended,
+        "_validated_claims": decision.claims,
     }
 
 
@@ -450,6 +495,240 @@ def _apply_validation_counters(
             )
             + 1
         )
+
+
+def _raw_output_text(output_payload: Mapping[str, object] | None) -> str | None:
+    if output_payload is None:
+        return None
+    value = output_payload.get("raw_text")
+    return value if isinstance(value, str) else None
+
+
+def _is_output_truncated(output_payload: Mapping[str, object] | None) -> bool:
+    if output_payload is None:
+        return False
+    for key in ("output_truncated", "is_truncated", "truncated"):
+        value = output_payload.get(key)
+        if isinstance(value, bool):
+            return value
+    finish_reason = output_payload.get("finish_reason")
+    return finish_reason == "length"
+
+
+def _dispatch_workflow_run_id(dispatch_payload: Mapping[str, object]) -> str:
+    schedule_payload = _dispatch_schedule_payload(dispatch_payload)
+    value = schedule_payload.get("workflow_run_id")
+    if isinstance(value, str) and value.strip():
+        return value
+    return "unknown-workflow-run"
+
+
+def _dispatch_work_item_id(dispatch_payload: Mapping[str, object]) -> str:
+    value = dispatch_payload.get("work_item_id")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("dispatch payload work_item_id must be non-empty")
+    return value
+
+
+def _dispatch_attempt_id(dispatch_payload: Mapping[str, object]) -> str:
+    value = dispatch_payload.get("attempt_id")
+    if isinstance(value, str) and value.strip():
+        return value
+    return "unknown-dispatch-attempt"
+
+
+def _dispatch_provider(dispatch_payload: Mapping[str, object]) -> str:
+    allocation = _allocation_mapping(dispatch_payload)
+    value = allocation.get("provider")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("llm_allocation provider must be non-empty")
+    return value
+
+
+def _dispatch_model_ref(dispatch_payload: Mapping[str, object]) -> str:
+    allocation = _allocation_mapping(dispatch_payload)
+    value = allocation.get("model_ref")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("llm_allocation model_ref must be non-empty")
+    return value
+
+
+def _allocation_mapping(dispatch_payload: Mapping[str, object]) -> Mapping[str, object]:
+    allocation = dispatch_payload.get("llm_allocation")
+    if not isinstance(allocation, Mapping):
+        raise ValueError("dispatch payload llm_allocation must be mapping")
+    return allocation
+
+
+def _dispatch_schedule_payload(
+    dispatch_payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    schedule_payload = dispatch_payload.get("schedule_payload")
+    if not isinstance(schedule_payload, Mapping):
+        raise ValueError("dispatch payload schedule_payload must be mapping")
+    return schedule_payload
+
+
+async def _persist_validated_draft_claims(
+    *,
+    persistence: PersistValidatedDraftClaimObservationsPort,
+    execution_result: ExecutePreparedLlmDispatchAttemptResult,
+    workflow_run_id: str,
+    dispatch_attempt_id: str,
+    work_item_id: str,
+) -> int:
+    claims = _validated_claims_from_metadata(execution_result.validation_metadata)
+    if not claims:
+        return 0
+
+    result = await persistence.persist_validated_claims(
+        _draft_claim_candidates(
+            execution_result=execution_result,
+            workflow_run_id=workflow_run_id,
+            dispatch_attempt_id=dispatch_attempt_id,
+            work_item_id=work_item_id,
+            claims=claims,
+        )
+    )
+    return result.persisted_count
+
+
+def _validated_claims_from_metadata(
+    validation_metadata: Mapping[str, object] | None,
+) -> tuple[ValidatedClaimBuilderClaim, ...]:
+    if validation_metadata is None:
+        return ()
+    value = validation_metadata.get("_validated_claims")
+    if not isinstance(value, tuple):
+        return ()
+    claims: list[ValidatedClaimBuilderClaim] = []
+    for item in value:
+        if not isinstance(item, ValidatedClaimBuilderClaim):
+            raise TypeError("_validated_claims must contain ValidatedClaimBuilderClaim")
+        claims.append(item)
+    return tuple(claims)
+
+
+def _draft_claim_candidates(
+    *,
+    execution_result: ExecutePreparedLlmDispatchAttemptResult,
+    workflow_run_id: str,
+    dispatch_attempt_id: str,
+    work_item_id: str,
+    claims: tuple[ValidatedClaimBuilderClaim, ...],
+) -> tuple[ValidatedDraftClaimObservationCandidate, ...]:
+    dispatch_payload = execution_result.dispatch.dispatch_payload
+    schedule_payload = _dispatch_schedule_payload(dispatch_payload)
+    allocation = _allocation_mapping(dispatch_payload)
+    provider = _require_mapping_text(allocation, "provider")
+    model_ref = _require_mapping_text(allocation, "model_ref")
+    validation_decision = _validation_decision_text(
+        execution_result.validation_metadata
+    )
+
+    candidates: list[ValidatedDraftClaimObservationCandidate] = []
+    for index, claim in enumerate(claims):
+        candidates.append(
+            ValidatedDraftClaimObservationCandidate(
+                workflow_run_id=workflow_run_id,
+                source_document_ref=_optional_mapping_text(
+                    schedule_payload,
+                    "source_document_ref",
+                ),
+                source_unit_ref=_source_unit_ref(dispatch_payload),
+                source_unit_ordinal=_optional_mapping_int(
+                    schedule_payload,
+                    "source_unit_ordinal",
+                ),
+                work_item_id=work_item_id,
+                dispatch_attempt_id=dispatch_attempt_id,
+                claim_index=index,
+                provider=provider,
+                model_ref=model_ref,
+                claim=claim.claim,
+                granularity=claim.granularity,
+                possible_questions=claim.possible_questions,
+                exclusion_scope=claim.exclusion_scope,
+                evidence_block=claim.evidence_block,
+                validation_decision=validation_decision,
+            )
+        )
+    return tuple(candidates)
+
+
+def _source_unit_ref(dispatch_payload: Mapping[str, object]) -> str:
+    schedule_payload = _dispatch_schedule_payload(dispatch_payload)
+    direct = _optional_mapping_text(schedule_payload, "source_unit_ref")
+    if direct is not None:
+        return direct
+
+    provider_messages = schedule_payload.get("provider_messages")
+    if not isinstance(provider_messages, (list, tuple)):
+        raise ValueError("schedule_payload provider_messages must be list")
+
+    for raw_message in provider_messages:
+        if not isinstance(raw_message, Mapping):
+            continue
+        content = raw_message.get("content")
+        if isinstance(content, str):
+            for line in content.splitlines():
+                if line.startswith("source_unit_ref:"):
+                    value = line.removeprefix("source_unit_ref:").strip()
+                    if value:
+                        return value
+    raise ValueError("source_unit_ref missing from claim builder dispatch payload")
+
+
+def _validation_decision_text(
+    validation_metadata: Mapping[str, object] | None,
+) -> str:
+    if validation_metadata is None:
+        raise ValueError("validation_metadata is required for draft claim persistence")
+    value = validation_metadata.get("validation_decision")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("validation_decision must be non-empty")
+    return value
+
+
+def _public_validation_metadata(
+    validation_metadata: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in validation_metadata.items()
+        if not key.startswith("_")
+    }
+
+
+def _require_mapping_text(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text")
+    return value
+
+
+def _optional_mapping_text(
+    payload: Mapping[str, object],
+    key: str,
+) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text when provided")
+    return value
+
+
+def _optional_mapping_int(
+    payload: Mapping[str, object],
+    key: str,
+) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int):
+        raise ValueError(f"{key} must be int when provided")
+    return value
 
 
 def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
@@ -513,6 +792,7 @@ def _claim_builder_attempt_outcome_event(
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
     capacity_observation: LlmAttemptCapacityObservation | None,
     validation_metadata: Mapping[str, object] | None,
+    persisted_draft_claim_count: int,
 ) -> WorkflowEvent:
     event_type = _event_type_for_status(execution_result.llm_result.status)
     payload = _event_payload(
@@ -522,6 +802,7 @@ def _claim_builder_attempt_outcome_event(
         execution_result=execution_result,
         capacity_observation=capacity_observation,
         validation_metadata=validation_metadata,
+        persisted_draft_claim_count=persisted_draft_claim_count,
     )
     return WorkflowEvent(
         event_id=WorkflowEventId(
@@ -558,6 +839,7 @@ def _event_payload(
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
     capacity_observation: LlmAttemptCapacityObservation | None,
     validation_metadata: Mapping[str, object] | None,
+    persisted_draft_claim_count: int,
 ) -> dict[str, object]:
     capacity_payload = (
         capacity_observation.to_event_payload()
@@ -582,7 +864,8 @@ def _event_payload(
         "actual_total_tokens": capacity_payload.get("actual_total_tokens"),
     }
     if validation_metadata is not None:
-        payload.update(validation_metadata)
+        payload.update(_public_validation_metadata(validation_metadata))
+    payload["persisted_draft_claim_count"] = persisted_draft_claim_count
     return payload
 
 
@@ -656,6 +939,7 @@ async def _save_progress_snapshot(
     status: LlmDispatchExecutionStatus,
     capacity_observation: LlmAttemptCapacityObservation | None,
     validation_metadata: Mapping[str, object] | None,
+    persisted_draft_claim_count: int,
     occurred_at,
 ) -> None:
     existing = await workflow_unit_of_work.progress_snapshots.get_snapshot(
@@ -674,6 +958,11 @@ async def _save_progress_snapshot(
         domain_counters=domain_counters,
         validation_metadata=validation_metadata,
     )
+    if persisted_draft_claim_count:
+        domain_counters["claim_builder_persisted_draft_claim_count"] = (
+            domain_counters.get("claim_builder_persisted_draft_claim_count", 0)
+            + persisted_draft_claim_count
+        )
 
     completed_delta = 1 if status is LlmDispatchExecutionStatus.SUCCEEDED else 0
     deferred_delta = 1 if status is LlmDispatchExecutionStatus.DEFERRED else 0
@@ -728,6 +1017,7 @@ def _timeline_entry(
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
     capacity_observation: LlmAttemptCapacityObservation | None,
     validation_metadata: Mapping[str, object] | None,
+    persisted_draft_claim_count: int,
 ) -> WorkflowTimelineEntry:
     event_type = _event_type_for_status(execution_result.llm_result.status)
     return WorkflowTimelineEntry(
@@ -747,6 +1037,7 @@ def _timeline_entry(
             execution_result=execution_result,
             capacity_observation=capacity_observation,
             validation_metadata=validation_metadata,
+            persisted_draft_claim_count=persisted_draft_claim_count,
         ),
         occurred_at=execution_result.llm_result.finished_at,
         source_ref=workflow_command.command_type,

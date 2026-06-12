@@ -21,6 +21,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_bui
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
+    PersistValidatedDraftClaimObservationsPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     PrepareLlmDispatchBatchPort,
 )
@@ -103,6 +106,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         claim_builder_output_validation_policy: (
             ClaimBuilderOutputValidationPolicy | None
         ) = None,
+        draft_claim_observation_persistence: (
+            PersistValidatedDraftClaimObservationsPort | None
+        ) = None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -135,6 +141,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 work_item_progress_read_repository=work_item_progress_read_repository,
                 claim_builder_output_validation_policy=(
                     claim_builder_output_validation_policy
+                ),
+                draft_claim_observation_persistence=(
+                    draft_claim_observation_persistence
                 ),
             )
             if not dispatch_result.dispatched:
