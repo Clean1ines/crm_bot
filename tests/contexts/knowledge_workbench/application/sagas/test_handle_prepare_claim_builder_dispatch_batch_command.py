@@ -434,3 +434,47 @@ async def test_updates_progress_and_timeline() -> None:
         "Claim builder dispatch batch prepared",
         "Execute claim builder section requested",
     )
+
+
+@pytest.mark.asyncio
+async def test_forwards_llm_dispatch_preparation_strategy_to_prepare_command() -> None:
+    workflow_command = _workflow_command()
+    payload = dict(workflow_command.payload)
+    payload["llm_dispatch_preparation_strategy"] = "FALLBACK_MODEL_REQUIRED"
+    workflow_command = WorkflowCommand(
+        command_id=workflow_command.command_id,
+        command_type=workflow_command.command_type,
+        workflow_run_id=workflow_command.workflow_run_id,
+        idempotency_key=workflow_command.idempotency_key,
+        payload=payload,
+        status=workflow_command.status,
+        run_after=workflow_command.run_after,
+        created_at=workflow_command.created_at,
+        updated_at=workflow_command.updated_at,
+    )
+
+    _, prepare, _ = await _execute(workflow_command)
+
+    assert prepare.calls[0].dispatch_preparation_strategy == ("FALLBACK_MODEL_REQUIRED")
+
+
+@pytest.mark.asyncio
+async def test_forwards_reconcile_produced_fallback_strategy_marker() -> None:
+    workflow_command = _workflow_command()
+    payload = dict(workflow_command.payload)
+    payload["selected_retry_strategy"] = "FALLBACK_MODEL_REQUIRED"
+    workflow_command = WorkflowCommand(
+        command_id=workflow_command.command_id,
+        command_type=workflow_command.command_type,
+        workflow_run_id=workflow_command.workflow_run_id,
+        idempotency_key=workflow_command.idempotency_key,
+        payload=payload,
+        status=workflow_command.status,
+        run_after=workflow_command.run_after,
+        created_at=workflow_command.created_at,
+        updated_at=workflow_command.updated_at,
+    )
+
+    _, prepare, _ = await _execute(workflow_command)
+
+    assert prepare.calls[0].dispatch_preparation_strategy == ("FALLBACK_MODEL_REQUIRED")

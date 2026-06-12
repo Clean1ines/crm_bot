@@ -260,6 +260,7 @@ def _command(
     requested_items: int = 2,
     now: datetime | None = None,
     started_at: datetime | None = None,
+    dispatch_preparation_strategy: str | None = None,
 ) -> PrepareLlmDispatchBatchCommand:
     return PrepareLlmDispatchBatchCommand(
         work_kind=_work_kind(),
@@ -272,6 +273,7 @@ def _command(
         lease_expires_at=_lease_expires_at(),
         now=now or _now(),
         started_at=started_at or _started_at(),
+        dispatch_preparation_strategy=dispatch_preparation_strategy,
     )
 
 
@@ -502,3 +504,88 @@ async def test_prepare_absent_active_model_starts_no_attempts() -> None:
     assert connection.attempts == {}
     assert connection.dispatches == {}
     assert connection.transactions[0].committed is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_resolves_fallback_strategy_to_first_automatic_fallback_model() -> (
+    None
+):
+    catalog = default_groq_llm_model_route_catalog()
+    fallback_model_ref = catalog.automatic_fallback_model_refs()[0]
+    connection = _connection_with_due_items(5)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="primary",
+                    model_ref=catalog.primary_model_ref(),
+                    minute_requests=10,
+                    minute_tokens=3500,
+                ),
+                _account(
+                    account_ref="fallback",
+                    model_ref=fallback_model_ref,
+                    minute_requests=10,
+                    minute_tokens=35000,
+                ),
+            ),
+            active_model_ref=catalog.primary_model_ref(),
+            dispatch_preparation_strategy="FALLBACK_MODEL_REQUIRED",
+            requested_items=10,
+        ),
+    )
+
+    assert len(result.attempt_result.started_attempts) == 5
+    assert {
+        dispatch["llm_allocation_payload"]["model_ref"]
+        for dispatch in connection.dispatches.values()
+    } == {fallback_model_ref}
+
+
+@pytest.mark.asyncio
+async def test_prepare_resolves_larger_output_strategy_to_fallback_for_now() -> None:
+    catalog = default_groq_llm_model_route_catalog()
+    fallback_model_ref = catalog.automatic_fallback_model_refs()[0]
+    connection = _connection_with_due_items(5)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="primary",
+                    model_ref=catalog.primary_model_ref(),
+                    minute_requests=10,
+                    minute_tokens=3500,
+                ),
+                _account(
+                    account_ref="fallback",
+                    model_ref=fallback_model_ref,
+                    minute_requests=10,
+                    minute_tokens=35000,
+                ),
+            ),
+            active_model_ref=catalog.primary_model_ref(),
+            dispatch_preparation_strategy="LARGER_OUTPUT_LIMIT_MODEL_REQUIRED",
+            requested_items=10,
+        ),
+    )
+
+    assert len(result.attempt_result.started_attempts) == 5
+    assert {
+        dispatch["llm_allocation_payload"]["model_ref"]
+        for dispatch in connection.dispatches.values()
+    } == {fallback_model_ref}
+
+
+@pytest.mark.asyncio
+async def test_prepare_unknown_dispatch_strategy_raises_value_error() -> None:
+    connection = _connection_with_due_items(1)
+    pool = FakePool(connection=connection)
+
+    with pytest.raises(ValueError, match="unknown llm dispatch preparation strategy"):
+        await _runner(pool).execute(
+            _command(dispatch_preparation_strategy="NO_SUCH_STRATEGY"),
+        )

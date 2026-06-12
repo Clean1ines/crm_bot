@@ -19,6 +19,10 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_l
 from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
     SelectActiveLlmModelCapacity,
 )
+from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparation_strategy import (
+    ResolveLlmDispatchPreparationStrategy,
+    ResolveLlmDispatchPreparationStrategyCommand,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelRouteCatalog,
 )
@@ -73,6 +77,7 @@ class PrepareLlmDispatchBatchCommand:
     lease_expires_at: datetime
     now: datetime
     started_at: datetime
+    dispatch_preparation_strategy: str | None = None
 
     def __post_init__(self) -> None:
         LeaseLlmAdmittedWorkItemsCommand(
@@ -87,6 +92,11 @@ class PrepareLlmDispatchBatchCommand:
             now=self.now,
         )
         _require_timezone_aware(self.started_at, field_name="started_at")
+        if self.dispatch_preparation_strategy is not None:
+            _require_non_empty_text(
+                self.dispatch_preparation_strategy,
+                field_name="dispatch_preparation_strategy",
+            )
         if self.started_at < self.now:
             raise ValueError("started_at must be >= now")
 
@@ -134,6 +144,14 @@ class PrepareLlmDispatchBatch:
                     asyncpg_connection,
                 )
 
+                strategy_result = ResolveLlmDispatchPreparationStrategy().execute(
+                    ResolveLlmDispatchPreparationStrategyCommand(
+                        current_active_model_ref=command.active_model_ref,
+                        strategy=command.dispatch_preparation_strategy,
+                        route_catalog=self.route_catalog,
+                    )
+                )
+
                 lease_result = await LeaseLlmAdmittedWorkItems(
                     lease_repository=lease_repository,
                     capacity_policy=self.capacity_policy,
@@ -144,7 +162,7 @@ class PrepareLlmDispatchBatch:
                         work_kind=command.work_kind,
                         profile=command.profile,
                         account_capacities=command.account_capacities,
-                        active_model_ref=command.active_model_ref,
+                        active_model_ref=strategy_result.active_model_ref,
                         requested_items=command.requested_items,
                         worker=command.worker,
                         lease_token_prefix=command.lease_token_prefix,
@@ -175,3 +193,10 @@ def _require_timezone_aware(value: datetime, *, field_name: str) -> None:
         raise TypeError(f"{field_name} must be datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
+
+
+def _require_non_empty_text(value: str, *, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
+    if not value.strip():
+        raise ValueError(f"{field_name} must be non-empty")

@@ -227,7 +227,27 @@ def _prepare_llm_dispatch_batch_command(
         ),
         now=occurred_at,
         started_at=occurred_at,
+        dispatch_preparation_strategy=_dispatch_preparation_strategy(
+            workflow_command.payload,
+        ),
     )
+
+
+def _dispatch_preparation_strategy(
+    payload: Mapping[str, object],
+) -> str | None:
+    for key in (
+        "llm_dispatch_preparation_strategy",
+        "claim_builder_next_model_strategy",
+        "selected_retry_strategy",
+    ):
+        value = payload.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"workflow command payload {key} must be non-empty text")
+        return value
+    return None
 
 
 def _profile_from_payload(payload: Mapping[str, object]) -> LlmTaskCapacityProfile:
