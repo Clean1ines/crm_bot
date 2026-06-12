@@ -14,6 +14,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
+from src.contexts.execution_runtime.application.ports.work_item_split_supersede_repository_port import (
+    WorkItemSplitSupersedeRepositoryPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
     HandleExecuteClaimBuilderSectionCommand,
@@ -37,6 +40,10 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_claim_b
 from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_builder_section_work_command import (
     HandleScheduleClaimBuilderSectionWorkCommand,
     HandleScheduleClaimBuilderSectionWorkCommandHandler,
+)
+from src.contexts.knowledge_workbench.application.sagas.handle_split_claim_builder_source_unit_command import (
+    HandleSplitClaimBuilderSourceUnitCommand,
+    HandleSplitClaimBuilderSourceUnitCommandHandler,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_command_handler_map import (
     implemented_handler_name_for,
@@ -118,6 +125,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         ) = None,
         draft_claim_observation_persistence: (
             PersistValidatedDraftClaimObservationsPort | None
+        ) = None,
+        work_item_split_supersede_repository: (
+            WorkItemSplitSupersedeRepositoryPort | None
         ) = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
@@ -236,6 +246,42 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 work_item_progress_read_repository=work_item_progress_read_repository,
                 claim_builder_retry_action_read_repository=(
                     claim_builder_retry_action_read_repository
+                ),
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT
+        ):
+            if work_item_split_supersede_repository is None:
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+
+            await HandleSplitClaimBuilderSourceUnitCommandHandler().execute(
+                HandleSplitClaimBuilderSourceUnitCommand(
+                    workflow_command=workflow_command,
+                ),
+                source_management_repository=source_unit_repository,
+                work_item_scheduling_repository=knowledge_unit_of_work,
+                work_item_split_supersede_repository=(
+                    work_item_split_supersede_repository
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
             )

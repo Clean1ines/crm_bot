@@ -14,6 +14,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
+from src.contexts.execution_runtime.application.ports.work_item_split_supersede_repository_port import (
+    WorkItemSplitSupersedeRepositoryPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extraction_workflow_command import (
     DispatchKnowledgeExtractionWorkflowCommand,
     DispatchKnowledgeExtractionWorkflowCommandHandler,
@@ -115,6 +118,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         draft_claim_observation_persistence: (
             PersistValidatedDraftClaimObservationsPort | None
         ) = None,
+        work_item_split_supersede_repository: (
+            WorkItemSplitSupersedeRepositoryPort | None
+        ) = None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -153,6 +159,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 ),
                 draft_claim_observation_persistence=(
                     draft_claim_observation_persistence
+                ),
+                work_item_split_supersede_repository=(
+                    work_item_split_supersede_repository
                 ),
             )
             if not dispatch_result.dispatched:

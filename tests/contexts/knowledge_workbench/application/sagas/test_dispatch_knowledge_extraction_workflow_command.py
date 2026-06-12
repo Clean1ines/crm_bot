@@ -408,6 +408,14 @@ class FakeAttemptResult:
 @dataclass(slots=True)
 class FakePrepareResult:
     attempt_result: FakeAttemptResult
+    input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
+    input_size_preflight_reason: str = (
+        "estimated prompt tokens fit active model input limit"
+    )
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    source_split_required: bool = False
+    affected_work_item_refs: tuple[str, ...] = ()
+    source_unit_refs: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)

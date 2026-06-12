@@ -17,6 +17,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_p
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
     PostgresWorkItemSchedulingRepository,
 )
+from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_split_supersede_repository import (
+    PostgresWorkItemSplitSupersedeRepository,
+)
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_claim_builder_retry_action_read_repository import (
     PostgresClaimBuilderRetryActionReadRepository,
 )
@@ -281,6 +284,11 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 ),
                 knowledge_unit_of_work=PostgresWorkItemSchedulingRepository(
                     cast(asyncpg.Connection, connection),
+                ),
+                work_item_split_supersede_repository=(
+                    PostgresWorkItemSplitSupersedeRepository(
+                        cast(asyncpg.Connection, connection),
+                    )
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
