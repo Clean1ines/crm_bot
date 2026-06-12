@@ -37,6 +37,12 @@ from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_bui
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
+    PersistValidatedDraftClaimObservationsPort,
+)
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_validated_draft_claim_observation_persistence import (
+    PostgresValidatedDraftClaimObservationPersistence,
+)
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhaseCommand,
     RunSourceIngestionFirstPhaseResult,
@@ -159,6 +165,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         claim_builder_output_validation_policy: (
             ClaimBuilderOutputValidationPolicy | None
         ) = None,
+        draft_claim_observation_persistence: (
+            PersistValidatedDraftClaimObservationsPort | None
+        ) = None,
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
@@ -172,6 +181,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             claim_builder_output_validation_policy
             or ClaimBuilderOutputValidationPolicy()
         )
+        self._draft_claim_observation_persistence = draft_claim_observation_persistence
 
     async def execute(
         self,
@@ -309,6 +319,12 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 ),
                 claim_builder_output_validation_policy=(
                     self._claim_builder_output_validation_policy
+                ),
+                draft_claim_observation_persistence=(
+                    self._draft_claim_observation_persistence
+                    or PostgresValidatedDraftClaimObservationPersistence(
+                        cast(asyncpg.Connection, connection)
+                    )
                 ),
             )
             await workflow_unit_of_work.commit()

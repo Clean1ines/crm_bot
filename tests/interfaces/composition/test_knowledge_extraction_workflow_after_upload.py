@@ -24,6 +24,10 @@ from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_fir
     RunSourceIngestionFirstPhaseResult,
     RunSourceIngestionFirstPhaseStatus,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
+    PersistValidatedDraftClaimObservationsResult,
+    ValidatedDraftClaimObservationCandidate,
+)
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
     SourceIngestionActor,
     SourceIngestionAdmissionStatus,
@@ -227,6 +231,14 @@ class FakeAttemptResult:
 @dataclass(slots=True)
 class FakePrepareResult:
     attempt_result: FakeAttemptResult
+    input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
+    input_size_preflight_reason: str = (
+        "estimated prompt tokens fit active model input limit"
+    )
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    source_split_required: bool = False
+    affected_work_item_refs: tuple[str, ...] = ()
+    source_unit_refs: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -247,6 +259,35 @@ class FakePrepareLlmDispatchBatch:
                 ),
             ),
         )
+
+
+@dataclass(slots=True)
+class FakeDraftClaimObservationPersistence:
+    persisted_candidates: list[tuple[ValidatedDraftClaimObservationCandidate, ...]] = (
+        field(default_factory=list)
+    )
+
+    async def persist_validated_claims(
+        self,
+        candidates: tuple[ValidatedDraftClaimObservationCandidate, ...],
+    ) -> PersistValidatedDraftClaimObservationsResult:
+        self.persisted_candidates.append(candidates)
+        return PersistValidatedDraftClaimObservationsResult(
+            persisted_count=len(candidates),
+        )
+
+
+class FakePostgresValidatedDraftClaimObservationPersistence(
+    FakeDraftClaimObservationPersistence
+):
+    instances: list["FakePostgresValidatedDraftClaimObservationPersistence"] = []
+
+    def __init__(self, connection: object) -> None:
+        if not isinstance(connection, FakeConnection):
+            raise TypeError("connection must be FakeConnection")
+        self.connection = connection
+        super().__init__()
+        FakePostgresValidatedDraftClaimObservationPersistence.instances.append(self)
 
 
 @dataclass(slots=True)
@@ -538,6 +579,12 @@ def _patch_drain_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         "PostgresWorkItemSchedulingRepository",
         FakePostgresWorkItemSchedulingRepository,
     )
+    FakePostgresValidatedDraftClaimObservationPersistence.instances = []
+    monkeypatch.setattr(
+        composition,
+        "PostgresValidatedDraftClaimObservationPersistence",
+        FakePostgresValidatedDraftClaimObservationPersistence,
+    )
 
 
 @pytest.mark.asyncio
@@ -679,4 +726,56 @@ async def test_rejected_source_ingestion_preserves_admission_status(
     assert result.source_ingestion_completed is False
     assert result.source_ingestion_admission_status is (
         SourceIngestionAdmissionStatus.ACTOR_ROLE_NOT_ALLOWED
+    )
+
+
+@pytest.mark.asyncio
+async def test_after_upload_passes_provided_draft_claim_observation_persistence_into_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_drain_dependencies(monkeypatch)
+    connection = FakeConnection()
+    provided_persistence = FakeDraftClaimObservationPersistence()
+
+    runner = RunKnowledgeExtractionWorkflowAfterUpload(
+        source_ingestion_runner=FakeSourceIngestionRunner(completed=True),
+        pool=FakePool(connection),
+        prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
+        draft_claim_observation_persistence=provided_persistence,
+    )
+
+    await runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=_source_ingestion_command(),
+            max_drain_commands=10,
+        )
+    )
+
+    assert FakePostgresValidatedDraftClaimObservationPersistence.instances == []
+
+
+@pytest.mark.asyncio
+async def test_after_upload_constructs_postgres_draft_claim_observation_persistence_when_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_drain_dependencies(monkeypatch)
+    connection = FakeConnection()
+
+    runner = RunKnowledgeExtractionWorkflowAfterUpload(
+        source_ingestion_runner=FakeSourceIngestionRunner(completed=True),
+        pool=FakePool(connection),
+        prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
+    )
+
+    await runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=_source_ingestion_command(),
+            max_drain_commands=10,
+        )
+    )
+
+    assert FakePostgresValidatedDraftClaimObservationPersistence.instances
+    assert all(
+        instance.connection is connection
+        for instance in FakePostgresValidatedDraftClaimObservationPersistence.instances
     )
