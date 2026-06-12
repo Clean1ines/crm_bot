@@ -6,6 +6,7 @@ from datetime import datetime
 import asyncpg
 
 from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    DueWorkItemRecord,
     LeasedWorkItemRecord,
     WorkItemLeaseRepositoryPort,
 )
@@ -31,6 +32,57 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
 
     def __init__(self, connection: asyncpg.Connection) -> None:
         self._connection = connection
+
+    async def peek_due_work_items(
+        self,
+        *,
+        work_kind: WorkKind,
+        requested_items: int,
+        now: datetime,
+    ) -> tuple[DueWorkItemRecord, ...]:
+        if not isinstance(requested_items, int):
+            raise TypeError("requested_items must be int")
+        if requested_items <= 0:
+            raise ValueError("requested_items must be > 0")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT
+                wi.work_item_id,
+                wi.work_kind,
+                wi.status,
+                wi.attempt_count,
+                wi.leased_by,
+                wi.lease_token,
+                wi.lease_expires_at,
+                wi.next_attempt_at,
+                wi.last_error_kind,
+                wi.created_at,
+                wi.updated_at,
+                wis.payload
+            FROM execution_work_items wi
+            JOIN execution_work_item_schedules wis
+              ON wis.work_item_id = wi.work_item_id
+            WHERE wi.work_kind = $1
+              AND wi.status IN ('ready', 'deferred', 'retryable_failed')
+              AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $2)
+            ORDER BY
+              wi.next_attempt_at NULLS FIRST,
+              wi.updated_at,
+              wi.work_item_id
+            LIMIT $3
+            """,
+            work_kind.value,
+            now,
+            requested_items,
+        )
+        return tuple(
+            DueWorkItemRecord(
+                work_item=_hydrate_work_item(row),
+                schedule_payload=_hydrate_schedule_payload(row["payload"]),
+            )
+            for row in rows
+        )
 
     async def lease_due_work_item(
         self,

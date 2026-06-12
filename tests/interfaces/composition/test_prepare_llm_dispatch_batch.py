@@ -91,6 +91,36 @@ class FakeConnection:
     def transaction(self) -> FakeTransaction:
         return FakeTransaction(connection=self)
 
+    async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        work_kind = str(args[0])
+        now = _as_datetime(args[1])
+        limit = int(args[2])
+        candidates: list[dict[str, object]] = []
+
+        for row in self.work_items.values():
+            if row["work_kind"] != work_kind:
+                continue
+            if row["status"] not in {"ready", "deferred", "retryable_failed"}:
+                continue
+            next_attempt_at = row["next_attempt_at"]
+            if next_attempt_at is not None and _as_datetime(next_attempt_at) > now:
+                continue
+            work_item_id = str(row["work_item_id"])
+            payload = self.schedules.get(work_item_id)
+            if payload is None:
+                continue
+            candidates.append({**row, "payload": payload})
+
+        candidates.sort(
+            key=lambda row: (
+                row["next_attempt_at"] is not None,
+                row["next_attempt_at"] or datetime.min.replace(tzinfo=timezone.utc),
+                row["updated_at"],
+                row["work_item_id"],
+            ),
+        )
+        return candidates[:limit]
+
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
         work_kind = str(args[0])
         now = _as_datetime(args[1])
@@ -674,9 +704,46 @@ async def test_source_split_required_does_not_lease_normal_llm_work_item() -> No
 
     assert result.source_split_required is True
     assert result.input_size_preflight_decision == "SOURCE_SPLIT_REQUIRED"
+    assert result.affected_work_item_refs == ("work-1", "work-2")
+    assert result.source_unit_refs == ("unit-1", "unit-2")
     assert result.lease_result.leased == ()
     assert result.attempt_result.started_attempts == ()
     assert connection.attempts == {}
     assert connection.dispatches == {}
     assert connection.work_items["work-1"]["status"] == "ready"
     assert connection.work_items["work-2"]["status"] == "ready"
+
+
+@pytest.mark.asyncio
+async def test_source_split_required_raises_when_due_payload_has_no_source_unit_ref() -> (
+    None
+):
+    catalog = default_groq_llm_model_route_catalog()
+    connection = _connection_with_due_items(1)
+    connection.schedules["work-1"] = {"not_source_unit_ref": "missing"}
+    pool = FakePool(connection=connection)
+
+    with pytest.raises(ValueError, match="source_unit_ref"):
+        await _runner(pool).execute(
+            _command(
+                profile=_large_input_profile(200000),
+                account_capacities=(
+                    _account(
+                        account_ref="primary",
+                        model_ref=catalog.primary_model_ref(),
+                        minute_requests=10,
+                        minute_tokens=1000000,
+                        daily_tokens=1000000,
+                    ),
+                    _account(
+                        account_ref="fallback",
+                        model_ref=catalog.automatic_fallback_model_refs()[0],
+                        minute_requests=10,
+                        minute_tokens=1000000,
+                        daily_tokens=1000000,
+                    ),
+                ),
+                active_model_ref=catalog.primary_model_ref(),
+                requested_items=1,
+            ),
+        )

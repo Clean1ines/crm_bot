@@ -134,6 +134,8 @@ class FakeAttemptResult:
 @dataclass(slots=True)
 class FakePrepareResult:
     attempt_result: FakeAttemptResult
+    affected_work_item_refs: tuple[str, ...] = ()
+    source_unit_refs: tuple[str, ...] = ()
     input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
@@ -147,6 +149,8 @@ class FakePrepareLlmDispatchBatch:
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...] = field(
         default_factory=lambda: (_attempt(1), _attempt(2)),
     )
+    affected_work_item_refs: tuple[str, ...] = ()
+    source_unit_refs: tuple[str, ...] = ()
     input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
@@ -161,6 +165,8 @@ class FakePrepareLlmDispatchBatch:
             attempt_result=FakeAttemptResult(
                 started_attempts=self.started_attempts,
             ),
+            affected_work_item_refs=self.affected_work_item_refs,
+            source_unit_refs=self.source_unit_refs,
             input_size_preflight_decision=self.input_size_preflight_decision,
             input_size_preflight_reason=self.input_size_preflight_reason,
             input_size_preflight_active_model_ref=(
@@ -319,6 +325,8 @@ async def _execute(
     workflow_command: WorkflowCommand | None = None,
     *,
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...] | None = None,
+    affected_work_item_refs: tuple[str, ...] = (),
+    source_unit_refs: tuple[str, ...] = (),
     input_size_preflight_decision: str = "USE_ACTIVE_MODEL",
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
@@ -334,6 +342,8 @@ async def _execute(
         started_attempts=(_attempt(1), _attempt(2))
         if started_attempts is None
         else started_attempts,
+        affected_work_item_refs=affected_work_item_refs,
+        source_unit_refs=source_unit_refs,
         input_size_preflight_decision=input_size_preflight_decision,
         input_size_preflight_reason=input_size_preflight_reason,
         input_size_preflight_active_model_ref=input_size_preflight_active_model_ref,
@@ -540,6 +550,8 @@ async def test_source_split_required_prepare_result_emits_split_command() -> Non
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
         input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        affected_work_item_refs=("work-1",),
+        source_unit_refs=("unit-1",),
         source_split_required=True,
     )
 
@@ -572,6 +584,8 @@ async def test_source_split_required_emits_split_required_event_and_command() ->
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
         input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        affected_work_item_refs=("work-1",),
+        source_unit_refs=("unit-1",),
         source_split_required=True,
     )
 
@@ -595,8 +609,9 @@ async def test_source_split_required_emits_split_required_event_and_command() ->
     )
     assert command.payload["workflow_run_id"] == _workflow_run_id()
     assert command.payload["source_document_ref"] == "source-document:project-1:abc"
-    assert command.payload["source_unit_ref"] is None
-    assert command.payload["affected_work_item_refs"] == ()
+    assert command.payload["source_unit_ref"] == "unit-1"
+    assert command.payload["source_unit_refs"] == ("unit-1",)
+    assert command.payload["affected_work_item_refs"] == ("work-1",)
     assert command.payload["estimated_prompt_tokens"] == 3000
     assert command.payload["active_model_ref"] == "qwen/qwen3-32b"
     assert command.payload["input_size_preflight_decision"] == ("SOURCE_SPLIT_REQUIRED")
@@ -616,6 +631,8 @@ async def test_source_split_required_records_progress_and_timeline() -> None:
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
         input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        affected_work_item_refs=("work-1",),
+        source_unit_refs=("unit-1",),
         source_split_required=True,
     )
 
@@ -643,6 +660,8 @@ async def test_source_split_required_does_not_emit_dispatch_prepared_or_execute_
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
         input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        affected_work_item_refs=("work-1",),
+        source_unit_refs=("unit-1",),
         source_split_required=True,
     )
 
@@ -657,3 +676,21 @@ async def test_source_split_required_does_not_emit_dispatch_prepared_or_execute_
     ) == (
         KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT.value,
     )
+
+
+@pytest.mark.asyncio
+async def test_source_split_required_raises_when_prepare_result_has_no_source_unit_ref() -> (
+    None
+):
+    with pytest.raises(ValueError, match="source_unit_refs"):
+        await _execute(
+            started_attempts=(),
+            input_size_preflight_decision="SOURCE_SPLIT_REQUIRED",
+            input_size_preflight_reason=(
+                "estimated prompt tokens exceed all automatic fallback input limits"
+            ),
+            input_size_preflight_active_model_ref="qwen/qwen3-32b",
+            affected_work_item_refs=("work-1",),
+            source_unit_refs=(),
+            source_split_required=True,
+        )

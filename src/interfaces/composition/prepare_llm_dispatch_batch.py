@@ -14,6 +14,10 @@ from src.contexts.capacity_runtime.domain.capacity_decision import (
     CapacityWorkClass,
 )
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
+from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    DueWorkItemRecord,
+    WorkItemLeaseRepositoryPort,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.execution_runtime.application.use_cases.lease_admitted_work_items import (
@@ -130,6 +134,8 @@ class PrepareLlmDispatchBatchResult:
     input_size_preflight_reason: str = "input size preflight used active model"
     input_size_preflight_active_model_ref: str | None = None
     source_split_required: bool = False
+    affected_work_item_refs: tuple[str, ...] = ()
+    source_unit_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.lease_result, LeaseLlmAdmittedWorkItemsResult):
@@ -158,11 +164,27 @@ class PrepareLlmDispatchBatchResult:
             )
         if not isinstance(self.source_split_required, bool):
             raise TypeError("source_split_required must be bool")
+        _require_non_empty_text_tuple(
+            self.affected_work_item_refs,
+            field_name="affected_work_item_refs",
+        )
+        _require_non_empty_text_tuple(
+            self.source_unit_refs,
+            field_name="source_unit_refs",
+        )
         if self.source_split_required:
             if self.lease_result.leased:
                 raise ValueError("source split required result must not lease items")
             if self.attempt_result.started_attempts:
                 raise ValueError("source split required result must not start attempts")
+            if not self.affected_work_item_refs:
+                raise ValueError(
+                    "source split required result must include affected_work_item_refs"
+                )
+            if not self.source_unit_refs:
+                raise ValueError(
+                    "source split required result must include source_unit_refs"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,9 +230,10 @@ class PrepareLlmDispatchBatch:
                     preflight_result.decision
                     is LlmDispatchInputSizePreflightDecision.SOURCE_SPLIT_REQUIRED
                 ):
-                    return _source_split_required_result(
+                    return await _source_split_required_result(
                         command=command,
                         preflight_result=preflight_result,
+                        lease_repository=lease_repository,
                     )
 
                 lease_result = await LeaseLlmAdmittedWorkItems(
@@ -255,14 +278,23 @@ class PrepareLlmDispatchBatch:
             await self.pool.release(connection)
 
 
-def _source_split_required_result(
+async def _source_split_required_result(
     *,
     command: PrepareLlmDispatchBatchCommand,
     preflight_result: ResolveLlmDispatchInputSizePreflightResult,
+    lease_repository: WorkItemLeaseRepositoryPort,
 ) -> PrepareLlmDispatchBatchResult:
     projection = zero_llm_capacity_projection(
         requested_items=command.requested_items,
     )
+    affected_records = await lease_repository.peek_due_work_items(
+        work_kind=command.work_kind,
+        requested_items=command.requested_items,
+        now=command.now,
+    )
+    affected_work_item_refs = _affected_work_item_refs(affected_records)
+    source_unit_refs = _source_unit_refs(affected_records)
+
     return PrepareLlmDispatchBatchResult(
         lease_result=LeaseLlmAdmittedWorkItemsResult(
             active_model_capacity_selection=SelectActiveLlmModelCapacityResult(
@@ -289,7 +321,27 @@ def _source_split_required_result(
         input_size_preflight_reason=preflight_result.reason,
         input_size_preflight_active_model_ref=preflight_result.active_model_ref,
         source_split_required=True,
+        affected_work_item_refs=affected_work_item_refs,
+        source_unit_refs=source_unit_refs,
     )
+
+
+def _affected_work_item_refs(
+    records: tuple[DueWorkItemRecord, ...],
+) -> tuple[str, ...]:
+    return tuple(record.work_item.work_item_id for record in records)
+
+
+def _source_unit_refs(records: tuple[DueWorkItemRecord, ...]) -> tuple[str, ...]:
+    refs: list[str] = []
+    for record in records:
+        source_unit_ref = record.schedule_payload.get("source_unit_ref")
+        if not isinstance(source_unit_ref, str) or not source_unit_ref.strip():
+            raise ValueError(
+                "source split required schedule payload must include source_unit_ref"
+            )
+        refs.append(source_unit_ref)
+    return tuple(refs)
 
 
 def _require_timezone_aware(value: datetime, *, field_name: str) -> None:
@@ -297,6 +349,17 @@ def _require_timezone_aware(value: datetime, *, field_name: str) -> None:
         raise TypeError(f"{field_name} must be datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
+
+
+def _require_non_empty_text_tuple(
+    value: tuple[str, ...],
+    *,
+    field_name: str,
+) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError(f"{field_name} must be tuple")
+    for item in value:
+        _require_non_empty_text(item, field_name=field_name)
 
 
 def _require_non_empty_text(value: str, *, field_name: str) -> None:

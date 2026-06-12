@@ -298,6 +298,8 @@ def _preflight_metadata_from_prepare_result(
         "input_size_preflight_reason": prepare_result.input_size_preflight_reason,
         "input_size_preflight_active_model_ref": active_model_ref,
         "source_split_required": prepare_result.source_split_required,
+        "affected_work_item_refs": prepare_result.affected_work_item_refs,
+        "source_unit_refs": prepare_result.source_unit_refs,
     }
     return metadata
 
@@ -447,14 +449,21 @@ def _source_split_payload(
     )
     profile_payload = _payload_mapping(dispatch_payload, "profile")
 
+    source_unit_refs = _metadata_text_tuple(preflight_metadata, "source_unit_refs")
+    affected_work_item_refs = _metadata_text_tuple(
+        preflight_metadata,
+        "affected_work_item_refs",
+    )
+
     return {
         "workflow_run_id": workflow_run_id,
         "source_document_ref": _payload_text(
             workflow_command.payload,
             "source_document_ref",
         ),
-        "source_unit_ref": None,
-        "affected_work_item_refs": (),
+        "source_unit_ref": source_unit_refs[0],
+        "source_unit_refs": source_unit_refs,
+        "affected_work_item_refs": affected_work_item_refs,
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "scheduled_work_item_count": _payload_positive_int(
             workflow_command.payload,
@@ -513,6 +522,21 @@ def _source_split_required_timeline_entry(
         occurred_at=occurred_at,
         source_ref=CLAIM_BUILDER_SECTION_WORK_KIND.value,
     )
+
+
+def _metadata_text_tuple(
+    payload: Mapping[str, object],
+    key: str,
+) -> tuple[str, ...]:
+    value = payload.get(key)
+    if not isinstance(value, tuple):
+        raise ValueError(f"preflight metadata must include tuple {key}")
+    if not value:
+        raise ValueError(f"preflight metadata {key} must be non-empty")
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"preflight metadata {key} must contain non-empty text")
+    return value
 
 
 def _metadata_text(
