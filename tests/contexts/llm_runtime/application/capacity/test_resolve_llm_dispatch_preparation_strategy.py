@@ -7,6 +7,7 @@ from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparat
     ResolveLlmDispatchPreparationStrategyCommand,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelCapacityLimits,
     LlmModelExecutionSettings,
     LlmModelRoute,
     LlmModelRouteCatalog,
@@ -25,6 +26,41 @@ def _catalog() -> LlmModelRouteCatalog:
 
 def _primary_model_ref() -> str:
     return _catalog().primary_model_ref()
+
+
+def _settings() -> LlmModelExecutionSettings:
+    return LlmModelExecutionSettings(reasoning_enabled=False)
+
+
+def _limits(
+    *,
+    input_token_limit: int,
+    output_token_limit: int,
+) -> LlmModelCapacityLimits:
+    return LlmModelCapacityLimits(
+        input_token_limit=input_token_limit,
+        output_token_limit=output_token_limit,
+    )
+
+
+def _route(
+    *,
+    model_ref: str,
+    role: LlmModelRouteRole,
+    order: int,
+    input_token_limit: int,
+    output_token_limit: int,
+) -> LlmModelRoute:
+    return LlmModelRoute(
+        model_ref=model_ref,
+        role=role,
+        order=order,
+        execution_settings=_settings(),
+        capacity_limits=_limits(
+            input_token_limit=input_token_limit,
+            output_token_limit=output_token_limit,
+        ),
+    )
 
 
 def _command(strategy: str | None):
@@ -74,22 +110,77 @@ def test_fallback_required_marker_resolves_first_automatic_fallback_model() -> N
     assert result.strategy_applied == "FALLBACK_MODEL_REQUIRED"
 
 
-def test_retry_larger_output_limit_uses_automatic_fallback_for_now() -> None:
-    catalog = _catalog()
-
+def test_retry_larger_output_limit_picks_first_larger_output_fallback() -> None:
     result = _resolver().execute(_command("RETRY_LARGER_OUTPUT_LIMIT_MODEL"))
 
-    assert result.active_model_ref == catalog.automatic_fallback_model_refs()[0]
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
 
 
-def test_larger_output_required_marker_uses_automatic_fallback_for_now() -> None:
-    catalog = _catalog()
-
+def test_larger_output_required_marker_picks_first_larger_output_fallback() -> None:
     result = _resolver().execute(_command("LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"))
 
-    assert result.active_model_ref == catalog.automatic_fallback_model_refs()[0]
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+
+
+def test_retry_larger_input_limit_picks_first_larger_input_fallback() -> None:
+    result = _resolver().execute(_command("RETRY_LARGER_INPUT_LIMIT_MODEL"))
+
+    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.strategy_applied == "RETRY_LARGER_INPUT_LIMIT_MODEL"
+
+
+def test_larger_input_required_marker_picks_first_larger_input_fallback() -> None:
+    result = _resolver().execute(_command("LARGER_INPUT_LIMIT_MODEL_REQUIRED"))
+
+    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.strategy_applied == "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
+
+
+def test_larger_output_strategy_skips_first_fallback_without_larger_output() -> None:
+    catalog = LlmModelRouteCatalog(
+        routes=(
+            _route(
+                model_ref="primary-model",
+                role=LlmModelRouteRole.PRIMARY,
+                order=0,
+                input_token_limit=32768,
+                output_token_limit=8192,
+            ),
+            _route(
+                model_ref="fallback-same-output",
+                role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
+                order=1,
+                input_token_limit=131072,
+                output_token_limit=8192,
+            ),
+            _route(
+                model_ref="fallback-larger-output",
+                role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
+                order=2,
+                input_token_limit=32768,
+                output_token_limit=16384,
+            ),
+            _route(
+                model_ref="degraded-model",
+                role=LlmModelRouteRole.DEGRADED_USER_CHOICE,
+                order=3,
+                input_token_limit=8192,
+                output_token_limit=4096,
+            ),
+        )
+    )
+
+    result = _resolver().execute(
+        ResolveLlmDispatchPreparationStrategyCommand(
+            current_active_model_ref="primary-model",
+            strategy="RETRY_LARGER_OUTPUT_LIMIT_MODEL",
+            route_catalog=catalog,
+        )
+    )
+
+    assert result.active_model_ref == "fallback-larger-output"
 
 
 def test_unknown_strategy_raises_value_error() -> None:
@@ -100,17 +191,19 @@ def test_unknown_strategy_raises_value_error() -> None:
 def test_fallback_strategy_without_automatic_fallback_raises() -> None:
     catalog = LlmModelRouteCatalog(
         routes=(
-            LlmModelRoute(
+            _route(
                 model_ref="primary-model",
                 role=LlmModelRouteRole.PRIMARY,
                 order=0,
-                execution_settings=LlmModelExecutionSettings(reasoning_enabled=False),
+                input_token_limit=32768,
+                output_token_limit=8192,
             ),
-            LlmModelRoute(
+            _route(
                 model_ref="degraded-model",
                 role=LlmModelRouteRole.DEGRADED_USER_CHOICE,
                 order=1,
-                execution_settings=LlmModelExecutionSettings(reasoning_enabled=False),
+                input_token_limit=8192,
+                output_token_limit=4096,
             ),
         )
     )
@@ -120,6 +213,43 @@ def test_fallback_strategy_without_automatic_fallback_raises() -> None:
             ResolveLlmDispatchPreparationStrategyCommand(
                 current_active_model_ref="primary-model",
                 strategy="FALLBACK_MODEL_REQUIRED",
+                route_catalog=catalog,
+            )
+        )
+
+
+def test_larger_output_strategy_without_larger_output_fallback_raises() -> None:
+    catalog = LlmModelRouteCatalog(
+        routes=(
+            _route(
+                model_ref="primary-model",
+                role=LlmModelRouteRole.PRIMARY,
+                order=0,
+                input_token_limit=32768,
+                output_token_limit=8192,
+            ),
+            _route(
+                model_ref="fallback-same-output",
+                role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
+                order=1,
+                input_token_limit=131072,
+                output_token_limit=8192,
+            ),
+            _route(
+                model_ref="degraded-model",
+                role=LlmModelRouteRole.DEGRADED_USER_CHOICE,
+                order=2,
+                input_token_limit=8192,
+                output_token_limit=4096,
+            ),
+        )
+    )
+
+    with pytest.raises(ValueError, match="larger output limit"):
+        _resolver().execute(
+            ResolveLlmDispatchPreparationStrategyCommand(
+                current_active_model_ref="primary-model",
+                strategy="RETRY_LARGER_OUTPUT_LIMIT_MODEL",
                 route_catalog=catalog,
             )
         )

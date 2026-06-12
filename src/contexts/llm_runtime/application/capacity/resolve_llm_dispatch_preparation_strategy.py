@@ -68,7 +68,22 @@ class ResolveLlmDispatchPreparationStrategy:
             "RETRY_LARGER_OUTPUT_LIMIT_MODEL",
         }:
             return ResolveLlmDispatchPreparationStrategyResult(
-                active_model_ref=_first_automatic_fallback(command.route_catalog),
+                active_model_ref=_first_larger_output_fallback(
+                    current_model_ref=command.current_active_model_ref,
+                    route_catalog=command.route_catalog,
+                ),
+                strategy_applied=strategy,
+            )
+
+        if strategy in {
+            "LARGER_INPUT_LIMIT_MODEL_REQUIRED",
+            "RETRY_LARGER_INPUT_LIMIT_MODEL",
+        }:
+            return ResolveLlmDispatchPreparationStrategyResult(
+                active_model_ref=_first_larger_input_fallback(
+                    current_model_ref=command.current_active_model_ref,
+                    route_catalog=command.route_catalog,
+                ),
                 strategy_applied=strategy,
             )
 
@@ -79,6 +94,40 @@ def _first_automatic_fallback(route_catalog: LlmModelRouteCatalog) -> str:
     fallback_model_refs = route_catalog.automatic_fallback_model_refs()
     if not fallback_model_refs:
         raise ValueError("route catalog has no automatic fallback model refs")
+    return fallback_model_refs[0]
+
+
+def _first_larger_output_fallback(
+    *,
+    current_model_ref: str,
+    route_catalog: LlmModelRouteCatalog,
+) -> str:
+    fallback_model_refs = (
+        route_catalog.automatic_fallback_model_refs_with_larger_output_limit(
+            current_model_ref,
+        )
+    )
+    if not fallback_model_refs:
+        raise ValueError(
+            "route catalog has no automatic fallback model with larger output limit"
+        )
+    return fallback_model_refs[0]
+
+
+def _first_larger_input_fallback(
+    *,
+    current_model_ref: str,
+    route_catalog: LlmModelRouteCatalog,
+) -> str:
+    fallback_model_refs = (
+        route_catalog.automatic_fallback_model_refs_with_larger_input_limit(
+            current_model_ref,
+        )
+    )
+    if not fallback_model_refs:
+        raise ValueError(
+            "route catalog has no automatic fallback model with larger input limit"
+        )
     return fallback_model_refs[0]
 
 

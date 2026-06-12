@@ -39,11 +39,28 @@ class LlmModelExecutionSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class LlmModelCapacityLimits:
+    input_token_limit: int
+    output_token_limit: int
+
+    def __post_init__(self) -> None:
+        _require_positive_int(
+            self.input_token_limit,
+            field_name="input_token_limit",
+        )
+        _require_positive_int(
+            self.output_token_limit,
+            field_name="output_token_limit",
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class LlmModelRoute:
     model_ref: str
     role: LlmModelRouteRole
     order: int
     execution_settings: LlmModelExecutionSettings
+    capacity_limits: LlmModelCapacityLimits
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.model_ref, field_name="model_ref")
@@ -55,6 +72,8 @@ class LlmModelRoute:
             raise ValueError("order must be >= 0")
         if not isinstance(self.execution_settings, LlmModelExecutionSettings):
             raise TypeError("execution_settings must be LlmModelExecutionSettings")
+        if not isinstance(self.capacity_limits, LlmModelCapacityLimits):
+            raise TypeError("capacity_limits must be LlmModelCapacityLimits")
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +118,34 @@ class LlmModelRouteCatalog:
             )
         )
 
+    def automatic_fallback_model_refs_with_larger_output_limit(
+        self,
+        current_model_ref: str,
+    ) -> tuple[str, ...]:
+        current_limits = self.capacity_limits_for_model_ref(current_model_ref)
+        return tuple(
+            route.model_ref
+            for route in self._ordered_routes_with_role(
+                LlmModelRouteRole.AUTOMATIC_FALLBACK,
+            )
+            if route.capacity_limits.output_token_limit
+            > current_limits.output_token_limit
+        )
+
+    def automatic_fallback_model_refs_with_larger_input_limit(
+        self,
+        current_model_ref: str,
+    ) -> tuple[str, ...]:
+        current_limits = self.capacity_limits_for_model_ref(current_model_ref)
+        return tuple(
+            route.model_ref
+            for route in self._ordered_routes_with_role(
+                LlmModelRouteRole.AUTOMATIC_FALLBACK,
+            )
+            if route.capacity_limits.input_token_limit
+            > current_limits.input_token_limit
+        )
+
     def degraded_user_choice_model_ref(self) -> str:
         return self._ordered_routes_with_role(
             LlmModelRouteRole.DEGRADED_USER_CHOICE,
@@ -119,6 +166,15 @@ class LlmModelRouteCatalog:
         if route is None:
             raise ValueError("model_ref is not in route catalog")
         return route.execution_settings
+
+    def capacity_limits_for_model_ref(
+        self,
+        model_ref: str,
+    ) -> LlmModelCapacityLimits:
+        route = self.route_for_model_ref(model_ref)
+        if route is None:
+            raise ValueError("model_ref is not in route catalog")
+        return route.capacity_limits
 
     def _routes_with_role(
         self,
@@ -144,33 +200,60 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
                 role=LlmModelRouteRole.PRIMARY,
                 order=0,
                 execution_settings=reasoning_disabled,
+                capacity_limits=LlmModelCapacityLimits(
+                    input_token_limit=32768,
+                    output_token_limit=8192,
+                ),
             ),
             LlmModelRoute(
                 model_ref="openai/gpt-oss-120b",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=1,
                 execution_settings=reasoning_disabled,
+                capacity_limits=LlmModelCapacityLimits(
+                    input_token_limit=131072,
+                    output_token_limit=16384,
+                ),
             ),
             LlmModelRoute(
                 model_ref="llama-3.3-70b-versatile",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=2,
                 execution_settings=reasoning_disabled,
+                capacity_limits=LlmModelCapacityLimits(
+                    input_token_limit=32768,
+                    output_token_limit=8192,
+                ),
             ),
             LlmModelRoute(
                 model_ref="meta-llama/llama-4-scout-17b-16e-instruct",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=3,
                 execution_settings=reasoning_disabled,
+                capacity_limits=LlmModelCapacityLimits(
+                    input_token_limit=131072,
+                    output_token_limit=8192,
+                ),
             ),
             LlmModelRoute(
                 model_ref="llama-3.1-8b-instant",
                 role=LlmModelRouteRole.DEGRADED_USER_CHOICE,
                 order=4,
                 execution_settings=reasoning_disabled,
+                capacity_limits=LlmModelCapacityLimits(
+                    input_token_limit=8192,
+                    output_token_limit=4096,
+                ),
             ),
         ),
     )
+
+
+def _require_positive_int(value: int, *, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")
+    if value <= 0:
+        raise ValueError(f"{field_name} must be positive")
 
 
 def _require_non_empty_text(value: str, *, field_name: str) -> None:
