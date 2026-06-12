@@ -30,6 +30,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
     ClaimBuilderOutputValidationFailureReason,
     ClaimBuilderOutputValidationPolicy,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_attempt_next_action_policy import (
+    ClaimBuilderAttemptNextActionKind,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
     PersistValidatedDraftClaimObservationsResult,
     ValidatedDraftClaimObservationCandidate,
@@ -546,6 +549,19 @@ async def test_appends_outcome_and_capacity_events() -> None:
         ClaimBuilderOutputValidationDecision.VALID_CLAIMS.value
     )
     assert outcome_event.payload["validated_claim_count"] == 1
+    assert outcome_event.payload["claim_builder_attempt_next_action_kind"] == (
+        ClaimBuilderAttemptNextActionKind.PERSIST_VALID_CLAIMS.value
+    )
+    assert outcome_event.payload["claim_builder_attempt_next_action_reason"] == (
+        "valid_claims"
+    )
+    assert outcome_event.payload["claim_builder_attempt_next_model_strategy"] is None
+    assert outcome_event.payload["claim_builder_should_persist_claims"] is True
+    assert (
+        outcome_event.payload["claim_builder_should_mark_work_item_completed"] is True
+    )
+    assert outcome_event.payload["claim_builder_requires_source_split"] is False
+    assert outcome_event.payload["claim_builder_next_run_after"] is None
 
 
 @pytest.mark.asyncio
@@ -587,6 +603,7 @@ async def test_updates_progress_snapshot_and_timeline() -> None:
     assert snapshot.domain_counters["capacity_observation_count"] == 1
     assert snapshot.domain_counters["claim_builder_valid_output_count"] == 1
     assert snapshot.domain_counters["claim_builder_valid_claim_count"] == 1
+    assert snapshot.domain_counters["draft_claim_observation_count"] == 1
 
     assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
         "Claim builder section attempt executed",
@@ -640,6 +657,17 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
             ),
             "validated_claim_count": 0,
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_reason": (
+                ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
+            ),
+            "claim_builder_attempt_next_model_strategy": "FALLBACK_MODEL_REQUIRED",
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
             "retry_recommended": True,
         },
     )
@@ -663,6 +691,30 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
         ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value
     )
     assert workflow_unit_of_work.outbox.events[1].payload["retry_recommended"] is True
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_attempt_next_action_kind"
+        ]
+        == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+    )
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_attempt_next_model_strategy"
+        ]
+        == "FALLBACK_MODEL_REQUIRED"
+    )
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_should_persist_claims"
+        ]
+        is False
+    )
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_should_mark_work_item_completed"
+        ]
+        is False
+    )
     assert tuple(
         command.command_type
         for command in workflow_unit_of_work.command_log.pending_commands
@@ -677,6 +729,8 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
     assert (
         snapshot.domain_counters["claim_builder_validation_retryable_failed_count"] == 1
     )
+    assert snapshot.domain_counters["claim_builder_retry_action_count"] == 1
+    assert snapshot.domain_counters["claim_builder_fallback_retry_required_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -704,6 +758,15 @@ async def test_valid_empty_output_after_retry_is_accepted_as_extracted() -> None
             ),
             "validation_failure_reason": None,
             "validated_claim_count": 0,
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.ACCEPT_VALID_EMPTY.value
+            ),
+            "claim_builder_attempt_next_action_reason": "valid_empty",
+            "claim_builder_attempt_next_model_strategy": None,
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": True,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
             "retry_recommended": False,
         },
     )
@@ -719,6 +782,25 @@ async def test_valid_empty_output_after_retry_is_accepted_as_extracted() -> None
         ClaimBuilderOutputValidationDecision.VALID_EMPTY.value
     )
     assert workflow_unit_of_work.outbox.events[1].payload["validated_claim_count"] == 0
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_attempt_next_action_kind"
+        ]
+        == ClaimBuilderAttemptNextActionKind.ACCEPT_VALID_EMPTY.value
+    )
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_should_persist_claims"
+        ]
+        is False
+    )
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_should_mark_work_item_completed"
+        ]
+        is True
+    )
+    assert draft_persistence.candidates == []
 
 
 def test_source_unit_text_missing_fails_explicitly() -> None:
@@ -775,6 +857,7 @@ async def test_valid_claims_are_persisted_as_draft_claim_observations() -> None:
     snapshot = workflow_unit_of_work.progress_snapshots.snapshot
     assert snapshot is not None
     assert snapshot.domain_counters["claim_builder_persisted_draft_claim_count"] == 1
+    assert snapshot.domain_counters["draft_claim_observation_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -811,6 +894,17 @@ async def test_invalid_retry_decision_persists_zero_draft_claims() -> None:
             ),
             "validated_claim_count": 0,
             "next_model_strategy": "FALLBACK_MODEL_REQUIRED",
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_reason": (
+                ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
+            ),
+            "claim_builder_attempt_next_model_strategy": "FALLBACK_MODEL_REQUIRED",
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
             "retry_recommended": True,
             "_validated_claims": (),
         },
@@ -828,3 +922,129 @@ async def test_invalid_retry_decision_persists_zero_draft_claims() -> None:
     assert workflow_unit_of_work.outbox.events[1].payload["next_model_strategy"] == (
         "FALLBACK_MODEL_REQUIRED"
     )
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_attempt_next_action_kind"
+        ]
+        == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+    )
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_should_persist_claims"
+        ]
+        is False
+    )
+
+
+def test_truncated_output_metadata_uses_larger_output_next_action() -> None:
+    validator = ClaimBuilderLlmDispatchOutputValidator(
+        policy=ClaimBuilderOutputValidationPolicy(),
+    )
+
+    result = validator.validate(
+        dispatch_payload=_dispatch().dispatch_payload,
+        output_payload={
+            "raw_text": '{"claims":[]}',
+            "output_truncated": True,
+        },
+        llm_status=LlmDispatchExecutionStatus.SUCCEEDED,
+        finished_at=_finished_at(),
+        attempt_number=1,
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
+    assert result.metadata["claim_builder_attempt_next_action_kind"] == (
+        ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value
+    )
+    assert result.metadata["claim_builder_attempt_next_model_strategy"] == (
+        "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+    )
+    assert result.metadata["claim_builder_should_persist_claims"] is False
+
+
+def test_retry_same_model_metadata_uses_retry_same_model_next_action() -> None:
+    validator = ClaimBuilderLlmDispatchOutputValidator(
+        policy=ClaimBuilderOutputValidationPolicy(),
+    )
+
+    result = validator.validate(
+        dispatch_payload=_dispatch().dispatch_payload,
+        output_payload={"raw_text": '{"claims":"not-list"}'},
+        llm_status=LlmDispatchExecutionStatus.SUCCEEDED,
+        finished_at=_finished_at(),
+        attempt_number=1,
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
+    assert result.metadata["claim_builder_attempt_next_action_kind"] == (
+        ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value
+    )
+    assert result.metadata["claim_builder_attempt_next_model_strategy"] == "SAME_MODEL"
+    assert result.metadata["claim_builder_should_persist_claims"] is False
+
+
+@pytest.mark.asyncio
+async def test_terminal_invalid_metadata_emits_terminal_failure_action() -> None:
+    terminal_result = ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.TERMINAL_FAILED,
+            finished_at=_finished_at(),
+            output_payload={"raw_text": '{"claims":[]}'},
+            error_kind="claim_builder_output_validation_failed",
+            capacity_observation={
+                **_capacity_payload(),
+                "outcome_class": LlmDispatchExecutionStatus.TERMINAL_FAILED.value,
+            },
+        ),
+        outcome_result=RecordWorkItemAttemptOutcomeResult(
+            work_item=WorkItem(
+                work_item_id=_work_item_id(),
+                work_kind=WorkKind(
+                    "knowledge_workbench.claim_builder.section_extraction"
+                ),
+                status=WorkItemStatus.TERMINAL_FAILED,
+            )
+        ),
+        validation_metadata={
+            "claim_builder_attempt_outcome_kind": "TERMINAL_INVALID",
+            "validation_decision": "TERMINAL_INVALID",
+            "validation_failure_reason": (
+                ClaimBuilderOutputValidationFailureReason.CLAIM_FIELD_SET_INVALID.value
+            ),
+            "validated_claim_count": 0,
+            "next_model_strategy": None,
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.TERMINAL_FAILURE.value
+            ),
+            "claim_builder_attempt_next_action_reason": (
+                ClaimBuilderOutputValidationFailureReason.CLAIM_FIELD_SET_INVALID.value
+            ),
+            "claim_builder_attempt_next_model_strategy": None,
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
+            "retry_recommended": False,
+            "_validated_claims": (),
+        },
+    )
+
+    _, _, _, workflow_unit_of_work, draft_persistence = await _execute(
+        execution_result=terminal_result,
+    )
+
+    assert draft_persistence.candidates == []
+    assert workflow_unit_of_work.outbox.events[1].event_type == (
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_TERMINAL_FAILED.value
+    )
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload[
+            "claim_builder_attempt_next_action_kind"
+        ]
+        == ClaimBuilderAttemptNextActionKind.TERMINAL_FAILURE.value
+    )
+
+    snapshot = workflow_unit_of_work.progress_snapshots.snapshot
+    assert snapshot is not None
+    assert snapshot.domain_counters["claim_builder_terminal_invalid_count"] == 1

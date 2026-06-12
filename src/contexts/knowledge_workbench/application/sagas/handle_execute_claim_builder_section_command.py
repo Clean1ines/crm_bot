@@ -20,6 +20,11 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
     ClaimBuilderAttemptOutcomeKind,
     DecideClaimBuilderAttemptOutcomeCommand,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_attempt_next_action_policy import (
+    ClaimBuilderAttemptNextAction,
+    ClaimBuilderAttemptNextActionKind,
+    ClaimBuilderAttemptNextActionPolicy,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationDecision,
     ClaimBuilderOutputValidationFailureReason,
@@ -86,6 +91,9 @@ class ClaimBuilderLlmDispatchOutputValidator:
     decision_policy: ClaimBuilderAttemptDecisionPolicy = (
         ClaimBuilderAttemptDecisionPolicy()
     )
+    next_action_policy: ClaimBuilderAttemptNextActionPolicy = (
+        ClaimBuilderAttemptNextActionPolicy()
+    )
 
     def validate(
         self,
@@ -140,8 +148,10 @@ class ClaimBuilderLlmDispatchOutputValidator:
                 validation_result=validation_result,
             )
         )
+        next_action = self.next_action_policy.decide_next_action(decision)
         return _decision_to_dispatch_result(
             decision=decision,
+            next_action=next_action,
             finished_at=finished_at,
         )
 
@@ -401,9 +411,10 @@ def _source_text_from_user_message(content: str) -> str:
 def _decision_to_dispatch_result(
     *,
     decision: ClaimBuilderAttemptDecision,
+    next_action: ClaimBuilderAttemptNextAction,
     finished_at: datetime,
 ) -> LlmDispatchOutputValidationResult:
-    metadata = _decision_metadata(decision)
+    metadata = _decision_metadata(decision, next_action=next_action)
     if decision.outcome_kind in {
         ClaimBuilderAttemptOutcomeKind.VALID_CLAIMS,
         ClaimBuilderAttemptOutcomeKind.VALID_EMPTY,
@@ -431,9 +442,30 @@ def _decision_to_dispatch_result(
     )
 
 
-def _decision_metadata(decision: ClaimBuilderAttemptDecision) -> dict[str, object]:
+def _decision_metadata(
+    decision: ClaimBuilderAttemptDecision,
+    *,
+    next_action: ClaimBuilderAttemptNextAction,
+) -> dict[str, object]:
     return {
         "claim_builder_attempt_outcome_kind": decision.outcome_kind.value,
+        "claim_builder_attempt_next_action_kind": next_action.kind.value,
+        "claim_builder_attempt_next_action_reason": next_action.reason,
+        "claim_builder_attempt_next_model_strategy": (
+            next_action.next_model_strategy.value
+            if next_action.next_model_strategy is not None
+            else None
+        ),
+        "claim_builder_should_persist_claims": next_action.should_persist_claims,
+        "claim_builder_should_mark_work_item_completed": (
+            next_action.should_mark_work_item_completed
+        ),
+        "claim_builder_requires_source_split": next_action.requires_source_split,
+        "claim_builder_next_run_after": (
+            next_action.run_after.isoformat()
+            if next_action.run_after is not None
+            else None
+        ),
         "validation_decision": (
             decision.validation_decision.value
             if decision.validation_decision is not None
@@ -494,6 +526,63 @@ def _apply_validation_counters(
                 0,
             )
             + 1
+        )
+
+    _apply_next_action_counters(
+        domain_counters=domain_counters,
+        validation_metadata=validation_metadata,
+    )
+
+
+def _apply_next_action_counters(
+    *,
+    domain_counters: dict[str, int],
+    validation_metadata: Mapping[str, object] | None,
+) -> None:
+    if validation_metadata is None:
+        return
+
+    action_kind = validation_metadata.get("claim_builder_attempt_next_action_kind")
+    if not isinstance(action_kind, str):
+        return
+
+    if action_kind == ClaimBuilderAttemptNextActionKind.ACCEPT_VALID_EMPTY.value:
+        domain_counters["sections_with_valid_empty_claims"] = (
+            domain_counters.get("sections_with_valid_empty_claims", 0) + 1
+        )
+        return
+
+    if action_kind in {
+        ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value,
+        ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value,
+        ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
+    }:
+        domain_counters["claim_builder_retry_action_count"] = (
+            domain_counters.get("claim_builder_retry_action_count", 0) + 1
+        )
+
+    if action_kind == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value:
+        domain_counters["claim_builder_fallback_retry_required_count"] = (
+            domain_counters.get("claim_builder_fallback_retry_required_count", 0) + 1
+        )
+        return
+
+    if (
+        action_kind
+        == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value
+    ):
+        domain_counters["claim_builder_larger_output_retry_required_count"] = (
+            domain_counters.get(
+                "claim_builder_larger_output_retry_required_count",
+                0,
+            )
+            + 1
+        )
+        return
+
+    if action_kind == ClaimBuilderAttemptNextActionKind.TERMINAL_FAILURE.value:
+        domain_counters["claim_builder_terminal_invalid_count"] = (
+            domain_counters.get("claim_builder_terminal_invalid_count", 0) + 1
         )
 
 
@@ -577,6 +666,9 @@ async def _persist_validated_draft_claims(
     dispatch_attempt_id: str,
     work_item_id: str,
 ) -> int:
+    if not _should_persist_claims(execution_result.validation_metadata):
+        return 0
+
     claims = _validated_claims_from_metadata(execution_result.validation_metadata)
     if not claims:
         return 0
@@ -591,6 +683,20 @@ async def _persist_validated_draft_claims(
         )
     )
     return result.persisted_count
+
+
+def _should_persist_claims(
+    validation_metadata: Mapping[str, object] | None,
+) -> bool:
+    if validation_metadata is None:
+        return False
+
+    action_kind = validation_metadata.get("claim_builder_attempt_next_action_kind")
+    should_persist = validation_metadata.get("claim_builder_should_persist_claims")
+    return (
+        action_kind == ClaimBuilderAttemptNextActionKind.PERSIST_VALID_CLAIMS.value
+        and should_persist is True
+    )
 
 
 def _validated_claims_from_metadata(
@@ -961,6 +1067,10 @@ async def _save_progress_snapshot(
     if persisted_draft_claim_count:
         domain_counters["claim_builder_persisted_draft_claim_count"] = (
             domain_counters.get("claim_builder_persisted_draft_claim_count", 0)
+            + persisted_draft_claim_count
+        )
+        domain_counters["draft_claim_observation_count"] = (
+            domain_counters.get("draft_claim_observation_count", 0)
             + persisted_draft_claim_count
         )
 
