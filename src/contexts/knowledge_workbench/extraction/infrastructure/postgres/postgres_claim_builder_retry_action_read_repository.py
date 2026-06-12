@@ -6,6 +6,9 @@ from datetime import datetime
 import asyncpg
 
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder_retry_action_read_repository_port import (
     ClaimBuilderRetryActionReadRepositoryPort,
     WorkItemRetryActionRecord,
@@ -51,13 +54,17 @@ class PostgresClaimBuilderRetryActionReadRepository(
                     occurred_at DESC,
                     sequence_number DESC
             )
-            SELECT payload
-            FROM latest_retry_action
-            ORDER BY sequence_number ASC
+            SELECT lra.payload
+            FROM latest_retry_action lra
+            JOIN execution_work_items wi
+              ON wi.work_item_id = lra.payload->>'work_item_id'
+            WHERE wi.status = ANY($4::text[])
+            ORDER BY lra.sequence_number ASC
             """,
             workflow_run_id,
             work_kind.value,
             _retry_action_values(),
+            _automatic_retry_status_values(),
         )
 
         records = tuple(_record_from_row(row) for row in rows)
@@ -76,6 +83,15 @@ def _retry_action_values() -> list[str]:
         ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
         ClaimBuilderAttemptNextActionKind.SPLIT_SOURCE_UNIT.value,
         ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value,
+    ]
+
+
+def _automatic_retry_status_values() -> list[str]:
+    return [
+        WorkItemStatus.READY.value,
+        WorkItemStatus.LEASED.value,
+        WorkItemStatus.DEFERRED.value,
+        WorkItemStatus.RETRYABLE_FAILED.value,
     ]
 
 
