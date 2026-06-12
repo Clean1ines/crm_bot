@@ -1,0 +1,436 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+import pytest
+
+from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    HandlePrepareClaimBuilderDispatchBatchCommand,
+    HandlePrepareClaimBuilderDispatchBatchCommandHandler,
+)
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
+    KnowledgeExtractionCanonicalCommandType,
+    KnowledgeExtractionCanonicalEventType,
+)
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    CLAIM_BUILDER_SECTION_WORK_KIND,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_command import (
+    WorkflowCommand,
+    WorkflowCommandStatus,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_event import WorkflowEvent
+from src.contexts.workflow_runtime.domain.entities.workflow_event_cursor import (
+    WorkflowEventCursor,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_progress_snapshot import (
+    WorkflowProgressSnapshot,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_resource_usage_snapshot import (
+    WorkflowResourceUsageSnapshot,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry import (
+    WorkflowTimelineEntry,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+    WorkflowCommandId,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_consumer_ref import (
+    WorkflowConsumerRef,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
+    WorkflowIdempotencyKey,
+)
+from src.interfaces.composition.prepare_llm_dispatch_batch import (
+    PrepareLlmDispatchBatchCommand,
+)
+from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
+    StartedLlmAdmittedAttempt,
+)
+
+
+def _now() -> datetime:
+    return datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+
+
+def _workflow_run_id() -> str:
+    return "knowledge-extraction:source-document:project-1:abc"
+
+
+def _dispatch_preparation() -> dict[str, object]:
+    return {
+        "profile": {
+            "profile_id": "faq_claim_observations",
+            "estimated_prompt_tokens": 3000,
+            "estimated_completion_tokens": 500,
+            "estimated_requests": 1,
+        },
+        "account_capacities": (
+            {
+                "provider": "groq",
+                "account_ref": "groq_org_primary",
+                "model_ref": "qwen/qwen3-32b",
+                "remaining_minute_requests": 2,
+                "remaining_minute_tokens": 7000,
+                "remaining_daily_requests": 100,
+                "remaining_daily_tokens": 50000,
+            },
+        ),
+        "active_model_ref": "qwen/qwen3-32b",
+        "requested_items": 2,
+        "worker_ref": "worker-1",
+        "lease_token_prefix": "lease-prefix",
+        "lease_ttl_seconds": 300,
+    }
+
+
+def _workflow_command(
+    *,
+    command_type: str = (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+    ),
+    status: WorkflowCommandStatus = WorkflowCommandStatus.PENDING,
+) -> WorkflowCommand:
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(
+            f"workflow-command:prepare-claim-builder-dispatch-batch:{_workflow_run_id()}"
+        ),
+        command_type=command_type,
+        workflow_run_id=_workflow_run_id(),
+        idempotency_key=WorkflowIdempotencyKey(
+            f"prepare-claim-builder-dispatch-batch:{_workflow_run_id()}"
+        ),
+        payload={
+            "workflow_run_id": _workflow_run_id(),
+            "source_document_ref": "source-document:project-1:abc",
+            "scheduled_work_item_count": 2,
+            "llm_dispatch_preparation": _dispatch_preparation(),
+        },
+        status=status,
+        run_after=_now(),
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
+def _attempt(index: int) -> StartedLlmAdmittedAttempt:
+    return StartedLlmAdmittedAttempt(
+        attempt_id=f"work-{index}:attempt:1",
+        work_item_id=f"work-{index}",
+        attempt_number=1,
+        dispatch_payload={
+            "work_item_id": f"work-{index}",
+            "schedule_payload": {"source_unit_ref": f"unit-{index}"},
+        },
+    )
+
+
+@dataclass(slots=True)
+class FakeAttemptResult:
+    started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
+
+
+@dataclass(slots=True)
+class FakePrepareResult:
+    attempt_result: FakeAttemptResult
+
+
+@dataclass(slots=True)
+class FakePrepareLlmDispatchBatch:
+    started_attempts: tuple[StartedLlmAdmittedAttempt, ...] = field(
+        default_factory=lambda: (_attempt(1), _attempt(2)),
+    )
+    calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
+
+    async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
+        self.calls.append(command)
+        return FakePrepareResult(
+            attempt_result=FakeAttemptResult(
+                started_attempts=self.started_attempts,
+            ),
+        )
+
+
+@dataclass(slots=True)
+class FakeCommandLogRepository:
+    pending_commands: list[WorkflowCommand] = field(default_factory=list)
+    completed_command_ids: list[WorkflowCommandId] = field(default_factory=list)
+
+    async def append_pending_command(
+        self,
+        command: WorkflowCommand,
+    ) -> WorkflowCommand:
+        self.pending_commands.append(command)
+        return command
+
+    async def mark_command_completed(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        completed_at: datetime,
+    ) -> WorkflowCommand:
+        del completed_at
+        self.completed_command_ids.append(command_id)
+        return _workflow_command(status=WorkflowCommandStatus.COMPLETED)
+
+
+@dataclass(slots=True)
+class FakeOutboxRepository:
+    events: list[WorkflowEvent] = field(default_factory=list)
+
+    async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
+        self.events.append(event)
+        return event
+
+    async def list_events_after(
+        self,
+        *,
+        consumer_ref: WorkflowConsumerRef,
+        after_sequence_number: int,
+        limit: int,
+    ) -> tuple[WorkflowEvent, ...]:
+        del consumer_ref, after_sequence_number, limit
+        return tuple(self.events)
+
+
+@dataclass(slots=True)
+class FakeEventCursorRepository:
+    async def get_cursor(
+        self,
+        consumer_ref: WorkflowConsumerRef,
+    ) -> WorkflowEventCursor | None:
+        del consumer_ref
+        return None
+
+    async def save_cursor(
+        self,
+        cursor: WorkflowEventCursor,
+    ) -> WorkflowEventCursor:
+        return cursor
+
+
+@dataclass(slots=True)
+class FakeProgressSnapshotRepository:
+    snapshot: WorkflowProgressSnapshot | None = None
+
+    async def get_snapshot(
+        self,
+        workflow_run_id: str,
+    ) -> WorkflowProgressSnapshot | None:
+        if (
+            self.snapshot is not None
+            and self.snapshot.workflow_run_id == workflow_run_id
+        ):
+            return self.snapshot
+        return None
+
+    async def save_snapshot(
+        self,
+        snapshot: WorkflowProgressSnapshot,
+    ) -> WorkflowProgressSnapshot:
+        self.snapshot = snapshot
+        return snapshot
+
+
+@dataclass(slots=True)
+class FakeTimelineRepository:
+    entries: list[WorkflowTimelineEntry] = field(default_factory=list)
+
+    async def append_entry(
+        self,
+        entry: WorkflowTimelineEntry,
+    ) -> WorkflowTimelineEntry:
+        self.entries.append(entry)
+        return entry
+
+    async def list_recent_entries(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+    ) -> tuple[WorkflowTimelineEntry, ...]:
+        del workflow_run_id, limit
+        return tuple(self.entries)
+
+
+@dataclass(slots=True)
+class FakeResourceUsageRepository:
+    usage: WorkflowResourceUsageSnapshot | None = None
+
+    async def get_usage(
+        self,
+        workflow_run_id: str,
+    ) -> WorkflowResourceUsageSnapshot | None:
+        del workflow_run_id
+        return self.usage
+
+    async def save_usage(
+        self,
+        usage: WorkflowResourceUsageSnapshot,
+    ) -> WorkflowResourceUsageSnapshot:
+        self.usage = usage
+        return usage
+
+
+@dataclass(slots=True)
+class FakeWorkflowRuntimeUnitOfWork:
+    command_log: FakeCommandLogRepository = field(
+        default_factory=FakeCommandLogRepository,
+    )
+    outbox: FakeOutboxRepository = field(default_factory=FakeOutboxRepository)
+    event_cursors: FakeEventCursorRepository = field(
+        default_factory=FakeEventCursorRepository,
+    )
+    progress_snapshots: FakeProgressSnapshotRepository = field(
+        default_factory=FakeProgressSnapshotRepository,
+    )
+    timeline: FakeTimelineRepository = field(default_factory=FakeTimelineRepository)
+    resource_usage: FakeResourceUsageRepository = field(
+        default_factory=FakeResourceUsageRepository,
+    )
+
+    async def commit(self) -> None:
+        raise AssertionError("handler must not own transaction commit")
+
+    async def rollback(self) -> None:
+        raise AssertionError("handler must not own transaction rollback")
+
+
+async def _execute(
+    workflow_command: WorkflowCommand | None = None,
+    *,
+    started_attempts: tuple[StartedLlmAdmittedAttempt, ...] | None = None,
+) -> tuple[
+    object,
+    FakePrepareLlmDispatchBatch,
+    FakeWorkflowRuntimeUnitOfWork,
+]:
+    prepare = FakePrepareLlmDispatchBatch(
+        started_attempts=(_attempt(1), _attempt(2))
+        if started_attempts is None
+        else started_attempts,
+    )
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+    result = await HandlePrepareClaimBuilderDispatchBatchCommandHandler().execute(
+        HandlePrepareClaimBuilderDispatchBatchCommand(
+            workflow_command=_workflow_command()
+            if workflow_command is None
+            else workflow_command,
+        ),
+        prepare_llm_dispatch_batch=prepare,
+        workflow_unit_of_work=workflow_unit_of_work,
+    )
+    return result, prepare, workflow_unit_of_work
+
+
+@pytest.mark.asyncio
+async def test_rejects_wrong_command_type() -> None:
+    with pytest.raises(ValueError, match="command_type"):
+        await _execute(
+            _workflow_command(
+                command_type=KnowledgeExtractionCanonicalCommandType.INGEST_SOURCE_DOCUMENT.value,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_rejects_non_pending_command() -> None:
+    with pytest.raises(ValueError, match="PENDING"):
+        await _execute(
+            _workflow_command(status=WorkflowCommandStatus.COMPLETED),
+        )
+
+
+@pytest.mark.asyncio
+async def test_calls_existing_prepare_llm_dispatch_batch_for_claim_builder_work_kind() -> (
+    None
+):
+    result, prepare, _ = await _execute()
+
+    assert result.prepared_dispatch_count == 2
+    assert len(prepare.calls) == 1
+    assert prepare.calls[0].work_kind == CLAIM_BUILDER_SECTION_WORK_KIND
+    assert prepare.calls[0].active_model_ref == "qwen/qwen3-32b"
+    assert prepare.calls[0].requested_items == 2
+
+
+@pytest.mark.asyncio
+async def test_appends_claim_builder_dispatch_batch_prepared_event() -> None:
+    result, _, workflow_unit_of_work = await _execute()
+
+    assert result.appended_event_count == 1
+    event = workflow_unit_of_work.outbox.events[0]
+    assert (
+        event.event_type
+        == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_BATCH_PREPARED.value
+    )
+    assert event.payload["workflow_run_id"] == _workflow_run_id()
+    assert event.payload["work_kind"] == CLAIM_BUILDER_SECTION_WORK_KIND.value
+    assert event.payload["prepared_dispatch_count"] == 2
+    assert event.payload["dispatch_attempt_ids"] == (
+        "work-1:attempt:1",
+        "work-2:attempt:1",
+    )
+    assert event.payload["work_item_ids"] == ("work-1", "work-2")
+
+
+@pytest.mark.asyncio
+async def test_appends_execute_claim_builder_section_per_prepared_attempt() -> None:
+    result, _, workflow_unit_of_work = await _execute()
+
+    assert result.appended_next_command_count == 2
+    assert tuple(
+        command.command_type
+        for command in workflow_unit_of_work.command_log.pending_commands
+    ) == (
+        KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value,
+        KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value,
+    )
+    assert tuple(
+        command.idempotency_key.value
+        for command in workflow_unit_of_work.command_log.pending_commands
+    ) == (
+        f"execute-claim-builder-section:{_workflow_run_id()}:work-1:attempt:1",
+        f"execute-claim-builder-section:{_workflow_run_id()}:work-2:attempt:1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_does_not_append_execute_claim_builder_section_when_no_attempts_prepared() -> (
+    None
+):
+    result, _, workflow_unit_of_work = await _execute(started_attempts=())
+
+    assert result.prepared_dispatch_count == 0
+    assert result.appended_event_count == 0
+    assert result.appended_next_command_count == 0
+    assert workflow_unit_of_work.outbox.events == []
+    assert workflow_unit_of_work.command_log.pending_commands == []
+
+
+@pytest.mark.asyncio
+async def test_marks_prepare_claim_builder_dispatch_batch_completed() -> None:
+    result, _, workflow_unit_of_work = await _execute()
+
+    assert result.completed_command_id == _workflow_command().command_id
+    assert workflow_unit_of_work.command_log.completed_command_ids == [
+        _workflow_command().command_id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_updates_progress_and_timeline() -> None:
+    _, _, workflow_unit_of_work = await _execute()
+
+    snapshot = workflow_unit_of_work.progress_snapshots.snapshot
+    assert snapshot is not None
+    assert snapshot.current_phase == "CLAIM_BUILDER_SECTION_EXTRACTION"
+    assert snapshot.workflow_status == "RUNNING"
+    assert snapshot.running_work_items == 2
+    assert snapshot.domain_counters["prepared_dispatch_count"] == 2
+
+    assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
+        "Claim builder dispatch batch prepared",
+        "Execute claim builder section requested",
+    )

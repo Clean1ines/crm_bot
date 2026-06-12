@@ -13,6 +13,9 @@ from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extracti
     DrainKnowledgeExtractionWorkflowCommandsCommand,
     DrainKnowledgeExtractionWorkflowCommandsResult,
 )
+from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    PrepareLlmDispatchBatchPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhaseCommand,
     RunSourceIngestionFirstPhaseResult,
@@ -122,9 +125,11 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         *,
         source_ingestion_runner: SourceIngestionFirstPhaseRunnerPort,
         pool: object,
+        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
+        self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
 
     async def execute(
         self,
@@ -239,6 +244,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                     cast(asyncpg.Connection, connection),
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
+                prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
             )
             await workflow_unit_of_work.commit()
             return result

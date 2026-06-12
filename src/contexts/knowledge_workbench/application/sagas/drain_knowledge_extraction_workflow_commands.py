@@ -9,6 +9,9 @@ from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extra
     DispatchKnowledgeExtractionWorkflowCommand,
     DispatchKnowledgeExtractionWorkflowCommandHandler,
 )
+from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    PrepareLlmDispatchBatchPort,
+)
 from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
     SourceManagementRepositoryPort,
 )
@@ -75,6 +78,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
         source_unit_repository: SourceManagementRepositoryPort,
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -99,6 +103,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 source_unit_repository=source_unit_repository,
                 knowledge_unit_of_work=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
+                prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
             )
             if not dispatch_result.dispatched:
                 blocked_count += 1

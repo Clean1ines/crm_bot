@@ -7,6 +7,12 @@ from datetime import datetime, timezone
 import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.interfaces.composition.prepare_llm_dispatch_batch import (
+    PrepareLlmDispatchBatchCommand,
+)
+from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
+    StartedLlmAdmittedAttempt,
+)
 from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extraction_workflow_command import (
     COMMAND_HANDLER_NOT_IMPLEMENTED,
 )
@@ -113,6 +119,33 @@ def _source_ingestion_command() -> RunSourceIngestionFirstPhaseCommand:
     )
 
 
+def _dispatch_preparation() -> dict[str, object]:
+    return {
+        "profile": {
+            "profile_id": "faq_claim_observations",
+            "estimated_prompt_tokens": 3000,
+            "estimated_completion_tokens": 500,
+            "estimated_requests": 1,
+        },
+        "account_capacities": (
+            {
+                "provider": "groq",
+                "account_ref": "groq_org_primary",
+                "model_ref": "qwen/qwen3-32b",
+                "remaining_minute_requests": 1,
+                "remaining_minute_tokens": 7000,
+                "remaining_daily_requests": 100,
+                "remaining_daily_tokens": 50000,
+            },
+        ),
+        "active_model_ref": "qwen/qwen3-32b",
+        "requested_items": 1,
+        "worker_ref": "worker-1",
+        "lease_token_prefix": "lease-prefix",
+        "lease_ttl_seconds": 300,
+    }
+
+
 def _schedule_command() -> WorkflowCommand:
     return WorkflowCommand(
         command_id=WorkflowCommandId(
@@ -129,6 +162,7 @@ def _schedule_command() -> WorkflowCommand:
             "workflow_run_id": _workflow_run_id(),
             "source_document_ref": _source_document_ref().value,
             "source_unit_count": 1,
+            "llm_dispatch_preparation": _dispatch_preparation(),
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=_now(),
@@ -181,6 +215,36 @@ class FakeSourceIngestionRunner:
                     content_hash="sha256:test",
                     occurred_at=command.occurred_at,
                 )
+            ),
+        )
+
+
+@dataclass(slots=True)
+class FakeAttemptResult:
+    started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
+
+
+@dataclass(slots=True)
+class FakePrepareResult:
+    attempt_result: FakeAttemptResult
+
+
+@dataclass(slots=True)
+class FakePrepareLlmDispatchBatch:
+    calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
+
+    async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
+        self.calls.append(command)
+        return FakePrepareResult(
+            attempt_result=FakeAttemptResult(
+                started_attempts=(
+                    StartedLlmAdmittedAttempt(
+                        attempt_id="work-1:attempt:1",
+                        work_item_id="work-1",
+                        attempt_number=1,
+                        dispatch_payload={"work_item_id": "work-1"},
+                    ),
+                ),
             ),
         )
 
@@ -488,6 +552,7 @@ async def test_completed_source_ingestion_triggers_drain_and_blocks_on_prepare_b
     runner = RunKnowledgeExtractionWorkflowAfterUpload(
         source_ingestion_runner=source_runner,
         pool=pool,
+        prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
     )
     result = await runner.execute(
         RunKnowledgeExtractionWorkflowAfterUploadCommand(
@@ -498,11 +563,11 @@ async def test_completed_source_ingestion_triggers_drain_and_blocks_on_prepare_b
 
     assert result.source_ingestion_completed is True
     assert result.workflow_run_id == _workflow_run_id()
-    assert result.drained_inspected_count == 2
-    assert result.drained_dispatched_count == 1
+    assert result.drained_inspected_count == 3
+    assert result.drained_dispatched_count == 2
     assert (
         result.blocked_command_type
-        == KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+        == KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value
     )
     assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
     assert (
@@ -510,8 +575,8 @@ async def test_completed_source_ingestion_triggers_drain_and_blocks_on_prepare_b
         is SourceIngestionAdmissionStatus.ALLOWED
     )
     assert connection.scheduled_work_item_count == 1
-    assert pool.acquire_count == 2
-    assert len(FakePostgresWorkflowRuntimeUnitOfWork.instances) == 2
+    assert pool.acquire_count == 3
+    assert len(FakePostgresWorkflowRuntimeUnitOfWork.instances) == 3
 
 
 @pytest.mark.asyncio
@@ -523,6 +588,7 @@ async def test_completed_source_ingestion_updates_command_log_states(
     runner = RunKnowledgeExtractionWorkflowAfterUpload(
         source_ingestion_runner=FakeSourceIngestionRunner(completed=True),
         pool=FakePool(connection),
+        prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
     )
 
     await runner.execute(
@@ -547,8 +613,17 @@ async def test_completed_source_ingestion_updates_command_log_states(
 
     assert len(schedule_commands) == 1
     assert schedule_commands[0].status is WorkflowCommandStatus.COMPLETED
+    execute_commands = [
+        command
+        for command in connection.command_log.commands
+        if command.command_type
+        == KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value
+    ]
+
     assert len(prepare_commands) == 1
-    assert prepare_commands[0].status is WorkflowCommandStatus.PENDING
+    assert prepare_commands[0].status is WorkflowCommandStatus.COMPLETED
+    assert len(execute_commands) == 1
+    assert execute_commands[0].status is WorkflowCommandStatus.PENDING
 
 
 @pytest.mark.asyncio
@@ -563,6 +638,7 @@ async def test_rejected_source_ingestion_does_not_run_drain(
     runner = RunKnowledgeExtractionWorkflowAfterUpload(
         source_ingestion_runner=source_runner,
         pool=pool,
+        prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
     )
     result = await runner.execute(
         RunKnowledgeExtractionWorkflowAfterUploadCommand(

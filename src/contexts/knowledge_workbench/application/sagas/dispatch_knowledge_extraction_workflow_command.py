@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    HandlePrepareClaimBuilderDispatchBatchCommand,
+    HandlePrepareClaimBuilderDispatchBatchCommandHandler,
+    PrepareLlmDispatchBatchPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_builder_section_work_command import (
     HandleScheduleClaimBuilderSectionWorkCommand,
     HandleScheduleClaimBuilderSectionWorkCommandHandler,
@@ -71,6 +76,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         source_unit_repository: SourceManagementRepositoryPort,
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = _canonical_command_type(workflow_command.command_type)
@@ -86,6 +92,37 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 handler_name=None,
                 dispatched=False,
                 blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+            )
+
+        if (
+            command_type
+            is KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+        ):
+            if prepare_llm_dispatch_batch is None:
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandlePrepareClaimBuilderDispatchBatchCommandHandler().execute(
+                HandlePrepareClaimBuilderDispatchBatchCommand(
+                    workflow_command=workflow_command,
+                ),
+                prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
             )
 
         if (

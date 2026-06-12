@@ -31,11 +31,13 @@ def test_schedule_claim_builder_section_work_is_implemented() -> None:
     )
 
 
-def test_prepare_claim_builder_dispatch_batch_is_known_but_not_implemented() -> None:
+def test_prepare_claim_builder_dispatch_batch_is_implemented() -> None:
     command_type = (
         KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
     )
 
     assert command_type in command_types_used_by_operations()
-    assert is_command_implemented(command_type) is False
-    assert implemented_handler_name_for(command_type) is None
+    assert is_command_implemented(command_type) is True
+    assert implemented_handler_name_for(command_type) == (
+        "HandlePrepareClaimBuilderDispatchBatchCommandHandler"
+    )

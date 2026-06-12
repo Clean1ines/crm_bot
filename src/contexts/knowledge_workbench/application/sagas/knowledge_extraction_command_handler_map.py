@@ -28,6 +28,12 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
         ),
         handler_name="HandleScheduleClaimBuilderSectionWorkCommandHandler",
     ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+        ),
+        handler_name="HandlePrepareClaimBuilderDispatchBatchCommandHandler",
+    ),
 )
 
 

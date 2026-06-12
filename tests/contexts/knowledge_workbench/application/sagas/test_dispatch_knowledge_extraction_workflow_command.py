@@ -6,6 +6,12 @@ from datetime import datetime, timezone
 import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.interfaces.composition.prepare_llm_dispatch_batch import (
+    PrepareLlmDispatchBatchCommand,
+)
+from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
+    StartedLlmAdmittedAttempt,
+)
 from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extraction_workflow_command import (
     COMMAND_HANDLER_NOT_IMPLEMENTED,
     DispatchKnowledgeExtractionWorkflowCommand,
@@ -92,12 +98,41 @@ def _workflow_command(
         payload={
             "workflow_run_id": _workflow_run_id(),
             "source_document_ref": _document_ref().value,
+            "scheduled_work_item_count": 1,
+            "llm_dispatch_preparation": _dispatch_preparation(),
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=_now(),
         created_at=_now(),
         updated_at=_now(),
     )
+
+
+def _dispatch_preparation() -> dict[str, object]:
+    return {
+        "profile": {
+            "profile_id": "faq_claim_observations",
+            "estimated_prompt_tokens": 3000,
+            "estimated_completion_tokens": 500,
+            "estimated_requests": 1,
+        },
+        "account_capacities": (
+            {
+                "provider": "groq",
+                "account_ref": "groq_org_primary",
+                "model_ref": "qwen/qwen3-32b",
+                "remaining_minute_requests": 1,
+                "remaining_minute_tokens": 7000,
+                "remaining_daily_requests": 100,
+                "remaining_daily_tokens": 50000,
+            },
+        ),
+        "active_model_ref": "qwen/qwen3-32b",
+        "requested_items": 1,
+        "worker_ref": "worker-1",
+        "lease_token_prefix": "lease-prefix",
+        "lease_ttl_seconds": 300,
+    }
 
 
 def _unknown_workflow_command() -> WorkflowCommand:
@@ -365,8 +400,43 @@ async def test_dispatches_schedule_claim_builder_section_work_to_existing_handle
     assert scheduling_repository.saved_count == 1
 
 
+@dataclass(slots=True)
+class FakeAttemptResult:
+    started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
+
+
+@dataclass(slots=True)
+class FakePrepareResult:
+    attempt_result: FakeAttemptResult
+
+
+@dataclass(slots=True)
+class FakePrepareLlmDispatchBatch:
+    calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
+
+    async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
+        self.calls.append(command)
+        return FakePrepareResult(
+            attempt_result=FakeAttemptResult(
+                started_attempts=(
+                    StartedLlmAdmittedAttempt(
+                        attempt_id="work-1:attempt:1",
+                        work_item_id="work-1",
+                        attempt_number=1,
+                        dispatch_payload={"work_item_id": "work-1"},
+                    ),
+                ),
+            ),
+        )
+
+
 @pytest.mark.asyncio
-async def test_known_unimplemented_prepare_dispatch_batch_returns_blocked() -> None:
+async def test_dispatches_prepare_claim_builder_dispatch_batch_to_existing_handler() -> (
+    None
+):
+    prepare = FakePrepareLlmDispatchBatch()
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+
     result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
         DispatchKnowledgeExtractionWorkflowCommand(
             workflow_command=_workflow_command(
@@ -375,11 +445,42 @@ async def test_known_unimplemented_prepare_dispatch_batch_returns_blocked() -> N
         ),
         source_unit_repository=FakeSourceManagementRepository(),
         knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
-        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        workflow_unit_of_work=workflow_unit_of_work,
+        prepare_llm_dispatch_batch=prepare,
     )
 
     operation = operation_by_command_type(
         KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+    )
+    assert result.dispatched is True
+    assert result.blocked_reason is None
+    assert result.operation_key == operation.operation_key
+    assert result.phase == operation.phase.value
+    assert result.handler_name == "HandlePrepareClaimBuilderDispatchBatchCommandHandler"
+    assert len(prepare.calls) == 1
+    assert tuple(
+        command.command_type
+        for command in workflow_unit_of_work.command_log.pending_commands
+    ) == (KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value,)
+
+
+@pytest.mark.asyncio
+async def test_known_unimplemented_execute_claim_builder_section_returns_blocked() -> (
+    None
+):
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+    )
+
+    operation = operation_by_command_type(
+        KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION
     )
     assert result.dispatched is False
     assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED

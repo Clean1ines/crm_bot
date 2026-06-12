@@ -133,6 +133,9 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
             source_document_ref=source_document_ref,
             scheduled_work_item_count=scheduled_work_item_count,
             occurred_at=occurred_at,
+            dispatch_preparation=workflow_command.payload.get(
+                "llm_dispatch_preparation"
+            ),
         )
         await workflow_unit_of_work.command_log.append_pending_command(next_command)
 
@@ -212,8 +215,19 @@ def _prepare_dispatch_batch_command(
     source_document_ref: SourceDocumentRef,
     scheduled_work_item_count: int,
     occurred_at: datetime,
+    dispatch_preparation: object | None = None,
 ) -> WorkflowCommand:
     idempotency_key = f"prepare-claim-builder-dispatch-batch:{workflow_run_id}"
+    command_payload: dict[str, object] = {
+        "workflow_run_id": workflow_run_id,
+        "source_document_ref": source_document_ref.value,
+        "scheduled_work_item_count": scheduled_work_item_count,
+    }
+    if dispatch_preparation is not None:
+        if not isinstance(dispatch_preparation, Mapping):
+            raise ValueError("llm_dispatch_preparation must be mapping")
+        command_payload["llm_dispatch_preparation"] = dict(dispatch_preparation)
+
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
         command_type=(
@@ -221,11 +235,7 @@ def _prepare_dispatch_batch_command(
         ),
         workflow_run_id=workflow_run_id,
         idempotency_key=WorkflowIdempotencyKey(idempotency_key),
-        payload={
-            "workflow_run_id": workflow_run_id,
-            "source_document_ref": source_document_ref.value,
-            "scheduled_work_item_count": scheduled_work_item_count,
-        },
+        payload=command_payload,
         status=WorkflowCommandStatus.PENDING,
         run_after=occurred_at,
         created_at=occurred_at,
