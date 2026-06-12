@@ -23,6 +23,7 @@ class KnowledgeExtractionCanonicalCommandType(StrEnum):
     INGEST_SOURCE_DOCUMENT = "IngestSourceDocument"
     SCHEDULE_CLAIM_BUILDER_SECTION_WORK = "ScheduleClaimBuilderSectionWork"
     PREPARE_CLAIM_BUILDER_DISPATCH_BATCH = "PrepareClaimBuilderDispatchBatch"
+    SPLIT_CLAIM_BUILDER_SOURCE_UNIT = "SplitClaimBuilderSourceUnit"
     EXECUTE_CLAIM_BUILDER_SECTION = "ExecuteClaimBuilderSection"
     RECONCILE_CLAIM_BUILDER_PROGRESS = "ReconcileClaimBuilderProgress"
     GENERATE_DRAFT_CLAIM_EMBEDDINGS = "GenerateDraftClaimEmbeddings"
@@ -47,6 +48,8 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
         "ClaimBuilderSectionExtractionTerminalFailed"
     )
     CLAIM_BUILDER_SECTION_SPLIT_REQUIRED = "ClaimBuilderSectionSplitRequired"
+    CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED = "ClaimBuilderSourceUnitSplitRequired"
+    CLAIM_BUILDER_SOURCE_UNIT_SPLIT_COMPLETED = "ClaimBuilderSourceUnitSplitCompleted"
     LLM_PROVIDER_CAPACITY_OBSERVED = "LlmProviderCapacityObserved"
     CLAIM_BUILDER_PROGRESS_RECONCILED = "ClaimBuilderProgressReconciled"
     CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED = "ClaimBuilderAllSectionsExtracted"
@@ -241,16 +244,56 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             success_event_type=(
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_BATCH_PREPARED
             ),
+            intermediate_event_types=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED,
+            ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION,
+                KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT,
             ),
             affected_read_models=(
                 KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
                 KnowledgeExtractionReadModelName.CAPACITY_STATUS,
+                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
                 KnowledgeExtractionReadModelName.TIMELINE,
             ),
             recovery_scopes=(
                 KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
+                KnowledgeExtractionRecoveryScope.CLAIM_BUILDER_SECTION,
+                KnowledgeExtractionRecoveryScope.SOURCE_UNIT,
+            ),
+            frontend_visibility=True,
+        ),
+        KnowledgeExtractionOperationContract(
+            operation_key="split_claim_builder_source_unit",
+            phase=KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION,
+            command_type=(
+                KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT
+            ),
+            owner_contexts=(
+                "knowledge_workbench",
+                "source_management",
+                "execution_runtime",
+                "workflow_runtime",
+            ),
+            unit_of_work_name="ClaimBuilderSourceUnitSplitUnitOfWork",
+            idempotency_key_template=(
+                "claim-builder-source-unit-split:{workflow_run_id}:"
+                "{source_document_ref}"
+            ),
+            success_event_type=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_COMPLETED
+            ),
+            next_command_types=(
+                KnowledgeExtractionCanonicalCommandType.SCHEDULE_CLAIM_BUILDER_SECTION_WORK,
+            ),
+            affected_read_models=(
+                KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
+                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+                KnowledgeExtractionReadModelName.TIMELINE,
+            ),
+            recovery_scopes=(
+                KnowledgeExtractionRecoveryScope.SOURCE_UNIT,
                 KnowledgeExtractionRecoveryScope.CLAIM_BUILDER_SECTION,
             ),
             frontend_visibility=True,

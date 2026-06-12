@@ -122,7 +122,37 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         appended_event_count = 0
         appended_next_command_count = 0
 
-        if prepared_dispatch_count > 0 or _source_split_required(preflight_metadata):
+        if _source_split_required(preflight_metadata):
+            split_required_event = _claim_builder_source_unit_split_required_event(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.outbox.append_event(split_required_event)
+            appended_event_count = 1
+
+            split_command = _split_claim_builder_source_unit_command(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.command_log.append_pending_command(
+                split_command,
+            )
+            appended_next_command_count = 1
+
+            await workflow_unit_of_work.timeline.append_entry(
+                _source_split_required_timeline_entry(
+                    workflow_command=workflow_command,
+                    split_required_event=split_required_event,
+                    split_command=split_command,
+                    occurred_at=occurred_at,
+                )
+            )
+
+        elif prepared_dispatch_count > 0:
             prepared_event = _claim_builder_dispatch_batch_prepared_event(
                 workflow_run_id=workflow_run_id,
                 started_attempts=started_attempts,
@@ -132,26 +162,25 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             await workflow_unit_of_work.outbox.append_event(prepared_event)
             appended_event_count = 1
 
-            if prepared_dispatch_count > 0:
-                next_commands = _execute_claim_builder_section_commands(
-                    workflow_command=workflow_command,
-                    workflow_run_id=workflow_run_id,
-                    started_attempts=started_attempts,
-                    occurred_at=occurred_at,
+            next_commands = _execute_claim_builder_section_commands(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                started_attempts=started_attempts,
+                occurred_at=occurred_at,
+            )
+            for next_command in next_commands:
+                await workflow_unit_of_work.command_log.append_pending_command(
+                    next_command,
                 )
-                for next_command in next_commands:
-                    await workflow_unit_of_work.command_log.append_pending_command(
-                        next_command,
-                    )
-                appended_next_command_count = len(next_commands)
+            appended_next_command_count = len(next_commands)
 
-                for timeline_entry in _timeline_entries(
-                    workflow_command=workflow_command,
-                    prepared_event=prepared_event,
-                    started_attempts=started_attempts,
-                    occurred_at=occurred_at,
-                ):
-                    await workflow_unit_of_work.timeline.append_entry(timeline_entry)
+            for timeline_entry in _timeline_entries(
+                workflow_command=workflow_command,
+                prepared_event=prepared_event,
+                started_attempts=started_attempts,
+                occurred_at=occurred_at,
+            ):
+                await workflow_unit_of_work.timeline.append_entry(timeline_entry)
 
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
@@ -331,6 +360,171 @@ def _account_capacities_from_payload(
     )
 
 
+def _claim_builder_source_unit_split_required_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    preflight_metadata: Mapping[str, object],
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    payload = _source_split_payload(
+        workflow_command=workflow_command,
+        workflow_run_id=workflow_run_id,
+        preflight_metadata=preflight_metadata,
+    )
+    source_document_ref = _payload_text(
+        workflow_command.payload,
+        "source_document_ref",
+    )
+    return WorkflowEvent(
+        event_id=WorkflowEventId(
+            "workflow-event:"
+            f"{workflow_run_id}:"
+            f"{KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED.value}:"
+            f"{source_document_ref}"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED.value
+        ),
+        workflow_run_id=workflow_run_id,
+        payload=payload,
+        occurred_at=occurred_at,
+        causation_command_id=workflow_command.command_id,
+        correlation_id=workflow_command.idempotency_key.value,
+    )
+
+
+def _split_claim_builder_source_unit_command(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    preflight_metadata: Mapping[str, object],
+    occurred_at: datetime,
+) -> WorkflowCommand:
+    payload = _source_split_payload(
+        workflow_command=workflow_command,
+        workflow_run_id=workflow_run_id,
+        preflight_metadata=preflight_metadata,
+    )
+    dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
+    if dispatch_preparation is not None:
+        if not isinstance(dispatch_preparation, Mapping):
+            raise ValueError("llm_dispatch_preparation must be mapping")
+        payload["llm_dispatch_preparation"] = dict(dispatch_preparation)
+
+    source_document_ref = _payload_text(
+        workflow_command.payload,
+        "source_document_ref",
+    )
+    idempotency_key = (
+        f"split-claim-builder-source-unit:{workflow_run_id}:{source_document_ref}"
+    )
+
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT.value
+        ),
+        workflow_run_id=workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+        payload=payload,
+        status=WorkflowCommandStatus.PENDING,
+        run_after=occurred_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+
+
+def _source_split_payload(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    preflight_metadata: Mapping[str, object],
+) -> dict[str, object]:
+    dispatch_payload = _payload_mapping(
+        workflow_command.payload,
+        "llm_dispatch_preparation",
+    )
+    profile_payload = _payload_mapping(dispatch_payload, "profile")
+
+    return {
+        "workflow_run_id": workflow_run_id,
+        "source_document_ref": _payload_text(
+            workflow_command.payload,
+            "source_document_ref",
+        ),
+        "source_unit_ref": None,
+        "affected_work_item_refs": (),
+        "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+        "scheduled_work_item_count": _payload_positive_int(
+            workflow_command.payload,
+            "scheduled_work_item_count",
+        ),
+        "estimated_prompt_tokens": _payload_positive_int(
+            profile_payload,
+            "estimated_prompt_tokens",
+        ),
+        "active_model_ref": _metadata_text(
+            preflight_metadata,
+            "input_size_preflight_active_model_ref",
+        ),
+        "input_size_preflight_decision": _metadata_text(
+            preflight_metadata,
+            "input_size_preflight_decision",
+        ),
+        "input_size_preflight_reason": _metadata_text(
+            preflight_metadata,
+            "input_size_preflight_reason",
+        ),
+        "source_split_required": True,
+        "split_handler_status": "BLOCKED_NOT_IMPLEMENTED",
+    }
+
+
+def _source_split_required_timeline_entry(
+    *,
+    workflow_command: WorkflowCommand,
+    split_required_event: WorkflowEvent,
+    split_command: WorkflowCommand,
+    occurred_at: datetime,
+) -> WorkflowTimelineEntry:
+    payload_summary = {
+        "workflow_run_id": workflow_command.workflow_run_id,
+        "source_document_ref": split_required_event.payload["source_document_ref"],
+        "input_size_preflight_decision": split_required_event.payload[
+            "input_size_preflight_decision"
+        ],
+        "input_size_preflight_reason": split_required_event.payload[
+            "input_size_preflight_reason"
+        ],
+        "next_command_type": split_command.command_type,
+    }
+    return WorkflowTimelineEntry(
+        timeline_entry_id=(
+            f"workflow-timeline:{workflow_command.workflow_run_id}:"
+            "ClaimBuilderSourceUnitSplitRequired"
+        ),
+        workflow_run_id=workflow_command.workflow_run_id,
+        event_type=split_required_event.event_type,
+        phase="CLAIM_BUILDER_SECTION_EXTRACTION",
+        severity=WorkflowTimelineSeverity.WARNING,
+        message="Claim builder source unit split required",
+        payload_summary=payload_summary,
+        occurred_at=occurred_at,
+        source_ref=CLAIM_BUILDER_SECTION_WORK_KIND.value,
+    )
+
+
+def _metadata_text(
+    payload: Mapping[str, object],
+    key: str,
+) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"preflight metadata must include {key}")
+    return value
+
+
 def _claim_builder_dispatch_batch_prepared_event(
     *,
     workflow_run_id: str,
@@ -425,6 +619,9 @@ async def _save_progress_snapshot(
     )
     existing_domain_counters["prepared_dispatch_count"] = prepared_dispatch_count
     existing_domain_counters["input_size_preflight_source_split_required_count"] = (
+        1 if _source_split_required(preflight_metadata) else 0
+    )
+    existing_domain_counters["claim_builder_source_split_required_count"] = (
         1 if _source_split_required(preflight_metadata) else 0
     )
     existing_domain_counters["input_size_preflight_larger_input_model_count"] = (

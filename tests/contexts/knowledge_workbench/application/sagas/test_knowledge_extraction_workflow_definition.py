@@ -238,6 +238,7 @@ def test_operations_for_phase_returns_claim_builder_section_operations() -> None
 
     assert tuple(operation.operation_key for operation in operations) == (
         "prepare_claim_builder_dispatch_batch",
+        "split_claim_builder_source_unit",
         "execute_claim_builder_section",
         "reconcile_claim_builder_progress",
     )
@@ -337,3 +338,36 @@ def test_late_phases_are_out_of_current_contract() -> None:
             is KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY
         )
         assert mapping.migration_status == "out_of_current_contract"
+
+
+def test_prepare_dispatch_batch_can_route_source_unit_split_required() -> None:
+    operation = _operation("prepare_claim_builder_dispatch_batch")
+
+    assert (
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED
+        in operation.intermediate_event_types
+    )
+    assert (
+        KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT
+        in operation.next_command_types
+    )
+
+
+def test_split_claim_builder_source_unit_operation_contract() -> None:
+    operation = _operation("split_claim_builder_source_unit")
+
+    assert (
+        operation.command_type
+        is KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT
+    )
+    assert (
+        operation.success_event_type
+        is KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_COMPLETED
+    )
+    assert operation.next_command_types == (
+        KnowledgeExtractionCanonicalCommandType.SCHEDULE_CLAIM_BUILDER_SECTION_WORK,
+    )
+    assert set(operation.recovery_scopes) >= {
+        KnowledgeExtractionRecoveryScope.SOURCE_UNIT,
+        KnowledgeExtractionRecoveryScope.CLAIM_BUILDER_SECTION,
+    }

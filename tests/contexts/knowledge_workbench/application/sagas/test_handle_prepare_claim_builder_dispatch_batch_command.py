@@ -532,9 +532,7 @@ async def test_prepare_event_exposes_input_size_preflight_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_source_split_required_prepare_result_emits_preflight_event_only() -> (
-    None
-):
+async def test_source_split_required_prepare_result_emits_split_command() -> None:
     result, _, workflow_unit_of_work = await _execute(
         started_attempts=(),
         input_size_preflight_decision="SOURCE_SPLIT_REQUIRED",
@@ -547,8 +545,13 @@ async def test_source_split_required_prepare_result_emits_preflight_event_only()
 
     assert result.prepared_dispatch_count == 0
     assert result.appended_event_count == 1
-    assert result.appended_next_command_count == 0
-    assert workflow_unit_of_work.command_log.pending_commands == []
+    assert result.appended_next_command_count == 1
+    assert tuple(
+        command.command_type
+        for command in workflow_unit_of_work.command_log.pending_commands
+    ) == (
+        KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT.value,
+    )
     event = workflow_unit_of_work.outbox.events[0]
     assert event.payload["source_split_required"] is True
     assert event.payload["input_size_preflight_decision"] == "SOURCE_SPLIT_REQUIRED"
@@ -557,4 +560,100 @@ async def test_source_split_required_prepare_result_emits_preflight_event_only()
     assert (
         snapshot.domain_counters["input_size_preflight_source_split_required_count"]
         == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_split_required_emits_split_required_event_and_command() -> None:
+    result, _, workflow_unit_of_work = await _execute(
+        started_attempts=(),
+        input_size_preflight_decision="SOURCE_SPLIT_REQUIRED",
+        input_size_preflight_reason=(
+            "estimated prompt tokens exceed all automatic fallback input limits"
+        ),
+        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        source_split_required=True,
+    )
+
+    assert result.appended_event_count == 1
+    assert result.appended_next_command_count == 1
+
+    event = workflow_unit_of_work.outbox.events[0]
+    assert (
+        event.event_type
+        == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED.value
+    )
+    assert (
+        event.event_type
+        != KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_BATCH_PREPARED.value
+    )
+
+    command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert (
+        command.command_type
+        == KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT.value
+    )
+    assert command.payload["workflow_run_id"] == _workflow_run_id()
+    assert command.payload["source_document_ref"] == "source-document:project-1:abc"
+    assert command.payload["source_unit_ref"] is None
+    assert command.payload["affected_work_item_refs"] == ()
+    assert command.payload["estimated_prompt_tokens"] == 3000
+    assert command.payload["active_model_ref"] == "qwen/qwen3-32b"
+    assert command.payload["input_size_preflight_decision"] == ("SOURCE_SPLIT_REQUIRED")
+    assert command.payload["input_size_preflight_reason"] == (
+        "estimated prompt tokens exceed all automatic fallback input limits"
+    )
+    assert command.payload["source_split_required"] is True
+    assert command.payload["split_handler_status"] == "BLOCKED_NOT_IMPLEMENTED"
+
+
+@pytest.mark.asyncio
+async def test_source_split_required_records_progress_and_timeline() -> None:
+    _, _, workflow_unit_of_work = await _execute(
+        started_attempts=(),
+        input_size_preflight_decision="SOURCE_SPLIT_REQUIRED",
+        input_size_preflight_reason=(
+            "estimated prompt tokens exceed all automatic fallback input limits"
+        ),
+        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        source_split_required=True,
+    )
+
+    snapshot = workflow_unit_of_work.progress_snapshots.snapshot
+    assert snapshot is not None
+    assert snapshot.domain_counters["claim_builder_source_split_required_count"] == 1
+    assert (
+        snapshot.domain_counters["input_size_preflight_source_split_required_count"]
+        == 1
+    )
+
+    assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
+        "Claim builder source unit split required",
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_split_required_does_not_emit_dispatch_prepared_or_execute_commands() -> (
+    None
+):
+    _, _, workflow_unit_of_work = await _execute(
+        started_attempts=(),
+        input_size_preflight_decision="SOURCE_SPLIT_REQUIRED",
+        input_size_preflight_reason=(
+            "estimated prompt tokens exceed all automatic fallback input limits"
+        ),
+        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        source_split_required=True,
+    )
+
+    assert all(
+        event.event_type
+        != KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_BATCH_PREPARED.value
+        for event in workflow_unit_of_work.outbox.events
+    )
+    assert tuple(
+        command.command_type
+        for command in workflow_unit_of_work.command_log.pending_commands
+    ) == (
+        KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT.value,
     )
