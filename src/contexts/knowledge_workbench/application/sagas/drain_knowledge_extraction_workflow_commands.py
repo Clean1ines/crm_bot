@@ -2,12 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservationRepositoryPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extraction_workflow_command import (
     DispatchKnowledgeExtractionWorkflowCommand,
     DispatchKnowledgeExtractionWorkflowCommandHandler,
+)
+from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
+    ExecutePreparedLlmDispatchAttemptPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     PrepareLlmDispatchBatchPort,
@@ -79,6 +85,12 @@ class DrainKnowledgeExtractionWorkflowCommands:
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
+        execute_prepared_llm_dispatch_attempt: (
+            ExecutePreparedLlmDispatchAttemptPort | None
+        ) = None,
+        capacity_observation_repository: (
+            LlmAttemptCapacityObservationRepositoryPort | None
+        ) = None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -104,6 +116,10 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 knowledge_unit_of_work=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
+                execute_prepared_llm_dispatch_attempt=(
+                    execute_prepared_llm_dispatch_attempt
+                ),
+                capacity_observation_repository=capacity_observation_repository,
             )
             if not dispatch_result.dispatched:
                 blocked_count += 1

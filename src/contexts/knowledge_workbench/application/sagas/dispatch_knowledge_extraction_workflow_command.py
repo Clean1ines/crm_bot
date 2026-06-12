@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservationRepositoryPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
+)
+from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
+    ExecutePreparedLlmDispatchAttemptPort,
+    HandleExecuteClaimBuilderSectionCommand,
+    HandleExecuteClaimBuilderSectionCommandHandler,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     HandlePrepareClaimBuilderDispatchBatchCommand,
@@ -77,6 +85,12 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
+        execute_prepared_llm_dispatch_attempt: (
+            ExecutePreparedLlmDispatchAttemptPort | None
+        ) = None,
+        capacity_observation_repository: (
+            LlmAttemptCapacityObservationRepositoryPort | None
+        ) = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = _canonical_command_type(workflow_command.command_type)
@@ -113,6 +127,43 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     workflow_command=workflow_command,
                 ),
                 prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION
+        ):
+            if (
+                execute_prepared_llm_dispatch_attempt is None
+                or capacity_observation_repository is None
+            ):
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleExecuteClaimBuilderSectionCommandHandler().execute(
+                HandleExecuteClaimBuilderSectionCommand(
+                    workflow_command=workflow_command,
+                ),
+                execute_prepared_llm_dispatch_attempt=(
+                    execute_prepared_llm_dispatch_attempt
+                ),
+                capacity_observation_repository=capacity_observation_repository,
                 workflow_unit_of_work=workflow_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(

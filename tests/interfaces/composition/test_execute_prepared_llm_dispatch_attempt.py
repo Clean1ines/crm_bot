@@ -279,3 +279,33 @@ def test_composition_does_not_import_legacy_provider_or_groq_paths() -> None:
     )
     for marker in forbidden:
         assert marker not in source
+
+
+@pytest.mark.asyncio
+async def test_execution_result_exposes_capacity_observation_contract() -> None:
+    capacity_observation = {
+        "provider": "groq",
+        "account_ref": "groq_org_primary",
+        "model_ref": "qwen/qwen3-32b",
+        "remaining_minute_requests": 1,
+        "remaining_minute_tokens": 1000,
+        "remaining_daily_requests": 10,
+        "remaining_daily_tokens": 10000,
+        "minute_reset_at": _finished_at() + timedelta(seconds=60),
+        "daily_reset_at": None,
+        "actual_prompt_tokens": 2,
+        "actual_completion_tokens": 3,
+        "actual_total_tokens": 5,
+        "outcome_class": "succeeded",
+        "observed_at": _finished_at(),
+    }
+    result, _, _ = await _execute(
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.SUCCEEDED,
+            finished_at=_finished_at(),
+            output_payload={"raw_text": "{}"},
+            capacity_observation=capacity_observation,
+        ),
+    )
+
+    assert result.llm_result.capacity_observation == capacity_observation

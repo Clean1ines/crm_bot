@@ -63,6 +63,7 @@ class LlmDispatchExecutionResult:
     output_payload: Mapping[str, object] | None = None
     error_kind: str | None = None
     next_attempt_at: datetime | None = None
+    capacity_observation: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, LlmDispatchExecutionStatus):
@@ -85,6 +86,12 @@ class LlmDispatchExecutionResult:
             )
             if self.next_attempt_at <= self.finished_at:
                 raise ValueError("next_attempt_at must be after finished_at")
+
+        if self.capacity_observation is not None and not isinstance(
+            self.capacity_observation,
+            Mapping,
+        ):
+            raise TypeError("capacity_observation must be Mapping when provided")
 
         if self.status is LlmDispatchExecutionStatus.SUCCEEDED:
             if self.output_payload is None:

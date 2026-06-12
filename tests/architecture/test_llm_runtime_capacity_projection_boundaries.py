@@ -50,7 +50,14 @@ def test_capacity_runtime_does_not_import_llm_runtime_or_provider_terms() -> Non
     )
     offenders: list[str] = []
 
+    allowed_feedback_contract = Path(
+        "src/contexts/capacity_runtime/application/ports/"
+        "llm_attempt_capacity_observation_repository_port.py"
+    )
+
     for path in sorted(root.rglob("*.py")):
+        if path == allowed_feedback_contract:
+            continue
         source = path.read_text(encoding="utf-8")
         for marker in forbidden:
             if marker in source:

@@ -41,3 +41,13 @@ def test_prepare_claim_builder_dispatch_batch_is_implemented() -> None:
     assert implemented_handler_name_for(command_type) == (
         "HandlePrepareClaimBuilderDispatchBatchCommandHandler"
     )
+
+
+def test_execute_claim_builder_section_is_implemented() -> None:
+    command_type = KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION
+
+    assert command_type in command_types_used_by_operations()
+    assert is_command_implemented(command_type) is True
+    assert implemented_handler_name_for(command_type) == (
+        "HandleExecuteClaimBuilderSectionCommandHandler"
+    )

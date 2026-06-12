@@ -5,6 +5,9 @@ from typing import Protocol, cast
 
 import asyncpg
 
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservationRepositoryPort,
+)
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
     PostgresWorkItemSchedulingRepository,
 )
@@ -12,6 +15,9 @@ from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extracti
     DrainKnowledgeExtractionWorkflowCommands,
     DrainKnowledgeExtractionWorkflowCommandsCommand,
     DrainKnowledgeExtractionWorkflowCommandsResult,
+)
+from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
+    ExecutePreparedLlmDispatchAttemptPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     PrepareLlmDispatchBatchPort,
@@ -126,10 +132,20 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         source_ingestion_runner: SourceIngestionFirstPhaseRunnerPort,
         pool: object,
         prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
+        execute_prepared_llm_dispatch_attempt: (
+            ExecutePreparedLlmDispatchAttemptPort | None
+        ) = None,
+        capacity_observation_repository: (
+            LlmAttemptCapacityObservationRepositoryPort | None
+        ) = None,
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
         self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
+        self._execute_prepared_llm_dispatch_attempt = (
+            execute_prepared_llm_dispatch_attempt
+        )
+        self._capacity_observation_repository = capacity_observation_repository
 
     async def execute(
         self,
@@ -245,6 +261,10 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
+                execute_prepared_llm_dispatch_attempt=(
+                    self._execute_prepared_llm_dispatch_attempt
+                ),
+                capacity_observation_repository=(self._capacity_observation_repository),
             )
             await workflow_unit_of_work.commit()
             return result

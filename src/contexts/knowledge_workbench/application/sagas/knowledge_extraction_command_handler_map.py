@@ -34,6 +34,12 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
         ),
         handler_name="HandlePrepareClaimBuilderDispatchBatchCommandHandler",
     ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION
+        ),
+        handler_name="HandleExecuteClaimBuilderSectionCommandHandler",
+    ),
 )
 
 

@@ -31,6 +31,7 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_chat_request_bu
 )
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_provider_response_mapper import (
     GroqProviderHttpResponse,
+    GroqProviderMappedResponse,
     GroqProviderResponseMapper,
 )
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_transport_port import (
@@ -89,16 +90,24 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 "account_ref": parsed.account_ref,
             }
             usage = getattr(provider_result, "usage", None)
-            if isinstance(usage, TokenUsage):
+            token_usage = usage if isinstance(usage, TokenUsage) else None
+            if token_usage is not None:
                 output_payload["usage"] = {
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                    "total_tokens": usage.total_tokens,
+                    "input_tokens": token_usage.input_tokens,
+                    "output_tokens": token_usage.output_tokens,
+                    "total_tokens": token_usage.total_tokens,
                 }
             return LlmDispatchExecutionResult(
                 status=LlmDispatchExecutionStatus.SUCCEEDED,
                 finished_at=observed_at,
                 output_payload=output_payload,
+                capacity_observation=_capacity_observation_payload(
+                    parsed=parsed,
+                    mapped=mapped,
+                    observed_at=observed_at,
+                    status=LlmDispatchExecutionStatus.SUCCEEDED,
+                    usage=token_usage,
+                ),
             )
 
         error_kind = getattr(provider_result, "error_kind", None)
@@ -119,6 +128,13 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             finished_at=observed_at,
             error_kind=error_kind.value,
             next_attempt_at=next_attempt_at,
+            capacity_observation=_capacity_observation_payload(
+                parsed=parsed,
+                mapped=mapped,
+                observed_at=observed_at,
+                status=status,
+                usage=None,
+            ),
         )
 
     def _find_model_profile(self, *, route: LlmRoute) -> ModelProfile:
@@ -240,6 +256,33 @@ def _map_error_kind_to_status(
     if error_kind is LlmErrorKind.AUTH_ERROR:
         return LlmDispatchExecutionStatus.TERMINAL_FAILED
     return LlmDispatchExecutionStatus.RETRYABLE_FAILED
+
+
+def _capacity_observation_payload(
+    *,
+    parsed: _ParsedGroqDispatchPayload,
+    mapped: GroqProviderMappedResponse,
+    observed_at: datetime,
+    status: LlmDispatchExecutionStatus,
+    usage: TokenUsage | None,
+) -> dict[str, object]:
+    quota = mapped.quota_snapshot
+    return {
+        "provider": parsed.provider,
+        "account_ref": parsed.account_ref,
+        "model_ref": parsed.model_ref,
+        "remaining_minute_requests": quota.remaining_requests_minute,
+        "remaining_minute_tokens": quota.remaining_tokens_minute,
+        "remaining_daily_requests": quota.remaining_requests_day,
+        "remaining_daily_tokens": quota.remaining_tokens_day,
+        "minute_reset_at": quota.unavailable_until,
+        "daily_reset_at": None,
+        "actual_prompt_tokens": usage.input_tokens if usage is not None else None,
+        "actual_completion_tokens": usage.output_tokens if usage is not None else None,
+        "actual_total_tokens": usage.total_tokens if usage is not None else None,
+        "outcome_class": status.value,
+        "observed_at": observed_at,
+    }
 
 
 def _terminal_invalid_dispatch_payload(
