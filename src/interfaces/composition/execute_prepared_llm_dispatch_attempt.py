@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol
 
 from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_read_repository_port import (
     WorkItemAttemptDispatchForExecution,
@@ -23,8 +26,60 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
 
 
 @dataclass(frozen=True, slots=True)
+class LlmDispatchOutputValidationResult:
+    status: LlmDispatchExecutionStatus
+    error_kind: str | None
+    next_attempt_at: datetime | None
+    metadata: Mapping[str, object]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.status, LlmDispatchExecutionStatus):
+            raise TypeError("status must be LlmDispatchExecutionStatus")
+        if self.error_kind is not None:
+            _require_non_empty_text(self.error_kind, field_name="error_kind")
+        if self.next_attempt_at is not None:
+            _require_timezone_aware(self.next_attempt_at, field_name="next_attempt_at")
+        if not isinstance(self.metadata, Mapping):
+            raise TypeError("metadata must be Mapping")
+
+        if self.status is LlmDispatchExecutionStatus.SUCCEEDED:
+            if self.error_kind is not None:
+                raise ValueError("error_kind must be None for succeeded validation")
+            if self.next_attempt_at is not None:
+                raise ValueError(
+                    "next_attempt_at must be None for succeeded validation"
+                )
+            return
+
+        if self.error_kind is None:
+            raise ValueError("error_kind is required for non-succeeded validation")
+
+        if self.status in {
+            LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+            LlmDispatchExecutionStatus.DEFERRED,
+        }:
+            if self.next_attempt_at is None:
+                raise ValueError(
+                    "next_attempt_at is required for retryable/deferred validation"
+                )
+
+
+class LlmDispatchOutputValidationPort(Protocol):
+    def validate(
+        self,
+        *,
+        dispatch_payload: Mapping[str, object],
+        output_payload: Mapping[str, object] | None,
+        llm_status: LlmDispatchExecutionStatus,
+        finished_at: datetime,
+        attempt_number: int,
+    ) -> LlmDispatchOutputValidationResult: ...
+
+
+@dataclass(frozen=True, slots=True)
 class ExecutePreparedLlmDispatchAttemptCommand:
     attempt_id: str
+    output_validator: LlmDispatchOutputValidationPort | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.attempt_id, field_name="attempt_id")
@@ -35,6 +90,14 @@ class ExecutePreparedLlmDispatchAttemptResult:
     dispatch: WorkItemAttemptDispatchForExecution
     llm_result: LlmDispatchExecutionResult
     outcome_result: RecordWorkItemAttemptOutcomeResult
+    validation_metadata: Mapping[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        if self.validation_metadata is not None and not isinstance(
+            self.validation_metadata,
+            Mapping,
+        ):
+            raise TypeError("validation_metadata must be Mapping when provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +116,7 @@ class ExecutePreparedLlmDispatchAttempt:
         if dispatch is None:
             raise ValueError("dispatch attempt not found")
 
-        llm_result = await self.llm_executor.execute_dispatch(
+        provider_llm_result = await self.llm_executor.execute_dispatch(
             LlmDispatchExecutionInput(
                 attempt_id=dispatch.attempt_id,
                 work_item_id=dispatch.work_item_id,
@@ -61,6 +124,16 @@ class ExecutePreparedLlmDispatchAttempt:
                 dispatch_payload=dispatch.dispatch_payload,
                 started_at=dispatch.started_at,
             ),
+        )
+
+        validation_result = _validate_output_if_requested(
+            output_validator=command.output_validator,
+            dispatch=dispatch,
+            provider_llm_result=provider_llm_result,
+        )
+        llm_result = _effective_llm_result(
+            provider_llm_result=provider_llm_result,
+            validation_result=validation_result,
         )
 
         outcome_result = await self.outcome_recorder.execute(
@@ -80,7 +153,50 @@ class ExecutePreparedLlmDispatchAttempt:
             dispatch=dispatch,
             llm_result=llm_result,
             outcome_result=outcome_result,
+            validation_metadata=(
+                dict(validation_result.metadata)
+                if validation_result is not None
+                else None
+            ),
         )
+
+
+def _validate_output_if_requested(
+    *,
+    output_validator: LlmDispatchOutputValidationPort | None,
+    dispatch: WorkItemAttemptDispatchForExecution,
+    provider_llm_result: LlmDispatchExecutionResult,
+) -> LlmDispatchOutputValidationResult | None:
+    if output_validator is None:
+        return None
+    if provider_llm_result.status is not LlmDispatchExecutionStatus.SUCCEEDED:
+        return None
+
+    return output_validator.validate(
+        dispatch_payload=dispatch.dispatch_payload,
+        output_payload=provider_llm_result.output_payload,
+        llm_status=provider_llm_result.status,
+        finished_at=provider_llm_result.finished_at,
+        attempt_number=dispatch.attempt_number,
+    )
+
+
+def _effective_llm_result(
+    *,
+    provider_llm_result: LlmDispatchExecutionResult,
+    validation_result: LlmDispatchOutputValidationResult | None,
+) -> LlmDispatchExecutionResult:
+    if validation_result is None:
+        return provider_llm_result
+
+    return LlmDispatchExecutionResult(
+        status=validation_result.status,
+        finished_at=provider_llm_result.finished_at,
+        output_payload=provider_llm_result.output_payload,
+        error_kind=validation_result.error_kind,
+        next_attempt_at=validation_result.next_attempt_at,
+        capacity_observation=provider_llm_result.capacity_observation,
+    )
 
 
 def _map_status(
@@ -102,3 +218,10 @@ def _require_non_empty_text(value: str, *, field_name: str) -> None:
         raise TypeError(f"{field_name} must be str")
     if not value.strip():
         raise ValueError(f"{field_name} must be non-empty")
+
+
+def _require_timezone_aware(value: datetime, *, field_name: str) -> None:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{field_name} must be datetime")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be timezone-aware")

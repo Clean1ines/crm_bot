@@ -28,6 +28,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_bui
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     PrepareLlmDispatchBatchPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
+    ClaimBuilderOutputValidationPolicy,
+)
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhaseCommand,
     RunSourceIngestionFirstPhaseResult,
@@ -147,6 +150,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         work_item_progress_read_repository: (
             WorkItemProgressReadRepositoryPort | None
         ) = None,
+        claim_builder_output_validation_policy: (
+            ClaimBuilderOutputValidationPolicy | None
+        ) = None,
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
@@ -156,6 +162,10 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         )
         self._capacity_observation_repository = capacity_observation_repository
         self._work_item_progress_read_repository = work_item_progress_read_repository
+        self._claim_builder_output_validation_policy = (
+            claim_builder_output_validation_policy
+            or ClaimBuilderOutputValidationPolicy()
+        )
 
     async def execute(
         self,
@@ -280,6 +290,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                     or PostgresWorkItemProgressReadRepository(
                         cast(asyncpg.Connection, connection)
                     )
+                ),
+                claim_builder_output_validation_policy=(
+                    self._claim_builder_output_validation_policy
                 ),
             )
             await workflow_unit_of_work.commit()

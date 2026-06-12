@@ -1,12 +1,25 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import TypeGuard
 from typing import Protocol, cast
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservation,
     LlmAttemptCapacityObservationRepositoryPort,
+)
+from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
+    JsonInputValue,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
+    ClaimBuilderOutputValidationDecision,
+    ClaimBuilderOutputValidationFailureReason,
+    ClaimBuilderOutputValidationPolicy,
+    ClaimBuilderOutputValidationResult,
+    ValidateClaimBuilderOutputCommand,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -45,6 +58,7 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttemptCommand,
     ExecutePreparedLlmDispatchAttemptResult,
+    LlmDispatchOutputValidationResult,
 )
 
 
@@ -53,6 +67,51 @@ class ExecutePreparedLlmDispatchAttemptPort(Protocol):
         self,
         command: ExecutePreparedLlmDispatchAttemptCommand,
     ) -> object: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimBuilderLlmDispatchOutputValidator:
+    policy: ClaimBuilderOutputValidationPolicy
+
+    def validate(
+        self,
+        *,
+        dispatch_payload: Mapping[str, object],
+        output_payload: Mapping[str, object] | None,
+        llm_status: LlmDispatchExecutionStatus,
+        finished_at: datetime,
+        attempt_number: int,
+    ) -> LlmDispatchOutputValidationResult:
+        if llm_status is not LlmDispatchExecutionStatus.SUCCEEDED:
+            return LlmDispatchOutputValidationResult(
+                status=llm_status,
+                error_kind=None,
+                next_attempt_at=None,
+                metadata={
+                    "validation_decision": None,
+                    "validated_claim_count": 0,
+                    "retry_recommended": False,
+                },
+            )
+
+        decoded_output = _decoded_claim_builder_output(output_payload)
+        if isinstance(decoded_output, ClaimBuilderOutputValidationResult):
+            return _validation_result_to_dispatch_result(
+                validation_result=decoded_output,
+                finished_at=finished_at,
+            )
+
+        validation_result = self.policy.validate(
+            ValidateClaimBuilderOutputCommand(
+                output_payload=decoded_output,
+                source_unit_text=_source_unit_text(dispatch_payload),
+                empty_claims_retry_already_attempted=attempt_number > 1,
+            )
+        )
+        return _validation_result_to_dispatch_result(
+            validation_result=validation_result,
+            finished_at=finished_at,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +154,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         *,
         execute_prepared_llm_dispatch_attempt: ExecutePreparedLlmDispatchAttemptPort,
         capacity_observation_repository: LlmAttemptCapacityObservationRepositoryPort,
+        claim_builder_output_validation_policy: ClaimBuilderOutputValidationPolicy,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
     ) -> HandleExecuteClaimBuilderSectionResult:
         workflow_command = command.workflow_command
@@ -119,6 +179,9 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             await execute_prepared_llm_dispatch_attempt.execute(
                 ExecutePreparedLlmDispatchAttemptCommand(
                     attempt_id=dispatch_attempt_id,
+                    output_validator=ClaimBuilderLlmDispatchOutputValidator(
+                        policy=claim_builder_output_validation_policy,
+                    ),
                 ),
             ),
         )
@@ -156,6 +219,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             work_item_id=work_item_id,
             execution_result=execution_result,
             capacity_observation=capacity_observation,
+            validation_metadata=execution_result.validation_metadata,
         )
         await workflow_unit_of_work.outbox.append_event(outcome_event)
         appended_event_count += 1
@@ -174,6 +238,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             workflow_run_id=workflow_run_id,
             status=execution_result.llm_result.status,
             capacity_observation=capacity_observation,
+            validation_metadata=execution_result.validation_metadata,
             occurred_at=finished_at,
         )
 
@@ -185,6 +250,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                 work_item_id=work_item_id,
                 execution_result=execution_result,
                 capacity_observation=capacity_observation,
+                validation_metadata=execution_result.validation_metadata,
             ),
         )
 
@@ -201,6 +267,188 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             appended_event_count=appended_event_count,
             appended_next_command_count=1,
             completed_command_id=workflow_command.command_id,
+        )
+
+
+def _decoded_claim_builder_output(
+    output_payload: Mapping[str, object] | None,
+) -> JsonInputValue | ClaimBuilderOutputValidationResult:
+    if output_payload is None:
+        return _synthetic_validation_failure(
+            ClaimBuilderOutputValidationFailureReason.OUTPUT_NOT_OBJECT,
+        )
+
+    raw_text = output_payload.get("raw_text")
+    if isinstance(raw_text, str):
+        try:
+            decoded = json.loads(raw_text)
+        except json.JSONDecodeError:
+            return _synthetic_validation_failure(
+                ClaimBuilderOutputValidationFailureReason.TRUNCATED_JSON_RETRY_REQUIRED,
+            )
+        if _is_json_input_value(decoded):
+            return decoded
+        return _synthetic_validation_failure(
+            ClaimBuilderOutputValidationFailureReason.OUTPUT_NOT_OBJECT,
+        )
+
+    if _is_json_input_value(output_payload):
+        return output_payload
+
+    return _synthetic_validation_failure(
+        ClaimBuilderOutputValidationFailureReason.OUTPUT_NOT_OBJECT,
+    )
+
+
+def _is_json_input_value(value: object) -> TypeGuard[JsonInputValue]:
+    if value is None or isinstance(value, str | int | float | bool):
+        return True
+    if isinstance(value, list):
+        return all(_is_json_input_value(item) for item in value)
+    if isinstance(value, tuple):
+        return all(_is_json_input_value(item) for item in value)
+    if isinstance(value, Mapping):
+        return all(
+            isinstance(key, str) and _is_json_input_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _synthetic_validation_failure(
+    failure_reason: ClaimBuilderOutputValidationFailureReason,
+) -> ClaimBuilderOutputValidationResult:
+    return ClaimBuilderOutputValidationResult(
+        decision=ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+        claims=(),
+        failure_reason=failure_reason,
+    )
+
+
+def _source_unit_text(dispatch_payload: Mapping[str, object]) -> str:
+    schedule_payload = dispatch_payload.get("schedule_payload")
+    if not isinstance(schedule_payload, Mapping):
+        raise ValueError("dispatch payload schedule_payload must be mapping")
+
+    provider_messages = schedule_payload.get("provider_messages")
+    if not isinstance(provider_messages, (list, tuple)):
+        raise ValueError("schedule_payload provider_messages must be list")
+
+    for raw_message in provider_messages:
+        if not isinstance(raw_message, Mapping):
+            continue
+        role = raw_message.get("role")
+        content = raw_message.get("content")
+        if role == "user" and isinstance(content, str):
+            source_unit_text = _source_text_from_user_message(content)
+            if source_unit_text.strip():
+                return source_unit_text
+
+    raise ValueError("source_unit_text missing from claim builder dispatch payload")
+
+
+def _source_text_from_user_message(content: str) -> str:
+    _, separator, source_text = content.partition("\n\n")
+    if not separator:
+        return ""
+    return source_text
+
+
+def _validation_result_to_dispatch_result(
+    *,
+    validation_result: ClaimBuilderOutputValidationResult,
+    finished_at: datetime,
+) -> LlmDispatchOutputValidationResult:
+    metadata = _validation_metadata(validation_result)
+    if validation_result.decision in {
+        ClaimBuilderOutputValidationDecision.VALID_CLAIMS,
+        ClaimBuilderOutputValidationDecision.VALID_EMPTY,
+    }:
+        return LlmDispatchOutputValidationResult(
+            status=LlmDispatchExecutionStatus.SUCCEEDED,
+            error_kind=None,
+            next_attempt_at=None,
+            metadata=metadata,
+        )
+
+    if (
+        validation_result.decision
+        is ClaimBuilderOutputValidationDecision.TERMINAL_INVALID
+    ):
+        return LlmDispatchOutputValidationResult(
+            status=LlmDispatchExecutionStatus.TERMINAL_FAILED,
+            error_kind="claim_builder_output_validation_failed",
+            next_attempt_at=None,
+            metadata=metadata,
+        )
+
+    return LlmDispatchOutputValidationResult(
+        status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+        error_kind="claim_builder_output_validation_failed",
+        next_attempt_at=finished_at + timedelta(seconds=1),
+        metadata=metadata,
+    )
+
+
+def _validation_metadata(
+    validation_result: ClaimBuilderOutputValidationResult,
+) -> dict[str, object]:
+    retry_recommended = validation_result.decision in {
+        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+        ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL,
+        ClaimBuilderOutputValidationDecision.RETRY_LARGER_OUTPUT_LIMIT_MODEL,
+    }
+    return {
+        "validation_decision": validation_result.decision.value,
+        "validation_failure_reason": (
+            validation_result.failure_reason.value
+            if validation_result.failure_reason is not None
+            else None
+        ),
+        "validated_claim_count": len(validation_result.claims),
+        "retry_recommended": retry_recommended,
+    }
+
+
+def _apply_validation_counters(
+    *,
+    domain_counters: dict[str, int],
+    validation_metadata: Mapping[str, object] | None,
+) -> None:
+    if validation_metadata is None:
+        return
+
+    decision = validation_metadata.get("validation_decision")
+    claim_count = validation_metadata.get("validated_claim_count")
+    if not isinstance(claim_count, int):
+        claim_count = 0
+
+    if decision in {
+        ClaimBuilderOutputValidationDecision.VALID_CLAIMS.value,
+        ClaimBuilderOutputValidationDecision.VALID_EMPTY.value,
+    }:
+        domain_counters["claim_builder_valid_output_count"] = (
+            domain_counters.get("claim_builder_valid_output_count", 0) + 1
+        )
+        domain_counters["claim_builder_valid_claim_count"] = (
+            domain_counters.get("claim_builder_valid_claim_count", 0) + claim_count
+        )
+        return
+
+    if decision in {
+        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL.value,
+        ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value,
+        ClaimBuilderOutputValidationDecision.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
+    }:
+        domain_counters["claim_builder_invalid_output_count"] = (
+            domain_counters.get("claim_builder_invalid_output_count", 0) + 1
+        )
+        domain_counters["claim_builder_validation_retryable_failed_count"] = (
+            domain_counters.get(
+                "claim_builder_validation_retryable_failed_count",
+                0,
+            )
+            + 1
         )
 
 
@@ -264,6 +512,7 @@ def _claim_builder_attempt_outcome_event(
     work_item_id: str,
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
     capacity_observation: LlmAttemptCapacityObservation | None,
+    validation_metadata: Mapping[str, object] | None,
 ) -> WorkflowEvent:
     event_type = _event_type_for_status(execution_result.llm_result.status)
     payload = _event_payload(
@@ -272,6 +521,7 @@ def _claim_builder_attempt_outcome_event(
         work_item_id=work_item_id,
         execution_result=execution_result,
         capacity_observation=capacity_observation,
+        validation_metadata=validation_metadata,
     )
     return WorkflowEvent(
         event_id=WorkflowEventId(
@@ -307,13 +557,14 @@ def _event_payload(
     work_item_id: str,
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
     capacity_observation: LlmAttemptCapacityObservation | None,
+    validation_metadata: Mapping[str, object] | None,
 ) -> dict[str, object]:
     capacity_payload = (
         capacity_observation.to_event_payload()
         if capacity_observation is not None
         else _allocation_payload(execution_result.dispatch.dispatch_payload)
     )
-    return {
+    payload: dict[str, object] = {
         "workflow_run_id": workflow_run_id,
         "dispatch_attempt_id": dispatch_attempt_id,
         "work_item_id": work_item_id,
@@ -330,6 +581,9 @@ def _event_payload(
         "actual_completion_tokens": capacity_payload.get("actual_completion_tokens"),
         "actual_total_tokens": capacity_payload.get("actual_total_tokens"),
     }
+    if validation_metadata is not None:
+        payload.update(validation_metadata)
+    return payload
 
 
 def _allocation_payload(dispatch_payload: Mapping[str, object]) -> dict[str, object]:
@@ -401,6 +655,7 @@ async def _save_progress_snapshot(
     workflow_run_id: str,
     status: LlmDispatchExecutionStatus,
     capacity_observation: LlmAttemptCapacityObservation | None,
+    validation_metadata: Mapping[str, object] | None,
     occurred_at,
 ) -> None:
     existing = await workflow_unit_of_work.progress_snapshots.get_snapshot(
@@ -414,6 +669,11 @@ async def _save_progress_snapshot(
         domain_counters["capacity_observation_count"] = (
             domain_counters.get("capacity_observation_count", 0) + 1
         )
+
+    _apply_validation_counters(
+        domain_counters=domain_counters,
+        validation_metadata=validation_metadata,
+    )
 
     completed_delta = 1 if status is LlmDispatchExecutionStatus.SUCCEEDED else 0
     deferred_delta = 1 if status is LlmDispatchExecutionStatus.DEFERRED else 0
@@ -467,6 +727,7 @@ def _timeline_entry(
     work_item_id: str,
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
     capacity_observation: LlmAttemptCapacityObservation | None,
+    validation_metadata: Mapping[str, object] | None,
 ) -> WorkflowTimelineEntry:
     event_type = _event_type_for_status(execution_result.llm_result.status)
     return WorkflowTimelineEntry(
@@ -485,6 +746,7 @@ def _timeline_entry(
             work_item_id=work_item_id,
             execution_result=execution_result,
             capacity_observation=capacity_observation,
+            validation_metadata=validation_metadata,
         ),
         occurred_at=execution_result.llm_result.finished_at,
         source_ref=workflow_command.command_type,

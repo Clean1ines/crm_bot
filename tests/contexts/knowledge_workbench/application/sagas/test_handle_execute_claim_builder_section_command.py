@@ -21,8 +21,14 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_status import
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
+    ClaimBuilderLlmDispatchOutputValidator,
     HandleExecuteClaimBuilderSectionCommand,
     HandleExecuteClaimBuilderSectionCommandHandler,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
+    ClaimBuilderOutputValidationDecision,
+    ClaimBuilderOutputValidationFailureReason,
+    ClaimBuilderOutputValidationPolicy,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -140,7 +146,19 @@ def _dispatch() -> WorkItemAttemptDispatchForExecution:
         worker_ref="worker-1",
         dispatch_payload={
             "work_item_id": _work_item_id(),
-            "schedule_payload": {"provider_messages": []},
+            "schedule_payload": {
+                "provider_messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "source_unit_ref: section-1\n"
+                            "heading_path: /\n\n"
+                            "Product System turns documents into knowledge. "
+                            "Цены не описаны."
+                        ),
+                    }
+                ]
+            },
             "llm_allocation": {
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
@@ -160,7 +178,15 @@ def _execution_result(
         llm_result = LlmDispatchExecutionResult(
             status=status,
             finished_at=_finished_at(),
-            output_payload={"raw_text": "{}"},
+            output_payload={
+                "raw_text": (
+                    '{"claims":[{"claim":"Product System turns documents into '
+                    'knowledge.","granularity":"atomic","possible_questions":'
+                    '["Что делает Product System?"],"exclusion_scope":"Цены не '
+                    'описаны.","evidence_block":"Product System turns documents '
+                    'into knowledge."}]}'
+                )
+            },
             capacity_observation=_capacity_payload(),
         )
         work_status = WorkItemStatus.COMPLETED
@@ -215,7 +241,33 @@ class FakeExecutePreparedLlmDispatchAttempt:
         self, command: ExecutePreparedLlmDispatchAttemptCommand
     ) -> object:
         self.calls.append(command)
-        return self.result
+        if (
+            command.output_validator is None
+            or self.result.validation_metadata is not None
+            or self.result.llm_result.status is not LlmDispatchExecutionStatus.SUCCEEDED
+        ):
+            return self.result
+
+        validation_result = command.output_validator.validate(
+            dispatch_payload=self.result.dispatch.dispatch_payload,
+            output_payload=self.result.llm_result.output_payload,
+            llm_status=self.result.llm_result.status,
+            finished_at=self.result.llm_result.finished_at,
+            attempt_number=self.result.dispatch.attempt_number,
+        )
+        return ExecutePreparedLlmDispatchAttemptResult(
+            dispatch=self.result.dispatch,
+            llm_result=LlmDispatchExecutionResult(
+                status=validation_result.status,
+                finished_at=self.result.llm_result.finished_at,
+                output_payload=self.result.llm_result.output_payload,
+                error_kind=validation_result.error_kind,
+                next_attempt_at=validation_result.next_attempt_at,
+                capacity_observation=self.result.llm_result.capacity_observation,
+            ),
+            outcome_result=self.result.outcome_result,
+            validation_metadata=dict(validation_result.metadata),
+        )
 
 
 @dataclass(slots=True)
@@ -391,6 +443,7 @@ async def _execute(
         ),
         execute_prepared_llm_dispatch_attempt=executor,
         capacity_observation_repository=capacity_repository,
+        claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
         workflow_unit_of_work=workflow_unit_of_work,
     )
     return result, executor, capacity_repository, workflow_unit_of_work
@@ -431,9 +484,9 @@ async def test_calls_existing_execute_prepared_llm_dispatch_attempt() -> None:
     assert result.dispatch_attempt_id == _attempt_id()
     assert result.work_item_id == _work_item_id()
     assert result.outcome_status == LlmDispatchExecutionStatus.SUCCEEDED.value
-    assert executor.calls == [
-        ExecutePreparedLlmDispatchAttemptCommand(attempt_id=_attempt_id())
-    ]
+    assert len(executor.calls) == 1
+    assert executor.calls[0].attempt_id == _attempt_id()
+    assert executor.calls[0].output_validator is not None
 
 
 @pytest.mark.asyncio
@@ -461,6 +514,10 @@ async def test_appends_outcome_and_capacity_events() -> None:
     assert outcome_event.payload["work_item_id"] == _work_item_id()
     assert outcome_event.payload["outcome_status"] == "succeeded"
     assert outcome_event.payload["actual_total_tokens"] == 15
+    assert outcome_event.payload["validation_decision"] == (
+        ClaimBuilderOutputValidationDecision.VALID_CLAIMS.value
+    )
+    assert outcome_event.payload["validated_claim_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -500,6 +557,8 @@ async def test_updates_progress_snapshot_and_timeline() -> None:
     assert snapshot.completed_work_items == 1
     assert snapshot.domain_counters["executed_attempt_count"] == 1
     assert snapshot.domain_counters["capacity_observation_count"] == 1
+    assert snapshot.domain_counters["claim_builder_valid_output_count"] == 1
+    assert snapshot.domain_counters["claim_builder_valid_claim_count"] == 1
 
     assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
         "Claim builder section attempt executed",
@@ -519,3 +578,143 @@ async def test_deferred_outcome_updates_deferred_progress() -> None:
     assert workflow_unit_of_work.outbox.events[1].event_type == (
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_DEFERRED.value
     )
+
+
+@pytest.mark.asyncio
+async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> None:
+    invalid_result = ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+            finished_at=_finished_at(),
+            output_payload={"raw_text": '{"claims":[]}'},
+            error_kind="claim_builder_output_validation_failed",
+            next_attempt_at=_finished_at() + timedelta(seconds=1),
+            capacity_observation={
+                **_capacity_payload(),
+                "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
+            },
+        ),
+        outcome_result=RecordWorkItemAttemptOutcomeResult(
+            work_item=WorkItem(
+                work_item_id=_work_item_id(),
+                work_kind=WorkKind(
+                    "knowledge_workbench.claim_builder.section_extraction"
+                ),
+                status=WorkItemStatus.RETRYABLE_FAILED,
+            )
+        ),
+        validation_metadata={
+            "validation_decision": (
+                ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value
+            ),
+            "validation_failure_reason": (
+                ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
+            ),
+            "validated_claim_count": 0,
+            "retry_recommended": True,
+        },
+    )
+
+    result, _, capacity_repository, workflow_unit_of_work = await _execute(
+        execution_result=invalid_result,
+    )
+
+    assert result.outcome_status == LlmDispatchExecutionStatus.RETRYABLE_FAILED.value
+    assert len(capacity_repository.observations) == 1
+    assert workflow_unit_of_work.outbox.events[1].event_type == (
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
+    )
+    assert workflow_unit_of_work.outbox.events[1].payload["validation_decision"] == (
+        ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value
+    )
+    assert workflow_unit_of_work.outbox.events[1].payload["retry_recommended"] is True
+    assert tuple(
+        command.command_type
+        for command in workflow_unit_of_work.command_log.pending_commands
+    ) == (
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS.value,
+    )
+
+    snapshot = workflow_unit_of_work.progress_snapshots.snapshot
+    assert snapshot is not None
+    assert snapshot.retryable_failed_work_items == 1
+    assert snapshot.domain_counters["claim_builder_invalid_output_count"] == 1
+    assert (
+        snapshot.domain_counters["claim_builder_validation_retryable_failed_count"] == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_valid_empty_output_after_retry_is_accepted_as_extracted() -> None:
+    valid_empty_result = ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.SUCCEEDED,
+            finished_at=_finished_at(),
+            output_payload={"raw_text": '{"claims":[]}'},
+            capacity_observation=_capacity_payload(),
+        ),
+        outcome_result=RecordWorkItemAttemptOutcomeResult(
+            work_item=WorkItem(
+                work_item_id=_work_item_id(),
+                work_kind=WorkKind(
+                    "knowledge_workbench.claim_builder.section_extraction"
+                ),
+                status=WorkItemStatus.COMPLETED,
+            )
+        ),
+        validation_metadata={
+            "validation_decision": (
+                ClaimBuilderOutputValidationDecision.VALID_EMPTY.value
+            ),
+            "validation_failure_reason": None,
+            "validated_claim_count": 0,
+            "retry_recommended": False,
+        },
+    )
+
+    _, _, _, workflow_unit_of_work = await _execute(
+        execution_result=valid_empty_result,
+    )
+
+    assert workflow_unit_of_work.outbox.events[1].event_type == (
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value
+    )
+    assert workflow_unit_of_work.outbox.events[1].payload["validation_decision"] == (
+        ClaimBuilderOutputValidationDecision.VALID_EMPTY.value
+    )
+    assert workflow_unit_of_work.outbox.events[1].payload["validated_claim_count"] == 0
+
+
+def test_source_unit_text_missing_fails_explicitly() -> None:
+    validator = ClaimBuilderLlmDispatchOutputValidator(
+        policy=ClaimBuilderOutputValidationPolicy(),
+    )
+
+    with pytest.raises(ValueError, match="source_unit_text"):
+        validator.validate(
+            dispatch_payload={
+                "work_item_id": _work_item_id(),
+                "schedule_payload": {"provider_messages": []},
+                "llm_allocation": {
+                    "provider": "groq",
+                    "account_ref": "groq_org_primary",
+                    "model_ref": "qwen/qwen3-32b",
+                    "slot_index": 0,
+                },
+                "llm_execution_settings": {"reasoning_enabled": False},
+            },
+            output_payload={
+                "raw_text": (
+                    '{"claims":[{"claim":"Product System turns documents into '
+                    'knowledge.","granularity":"atomic","possible_questions":'
+                    '["Что делает Product System?"],"exclusion_scope":"Цены не '
+                    'описаны.","evidence_block":"Product System turns documents '
+                    'into knowledge."}]}'
+                )
+            },
+            llm_status=LlmDispatchExecutionStatus.SUCCEEDED,
+            finished_at=_finished_at(),
+            attempt_number=1,
+        )

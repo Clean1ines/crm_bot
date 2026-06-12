@@ -16,6 +16,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_bui
     HandleExecuteClaimBuilderSectionCommand,
     HandleExecuteClaimBuilderSectionCommandHandler,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
+    ClaimBuilderOutputValidationPolicy,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     HandlePrepareClaimBuilderDispatchBatchCommand,
     HandlePrepareClaimBuilderDispatchBatchCommandHandler,
@@ -101,6 +104,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         work_item_progress_read_repository: (
             WorkItemProgressReadRepositoryPort | None
         ) = None,
+        claim_builder_output_validation_policy: (
+            ClaimBuilderOutputValidationPolicy | None
+        ) = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = _canonical_command_type(workflow_command.command_type)
@@ -156,6 +162,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             if (
                 execute_prepared_llm_dispatch_attempt is None
                 or capacity_observation_repository is None
+                or claim_builder_output_validation_policy is None
             ):
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
@@ -174,6 +181,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     execute_prepared_llm_dispatch_attempt
                 ),
                 capacity_observation_repository=capacity_observation_repository,
+                claim_builder_output_validation_policy=(
+                    claim_builder_output_validation_policy
+                ),
                 workflow_unit_of_work=workflow_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(

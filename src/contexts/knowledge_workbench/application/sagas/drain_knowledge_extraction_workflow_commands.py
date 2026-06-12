@@ -18,6 +18,9 @@ from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extra
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
+    ClaimBuilderOutputValidationPolicy,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     PrepareLlmDispatchBatchPort,
 )
@@ -97,6 +100,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         work_item_progress_read_repository: (
             WorkItemProgressReadRepositoryPort | None
         ) = None,
+        claim_builder_output_validation_policy: (
+            ClaimBuilderOutputValidationPolicy | None
+        ) = None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -127,6 +133,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 ),
                 capacity_observation_repository=capacity_observation_repository,
                 work_item_progress_read_repository=work_item_progress_read_repository,
+                claim_builder_output_validation_policy=(
+                    claim_builder_output_validation_policy
+                ),
             )
             if not dispatch_result.dispatched:
                 blocked_count += 1
