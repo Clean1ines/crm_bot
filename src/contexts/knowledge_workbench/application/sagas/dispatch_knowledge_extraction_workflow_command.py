@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressReadRepositoryPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -17,6 +20,10 @@ from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_bui
     HandlePrepareClaimBuilderDispatchBatchCommand,
     HandlePrepareClaimBuilderDispatchBatchCommandHandler,
     PrepareLlmDispatchBatchPort,
+)
+from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_claim_builder_progress_command import (
+    HandleReconcileClaimBuilderProgressCommand,
+    HandleReconcileClaimBuilderProgressCommandHandler,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_builder_section_work_command import (
     HandleScheduleClaimBuilderSectionWorkCommand,
@@ -91,6 +98,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         capacity_observation_repository: (
             LlmAttemptCapacityObservationRepositoryPort | None
         ) = None,
+        work_item_progress_read_repository: (
+            WorkItemProgressReadRepositoryPort | None
+        ) = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = _canonical_command_type(workflow_command.command_type)
@@ -164,6 +174,37 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     execute_prepared_llm_dispatch_attempt
                 ),
                 capacity_observation_repository=capacity_observation_repository,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS
+        ):
+            if work_item_progress_read_repository is None:
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleReconcileClaimBuilderProgressCommandHandler().execute(
+                HandleReconcileClaimBuilderProgressCommand(
+                    workflow_command=workflow_command,
+                ),
+                work_item_progress_read_repository=work_item_progress_read_repository,
                 workflow_unit_of_work=workflow_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(

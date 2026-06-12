@@ -40,6 +40,12 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
         ),
         handler_name="HandleExecuteClaimBuilderSectionCommandHandler",
     ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS
+        ),
+        handler_name="HandleReconcileClaimBuilderProgressCommandHandler",
+    ),
 )
 
 

@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressReadRepositoryPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -91,6 +94,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         capacity_observation_repository: (
             LlmAttemptCapacityObservationRepositoryPort | None
         ) = None,
+        work_item_progress_read_repository: (
+            WorkItemProgressReadRepositoryPort | None
+        ) = None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -120,6 +126,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
                     execute_prepared_llm_dispatch_attempt
                 ),
                 capacity_observation_repository=capacity_observation_repository,
+                work_item_progress_read_repository=work_item_progress_read_repository,
             )
             if not dispatch_result.dispatched:
                 blocked_count += 1

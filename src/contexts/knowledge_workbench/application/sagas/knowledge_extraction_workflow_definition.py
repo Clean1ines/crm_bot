@@ -48,6 +48,7 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     )
     CLAIM_BUILDER_SECTION_SPLIT_REQUIRED = "ClaimBuilderSectionSplitRequired"
     LLM_PROVIDER_CAPACITY_OBSERVED = "LlmProviderCapacityObserved"
+    CLAIM_BUILDER_PROGRESS_RECONCILED = "ClaimBuilderProgressReconciled"
     CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED = "ClaimBuilderAllSectionsExtracted"
     DRAFT_CLAIM_EMBEDDING_BATCH_COMPLETED = "DraftClaimEmbeddingBatchCompleted"
     DRAFT_CLAIM_EMBEDDINGS_GENERATED = "DraftClaimEmbeddingsGenerated"
@@ -311,6 +312,9 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             idempotency_key_template="claim-builder-progress:{workflow_run_id}",
             success_event_type=(
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED
+            ),
+            intermediate_event_types=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED,
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS,

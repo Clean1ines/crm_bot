@@ -161,6 +161,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         appended_event_count += 1
 
         next_command = _reconcile_claim_builder_progress_command(
+            workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
             dispatch_attempt_id=dispatch_attempt_id,
             work_item_id=work_item_id,
@@ -344,6 +345,7 @@ def _allocation_payload(dispatch_payload: Mapping[str, object]) -> dict[str, obj
 
 def _reconcile_claim_builder_progress_command(
     *,
+    workflow_command: WorkflowCommand,
     workflow_run_id: str,
     dispatch_attempt_id: str,
     work_item_id: str,
@@ -359,17 +361,38 @@ def _reconcile_claim_builder_progress_command(
         ),
         workflow_run_id=workflow_run_id,
         idempotency_key=WorkflowIdempotencyKey(idempotency_key),
-        payload={
-            "workflow_run_id": workflow_run_id,
-            "dispatch_attempt_id": dispatch_attempt_id,
-            "work_item_id": work_item_id,
-            "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
-        },
+        payload=_reconcile_command_payload(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            dispatch_attempt_id=dispatch_attempt_id,
+            work_item_id=work_item_id,
+        ),
         status=WorkflowCommandStatus.PENDING,
         run_after=occurred_at,
         created_at=occurred_at,
         updated_at=occurred_at,
     )
+
+
+def _reconcile_command_payload(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    dispatch_attempt_id: str,
+    work_item_id: str,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "workflow_run_id": workflow_run_id,
+        "dispatch_attempt_id": dispatch_attempt_id,
+        "work_item_id": work_item_id,
+        "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+    }
+    dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
+    if dispatch_preparation is not None:
+        if not isinstance(dispatch_preparation, Mapping):
+            raise ValueError("llm_dispatch_preparation must be mapping")
+        payload["llm_dispatch_preparation"] = dict(dispatch_preparation)
+    return payload
 
 
 async def _save_progress_snapshot(

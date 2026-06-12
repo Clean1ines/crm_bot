@@ -128,6 +128,7 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             appended_event_count = 1
 
             next_commands = _execute_claim_builder_section_commands(
+                workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
                 started_attempts=started_attempts,
                 occurred_at=occurred_at,
@@ -317,17 +318,30 @@ def _claim_builder_dispatch_batch_prepared_event(
 
 def _execute_claim_builder_section_commands(
     *,
+    workflow_command: WorkflowCommand,
     workflow_run_id: str,
     started_attempts: Sequence[object],
     occurred_at: datetime,
 ) -> tuple[WorkflowCommand, ...]:
     commands: list[WorkflowCommand] = []
+    dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
     for attempt in started_attempts:
         dispatch_attempt_id = _attempt_text(attempt, "attempt_id")
         work_item_id = _attempt_text(attempt, "work_item_id")
         idempotency_key = (
             f"execute-claim-builder-section:{workflow_run_id}:{dispatch_attempt_id}"
         )
+        command_payload: dict[str, object] = {
+            "workflow_run_id": workflow_run_id,
+            "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+            "dispatch_attempt_id": dispatch_attempt_id,
+            "work_item_id": work_item_id,
+        }
+        if dispatch_preparation is not None:
+            if not isinstance(dispatch_preparation, Mapping):
+                raise ValueError("llm_dispatch_preparation must be mapping")
+            command_payload["llm_dispatch_preparation"] = dict(dispatch_preparation)
+
         commands.append(
             WorkflowCommand(
                 command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
@@ -336,12 +350,7 @@ def _execute_claim_builder_section_commands(
                 ),
                 workflow_run_id=workflow_run_id,
                 idempotency_key=WorkflowIdempotencyKey(idempotency_key),
-                payload={
-                    "workflow_run_id": workflow_run_id,
-                    "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
-                    "dispatch_attempt_id": dispatch_attempt_id,
-                    "work_item_id": work_item_id,
-                },
+                payload=command_payload,
                 status=WorkflowCommandStatus.PENDING,
                 run_after=occurred_at,
                 created_at=occurred_at,

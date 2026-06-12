@@ -8,6 +8,12 @@ import asyncpg
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressReadRepositoryPort,
+)
+from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_progress_read_repository import (
+    PostgresWorkItemProgressReadRepository,
+)
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
     PostgresWorkItemSchedulingRepository,
 )
@@ -138,6 +144,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         capacity_observation_repository: (
             LlmAttemptCapacityObservationRepositoryPort | None
         ) = None,
+        work_item_progress_read_repository: (
+            WorkItemProgressReadRepositoryPort | None
+        ) = None,
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
@@ -146,6 +155,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             execute_prepared_llm_dispatch_attempt
         )
         self._capacity_observation_repository = capacity_observation_repository
+        self._work_item_progress_read_repository = work_item_progress_read_repository
 
     async def execute(
         self,
@@ -265,6 +275,12 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                     self._execute_prepared_llm_dispatch_attempt
                 ),
                 capacity_observation_repository=(self._capacity_observation_repository),
+                work_item_progress_read_repository=(
+                    self._work_item_progress_read_repository
+                    or PostgresWorkItemProgressReadRepository(
+                        cast(asyncpg.Connection, connection)
+                    )
+                ),
             )
             await workflow_unit_of_work.commit()
             return result

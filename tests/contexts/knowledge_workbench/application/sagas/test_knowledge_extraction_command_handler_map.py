@@ -51,3 +51,15 @@ def test_execute_claim_builder_section_is_implemented() -> None:
     assert implemented_handler_name_for(command_type) == (
         "HandleExecuteClaimBuilderSectionCommandHandler"
     )
+
+
+def test_reconcile_claim_builder_progress_is_implemented() -> None:
+    command_type = (
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS
+    )
+
+    assert command_type in command_types_used_by_operations()
+    assert is_command_implemented(command_type) is True
+    assert implemented_handler_name_for(command_type) == (
+        "HandleReconcileClaimBuilderProgressCommandHandler"
+    )
