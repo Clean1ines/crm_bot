@@ -109,48 +109,55 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
                 occurred_at=occurred_at,
             ),
         )
-        started_attempts = cast(
+        typed_prepare_result = cast(
             PrepareLlmDispatchBatchResult,
             prepare_result,
-        ).attempt_result.started_attempts
+        )
+        started_attempts = typed_prepare_result.attempt_result.started_attempts
         prepared_dispatch_count = len(started_attempts)
+        preflight_metadata = _preflight_metadata_from_prepare_result(
+            typed_prepare_result,
+        )
 
         appended_event_count = 0
         appended_next_command_count = 0
 
-        if prepared_dispatch_count > 0:
+        if prepared_dispatch_count > 0 or _source_split_required(preflight_metadata):
             prepared_event = _claim_builder_dispatch_batch_prepared_event(
                 workflow_run_id=workflow_run_id,
                 started_attempts=started_attempts,
+                preflight_metadata=preflight_metadata,
                 occurred_at=occurred_at,
             )
             await workflow_unit_of_work.outbox.append_event(prepared_event)
             appended_event_count = 1
 
-            next_commands = _execute_claim_builder_section_commands(
-                workflow_command=workflow_command,
-                workflow_run_id=workflow_run_id,
-                started_attempts=started_attempts,
-                occurred_at=occurred_at,
-            )
-            for next_command in next_commands:
-                await workflow_unit_of_work.command_log.append_pending_command(
-                    next_command,
+            if prepared_dispatch_count > 0:
+                next_commands = _execute_claim_builder_section_commands(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    started_attempts=started_attempts,
+                    occurred_at=occurred_at,
                 )
-            appended_next_command_count = len(next_commands)
+                for next_command in next_commands:
+                    await workflow_unit_of_work.command_log.append_pending_command(
+                        next_command,
+                    )
+                appended_next_command_count = len(next_commands)
 
-            for timeline_entry in _timeline_entries(
-                workflow_command=workflow_command,
-                prepared_event=prepared_event,
-                started_attempts=started_attempts,
-                occurred_at=occurred_at,
-            ):
-                await workflow_unit_of_work.timeline.append_entry(timeline_entry)
+                for timeline_entry in _timeline_entries(
+                    workflow_command=workflow_command,
+                    prepared_event=prepared_event,
+                    started_attempts=started_attempts,
+                    occurred_at=occurred_at,
+                ):
+                    await workflow_unit_of_work.timeline.append_entry(timeline_entry)
 
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
             workflow_run_id=workflow_run_id,
             prepared_dispatch_count=prepared_dispatch_count,
+            preflight_metadata=preflight_metadata,
             occurred_at=occurred_at,
         )
 
@@ -250,6 +257,26 @@ def _dispatch_preparation_strategy(
     return None
 
 
+def _preflight_metadata_from_prepare_result(
+    prepare_result: PrepareLlmDispatchBatchResult,
+) -> dict[str, object]:
+    active_model_ref = prepare_result.input_size_preflight_active_model_ref
+    if active_model_ref is None:
+        active_model_ref = ""
+
+    metadata: dict[str, object] = {
+        "input_size_preflight_decision": (prepare_result.input_size_preflight_decision),
+        "input_size_preflight_reason": prepare_result.input_size_preflight_reason,
+        "input_size_preflight_active_model_ref": active_model_ref,
+        "source_split_required": prepare_result.source_split_required,
+    }
+    return metadata
+
+
+def _source_split_required(metadata: Mapping[str, object]) -> bool:
+    return metadata.get("source_split_required") is True
+
+
 def _profile_from_payload(payload: Mapping[str, object]) -> LlmTaskCapacityProfile:
     return LlmTaskCapacityProfile(
         profile_id=_payload_text(payload, "profile_id"),
@@ -308,6 +335,7 @@ def _claim_builder_dispatch_batch_prepared_event(
     *,
     workflow_run_id: str,
     started_attempts: Sequence[object],
+    preflight_metadata: Mapping[str, object],
     occurred_at: datetime,
 ) -> WorkflowEvent:
     dispatch_attempt_ids = _dispatch_attempt_ids(started_attempts)
@@ -331,6 +359,7 @@ def _claim_builder_dispatch_batch_prepared_event(
             "prepared_dispatch_count": len(dispatch_attempt_ids),
             "dispatch_attempt_ids": dispatch_attempt_ids,
             "work_item_ids": work_item_ids,
+            **preflight_metadata,
         },
         occurred_at=occurred_at,
     )
@@ -385,6 +414,7 @@ async def _save_progress_snapshot(
     workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
     workflow_run_id: str,
     prepared_dispatch_count: int,
+    preflight_metadata: Mapping[str, object],
     occurred_at: datetime,
 ) -> None:
     existing = await workflow_unit_of_work.progress_snapshots.get_snapshot(
@@ -394,6 +424,15 @@ async def _save_progress_snapshot(
         dict(existing.domain_counters) if existing is not None else {}
     )
     existing_domain_counters["prepared_dispatch_count"] = prepared_dispatch_count
+    existing_domain_counters["input_size_preflight_source_split_required_count"] = (
+        1 if _source_split_required(preflight_metadata) else 0
+    )
+    existing_domain_counters["input_size_preflight_larger_input_model_count"] = (
+        1
+        if preflight_metadata.get("input_size_preflight_decision")
+        == "USE_LARGER_INPUT_MODEL"
+        else 0
+    )
 
     await workflow_unit_of_work.progress_snapshots.save_snapshot(
         WorkflowProgressSnapshot(
@@ -489,7 +528,7 @@ def _work_item_ids(started_attempts: Sequence[object]) -> tuple[str, ...]:
 
 def _dispatch_batch_key(dispatch_attempt_ids: tuple[str, ...]) -> str:
     if not dispatch_attempt_ids:
-        raise ValueError("dispatch_attempt_ids must be non-empty")
+        return "0:source-split-required"
     return f"{len(dispatch_attempt_ids)}:{dispatch_attempt_ids[0]}"
 
 

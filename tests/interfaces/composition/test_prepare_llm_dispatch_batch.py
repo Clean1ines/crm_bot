@@ -205,6 +205,14 @@ def _profile() -> LlmTaskCapacityProfile:
     )
 
 
+def _large_input_profile(prompt_tokens: int) -> LlmTaskCapacityProfile:
+    return LlmTaskCapacityProfile(
+        profile_id="prompt-a-large-input",
+        estimated_prompt_tokens=prompt_tokens,
+        estimated_completion_tokens=500,
+    )
+
+
 def _account(
     *,
     account_ref: str = "org-1",
@@ -255,6 +263,7 @@ def _connection_with_due_items(count: int) -> FakeConnection:
 
 def _command(
     *,
+    profile: LlmTaskCapacityProfile | None = None,
     account_capacities: tuple[LlmProviderAccountCapacity, ...] = (_account(),),
     active_model_ref: str = "qwen/qwen3-32b",
     requested_items: int = 2,
@@ -264,7 +273,7 @@ def _command(
 ) -> PrepareLlmDispatchBatchCommand:
     return PrepareLlmDispatchBatchCommand(
         work_kind=_work_kind(),
-        profile=_profile(),
+        profile=profile or _profile(),
         account_capacities=account_capacities,
         active_model_ref=active_model_ref,
         requested_items=requested_items,
@@ -589,3 +598,85 @@ async def test_prepare_unknown_dispatch_strategy_raises_value_error() -> None:
         await _runner(pool).execute(
             _command(dispatch_preparation_strategy="NO_SUCH_STRATEGY"),
         )
+
+
+@pytest.mark.asyncio
+async def test_prepare_uses_input_preflight_model_ref_before_leasing() -> None:
+    catalog = default_groq_llm_model_route_catalog()
+    fallback_model_ref = catalog.automatic_fallback_model_refs_with_larger_input_limit(
+        catalog.primary_model_ref(),
+    )[0]
+    connection = _connection_with_due_items(2)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            profile=_large_input_profile(40000),
+            account_capacities=(
+                _account(
+                    account_ref="primary",
+                    model_ref=catalog.primary_model_ref(),
+                    minute_requests=10,
+                    minute_tokens=500000,
+                    daily_tokens=500000,
+                ),
+                _account(
+                    account_ref="fallback",
+                    model_ref=fallback_model_ref,
+                    minute_requests=10,
+                    minute_tokens=500000,
+                    daily_tokens=500000,
+                ),
+            ),
+            active_model_ref=catalog.primary_model_ref(),
+            requested_items=2,
+        ),
+    )
+
+    assert result.input_size_preflight_decision == "USE_LARGER_INPUT_MODEL"
+    assert result.input_size_preflight_active_model_ref == fallback_model_ref
+    assert len(result.attempt_result.started_attempts) == 2
+    assert {
+        dispatch["llm_allocation_payload"]["model_ref"]
+        for dispatch in connection.dispatches.values()
+    } == {fallback_model_ref}
+
+
+@pytest.mark.asyncio
+async def test_source_split_required_does_not_lease_normal_llm_work_item() -> None:
+    catalog = default_groq_llm_model_route_catalog()
+    connection = _connection_with_due_items(2)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            profile=_large_input_profile(200000),
+            account_capacities=(
+                _account(
+                    account_ref="primary",
+                    model_ref=catalog.primary_model_ref(),
+                    minute_requests=10,
+                    minute_tokens=1000000,
+                    daily_tokens=1000000,
+                ),
+                _account(
+                    account_ref="fallback",
+                    model_ref=catalog.automatic_fallback_model_refs()[0],
+                    minute_requests=10,
+                    minute_tokens=1000000,
+                    daily_tokens=1000000,
+                ),
+            ),
+            active_model_ref=catalog.primary_model_ref(),
+            requested_items=2,
+        ),
+    )
+
+    assert result.source_split_required is True
+    assert result.input_size_preflight_decision == "SOURCE_SPLIT_REQUIRED"
+    assert result.lease_result.leased == ()
+    assert result.attempt_result.started_attempts == ()
+    assert connection.attempts == {}
+    assert connection.dispatches == {}
+    assert connection.work_items["work-1"]["status"] == "ready"
+    assert connection.work_items["work-2"]["status"] == "ready"

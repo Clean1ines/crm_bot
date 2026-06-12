@@ -134,6 +134,12 @@ class FakeAttemptResult:
 @dataclass(slots=True)
 class FakePrepareResult:
     attempt_result: FakeAttemptResult
+    input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
+    input_size_preflight_reason: str = (
+        "estimated prompt tokens fit active model input limit"
+    )
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    source_split_required: bool = False
 
 
 @dataclass(slots=True)
@@ -141,6 +147,12 @@ class FakePrepareLlmDispatchBatch:
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...] = field(
         default_factory=lambda: (_attempt(1), _attempt(2)),
     )
+    input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
+    input_size_preflight_reason: str = (
+        "estimated prompt tokens fit active model input limit"
+    )
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    source_split_required: bool = False
     calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
 
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
@@ -149,6 +161,12 @@ class FakePrepareLlmDispatchBatch:
             attempt_result=FakeAttemptResult(
                 started_attempts=self.started_attempts,
             ),
+            input_size_preflight_decision=self.input_size_preflight_decision,
+            input_size_preflight_reason=self.input_size_preflight_reason,
+            input_size_preflight_active_model_ref=(
+                self.input_size_preflight_active_model_ref
+            ),
+            source_split_required=self.source_split_required,
         )
 
 
@@ -301,6 +319,12 @@ async def _execute(
     workflow_command: WorkflowCommand | None = None,
     *,
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...] | None = None,
+    input_size_preflight_decision: str = "USE_ACTIVE_MODEL",
+    input_size_preflight_reason: str = (
+        "estimated prompt tokens fit active model input limit"
+    ),
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b",
+    source_split_required: bool = False,
 ) -> tuple[
     object,
     FakePrepareLlmDispatchBatch,
@@ -310,6 +334,10 @@ async def _execute(
         started_attempts=(_attempt(1), _attempt(2))
         if started_attempts is None
         else started_attempts,
+        input_size_preflight_decision=input_size_preflight_decision,
+        input_size_preflight_reason=input_size_preflight_reason,
+        input_size_preflight_active_model_ref=input_size_preflight_active_model_ref,
+        source_split_required=source_split_required,
     )
     workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
     result = await HandlePrepareClaimBuilderDispatchBatchCommandHandler().execute(
@@ -478,3 +506,55 @@ async def test_forwards_reconcile_produced_fallback_strategy_marker() -> None:
     _, prepare, _ = await _execute(workflow_command)
 
     assert prepare.calls[0].dispatch_preparation_strategy == ("FALLBACK_MODEL_REQUIRED")
+
+
+@pytest.mark.asyncio
+async def test_prepare_event_exposes_input_size_preflight_metadata() -> None:
+    _, _, workflow_unit_of_work = await _execute(
+        input_size_preflight_decision="USE_LARGER_INPUT_MODEL",
+        input_size_preflight_reason=(
+            "estimated prompt tokens exceed active model input limit; "
+            "selected larger input model"
+        ),
+        input_size_preflight_active_model_ref="openai/gpt-oss-120b",
+    )
+
+    event = workflow_unit_of_work.outbox.events[0]
+    assert event.payload["input_size_preflight_decision"] == ("USE_LARGER_INPUT_MODEL")
+    assert event.payload["input_size_preflight_active_model_ref"] == (
+        "openai/gpt-oss-120b"
+    )
+    snapshot = workflow_unit_of_work.progress_snapshots.snapshot
+    assert snapshot is not None
+    assert (
+        snapshot.domain_counters["input_size_preflight_larger_input_model_count"] == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_split_required_prepare_result_emits_preflight_event_only() -> (
+    None
+):
+    result, _, workflow_unit_of_work = await _execute(
+        started_attempts=(),
+        input_size_preflight_decision="SOURCE_SPLIT_REQUIRED",
+        input_size_preflight_reason=(
+            "estimated prompt tokens exceed all automatic fallback input limits"
+        ),
+        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        source_split_required=True,
+    )
+
+    assert result.prepared_dispatch_count == 0
+    assert result.appended_event_count == 1
+    assert result.appended_next_command_count == 0
+    assert workflow_unit_of_work.command_log.pending_commands == []
+    event = workflow_unit_of_work.outbox.events[0]
+    assert event.payload["source_split_required"] is True
+    assert event.payload["input_size_preflight_decision"] == "SOURCE_SPLIT_REQUIRED"
+    snapshot = workflow_unit_of_work.progress_snapshots.snapshot
+    assert snapshot is not None
+    assert (
+        snapshot.domain_counters["input_size_preflight_source_split_required_count"]
+        == 1
+    )

@@ -7,21 +7,40 @@ from typing import Protocol, cast
 
 import asyncpg
 
+from src.contexts.capacity_runtime.domain.capacity_decision import (
+    CapacityDecision,
+    CapacityDecisionStatus,
+    CapacityResourceKind,
+    CapacityWorkClass,
+)
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.execution_runtime.application.use_cases.lease_admitted_work_items import (
+    LeaseAdmittedWorkItemsResult,
+)
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_dispatch_repository import (
     PostgresWorkItemAttemptDispatchRepository,
 )
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
     PostgresWorkItemLeaseRepository,
 )
+from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
+    zero_llm_capacity_projection,
+)
 from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
     SelectActiveLlmModelCapacity,
+    SelectActiveLlmModelCapacityResult,
 )
 from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparation_strategy import (
     ResolveLlmDispatchPreparationStrategy,
     ResolveLlmDispatchPreparationStrategyCommand,
+)
+from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_input_size_preflight import (
+    LlmDispatchInputSizePreflightDecision,
+    ResolveLlmDispatchInputSizePreflight,
+    ResolveLlmDispatchInputSizePreflightCommand,
+    ResolveLlmDispatchInputSizePreflightResult,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelRouteCatalog,
@@ -105,6 +124,12 @@ class PrepareLlmDispatchBatchCommand:
 class PrepareLlmDispatchBatchResult:
     lease_result: LeaseLlmAdmittedWorkItemsResult
     attempt_result: StartLlmAdmittedWorkItemAttemptsResult
+    input_size_preflight_decision: str = (
+        LlmDispatchInputSizePreflightDecision.USE_ACTIVE_MODEL.value
+    )
+    input_size_preflight_reason: str = "input size preflight used active model"
+    input_size_preflight_active_model_ref: str | None = None
+    source_split_required: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.lease_result, LeaseLlmAdmittedWorkItemsResult):
@@ -118,6 +143,26 @@ class PrepareLlmDispatchBatchResult:
             )
         if len(self.attempt_result.started_attempts) != len(self.lease_result.leased):
             raise ValueError("started attempt count must equal leased item count")
+        _require_non_empty_text(
+            self.input_size_preflight_decision,
+            field_name="input_size_preflight_decision",
+        )
+        _require_non_empty_text(
+            self.input_size_preflight_reason,
+            field_name="input_size_preflight_reason",
+        )
+        if self.input_size_preflight_active_model_ref is not None:
+            _require_non_empty_text(
+                self.input_size_preflight_active_model_ref,
+                field_name="input_size_preflight_active_model_ref",
+            )
+        if not isinstance(self.source_split_required, bool):
+            raise TypeError("source_split_required must be bool")
+        if self.source_split_required:
+            if self.lease_result.leased:
+                raise ValueError("source split required result must not lease items")
+            if self.attempt_result.started_attempts:
+                raise ValueError("source split required result must not start attempts")
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +196,22 @@ class PrepareLlmDispatchBatch:
                         route_catalog=self.route_catalog,
                     )
                 )
+                preflight_result = ResolveLlmDispatchInputSizePreflight().execute(
+                    ResolveLlmDispatchInputSizePreflightCommand(
+                        active_model_ref=strategy_result.active_model_ref,
+                        profile=command.profile,
+                        route_catalog=self.route_catalog,
+                    )
+                )
+                resolved_active_model_ref = preflight_result.active_model_ref
+                if (
+                    preflight_result.decision
+                    is LlmDispatchInputSizePreflightDecision.SOURCE_SPLIT_REQUIRED
+                ):
+                    return _source_split_required_result(
+                        command=command,
+                        preflight_result=preflight_result,
+                    )
 
                 lease_result = await LeaseLlmAdmittedWorkItems(
                     lease_repository=lease_repository,
@@ -162,7 +223,7 @@ class PrepareLlmDispatchBatch:
                         work_kind=command.work_kind,
                         profile=command.profile,
                         account_capacities=command.account_capacities,
-                        active_model_ref=strategy_result.active_model_ref,
+                        active_model_ref=resolved_active_model_ref,
                         requested_items=command.requested_items,
                         worker=command.worker,
                         lease_token_prefix=command.lease_token_prefix,
@@ -183,9 +244,52 @@ class PrepareLlmDispatchBatch:
                 return PrepareLlmDispatchBatchResult(
                     lease_result=lease_result,
                     attempt_result=attempt_result,
+                    input_size_preflight_decision=preflight_result.decision.value,
+                    input_size_preflight_reason=preflight_result.reason,
+                    input_size_preflight_active_model_ref=(
+                        preflight_result.active_model_ref
+                    ),
+                    source_split_required=False,
                 )
         finally:
             await self.pool.release(connection)
+
+
+def _source_split_required_result(
+    *,
+    command: PrepareLlmDispatchBatchCommand,
+    preflight_result: ResolveLlmDispatchInputSizePreflightResult,
+) -> PrepareLlmDispatchBatchResult:
+    projection = zero_llm_capacity_projection(
+        requested_items=command.requested_items,
+    )
+    return PrepareLlmDispatchBatchResult(
+        lease_result=LeaseLlmAdmittedWorkItemsResult(
+            active_model_capacity_selection=SelectActiveLlmModelCapacityResult(
+                active_model_ref=preflight_result.active_model_ref,
+                selected_accounts=(),
+                projection=projection,
+            ),
+            lease_result=LeaseAdmittedWorkItemsResult(
+                capacity_decision=CapacityDecision(
+                    status=CapacityDecisionStatus.REJECT,
+                    work_class=CapacityWorkClass.LLM_BOUND,
+                    max_admissible_items=0,
+                    blocking_resources=(CapacityResourceKind.EXTERNAL_IO,),
+                    reason=preflight_result.reason,
+                ),
+                leased=(),
+            ),
+            leased=(),
+        ),
+        attempt_result=StartLlmAdmittedWorkItemAttemptsResult(
+            started_attempts=(),
+        ),
+        input_size_preflight_decision=preflight_result.decision.value,
+        input_size_preflight_reason=preflight_result.reason,
+        input_size_preflight_active_model_ref=preflight_result.active_model_ref,
+        source_split_required=True,
+    )
 
 
 def _require_timezone_aware(value: datetime, *, field_name: str) -> None:
