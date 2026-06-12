@@ -22,13 +22,6 @@ EXPECTED_MIGRATIONS = {
         "idx_llm_tasks_prompt_input",
         "idx_llm_attempts_task",
     ),
-    "085_create_artifact_runtime_tables.sql": (
-        "CREATE TABLE IF NOT EXISTS pipeline_artifacts",
-        "CREATE TABLE IF NOT EXISTS pipeline_artifact_lineage",
-        "idx_pipeline_artifacts_kind_status",
-        "idx_pipeline_artifacts_retention",
-        "idx_pipeline_artifact_lineage_parent",
-    ),
     "086_create_context_outbox_events.sql": (
         "CREATE TABLE IF NOT EXISTS outbox_events",
         "idx_outbox_events_unpublished",
@@ -44,7 +37,6 @@ EXPECTED_MIGRATIONS = {
         "CREATE TABLE IF NOT EXISTS claim_extraction_stage_work_items",
         "idx_claim_extraction_stage_work_items_stage",
         "idx_claim_extraction_stage_work_items_work_item",
-        "idx_pipeline_artifacts_claim_extraction_stage_payload",
     ),
     "089_create_draft_claim_observation_provenance.sql": (
         "CREATE TABLE IF NOT EXISTS draft_claim_observation_provenance",
@@ -107,8 +99,6 @@ REQUIRED_TABLES = (
     "execution_work_item_attempts",
     "llm_tasks",
     "llm_attempts",
-    "pipeline_artifacts",
-    "pipeline_artifact_lineage",
     "outbox_events",
     "draft_claim_observations",
     "draft_claim_observation_possible_questions",
@@ -206,23 +196,6 @@ def test_llm_runtime_migration_preserves_task_and_attempt_shape() -> None:
         "output_tokens integer NULL",
         "chk_llm_tasks_running_has_route",
         "chk_llm_tasks_wait_until_only_deferred",
-    )
-
-    missing = [fragment for fragment in required if fragment not in text]
-    assert not missing, "\n".join(missing)
-
-
-def test_artifact_runtime_migration_preserves_opaque_payload_and_lineage() -> None:
-    text = _read_migration("085_create_artifact_runtime_tables.sql")
-
-    required = (
-        "artifact_ref text PRIMARY KEY",
-        "artifact_kind text NOT NULL",
-        "payload jsonb NOT NULL",
-        "retention_policy_kind text NOT NULL",
-        "pipeline_artifact_lineage",
-        "parent_artifact_ref text NOT NULL",
-        "chk_pipeline_artifacts_payload_is_object",
     )
 
     missing = [fragment for fragment in required if fragment not in text]

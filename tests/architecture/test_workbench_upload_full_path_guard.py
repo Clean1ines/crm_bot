@@ -1,68 +1,88 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 
-UPLOAD_COMPOSITION = Path("src/interfaces/composition/faq_workbench_upload.py")
-UPLOAD_SERVICE = Path("src/application/workbench/upload_service.py")
-QUEUE_ADAPTER = Path("src/infrastructure/queue/workbench_parallel_queue.py")
-FRESH_UPLOAD_SERVICE = Path(
-    "src/application/services/faq_workbench_fresh_upload_service.py"
-)
-REPOSITORY = Path("src/infrastructure/db/knowledge_workbench_repository.py")
-
-
-def test_upload_composition_wires_parallel_queue_adapter_to_pool_not_queue_repo() -> (
+def test_current_http_upload_uses_source_ingestion_workflow_not_legacy_queue_upload() -> (
     None
 ):
-    source = UPLOAD_COMPOSITION.read_text()
+    source = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
 
-    assert "WorkbenchParallelQueueAdapter(" in source
-    start = source.index("WorkbenchParallelQueueAdapter(")
-    end = source.index("id_factory=UuidIdFactory()", start)
-    adapter_block = source[start:end]
+    assert "make_knowledge_extraction_workflow_after_upload(" in source
+    assert "RunSourceIngestionFirstPhaseCommand(" in source
+    assert "RunKnowledgeExtractionWorkflowAfterUploadCommand(" in source
 
-    assert "connection=cast(WorkbenchParallelQueueConnection, pool)" in adapter_block
-    assert (
-        "connection=cast(WorkbenchParallelQueueConnection, queue_repo)"
-        not in adapter_block
+    forbidden = (
+        "upload_faq_workbench_knowledge_file",
+        "FaqWorkbenchUploadService",
+        "WorkbenchQueueAdapter",
+        "WorkbenchParallelQueueAdapter",
+        "TASK_PROCESS_WORKBENCH_DOCUMENT",
+        "TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING",
+        "process_workbench_document",
+        "process_workbench_parallel_processing",
+        "get_queue_repo",
+        "queue_repo=Depends(",
+    )
+    violations = [marker for marker in forbidden if marker in source]
+    assert violations == []
+
+
+def test_telegram_upload_uses_current_source_ingestion_workflow_vertical() -> None:
+    source = Path(
+        "src/interfaces/telegram/platform_admin/knowledge_upload.py"
+    ).read_text(encoding="utf-8")
+
+    required = (
+        "make_knowledge_extraction_workflow_after_upload(",
+        "RunSourceIngestionFirstPhaseCommand(",
+        "RunKnowledgeExtractionWorkflowAfterUploadCommand(",
+        "SourceIngestionActor(",
+    )
+    missing = [marker for marker in required if marker not in source]
+    assert missing == []
+
+    forbidden = (
+        "upload_faq_workbench_knowledge_file",
+        "src.interfaces.composition.faq_workbench_upload",
+        "QueueRepository(",
+        "WorkbenchQueueAdapter",
+        "WorkbenchParallelQueueAdapter",
+        "TASK_PROCESS_WORKBENCH_DOCUMENT",
+        "TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING",
+        "process_workbench_document",
+        "process_workbench_parallel_processing",
+    )
+    violations = [marker for marker in forbidden if marker in source]
+    assert violations == []
+
+
+def test_generic_queue_worker_does_not_import_legacy_llm_package_side_effects() -> None:
+    source = Path("src/infrastructure/queue/worker_loop.py").read_text(encoding="utf-8")
+
+    forbidden = (
+        "src.infrastructure.llm",
+        "configured_groq_api_keys",
+        "faq_workbench",
+        "knowledge_workbench",
+        "handlers.rag_eval",
+        "run_full_rag_eval",
+        "workbench_runtime_retrieval_repository",
+    )
+    violations = [marker for marker in forbidden if marker in source]
+    assert violations == []
+
+
+def test_legacy_workbench_queue_upload_paths_do_not_exist() -> None:
+    deleted_paths = (
+        "src/interfaces/composition/faq_workbench_upload.py",
+        "src/interfaces/composition/faq_workbench_resume.py",
+        "src/infrastructure/queue/workbench_queue.py",
+        "src/infrastructure/queue/workbench_parallel_queue.py",
+        "src/infrastructure/queue/handlers/workbench_document.py",
+        "src/infrastructure/queue/handlers/workbench_parallel_processing.py",
+        "src/infrastructure/queue/handlers/workbench_parallel_processing_terminal.py",
     )
 
-
-def test_parallel_queue_adapter_contract_requires_execute_connection() -> None:
-    source = QUEUE_ADAPTER.read_text()
-
-    assert "class WorkbenchParallelQueueConnection(Protocol):" in source
-    assert "def execute(self, query: str, *args: object)" in source
-    assert "await self.connection.execute(" in source
-
-
-def test_upload_service_enqueues_after_fresh_upload_result() -> None:
-    source = UPLOAD_SERVICE.read_text()
-
-    fresh_index = source.index("start_fresh_upload(")
-    enqueue_index = source.index("enqueue_process_workbench_document(queue_payload)")
-
-    assert fresh_index < enqueue_index
-
-
-def test_fresh_upload_parent_registry_is_written_before_registry_snapshot() -> None:
-    source = FRESH_UPLOAD_SERVICE.read_text()
-
-    registry_index = source.index("create_fact_registry(registry)")
-    snapshot_index = source.index("create_registry_snapshot(initial_snapshot)")
-
-    assert registry_index < snapshot_index
-
-
-def test_repository_contains_fact_registry_parent_insert_and_snapshot_child_insert() -> (
-    None
-):
-    source = REPOSITORY.read_text()
-
-    assert "async def create_fact_registry(" in source
-    assert "INSERT INTO knowledge_workbench_fact_registries" in source
-    assert "registry_id," in source
-    assert "async def create_registry_snapshot(" in source
-    assert "INSERT INTO knowledge_workbench_registry_snapshots" in source
-    assert (
-        "registry_id," in source[source.index("async def create_registry_snapshot(") :]
-    )
+    leftovers = [path for path in deleted_paths if Path(path).exists()]
+    assert leftovers == []

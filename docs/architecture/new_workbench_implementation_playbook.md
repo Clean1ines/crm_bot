@@ -119,20 +119,17 @@ knowledge_workbench/extraction
   may depend on:
     execution_runtime domain/application contracts
     llm_runtime application/domain contracts
-    artifact_runtime domain/application contracts
     knowledge_workbench/source_management domain refs
 
 knowledge_workbench/consolidation
   may depend on:
     extraction draft observation refs/entities
-    artifact_runtime contracts
     execution_runtime contracts only for consolidation WorkItems if needed
     llm_runtime contracts only for Prompt C execution if needed
 
 knowledge_workbench/publication
   may depend on:
     consolidation outputs
-    artifact_runtime contracts
     embedding/retrieval contracts
     runtime projection contracts
 
@@ -140,18 +137,15 @@ execution_runtime
   must not depend on:
     knowledge_workbench
     llm_runtime
-    artifact_runtime
     provider-specific code
     frontend
 
 llm_runtime
   must not depend on:
     knowledge_workbench
-    artifact_runtime claim/surface semantics
     frontend
     publication
 
-artifact_runtime
   must not depend on:
     knowledge_workbench claim/surface semantics
     llm provider semantics
@@ -172,7 +166,6 @@ source_management
 ```text
 execution_runtime -> knowledge_workbench
 llm_runtime -> knowledge_workbench
-artifact_runtime -> knowledge_workbench semantic parsers
 source_management -> extraction
 frontend -> lifecycle inference
 legacy Workbench -> new canonical orchestration
@@ -303,18 +296,15 @@ Groq is not LLM Runtime. Groq is one provider adapter behind LLM Runtime contrac
 
 ---
 
-### Artifact Runtime
 
 Path:
 
 ```text
-src/contexts/artifact_runtime/
 ```
 
 Owns:
 
 ```text
-PipelineArtifact
 ArtifactRef
 ArtifactKind
 ArtifactPayload
@@ -332,21 +322,15 @@ artifact query use cases
 Tables:
 
 ```text
-pipeline_artifacts
-pipeline_artifact_lineage
 ```
 
 Migration:
 
 ```text
-085_create_artifact_runtime_tables.sql
 ```
 
-Artifact Runtime owns artifact lifecycle and lineage.
 
-Artifact payload is opaque to Artifact Runtime.
 
-Artifact Runtime does not own:
 
 ```text
 claim parsing
@@ -359,7 +343,6 @@ frontend state
 publication semantics
 ```
 
-Workbench contexts may parse Workbench-specific artifacts. Artifact Runtime must not parse Workbench semantics.
 
 ---
 
@@ -578,7 +561,6 @@ WorkItem
 WorkItemAttempt
 LlmTask
 LlmAttempt
-PipelineArtifact
 DraftClaimObservation
 DraftClaimCluster
 ConsolidatedSurface
@@ -609,10 +591,8 @@ DTO used as domain entity
 ## Canonical distinctions
 
 ```text
-WorkItem != LlmTask != PipelineArtifact
 SourceUnit != DraftClaimObservation != ConsolidatedSurface != KnowledgeSurface
 Prompt A != LLM Runtime
-Prompt C != Artifact Runtime
 Groq != LLM Runtime
 Provider success != LLM task success
 DTO != Entity
@@ -641,9 +621,7 @@ The new Workbench replacement target flow is:
 5. Extraction process manager executes Prompt A through LLM Runtime
 6. LLM Runtime returns provider-neutral outcome
 7. Extraction artifact factory creates raw/parsed/error/split artifacts from actual outcome
-8. Artifact Runtime persists artifacts and lineage
 9. Extraction records WorkItem/LlmTask/LlmAttempt/artifacts/events in one UoW
-10. ApplyDraftClaimObservationArtifact parses persisted parsed artifact
 11. DraftClaimObservations are persisted
 12. Extraction progress read model exposes progress, blockers, reasons, next actions
 13. Consolidation clusters DraftClaimObservations
@@ -677,8 +655,6 @@ LLM execution
 
 Artifact persistence
   Source of truth:
-    pipeline_artifacts
-    pipeline_artifact_lineage
   Projection/read model:
     artifact lists, resume candidates, lineage graph
 
@@ -696,11 +672,9 @@ Claim extraction stage membership
 
 Prompt A raw output
   Source of truth:
-    pipeline_artifacts with raw Prompt A artifact kind
 
 Prompt A parsed output
   Source of truth:
-    pipeline_artifacts with parsed Prompt A artifact kind
 
 Applied draft claims
   Source of truth:
@@ -759,7 +733,6 @@ auth_error
 unknown
 ```
 
-Artifact Runtime owns artifact validity/lifecycle reasons, such as:
 
 ```text
 artifact_stored
@@ -912,7 +885,6 @@ Correct flow:
 ```text
 LLM outcome
 -> artifact factory
--> raw artifact
 -> parsed/validated artifact
 -> UoW commit
 -> artifact application
@@ -921,13 +893,11 @@ LLM outcome
 Forbidden flow:
 
 ```text
-caller-prebuilt parsed artifact
 -> accepted as proof of actual LLM output
 ```
 
 Artifact construction belongs to the orchestrating Workbench context when artifact semantics are Workbench-specific.
 
-Artifact Runtime stores artifacts. Workbench-specific artifact factories/parsers interpret Workbench-specific payloads.
 
 ---
 
@@ -1008,10 +978,8 @@ Decide whether each artifact factory belongs in:
 ```text
 Workbench extraction application policy
 Workbench consolidation application policy
-Artifact Runtime generic helper
 ```
 
-Workbench-specific payload construction must not move into Artifact Runtime.
 
 ### 4. Outbox v1
 
@@ -1138,7 +1106,6 @@ Verify:
 no legacy references from src/contexts
 no runtime -> Workbench imports
 no provider-specific logic in Workbench process managers
-no Artifact Runtime semantic parsing
 no direct status mutation bypassing state machines
 ```
 
@@ -1298,13 +1265,10 @@ Definition of done: LLM Runtime can execute and classify an LLM task without kno
 
 ---
 
-### PHASE 04 — Artifact Runtime Completion
 
 Read:
 
 ```text
-src/contexts/artifact_runtime
-migrations/085_create_artifact_runtime_tables.sql
 ```
 
 Allowed:
@@ -1330,7 +1294,6 @@ provider semantics
 frontend lifecycle
 ```
 
-Definition of done: Artifact Runtime stores opaque artifacts and lineage without Workbench semantic parsing.
 
 ---
 
@@ -1372,7 +1335,6 @@ Definition of done: SourceUnits can be fanned out into generic WorkItems and ind
 
 ### PHASE 06 — Claim Extraction Work Item Processing
 
-Goal: process one leased claim extraction WorkItem through LLM Runtime and Artifact Runtime.
 
 Allowed:
 
@@ -1403,7 +1365,6 @@ Definition of done:
 leased WorkItem
 -> LlmTask/LlmAttempt
 -> actual LLM outcome
--> raw artifact
 -> parsed/error/split artifact
 -> WorkItem completed/deferred/failed/user_action_required/split_superseded
 -> outbox events
@@ -1817,8 +1778,6 @@ new table without source-of-truth/projection role
 new direct dependency from runtime context to Workbench
 provider-specific logic inside Workbench process manager
 Prompt A logic inside LLM Runtime
-Prompt C logic inside Artifact Runtime
-Artifact Runtime parsing claim/surface semantics
 Execution Runtime containing workflow_run_id/stage_run_id
 Execution Runtime containing Workbench blocker semantics
 frontend lifecycle workaround
@@ -1838,7 +1797,6 @@ broad test suite run without request
 2. PHASE 01 guard hardening for found drift
 3. PHASE 02 execution runtime completion
 4. PHASE 03 LLM runtime completion
-5. PHASE 04 artifact runtime completion
 6. PHASE 05 claim extraction stage fan-out
 7. PHASE 06 one claim extraction work item processing
 8. PHASE 07 apply draft claim artifact

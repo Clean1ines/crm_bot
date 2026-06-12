@@ -1,17 +1,15 @@
-"""Known execution_queue task types."""
+"""Known legacy execution_queue task types.
+
+The current knowledge upload -> source ingestion -> workflow command drain
+vertical is not driven by this old execution_queue.
+"""
 
 TASK_NOTIFY_MANAGER = "notify_manager"
 TASK_UPDATE_METRICS = "update_metrics"
 TASK_AGGREGATE_METRICS = "aggregate_metrics"
-TASK_RUN_FULL_RAG_EVAL = "run_full_rag_eval"
-TASK_PROCESS_WORKBENCH_DOCUMENT = "process_workbench_document"
-TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING = "process_workbench_parallel_processing"
 
 KNOWN_TASK_TYPES = {
     TASK_NOTIFY_MANAGER,
     TASK_UPDATE_METRICS,
     TASK_AGGREGATE_METRICS,
-    TASK_RUN_FULL_RAG_EVAL,
-    TASK_PROCESS_WORKBENCH_DOCUMENT,
-    TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
 }

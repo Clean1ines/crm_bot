@@ -307,7 +307,6 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
                 "execution_runtime",
                 "llm_runtime",
                 "capacity_runtime",
-                "artifact_runtime",
             ),
             unit_of_work_name="ClaimBuilderSectionExecutionUnitOfWork",
             idempotency_key_template="claim-builder-section:{work_item_attempt_id}",

@@ -4,9 +4,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
-    JsonInputValue,
-)
+from src.shared.json_value import JsonInputValue
 from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_claim_granularity import (
     DraftClaimGranularity,
 )

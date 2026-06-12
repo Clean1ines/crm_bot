@@ -12,7 +12,6 @@
 
 Он не является artifact store.
 
-Он использует `execution_runtime`, `llm_runtime` и `artifact_runtime`, но не заменяет их.
 
 ## Subdomains
 

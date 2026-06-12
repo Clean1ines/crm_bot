@@ -1,8 +1,8 @@
 """
-Workbench-first API boundary for project knowledge.
+Knowledge extraction API boundary.
 
-This router must stay safe to import without loading the old FAQ compiler path.
-FAQ uploads are delegated lazily to the Workbench upload composition.
+This router owns the current upload -> source ingestion -> workflow command drain
+vertical. Queue-based FAQ Workbench document upload is retired.
 """
 
 from __future__ import annotations
@@ -38,12 +38,16 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
     SourceDocumentRef,
 )
+from src.interfaces.composition.knowledge_extraction_after_upload_composition import (
+    make_knowledge_extraction_workflow_after_upload,
+)
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
-    RunKnowledgeExtractionWorkflowAfterUpload,
     RunKnowledgeExtractionWorkflowAfterUploadCommand,
 )
-from src.interfaces.composition.source_ingestion_first_phase import (
-    make_source_ingestion_first_phase,
+from src.interfaces.composition.knowledge_extraction_workflow_resume import (
+    KnowledgeExtractionWorkflowResumeNotFoundError,
+    RunKnowledgeExtractionWorkflowResumeCommand,
+    make_knowledge_extraction_workflow_resume,
 )
 from src.infrastructure.config.settings import settings
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
@@ -54,7 +58,6 @@ from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import (
     get_pool,
     get_project_repo,
-    get_queue_repo,
     get_user_repository,
 )
 
@@ -400,14 +403,10 @@ async def upload_knowledge(
     )
     source_format = _source_format_from_upload_name(file.filename)
 
-    source_ingestion_runner = make_source_ingestion_first_phase(
+    workflow_runner = make_knowledge_extraction_workflow_after_upload(
         pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
-    )
-    workflow_runner = RunKnowledgeExtractionWorkflowAfterUpload(
-        source_ingestion_runner=source_ingestion_runner,
-        pool=pool,
     )
 
     try:
@@ -1129,10 +1128,9 @@ async def resume_knowledge_processing(
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
-    queue_repo=Depends(get_queue_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Queues explicit user resume through the Workbench process document path."""
+    """Resume the current knowledge-extraction workflow command drain."""
 
     await _require_project_access(
         project_id=project_id,
@@ -1140,26 +1138,31 @@ async def resume_knowledge_processing(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_resume import (
-        WorkbenchManualResumeNotFoundError,
-        WorkbenchManualResumeRejectedError,
-        resume_workbench_document,
-    )
 
+    resume_runner = make_knowledge_extraction_workflow_resume(pool=pool)
     try:
-        return await resume_workbench_document(
-            pool=pool,
-            queue_repo=queue_repo,
-            project_id=project_id,
-            document_id=document_id,
+        result = await resume_runner.execute(
+            RunKnowledgeExtractionWorkflowResumeCommand(
+                project_id=project_id,
+                document_id=document_id,
+                max_drain_commands=10,
+            )
         )
-    except WorkbenchManualResumeNotFoundError as exc:
+    except KnowledgeExtractionWorkflowResumeNotFoundError as exc:
         raise HTTPException(
             status_code=404,
-            detail="Knowledge document not found",
+            detail="Knowledge extraction workflow not found",
         ) from exc
-    except WorkbenchManualResumeRejectedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {
+        "status": "knowledge_extraction_workflow_resume_requested",
+        "workflow_run_id": result.workflow_run_id,
+        "source_document_ref": result.source_document_ref,
+        "drained_inspected_count": result.drained_inspected_count,
+        "drained_dispatched_count": result.drained_dispatched_count,
+        "blocked_command_type": result.blocked_command_type,
+        "blocked_reason": result.blocked_reason,
+    }
 
 
 @router.post("/{document_id}/cancel")

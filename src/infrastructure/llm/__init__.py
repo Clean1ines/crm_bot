@@ -1,10 +1,10 @@
-from __future__ import annotations
+"""Infrastructure LLM adapters package.
 
-from src.infrastructure.llm import (
-    faq_workbench_claim_observations_generator as _claim_obs,
-)
-from src.infrastructure.llm.faq_claim_obs_contract import FaqClaimObsContractGenerator
+Keep this package initializer side-effect free.
 
-setattr(
-    _claim_obs, "FaqWorkbenchClaimObservationsGenerator", FaqClaimObsContractGenerator
-)
+Import concrete adapters from their modules directly, for example:
+`src.infrastructure.llm.groq_keyring`.
+
+This avoids loading retired Workbench LLM modules when unrelated code imports a
+current adapter such as the AI Playground Groq key rotator.
+"""

@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.contexts.artifact_runtime.domain.value_objects.artifact_payload import (
-    JsonInputValue,
-)
+from src.shared.json_value import JsonInputValue
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationDecision,
     ClaimBuilderOutputValidationFailureReason,

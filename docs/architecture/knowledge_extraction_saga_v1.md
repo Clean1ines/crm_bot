@@ -27,7 +27,6 @@ This document fixes the canonical architecture contract for `KnowledgeExtraction
 
 The saga exists to coordinate the long-running business workflow that turns an uploaded source document into reviewed and published knowledge. It must be resumable, auditable, idempotent, and safe across process restarts, partial failures, LLM quota waits, manual review waits, and cleanup.
 
-The saga is not a replacement for Execution Runtime, LLM Runtime, Artifact Runtime, Source Management, Embedding Runtime, Consolidation, Publication, or future Capacity Runtime. It owns the business process and delegates implementation to those contexts through explicit application contracts, commands, events, and durable checkpoints.
 
 ## 2. Scope and owner
 
@@ -83,8 +82,6 @@ LLM Runtime:
 - ExecuteLlmTask
 - ExecuteAndRecordLlmTask
 
-Artifact Runtime:
-- PipelineArtifact
 - ArtifactKind
 - ArtifactRef
 - ArtifactLineage
@@ -92,7 +89,6 @@ Artifact Runtime:
 - ArtifactStatus
 - RetentionPolicy
 - ArtifactStored
-- PersistArtifact
 - LoadArtifact
 
 Knowledge Workbench / Extraction:
@@ -132,8 +128,6 @@ Current reusable persistence already exists for several local pieces:
 ```text
 execution_work_items
 execution_work_item_attempts
-pipeline_artifacts
-pipeline_artifact_lineage
 outbox_events
 claim_extraction_stage_work_items
 draft_claim_observations
@@ -252,7 +246,6 @@ artifact retention policy
 work item leasing
 ```
 
-### Artifact Runtime
 
 Owns:
 
@@ -315,7 +308,6 @@ publication checkpoint
 cleanup checkpoint
 ```
 
-Does not own internal mechanics of Execution Runtime, LLM Runtime, Artifact Runtime, Embedding Runtime, queue workers, provider adapters, or storage adapters.
 
 ## 7. High-level workflow
 
@@ -329,7 +321,6 @@ Prompt A work scheduled
 Prompt A work executed through Execution + LLM Runtime
 raw/parsed Prompt A artifacts stored
 ArtifactStored(parsed) observed
-Prompt A parsed artifact applied into draft observations
 draft embeddings built
 semantic clusters built
 Prompt B work scheduled
@@ -388,7 +379,6 @@ PROMPT_A_WORK_COMPLETED:
   Prompt A execution work items reached terminal successful output state or all blockers are explicit.
 
 PROMPT_A_ARTIFACTS_APPLIED:
-  Prompt A parsed artifacts were applied into draft claim observations and provenance.
 
 DRAFT_EMBEDDINGS_BUILT:
   Embeddings for draft observations exist for the selected embedding model/version.
@@ -468,7 +458,6 @@ CANCELLED
 COMPLETED
 ```
 
-This state is the business workflow state. It is not a replacement for `execution_work_items`, `pipeline_artifacts`, draft observation rows, or publication rows. It points to them through refs and reconciles against them.
 
 ## 10. Phase checkpoint model
 
@@ -527,10 +516,8 @@ source unit:
 Prompt A work item:
   claim-extraction:{prompt_id}:{source_unit_ref}
 
-Prompt A raw artifact:
   workflow_run_id + stage_run_id + work_item_id + work_item_attempt_id + llm_attempt_id + raw
 
-Prompt A parsed artifact:
   workflow_run_id + stage_run_id + work_item_id + work_item_attempt_id + llm_attempt_id + parsed
 
 draft observation:
@@ -618,7 +605,6 @@ LlmTaskSucceeded / LlmTaskDeferred / LlmTaskFailed / LlmDailyLimitExhausted / Ll
 
 ArtifactStored:
   status: exists
-  owner: artifact_runtime
   note: carries artifact_ref and occurred_at only; handlers must load artifact to inspect kind/payload.
 
 DraftClaimObservationsApplied:
@@ -655,7 +641,6 @@ RetrievalEmbeddingsBuilt:
 
 IntermediateArtifactsCleaned:
   status: missing
-  owner: knowledge_workbench saga + artifact_runtime cleanup contract later
 ```
 
 ## 13. Command map
@@ -682,7 +667,6 @@ ReserveLlmRoute:
   current status: future durable reservation, not implemented yet
 
 PersistPromptAArtifacts:
-  target: artifact_runtime via extraction UoW / artifact ports
   current reusable boundary: RecordClaimExtractionSuccess
 
 ApplyPromptAParsedArtifact:
@@ -722,7 +706,6 @@ BuildRetrievalEmbeddings:
   current status: missing canonical boundary
 
 CleanupIntermediateArtifacts:
-  target: knowledge_workbench saga + artifact_runtime retention/cleanup contract
   current status: missing canonical boundary
 ```
 
@@ -770,9 +753,7 @@ PROMPT_A_WORK_COMPLETED:
   action: release expired leases, requeue due deferred/retryable work, block terminal/user-action cases
 
 PROMPT_A_ARTIFACTS_APPLIED:
-  expected: draft observations/provenance for every valid Prompt A parsed artifact
   existing: draft_claim_observations + draft_claim_observation_provenance
-  action: apply only missing parsed artifacts by artifact_ref and claim index
 
 DRAFT_EMBEDDINGS_BUILT:
   expected: embedding vector per draft observation per embedding contract
@@ -997,7 +978,6 @@ Forbidden:
 ```text
 using old FAQ/workbench document tables as canonical source persistence without explicit migration/mapping design
 making Extraction own canonical source persistence
-making Artifact Runtime own SourceUnit semantics
 ```
 
 ## 19. Embedding runtime boundary
@@ -1065,7 +1045,6 @@ Workbench manual curation checkpoint + audit trail
 It is not:
 
 ```text
-Artifact Runtime state
 Execution Runtime user-action internals only
 frontend-only flag
 publication itself
@@ -1107,7 +1086,6 @@ REVIEW_COMPLETED
 → BuildRetrievalEmbeddings / projections
 ```
 
-Publication must not be implemented inside Extraction, Execution Runtime, LLM Runtime, or Artifact Runtime.
 
 ## 22. Cleanup boundary
 
@@ -1116,7 +1094,6 @@ Cleanup is a separate idempotent phase:
 ```text
 CleanupIntermediateArtifactsRequested
 → build cleanup plan by workflow_run_id + retention policy
-→ expire/delete intermediate artifacts via Artifact Runtime contract
 → record per-artifact cleanup result
 → IntermediateArtifactsCleaned
 ```
@@ -1165,11 +1142,9 @@ process_workbench_document as canonical handler
 
 The saga must not become one service that does everything.
 
-The saga must not absorb Execution Runtime, LLM Runtime, Artifact Runtime, Embedding Runtime, Source Management, Publication, or future Capacity Runtime.
 
 The saga must not directly call provider adapters, SQL repositories, queue workers, or frontend code.
 
-The saga must not call apply from `RunClaimExtractionStageAsync` or `RecordClaimExtractionSuccess`. Prompt A parsed artifact application is a separate event-to-apply boundary via `ArtifactStored` and artifact loading.
 
 ## 24. First safe code skeleton after this document
 

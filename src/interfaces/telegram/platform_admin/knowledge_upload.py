@@ -4,17 +4,33 @@ Platform admin bot handler for uploading knowledge base files.
 
 import aiohttp
 import asyncpg
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
 from telegram import InlineKeyboardMarkup
 
 from src.infrastructure.config.settings import settings
+from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
+    RunSourceIngestionFirstPhaseCommand,
+)
+from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
+    SourceIngestionActor,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
+    SourceFormat,
+)
+from src.infrastructure.db.repositories.user_repository import UserRepository
+from src.interfaces.composition.knowledge_extraction_after_upload_composition import (
+    make_knowledge_extraction_workflow_after_upload,
+)
+from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
+    RunKnowledgeExtractionWorkflowAfterUploadCommand,
+)
+from src.interfaces.composition.project_repositories import build_project_repository
 from src.infrastructure.logging.logger import get_logger
 from src.domain.project_plane.knowledge_processing_modes import (
     KnowledgeProcessingModeValidationError,
     require_faq_workbench_mode,
-)
-from src.infrastructure.db.repositories.queue_repository import QueueRepository
-from src.interfaces.composition.faq_workbench_upload import (
-    upload_faq_workbench_knowledge_file,
 )
 from src.interfaces.telegram.platform_admin.handlers import _get_project_menu_keyboard
 from src.interfaces.telegram.platform_admin.state import (
@@ -37,6 +53,14 @@ def _normalize_workbench_upload_mode(value: object) -> str:
 
 DocumentPayload = dict[str, object]
 UploadResult = tuple[str, InlineKeyboardMarkup | None]
+
+
+@dataclass(frozen=True, slots=True)
+class TelegramKnowledgeUploadResult:
+    document_id: str
+    chunks: int
+    preprocessing_mode: str
+    preprocessing_status: str
 
 
 async def _download_file(file_path: str) -> bytes:
@@ -134,6 +158,35 @@ async def _download_document(file_id: str) -> bytes:
     return await _download_file(file_path)
 
 
+def _source_format_from_upload_name(file_name: str) -> SourceFormat:
+    normalized = file_name.strip().lower()
+    suffix = ""
+    if "." in normalized:
+        suffix = "." + normalized.rsplit(".", 1)[-1]
+
+    if suffix in {".md", ".markdown"}:
+        return SourceFormat.MARKDOWN
+    if suffix == ".pdf":
+        return SourceFormat.PDF
+    if suffix == ".html":
+        return SourceFormat.HTML
+    return SourceFormat.PLAIN_TEXT
+
+
+def _decode_knowledge_upload_text(file_content: bytes) -> str:
+    try:
+        text = file_content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(
+            "Knowledge upload must be UTF-8 text for source ingestion v1"
+        ) from exc
+
+    if not text.strip():
+        raise ValueError("Knowledge upload text is empty")
+
+    return text
+
+
 async def _queue_knowledge_upload(
     *,
     pool: asyncpg.Pool,
@@ -142,16 +195,52 @@ async def _queue_knowledge_upload(
     file_content: bytes,
     preprocessing_mode: str,
 ):
-    _normalize_workbench_upload_mode(preprocessing_mode)
+    normalized_mode = _normalize_workbench_upload_mode(preprocessing_mode)
+    raw_text = _decode_knowledge_upload_text(file_content)
 
-    queue_repo = QueueRepository(pool)
-    return await upload_faq_workbench_knowledge_file(
+    project_repo = build_project_repository(pool)
+    user_repo = UserRepository(pool)
+    workflow_runner = make_knowledge_extraction_workflow_after_upload(
         pool=pool,
-        queue_repo=queue_repo,
-        project_id=project_id,
-        file_name=filename,
-        file_content=bytes(file_content),
-        logger=logger,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    result = await workflow_runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=RunSourceIngestionFirstPhaseCommand(
+                project_id=project_id,
+                actor=SourceIngestionActor(
+                    actor_user_id="telegram_platform_admin",
+                    is_platform_admin=True,
+                ),
+                original_filename=filename,
+                source_format=_source_format_from_upload_name(filename),
+                content_bytes=bytes(file_content),
+                raw_text=raw_text,
+                occurred_at=datetime.now(timezone.utc),
+            ),
+            max_drain_commands=10,
+        )
+    )
+
+    if not result.source_ingestion_completed:
+        admission_status = result.source_ingestion_admission_status
+        detail = admission_status.value if admission_status is not None else "unknown"
+        raise ValueError(f"Source ingestion rejected: {detail}")
+
+    if result.source_document_ref is None:
+        raise ValueError("Source ingestion completed without source_document_ref")
+
+    return TelegramKnowledgeUploadResult(
+        document_id=result.source_document_ref,
+        chunks=result.source_unit_count,
+        preprocessing_mode=normalized_mode,
+        preprocessing_status=(
+            "workflow_blocked"
+            if result.blocked_command_type is not None
+            else "workflow_drained"
+        ),
     )
 
 
@@ -238,7 +327,7 @@ async def handle_knowledge_upload(
             return _no_chunks_response()
 
         logger.info(
-            "Knowledge upload queued",
+            "Knowledge upload started via source-ingestion workflow",
             extra={
                 "project_id": project_id,
                 "document_id": result.document_id,

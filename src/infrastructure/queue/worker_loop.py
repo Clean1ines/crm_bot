@@ -8,36 +8,11 @@ import uuid
 from src.infrastructure.db.repositories.queue_repository import QueueRepository
 from src.infrastructure.logging.logger import get_logger
 from src.infrastructure.queue.job_dispatcher import JobDispatcher
-from src.infrastructure.queue.job_types import (
-    TASK_PROCESS_WORKBENCH_DOCUMENT,
-    TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING,
-)
 from src.infrastructure.queue.job_exceptions import PermanentJobError, TransientJobError
-from src.infrastructure.queue.handlers.workbench_document import (
-    mark_process_workbench_document_exhausted,
-)
 from src.infrastructure.queue.retry_policy import build_retry_decision
 from src.infrastructure.queue.stale_recovery import recover_stale_jobs
-from src.infrastructure.llm.groq_keyring import configured_groq_api_keys
 
 logger = get_logger(__name__)
-
-
-def _is_attempt_preserving_workbench_transient_retry(
-    *,
-    task_type: str,
-    error: str,
-) -> bool:
-    if task_type != TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING:
-        return False
-
-    return (
-        error.startswith("retryable Prompt A ")
-        or error.startswith("parallel Workbench processing is not terminal:")
-        or error.startswith(
-            "parallel Workbench processing reached max_cycles before terminal completion"
-        )
-    )
 
 
 async def run_worker_loop(
@@ -52,18 +27,9 @@ async def run_worker_loop(
 ) -> None:
     """Continuously claim and process queue jobs."""
     resolved_worker_id = worker_id or f"worker-{uuid.uuid4()}"
-    groq_keys = configured_groq_api_keys()
     logger.info(
         "Worker started",
-        extra={
-            "worker_id": resolved_worker_id,
-            "groq_key_count": len(groq_keys),
-            "groq_key_slots": {
-                "GROQ_API_KEY": bool(groq_keys[0:1]),
-                "GROQ_API_KEY2_OR_LATER": len(groq_keys) >= 2,
-                "GROQ_API_KEY3_OR_LATER": len(groq_keys) >= 3,
-            },
-        },
+        extra={"worker_id": resolved_worker_id},
     )
 
     while not shutdown_event.is_set():
@@ -109,29 +75,12 @@ async def run_worker_loop(
                         error_message,
                         retry_after_seconds=exc.retry_after_seconds,
                     )
-                    if _is_attempt_preserving_workbench_transient_retry(
-                        task_type=task_type,
+                    await queue_repo.fail_job(
+                        job_id,
+                        increment_attempt=True,
+                        retry_delay_seconds=decision.backoff_seconds,
                         error=error_message,
-                    ):
-                        await queue_repo.retry_job_without_attempt_increment(
-                            job_id,
-                            retry_delay_seconds=decision.backoff_seconds,
-                            error=error_message,
-                        )
-                    else:
-                        await queue_repo.fail_job(
-                            job_id,
-                            increment_attempt=True,
-                            retry_delay_seconds=decision.backoff_seconds,
-                            error=error_message,
-                        )
-                        if (
-                            decision.exhausted
-                            and task_type == TASK_PROCESS_WORKBENCH_DOCUMENT
-                        ):
-                            await mark_process_workbench_document_exhausted(
-                                job_record,
-                            )
+                    )
                 else:
                     await queue_repo.complete_job(job_id, success=True)
                     logger.info(

@@ -11,14 +11,25 @@ QUEUE_ROOTS = (
 )
 
 
-def test_legacy_knowledge_upload_handler_is_not_a_queue_root_dependency() -> None:
+def test_legacy_workbench_document_upload_is_not_a_queue_root_dependency() -> None:
     forbidden = (
-        "src.infrastructure.queue.handlers.knowledge_upload",
-        "src.infrastructure.queue.handlers.knowledge_upload_recovery",
-        "handle_process_knowledge_upload",
-        "mark_process_knowledge_upload_exhausted",
-        "TASK_PROCESS_KNOWLEDGE_UPLOAD",
-        "process_knowledge_upload",
+        "src.infrastructure.queue.handlers.workbench_document",
+        "src.infrastructure.queue.handlers.workbench_parallel_processing",
+        "src.infrastructure.queue.handlers.workbench_parallel_processing_terminal",
+        "handle_process_workbench_document",
+        "handle_workbench_parallel_processing",
+        "mark_process_workbench_document_exhausted",
+        "TASK_PROCESS_WORKBENCH_DOCUMENT",
+        "TASK_PROCESS_WORKBENCH_PARALLEL_PROCESSING",
+        "process_workbench_document",
+        "process_workbench_parallel_processing",
+        "WorkbenchQueueAdapter",
+        "WorkbenchParallelQueueAdapter",
+        "workbench_runtime_retrieval_repository",
+        "handlers.rag_eval",
+        "handle_run_full_rag_eval",
+        "run_full_rag_eval",
+        "TASK_RUN_FULL_RAG_EVAL",
     )
 
     for path in QUEUE_ROOTS:
@@ -27,26 +38,27 @@ def test_legacy_knowledge_upload_handler_is_not_a_queue_root_dependency() -> Non
             assert marker not in source, f"{path} still contains {marker}"
 
 
-def test_legacy_knowledge_upload_handler_files_are_deleted() -> None:
-    assert not Path("src/infrastructure/queue/handlers/knowledge_upload.py").exists()
-    assert not Path(
-        "src/infrastructure/queue/handlers/knowledge_upload_recovery.py"
-    ).exists()
+def test_legacy_workbench_document_upload_files_are_deleted() -> None:
+    deleted_paths = (
+        "src/infrastructure/queue/handlers/workbench_document.py",
+        "src/infrastructure/queue/handlers/workbench_parallel_processing.py",
+        "src/infrastructure/queue/handlers/workbench_parallel_processing_terminal.py",
+        "src/infrastructure/queue/workbench_queue.py",
+        "src/infrastructure/queue/workbench_parallel_queue.py",
+        "src/interfaces/composition/faq_workbench_upload.py",
+        "src/interfaces/composition/faq_workbench_resume.py",
+        "src/application/workbench/upload_service.py",
+        "src/application/workbench_commands/manual_resume.py",
+    )
+
+    leftovers = [path for path in deleted_paths if Path(path).exists()]
+    assert leftovers == []
 
 
-def test_queue_roots_import_without_legacy_compiler_chain() -> None:
+def test_queue_roots_import_without_legacy_workbench_document_upload() -> None:
     for module in (
         "src.infrastructure.queue.job_types",
         "src.infrastructure.queue.job_dispatcher",
         "src.infrastructure.queue.worker_loop",
     ):
         importlib.import_module(module)
-
-
-def test_workbench_exhaustion_hook_remains_wired() -> None:
-    source = Path("src/infrastructure/queue/worker_loop.py").read_text(encoding="utf-8")
-
-    assert "TASK_PROCESS_WORKBENCH_DOCUMENT" in source
-    assert "mark_process_workbench_document_exhausted" in source
-    assert "mark_process_knowledge_upload_exhausted" not in source
-    assert "TASK_PROCESS_KNOWLEDGE_UPLOAD" not in source

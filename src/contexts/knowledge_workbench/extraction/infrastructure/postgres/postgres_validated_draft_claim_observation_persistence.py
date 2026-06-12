@@ -157,8 +157,8 @@ class PostgresValidatedDraftClaimObservationPersistence(
             candidate.dispatch_attempt_id,
             f"{candidate.provider}:claim_builder_section_extraction",
             candidate.model_ref,
-            _inline_artifact_ref(candidate, artifact_kind="raw"),
-            _inline_artifact_ref(candidate, artifact_kind="validated"),
+            None,
+            None,
             candidate.claim_index,
             created_at,
         )
@@ -176,25 +176,6 @@ def _observation_ref(candidate: ValidatedDraftClaimObservationCandidate) -> str:
         ).encode("utf-8"),
     ).hexdigest()
     return f"draft-claim-observation:{digest}"
-
-
-def _inline_artifact_ref(
-    candidate: ValidatedDraftClaimObservationCandidate,
-    *,
-    artifact_kind: str,
-) -> str:
-    digest = sha256(
-        (
-            f"{candidate.workflow_run_id}:"
-            f"{candidate.source_document_ref or 'unknown-source-document'}:"
-            f"{candidate.source_unit_ref}:"
-            f"{candidate.work_item_id}:"
-            f"{candidate.dispatch_attempt_id}:"
-            f"{candidate.claim_index}:"
-            f"{artifact_kind}"
-        ).encode("utf-8"),
-    ).hexdigest()
-    return f"inline-claim-builder-{artifact_kind}-artifact:{digest}"
 
 
 def _utc_now() -> datetime:
