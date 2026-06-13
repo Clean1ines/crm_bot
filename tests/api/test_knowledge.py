@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 
 import pytest
 from fastapi import HTTPException, UploadFile
@@ -16,6 +16,9 @@ from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_fir
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_workflow_effects import (
     BuildSourceIngestionWorkflowEffects,
     BuildSourceIngestionWorkflowEffectsCommand,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadModel,
 )
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
     SourceIngestionAdmissionStatus,
@@ -155,6 +158,108 @@ class _FakeWorkflowAfterUploadRunner:
         )
 
 
+def _patch_after_upload_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    runner: _FakeSourceIngestionRunner,
+    factory_calls: list[dict[str, object]] | None = None,
+) -> None:
+    def fake_make_knowledge_extraction_workflow_after_upload(
+        **kwargs: object,
+    ) -> _FakeWorkflowAfterUploadRunner:
+        if factory_calls is not None:
+            factory_calls.append(kwargs)
+        return _FakeWorkflowAfterUploadRunner(
+            source_ingestion_runner=runner,
+            pool=kwargs["pool"],
+        )
+
+    monkeypatch.setattr(
+        knowledge,
+        "make_knowledge_extraction_workflow_after_upload",
+        fake_make_knowledge_extraction_workflow_after_upload,
+    )
+
+
+@dataclass(slots=True)
+class _FakeDraftClaimObservationReadRepository:
+    items: tuple[DraftClaimObservationReadModel, ...] = ()
+    document_calls: list[dict[str, object]] = field(default_factory=list)
+    source_unit_calls: list[dict[str, object]] = field(default_factory=list)
+
+    instances: ClassVar[list[_FakeDraftClaimObservationReadRepository]] = []
+    configured_items: ClassVar[tuple[DraftClaimObservationReadModel, ...]] = ()
+
+    def __init__(self, pool: object) -> None:
+        del pool
+        self.items = self.configured_items
+        self.document_calls = []
+        self.source_unit_calls = []
+        self.instances.append(self)
+
+    async def list_by_source_document_ref(
+        self,
+        *,
+        source_document_ref: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        self.document_calls.append(
+            {
+                "source_document_ref": source_document_ref,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        return self.items[offset : offset + limit]
+
+    async def list_by_source_unit_ref(
+        self,
+        *,
+        source_unit_ref: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        self.source_unit_calls.append(
+            {
+                "source_unit_ref": source_unit_ref,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        return tuple(
+            item for item in self.items if item.source_unit_ref == source_unit_ref
+        )[offset : offset + limit]
+
+
+def _draft_claim_read_model(
+    *,
+    observation_ref: str = "draft-claim-observation:1",
+    source_unit_ref: str = "source-unit:1",
+    claim: str = "System turns documents into knowledge.",
+    claim_index: int | None = 0,
+) -> DraftClaimObservationReadModel:
+    return DraftClaimObservationReadModel(
+        observation_ref=observation_ref,
+        source_unit_ref=source_unit_ref,
+        claim=claim,
+        granularity="atomic",
+        possible_questions=("What does the system do?",),
+        exclusion_scope="",
+        evidence_block="System turns documents into knowledge.",
+        workflow_run_id="workflow-1",
+        stage_run_id="claim_builder_section_extraction",
+        work_item_id="work-1",
+        work_item_attempt_id="work-1:attempt-1",
+        llm_task_id="work-1",
+        llm_attempt_id="work-1:attempt-1",
+        prompt_id="faq_claim_observations",
+        prompt_version="v1",
+        claim_index=claim_index,
+        created_at=datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc),
+    )
+
+
 def _completed_source_ingestion_result() -> RunSourceIngestionFirstPhaseResult:
     return RunSourceIngestionFirstPhaseResult(
         status=RunSourceIngestionFirstPhaseStatus.COMPLETED,
@@ -240,22 +345,11 @@ async def test_upload_success_uses_workflow_after_upload_runner(
     factory_calls: list[dict[str, object]] = []
     _FakeWorkflowAfterUploadRunner.instances = []
 
-    def fake_make_source_ingestion_first_phase(
-        **kwargs: object,
-    ) -> _FakeSourceIngestionRunner:
-        factory_calls.append(kwargs)
-        return runner
-
     monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
-    monkeypatch.setattr(
-        knowledge,
-        "make_source_ingestion_first_phase",
-        fake_make_source_ingestion_first_phase,
-    )
-    monkeypatch.setattr(
-        knowledge,
-        "RunKnowledgeExtractionWorkflowAfterUpload",
-        _FakeWorkflowAfterUploadRunner,
+    _patch_after_upload_factory(
+        monkeypatch,
+        runner=runner,
+        factory_calls=factory_calls,
     )
 
     response = await knowledge.upload_knowledge(
@@ -281,6 +375,10 @@ async def test_upload_success_uses_workflow_after_upload_runner(
         "source_units_url": (
             "/api/projects/project-1/knowledge/source-documents/"
             "source-document:project-1:abc/source-units"
+        ),
+        "draft_claims_url": (
+            "/api/projects/project-1/knowledge/source-documents/"
+            "source-document:project-1:abc/draft-claims"
         ),
     }
     assert len(factory_calls) == 1
@@ -316,22 +414,8 @@ async def test_upload_rejected_missing_project_maps_to_404(
         )
     )
 
-    def fake_make_source_ingestion_first_phase(
-        **kwargs: object,
-    ) -> _FakeSourceIngestionRunner:
-        return runner
-
     monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
-    monkeypatch.setattr(
-        knowledge,
-        "make_source_ingestion_first_phase",
-        fake_make_source_ingestion_first_phase,
-    )
-    monkeypatch.setattr(
-        knowledge,
-        "RunKnowledgeExtractionWorkflowAfterUpload",
-        _FakeWorkflowAfterUploadRunner,
-    )
+    _patch_after_upload_factory(monkeypatch, runner=runner)
 
     with pytest.raises(HTTPException) as exc_info:
         await knowledge.upload_knowledge(
@@ -361,22 +445,8 @@ async def test_upload_rejected_unauthenticated_maps_to_401(
         )
     )
 
-    def fake_make_source_ingestion_first_phase(
-        **kwargs: object,
-    ) -> _FakeSourceIngestionRunner:
-        return runner
-
     monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
-    monkeypatch.setattr(
-        knowledge,
-        "make_source_ingestion_first_phase",
-        fake_make_source_ingestion_first_phase,
-    )
-    monkeypatch.setattr(
-        knowledge,
-        "RunKnowledgeExtractionWorkflowAfterUpload",
-        _FakeWorkflowAfterUploadRunner,
-    )
+    _patch_after_upload_factory(monkeypatch, runner=runner)
 
     with pytest.raises(HTTPException) as exc_info:
         await knowledge.upload_knowledge(
@@ -406,22 +476,8 @@ async def test_upload_rejected_role_denied_maps_to_403(
         )
     )
 
-    def fake_make_source_ingestion_first_phase(
-        **kwargs: object,
-    ) -> _FakeSourceIngestionRunner:
-        return runner
-
     monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
-    monkeypatch.setattr(
-        knowledge,
-        "make_source_ingestion_first_phase",
-        fake_make_source_ingestion_first_phase,
-    )
-    monkeypatch.setattr(
-        knowledge,
-        "RunKnowledgeExtractionWorkflowAfterUpload",
-        _FakeWorkflowAfterUploadRunner,
-    )
+    _patch_after_upload_factory(monkeypatch, runner=runner)
 
     with pytest.raises(HTTPException) as exc_info:
         await knowledge.upload_knowledge(
@@ -453,7 +509,7 @@ async def test_upload_rejects_non_utf8_before_factory(
 
     monkeypatch.setattr(
         knowledge,
-        "make_source_ingestion_first_phase",
+        "make_knowledge_extraction_workflow_after_upload",
         fake_make_source_ingestion_first_phase,
     )
 
@@ -491,7 +547,7 @@ async def test_upload_rejects_empty_text_before_factory(
 
     monkeypatch.setattr(
         knowledge,
-        "make_source_ingestion_first_phase",
+        "make_knowledge_extraction_workflow_after_upload",
         fake_make_source_ingestion_first_phase,
     )
 
@@ -700,7 +756,7 @@ def test_upload_boundary_has_no_legacy_patch_points() -> None:
     assert not hasattr(knowledge, "jwt")
 
     required = (
-        "make_source_ingestion_first_phase",
+        "make_knowledge_extraction_workflow_after_upload",
         "RunSourceIngestionFirstPhaseCommand",
         "_decode_workbench_upload_text",
         "_build_source_ingestion_actor",
@@ -1082,3 +1138,212 @@ def test_knowledge_http_routes_are_not_duplicated() -> None:
 
     for marker in forbidden:
         assert marker not in guarded_region
+
+
+@pytest.mark.asyncio
+async def test_source_document_draft_claims_endpoint_requires_project_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = ()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.source_document_draft_claims(
+            project_id="project-1",
+            source_document_ref="source-document:project-1:abc",
+            authorization="Bearer valid-token",
+            limit=50,
+            offset=0,
+            pool=object(),
+            project_repo=_FakeProjectRepo(has_role=False),
+            user_repo=_user_repo(platform_admin=False),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert _FakeDraftClaimObservationReadRepository.instances == []
+
+
+@pytest.mark.asyncio
+async def test_source_document_draft_claims_endpoint_returns_empty_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = ()
+
+    response = await knowledge.source_document_draft_claims(
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        limit=50,
+        offset=0,
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert response == {
+        "source_document_ref": "source-document:project-1:abc",
+        "count": 0,
+        "limit": 50,
+        "offset": 0,
+        "items": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_source_document_draft_claims_endpoint_returns_persisted_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    item = _draft_claim_read_model()
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = (item,)
+
+    response = await knowledge.source_document_draft_claims(
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        limit=50,
+        offset=0,
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert response["count"] == 1
+    assert response["limit"] == 50
+    assert response["offset"] == 0
+    assert response["items"] == [
+        {
+            "observation_ref": item.observation_ref,
+            "source_unit_ref": item.source_unit_ref,
+            "claim": item.claim,
+            "granularity": item.granularity,
+            "possible_questions": ["What does the system do?"],
+            "exclusion_scope": "",
+            "evidence_block": item.evidence_block,
+            "provenance": {
+                "workflow_run_id": "workflow-1",
+                "stage_run_id": "claim_builder_section_extraction",
+                "work_item_id": "work-1",
+                "work_item_attempt_id": "work-1:attempt-1",
+                "llm_task_id": "work-1",
+                "llm_attempt_id": "work-1:attempt-1",
+                "prompt_id": "faq_claim_observations",
+                "prompt_version": "v1",
+                "claim_index": 0,
+            },
+            "created_at": "2026-06-13T12:00:00+00:00",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_source_unit_draft_claims_endpoint_returns_only_selected_unit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = (
+        _draft_claim_read_model(
+            observation_ref="draft-claim-observation:1",
+            source_unit_ref="source-unit:1",
+            claim_index=0,
+        ),
+        _draft_claim_read_model(
+            observation_ref="draft-claim-observation:2",
+            source_unit_ref="source-unit:2",
+            claim_index=1,
+        ),
+    )
+
+    response = await knowledge.source_unit_draft_claims(
+        project_id="project-1",
+        source_unit_ref="source-unit:2",
+        authorization="Bearer valid-token",
+        limit=50,
+        offset=0,
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert response["source_unit_ref"] == "source-unit:2"
+    assert response["count"] == 1
+    assert response["items"][0]["observation_ref"] == "draft-claim-observation:2"
+
+
+@pytest.mark.asyncio
+async def test_draft_claims_endpoint_respects_limit_and_offset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = (
+        _draft_claim_read_model(observation_ref="draft-claim-observation:1"),
+        _draft_claim_read_model(observation_ref="draft-claim-observation:2"),
+    )
+
+    response = await knowledge.source_document_draft_claims(
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        limit=1,
+        offset=1,
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    repository = _FakeDraftClaimObservationReadRepository.instances[0]
+    assert repository.document_calls == [
+        {
+            "source_document_ref": "source-document:project-1:abc",
+            "limit": 1,
+            "offset": 1,
+        }
+    ]
+    assert response["count"] == 1
+    assert response["items"][0]["observation_ref"] == "draft-claim-observation:2"

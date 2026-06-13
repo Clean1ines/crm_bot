@@ -50,6 +50,12 @@ from src.interfaces.composition.knowledge_extraction_workflow_resume import (
     make_knowledge_extraction_workflow_resume,
 )
 from src.infrastructure.config.settings import settings
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadModel,
+)
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_observation_read_repository import (
+    PostgresDraftClaimObservationReadRepository,
+)
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     PostgresSourceManagementRepository,
 )
@@ -262,6 +268,43 @@ def _source_units_url(
     )
 
 
+def _source_document_draft_claims_url(
+    *,
+    project_id: str,
+    source_document_ref: str,
+) -> str:
+    return (
+        f"/api/projects/{project_id}/knowledge/source-documents/"
+        f"{source_document_ref}/draft-claims"
+    )
+
+
+def _draft_claim_observation_read_model(
+    item: DraftClaimObservationReadModel,
+) -> dict[str, object]:
+    return {
+        "observation_ref": item.observation_ref,
+        "source_unit_ref": item.source_unit_ref,
+        "claim": item.claim,
+        "granularity": item.granularity,
+        "possible_questions": list(item.possible_questions),
+        "exclusion_scope": item.exclusion_scope,
+        "evidence_block": item.evidence_block,
+        "provenance": {
+            "workflow_run_id": item.workflow_run_id,
+            "stage_run_id": item.stage_run_id,
+            "work_item_id": item.work_item_id,
+            "work_item_attempt_id": item.work_item_attempt_id,
+            "llm_task_id": item.llm_task_id,
+            "llm_attempt_id": item.llm_attempt_id,
+            "prompt_id": item.prompt_id,
+            "prompt_version": item.prompt_version,
+            "claim_index": item.claim_index,
+        },
+        "created_at": item.created_at.isoformat(),
+    }
+
+
 async def _require_project_access(
     *,
     project_id: str,
@@ -459,6 +502,10 @@ async def upload_knowledge(
             project_id=project_id,
             source_document_ref=source_document_ref,
         ),
+        "draft_claims_url": _source_document_draft_claims_url(
+            project_id=project_id,
+            source_document_ref=source_document_ref,
+        ),
     }
 
 
@@ -489,6 +536,78 @@ async def source_ingestion_source_units(
         "source_document_ref": document_ref.value,
         "source_unit_count": len(source_units),
         "source_units": [_source_unit_read_model(unit) for unit in source_units],
+    }
+
+
+@router.get("/source-documents/{source_document_ref}/draft-claims")
+async def source_document_draft_claims(
+    project_id: str,
+    source_document_ref: str,
+    authorization: str | None = Header(default=None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns draft claim observations extracted for a source document."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    repository = PostgresDraftClaimObservationReadRepository(pool)
+    items = await repository.list_by_source_document_ref(
+        source_document_ref=source_document_ref,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "source_document_ref": source_document_ref,
+        "count": len(items),
+        "limit": limit,
+        "offset": offset,
+        "items": [_draft_claim_observation_read_model(item) for item in items],
+    }
+
+
+@router.get("/source-units/{source_unit_ref}/draft-claims")
+async def source_unit_draft_claims(
+    project_id: str,
+    source_unit_ref: str,
+    authorization: str | None = Header(default=None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns draft claim observations extracted for one source unit."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    repository = PostgresDraftClaimObservationReadRepository(pool)
+    items = await repository.list_by_source_unit_ref(
+        source_unit_ref=source_unit_ref,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "source_unit_ref": source_unit_ref,
+        "count": len(items),
+        "limit": limit,
+        "offset": offset,
+        "items": [_draft_claim_observation_read_model(item) for item in items],
     }
 
 
