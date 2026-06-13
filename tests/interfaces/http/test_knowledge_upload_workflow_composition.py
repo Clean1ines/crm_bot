@@ -13,6 +13,9 @@ from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_fir
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
     SourceIngestionActor,
 )
+from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
+    LlmDispatchExecutorPort,
+)
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
     RunKnowledgeExtractionWorkflowAfterUploadCommand,
@@ -61,10 +64,15 @@ class FactoryCall:
     pool: object
     project_repo: object
     user_repo: UserRepository
+    llm_executor: LlmDispatchExecutorPort
 
 
 def _user_repository() -> UserRepository:
     return cast(UserRepository, object())
+
+
+def _llm_executor() -> LlmDispatchExecutorPort:
+    return cast(LlmDispatchExecutorPort, object())
 
 
 async def _fake_actor(
@@ -84,6 +92,23 @@ def test_upload_handler_uses_after_upload_factory_not_manual_partial_runner() ->
     assert "RunKnowledgeExtractionWorkflowAfterUpload(" not in source
 
 
+def test_upload_handler_declares_llm_dispatch_executor_dependency() -> None:
+    parameter = inspect.signature(knowledge.upload_knowledge).parameters["llm_executor"]
+
+    assert getattr(parameter.default, "dependency", None) is (
+        knowledge.get_llm_dispatch_executor
+    )
+
+
+def test_upload_handler_wires_executor_without_direct_provider_call() -> None:
+    source = inspect.getsource(knowledge.upload_knowledge)
+
+    assert "llm_executor=llm_executor" in source
+    assert "execute_dispatch(" not in source
+    assert "GroqDispatchExecutor" not in source
+    assert "GROQ_API_KEY" not in source
+
+
 @pytest.mark.asyncio
 async def test_upload_calls_production_after_upload_factory(
     monkeypatch: pytest.MonkeyPatch,
@@ -93,18 +118,21 @@ async def test_upload_calls_production_after_upload_factory(
     pool = object()
     project_repo = object()
     user_repo = _user_repository()
+    llm_executor = _llm_executor()
 
     def fake_factory(
         *,
         pool: object,
         project_repo: object,
         user_repo: UserRepository,
+        llm_executor: LlmDispatchExecutorPort,
     ) -> FakeWorkflowRunner:
         calls.append(
             FactoryCall(
                 pool=pool,
                 project_repo=project_repo,
                 user_repo=user_repo,
+                llm_executor=llm_executor,
             )
         )
         return runner
@@ -131,12 +159,14 @@ async def test_upload_calls_production_after_upload_factory(
         pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
+        llm_executor=llm_executor,
     )
 
     assert len(calls) == 1
     assert calls[0].pool is pool
     assert calls[0].project_repo is project_repo
     assert calls[0].user_repo is user_repo
+    assert calls[0].llm_executor is llm_executor
     assert len(runner.calls) == 1
 
     command = runner.calls[0].source_ingestion_command
@@ -157,14 +187,16 @@ async def test_upload_without_llm_executor_keeps_explicit_blocked_behavior(
     pool = object()
     project_repo = object()
     user_repo = _user_repository()
+    llm_executor = _llm_executor()
 
     def fake_factory(
         *,
         pool: object,
         project_repo: object,
         user_repo: UserRepository,
+        llm_executor: LlmDispatchExecutorPort,
     ) -> FakeWorkflowRunner:
-        del pool, project_repo, user_repo
+        del pool, project_repo, user_repo, llm_executor
         return runner
 
     monkeypatch.setattr(
@@ -189,6 +221,7 @@ async def test_upload_without_llm_executor_keeps_explicit_blocked_behavior(
         pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
+        llm_executor=llm_executor,
     )
 
     assert response["source_ingestion_completed"] is True

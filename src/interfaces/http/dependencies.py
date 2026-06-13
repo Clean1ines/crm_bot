@@ -13,6 +13,7 @@ This module provides centralized dependency injection functions for:
 All dependencies use the global pool from lifespan management.
 """
 
+import os
 from typing import TYPE_CHECKING, Protocol, cast, Callable, Awaitable
 import jwt
 
@@ -26,6 +27,18 @@ from src.application.ports.project_port import (
     ProjectTokenPort,
 )
 from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
+from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
+    LlmDispatchExecutorPort,
+)
+from src.contexts.llm_runtime.infrastructure.config.llm_runtime_provider_composition import (
+    LlmRuntimeProviderCompositionFactory,
+)
+from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
+    LlmRuntimeSettings,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_dispatch_executor import (
+    GroqDispatchExecutor,
+)
 from src.interfaces.composition.project_repositories import (
     build_project_member_repository,
     build_project_repository,
@@ -122,6 +135,19 @@ def get_orchestrator() -> object:
         logger.error("Orchestrator requested before initialization")
         raise RuntimeError("Orchestrator not initialized")
     return src.interfaces.composition.fastapi_lifespan.orchestrator
+
+
+def get_llm_dispatch_executor() -> LlmDispatchExecutorPort:
+    """Return the composed LLM dispatch executor for claim-builder drains."""
+    runtime_settings = LlmRuntimeSettings.from_env_mapping(os.environ)
+    provider_components = LlmRuntimeProviderCompositionFactory(
+        settings=runtime_settings,
+    ).build()
+    groq_components = provider_components.groq
+    return GroqDispatchExecutor(
+        transport=groq_components.provider.transport,
+        model_profiles=groq_components.model_profiles,
+    )
 
 
 def get_project_repo(pool: object = Depends(get_pool)):

@@ -38,6 +38,9 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
     SourceDocumentRef,
 )
+from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
+    LlmDispatchExecutorPort,
+)
 from src.interfaces.composition.knowledge_extraction_after_upload_composition import (
     make_knowledge_extraction_workflow_after_upload,
 )
@@ -62,6 +65,7 @@ from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import (
+    get_llm_dispatch_executor,
     get_pool,
     get_project_repo,
     get_user_repository,
@@ -410,6 +414,7 @@ async def upload_knowledge(
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
+    llm_executor: LlmDispatchExecutorPort = Depends(get_llm_dispatch_executor),
 ):
     """Uploads UTF-8 text into the source ingestion first-phase workflow."""
 
@@ -450,6 +455,7 @@ async def upload_knowledge(
         pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
+        llm_executor=llm_executor,
     )
 
     try:

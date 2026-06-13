@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -10,7 +11,17 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
     LlmAttemptCapacityObservation,
 )
 
+from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_read_repository_port import (
+    WorkItemAttemptDispatchForExecution,
+)
+from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
+    RecordWorkItemAttemptOutcomeResult,
+)
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
 )
@@ -22,6 +33,9 @@ from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extra
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
+)
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    CLAIM_BUILDER_SECTION_WORK_KIND,
 )
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhaseCommand,
@@ -67,6 +81,10 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_text import (
     SourceUnitText,
 )
+from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
+    LlmDispatchExecutionResult,
+    LlmDispatchExecutionStatus,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
     WorkflowCommandStatus,
@@ -96,6 +114,10 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 from src.interfaces.composition import (
     knowledge_extraction_workflow_after_upload as composition,
 )
+from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
+    ExecutePreparedLlmDispatchAttemptCommand,
+    ExecutePreparedLlmDispatchAttemptResult,
+)
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
     RunKnowledgeExtractionWorkflowAfterUpload,
     RunKnowledgeExtractionWorkflowAfterUploadCommand,
@@ -112,6 +134,10 @@ def _workflow_run_id() -> str:
 
 def _source_document_ref() -> SourceDocumentRef:
     return SourceDocumentRef("source-document:project-1:abc")
+
+
+def _source_unit_ref() -> str:
+    return f"{_source_document_ref().value}.unit.0"
 
 
 def _source_ingestion_command() -> RunSourceIngestionFirstPhaseCommand:
@@ -179,9 +205,59 @@ def _schedule_command() -> WorkflowCommand:
     )
 
 
+def _valid_claim_builder_output_text() -> str:
+    return json.dumps(
+        {
+            "claims": [
+                {
+                    "claim": "Body",
+                    "granularity": "atomic",
+                    "possible_questions": ["Body?"],
+                    "exclusion_scope": "Body",
+                    "evidence_block": "Body",
+                }
+            ]
+        }
+    )
+
+
+def _claim_builder_dispatch_payload(attempt_id: str) -> dict[str, object]:
+    return {
+        "attempt_id": attempt_id,
+        "work_item_id": "work-1",
+        "schedule_payload": {
+            "workflow_run_id": _workflow_run_id(),
+            "source_document_ref": _source_document_ref().value,
+            "source_unit_ref": _source_unit_ref(),
+            "source_unit_ordinal": 0,
+            "claim_builder_provenance": {
+                "workflow_run_id": _workflow_run_id(),
+                "stage_run_id": "stage-run-1",
+                "prompt_id": "faq_claim_observations",
+                "prompt_version": "v1",
+                "source_unit_ref": _source_unit_ref(),
+                "work_item_id": "work-1",
+            },
+            "provider_messages": (
+                {
+                    "role": "user",
+                    "content": f"source_unit_ref: {_source_unit_ref()}\n\n# Unit\n\nBody",
+                },
+            ),
+        },
+        "llm_allocation": {
+            "provider": "groq",
+            "account_ref": "groq_org_primary",
+            "model_ref": "qwen/qwen3-32b",
+            "slot_index": 0,
+        },
+        "llm_execution_settings": {"reasoning_enabled": False},
+    }
+
+
 def _source_unit() -> SourceUnit:
     return SourceUnit(
-        unit_ref=SourceUnitRef(f"{_source_document_ref().value}.unit.0"),
+        unit_ref=SourceUnitRef(_source_unit_ref()),
         document_ref=_source_document_ref(),
         unit_kind=SourceUnitKind.SECTION,
         text=SourceUnitText("# Unit\n\nBody"),
@@ -262,6 +338,64 @@ class FakePrepareLlmDispatchBatch:
                     ),
                 ),
             ),
+        )
+
+
+@dataclass(slots=True)
+class FakeExecutePreparedLlmDispatchAttempt:
+    calls: list[ExecutePreparedLlmDispatchAttemptCommand] = field(
+        default_factory=list,
+    )
+
+    async def execute(
+        self,
+        command: ExecutePreparedLlmDispatchAttemptCommand,
+    ) -> ExecutePreparedLlmDispatchAttemptResult:
+        self.calls.append(command)
+        finished_at = _now()
+        dispatch_payload = _claim_builder_dispatch_payload(command.attempt_id)
+        llm_result = LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.SUCCEEDED,
+            finished_at=finished_at,
+            output_payload={"raw_text": _valid_claim_builder_output_text()},
+        )
+        validation_metadata: dict[str, object] | None = None
+        if command.output_validator is not None:
+            validation_result = command.output_validator.validate(
+                dispatch_payload=dispatch_payload,
+                output_payload=llm_result.output_payload,
+                llm_status=llm_result.status,
+                finished_at=finished_at,
+                attempt_number=1,
+            )
+            llm_result = LlmDispatchExecutionResult(
+                status=validation_result.status,
+                finished_at=finished_at,
+                output_payload=llm_result.output_payload,
+                error_kind=validation_result.error_kind,
+                next_attempt_at=validation_result.next_attempt_at,
+            )
+            validation_metadata = dict(validation_result.metadata)
+
+        return ExecutePreparedLlmDispatchAttemptResult(
+            dispatch=WorkItemAttemptDispatchForExecution(
+                attempt_id=command.attempt_id,
+                work_item_id="work-1",
+                attempt_number=1,
+                lease_token=LeaseToken("lease-token-1"),
+                worker_ref="worker-1",
+                dispatch_payload=dispatch_payload,
+                started_at=_now(),
+            ),
+            llm_result=llm_result,
+            outcome_result=RecordWorkItemAttemptOutcomeResult(
+                work_item=WorkItem(
+                    work_item_id="work-1",
+                    work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+                    status=WorkItemStatus.COMPLETED,
+                )
+            ),
+            validation_metadata=validation_metadata,
         )
 
 
@@ -865,3 +999,49 @@ async def test_after_upload_uses_provided_capacity_observation_repository_overri
     )
 
     assert FakePostgresLlmAttemptCapacityObservationRepository.instances == []
+
+
+@pytest.mark.asyncio
+async def test_after_upload_execute_path_persists_valid_claims_and_leaves_reconcile_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_drain_dependencies(monkeypatch)
+    connection = FakeConnection()
+    execute_port = FakeExecutePreparedLlmDispatchAttempt()
+    persistence = FakeDraftClaimObservationPersistence()
+
+    runner = RunKnowledgeExtractionWorkflowAfterUpload(
+        source_ingestion_runner=FakeSourceIngestionRunner(completed=True),
+        pool=FakePool(connection),
+        prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
+        execute_prepared_llm_dispatch_attempt=execute_port,
+        draft_claim_observation_persistence=persistence,
+    )
+
+    result = await runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=_source_ingestion_command(),
+            max_drain_commands=3,
+        )
+    )
+
+    assert result.source_ingestion_completed is True
+    assert result.blocked_command_type is None
+    assert result.blocked_reason is None
+    assert len(execute_port.calls) == 1
+    assert execute_port.calls[0].attempt_id == "work-1:attempt:1"
+    assert execute_port.calls[0].output_validator is not None
+    assert len(persistence.persisted_candidates) == 1
+    assert len(persistence.persisted_candidates[0]) == 1
+    candidate = persistence.persisted_candidates[0][0]
+    assert candidate.claim == "Body"
+    assert candidate.source_unit_ref == _source_unit_ref()
+
+    reconcile_commands = [
+        command
+        for command in connection.command_log.commands
+        if command.command_type
+        == KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS.value
+    ]
+    assert len(reconcile_commands) == 1
+    assert reconcile_commands[0].status is WorkflowCommandStatus.PENDING

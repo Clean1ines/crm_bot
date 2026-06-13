@@ -75,14 +75,17 @@ def test_factory_wires_prepare_llm_dispatch_batch_when_executor_is_provided() ->
 def test_factory_wires_execute_prepared_llm_dispatch_attempt_when_executor_is_provided() -> (
     None
 ):
+    llm_executor = FakeLlmExecutor()
     runner = make_knowledge_extraction_workflow_after_upload(
         pool=_pool(),
         project_repo=_project_repo(),
         user_repo=_user_repo(),
-        llm_executor=FakeLlmExecutor(),
+        llm_executor=llm_executor,
     )
 
-    assert runner._execute_prepared_llm_dispatch_attempt is not None
+    execute_attempt = runner._execute_prepared_llm_dispatch_attempt
+    assert execute_attempt is not None
+    assert execute_attempt.llm_executor is llm_executor
     assert runner._capacity_observation_repository is None
 
 
