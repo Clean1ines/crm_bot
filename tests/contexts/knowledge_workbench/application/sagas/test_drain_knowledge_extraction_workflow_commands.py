@@ -19,6 +19,11 @@ from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extracti
     DrainKnowledgeExtractionWorkflowCommands,
     DrainKnowledgeExtractionWorkflowCommandsCommand,
 )
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
+    KnowledgeExtractionPhaseKey,
+    KnowledgeExtractionWorkflowState,
+    KnowledgeExtractionWorkflowStatus,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
 )
@@ -146,6 +151,41 @@ def _source_unit() -> SourceUnit:
         lineage=SourceUnitLineage(),
         ordinal=0,
         created_at=_now(),
+    )
+
+
+@dataclass(slots=True)
+class FakeWorkflowStateRepository:
+    state: KnowledgeExtractionWorkflowState | None = None
+
+    async def load_workflow_state(
+        self,
+        workflow_run_id: str,
+    ) -> KnowledgeExtractionWorkflowState | None:
+        assert workflow_run_id == _workflow_run_id()
+        return self.state
+
+    async def save_workflow_state(
+        self,
+        state: KnowledgeExtractionWorkflowState,
+    ) -> None:
+        self.state = state
+
+
+def _workflow_state(
+    status: KnowledgeExtractionWorkflowStatus,
+) -> KnowledgeExtractionWorkflowState:
+    return KnowledgeExtractionWorkflowState(
+        workflow_run_id=_workflow_run_id(),
+        project_id="project-1",
+        source_document_ref=_document_ref().value,
+        status=status,
+        current_phase=KnowledgeExtractionPhaseKey.SOURCE_UNITS_CREATED,
+        pause_reason="manual_pause"
+        if status is KnowledgeExtractionWorkflowStatus.PAUSED
+        else None,
+        created_at=_now(),
+        updated_at=_now(),
     )
 
 
@@ -401,6 +441,7 @@ async def _drain(
     *,
     pending_commands: tuple[WorkflowCommand, ...],
     max_commands: int = 10,
+    workflow_state_repository: FakeWorkflowStateRepository | None = None,
 ) -> tuple[object, FakeWorkItemSchedulingRepository, FakeWorkflowRuntimeUnitOfWork]:
     scheduling_repository = FakeWorkItemSchedulingRepository()
     workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork(
@@ -415,6 +456,7 @@ async def _drain(
         knowledge_unit_of_work=scheduling_repository,
         workflow_unit_of_work=workflow_unit_of_work,
         prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
+        workflow_state_repository=workflow_state_repository,
     )
     return result, scheduling_repository, workflow_unit_of_work
 

@@ -29,6 +29,19 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admissi
     SourceIngestionActor,
     SourceIngestionAdmissionStatus,
 )
+from src.contexts.knowledge_workbench.application.sagas.pause_knowledge_extraction_workflow import (
+    KnowledgeExtractionWorkflowPauseNotFoundError,
+    KnowledgeExtractionWorkflowPauseProjectMismatchError,
+    KnowledgeExtractionWorkflowPauseTerminalStateError,
+    PauseKnowledgeExtractionWorkflowCommand,
+)
+from src.contexts.knowledge_workbench.application.sagas.resume_knowledge_extraction_workflow import (
+    KnowledgeExtractionWorkflowResumeNotPausedError,
+    KnowledgeExtractionWorkflowResumeProjectMismatchError,
+    KnowledgeExtractionWorkflowResumeStateNotFoundError,
+    KnowledgeExtractionWorkflowResumeTerminalStateError,
+    ResumeKnowledgeExtractionWorkflowCommand,
+)
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
 )
@@ -46,6 +59,10 @@ from src.interfaces.composition.knowledge_extraction_after_upload_composition im
 )
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
     RunKnowledgeExtractionWorkflowAfterUploadCommand,
+)
+from src.interfaces.composition.knowledge_extraction_workflow_pause_resume import (
+    make_pause_knowledge_extraction_workflow,
+    make_resume_knowledge_extraction_workflow_transition,
 )
 from src.interfaces.composition.knowledge_extraction_workflow_resume import (
     KnowledgeExtractionWorkflowResumeNotFoundError,
@@ -1403,3 +1420,126 @@ async def clear_knowledge(
             status_code=409,
             detail=str(exc),
         ) from exc
+
+
+@router.post("/workflows/{workflow_run_id}/pause")
+async def pause_knowledge_extraction_workflow(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    reason: str = Body(default="manual_pause"),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.interfaces.http.dependencies import get_current_user_id
+
+    actor_user_id = await get_current_user_id(authorization)
+    runner = make_pause_knowledge_extraction_workflow(pool=pool)
+
+    try:
+        result = await runner.execute(
+            PauseKnowledgeExtractionWorkflowCommand(
+                workflow_run_id=workflow_run_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                occurred_at=datetime.now(timezone.utc),
+                reason=reason,
+            )
+        )
+    except (
+        KnowledgeExtractionWorkflowPauseNotFoundError,
+        KnowledgeExtractionWorkflowPauseProjectMismatchError,
+    ) as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
+    except KnowledgeExtractionWorkflowPauseTerminalStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Terminal workflow cannot be paused",
+        ) from exc
+
+    return {
+        "workflow_run_id": result.workflow_run_id,
+        "status": result.status,
+        "paused_at": result.paused_at.isoformat(),
+        "already_paused": result.already_paused,
+    }
+
+
+@router.post("/workflows/{workflow_run_id}/resume")
+async def resume_knowledge_extraction_workflow(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    max_drain_commands: int = Query(10, ge=1, le=100),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+    llm_executor: LlmDispatchExecutorPort = Depends(get_llm_dispatch_executor),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.interfaces.http.dependencies import get_current_user_id
+
+    actor_user_id = await get_current_user_id(authorization)
+    transition_runner = make_resume_knowledge_extraction_workflow_transition(pool=pool)
+
+    try:
+        transition_result = await transition_runner.execute(
+            ResumeKnowledgeExtractionWorkflowCommand(
+                workflow_run_id=workflow_run_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                occurred_at=datetime.now(timezone.utc),
+                max_drain_commands=max_drain_commands,
+            )
+        )
+        workflow_runner = make_knowledge_extraction_workflow_resume(
+            pool=pool,
+            llm_executor=llm_executor,
+        )
+        drain_result = await workflow_runner.execute(
+            RunKnowledgeExtractionWorkflowResumeCommand(
+                project_id=project_id,
+                document_id=workflow_run_id,
+                max_drain_commands=max_drain_commands,
+            )
+        )
+    except (
+        KnowledgeExtractionWorkflowResumeStateNotFoundError,
+        KnowledgeExtractionWorkflowResumeProjectMismatchError,
+        KnowledgeExtractionWorkflowResumeNotFoundError,
+    ) as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
+    except KnowledgeExtractionWorkflowResumeTerminalStateError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Terminal workflow cannot be resumed",
+        ) from exc
+    except KnowledgeExtractionWorkflowResumeNotPausedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Workflow is not manually paused",
+        ) from exc
+
+    return {
+        "workflow_run_id": transition_result.workflow_run_id,
+        "status": transition_result.status,
+        "resumed_at": transition_result.resumed_at.isoformat(),
+        "drained_inspected_count": drain_result.drained_inspected_count,
+        "drained_dispatched_count": drain_result.drained_dispatched_count,
+        "blocked_command_type": drain_result.blocked_command_type,
+        "blocked_reason": drain_result.blocked_reason,
+    }

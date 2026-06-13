@@ -51,6 +51,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
     PersistValidatedDraftClaimObservationsPort,
 )
+from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_knowledge_extraction_saga_state_repository import (
+    PostgresKnowledgeExtractionSagaStateRepository,
+)
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_claim_builder_retry_action_read_repository import (
     PostgresClaimBuilderRetryActionReadRepository,
 )
@@ -342,6 +345,11 @@ class RunKnowledgeExtractionWorkflowResume:
                         cast(asyncpg.Connection, connection)
                     )
                 ),
+                workflow_state_repository=(
+                    PostgresKnowledgeExtractionSagaStateRepository(
+                        cast(asyncpg.Connection, connection)
+                    )
+                ),
             )
             await workflow_unit_of_work.commit()
             return result
@@ -365,16 +373,18 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
         try:
             async with connection.transaction():
                 asyncpg_connection = cast(asyncpg.Connection, connection)
+                outcome_repository = PostgresWorkItemAttemptOutcomeRepository(
+                    asyncpg_connection,
+                )
                 return await ExecutePreparedLlmDispatchAttempt(
                     dispatch_repository=PostgresReadWorkItemAttemptDispatchRepository(
                         asyncpg_connection,
                     ),
                     llm_executor=self.llm_executor,
                     outcome_recorder=RecordWorkItemAttemptOutcome(
-                        repository=PostgresWorkItemAttemptOutcomeRepository(
-                            asyncpg_connection,
-                        ),
+                        repository=outcome_repository,
                     ),
+                    recorded_outcome_reader=outcome_repository,
                 ).execute(command)
         finally:
             await self.pool.release(connection)

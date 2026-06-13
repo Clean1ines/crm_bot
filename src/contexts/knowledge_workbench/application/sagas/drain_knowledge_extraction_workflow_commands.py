@@ -17,6 +17,12 @@ from src.contexts.execution_runtime.application.ports.work_item_scheduling_repos
 from src.contexts.execution_runtime.application.ports.work_item_split_supersede_repository_port import (
     WorkItemSplitSupersedeRepositoryPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_ports import (
+    KnowledgeExtractionSagaStateRepositoryPort,
+)
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
+    KnowledgeExtractionWorkflowStatus,
+)
 from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extraction_workflow_command import (
     DispatchKnowledgeExtractionWorkflowCommand,
     DispatchKnowledgeExtractionWorkflowCommandHandler,
@@ -39,6 +45,9 @@ from src.contexts.knowledge_workbench.source_management.application.ports.source
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
+
+
+WORKFLOW_MANUALLY_PAUSED = "WORKFLOW_MANUALLY_PAUSED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +130,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         work_item_split_supersede_repository: (
             WorkItemSplitSupersedeRepositoryPort | None
         ) = None,
+        workflow_state_repository: (
+            KnowledgeExtractionSagaStateRepositoryPort | None
+        ) = None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -128,6 +140,26 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 limit=command.max_commands,
             )
         )
+        if workflow_state_repository is not None:
+            workflow_state = await workflow_state_repository.load_workflow_state(
+                command.workflow_run_id,
+            )
+            if (
+                workflow_state is not None
+                and workflow_state.status is KnowledgeExtractionWorkflowStatus.PAUSED
+            ):
+                next_command_type = (
+                    pending_commands[0].command_type if pending_commands else None
+                )
+                return DrainKnowledgeExtractionWorkflowCommandsResult(
+                    workflow_run_id=command.workflow_run_id,
+                    inspected_count=1 if pending_commands else 0,
+                    dispatched_count=0,
+                    blocked_count=1,
+                    last_blocked_command_type=next_command_type,
+                    last_blocked_reason=WORKFLOW_MANUALLY_PAUSED,
+                )
+
         dispatcher = DispatchKnowledgeExtractionWorkflowCommandHandler()
 
         inspected_count = 0

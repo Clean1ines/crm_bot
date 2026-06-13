@@ -23,6 +23,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_s
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_split_supersede_repository import (
     PostgresWorkItemSplitSupersedeRepository,
 )
+from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_knowledge_extraction_saga_state_repository import (
+    PostgresKnowledgeExtractionSagaStateRepository,
+)
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_claim_builder_retry_action_read_repository import (
     PostgresClaimBuilderRetryActionReadRepository,
 )
@@ -331,6 +334,11 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 draft_claim_observation_persistence=(
                     self._draft_claim_observation_persistence
                     or PostgresValidatedDraftClaimObservationPersistence(
+                        cast(asyncpg.Connection, connection)
+                    )
+                ),
+                workflow_state_repository=(
+                    PostgresKnowledgeExtractionSagaStateRepository(
                         cast(asyncpg.Connection, connection)
                     )
                 ),

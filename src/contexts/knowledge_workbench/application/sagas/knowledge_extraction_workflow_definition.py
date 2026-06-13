@@ -58,6 +58,8 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     DRAFT_CLAIM_CLUSTERS_BUILT = "DraftClaimClustersBuilt"
     CLUSTER_PREVIEW_READY = "ClusterPreviewReady"
     CLUSTER_CONTRACT_REVIEW_REQUIRED = "ClusterContractReviewRequired"
+    WORKFLOW_MANUALLY_PAUSED = "WorkflowManuallyPaused"
+    WORKFLOW_MANUALLY_RESUMED = "WorkflowManuallyResumed"
 
 
 class KnowledgeExtractionReadModelName(StrEnum):

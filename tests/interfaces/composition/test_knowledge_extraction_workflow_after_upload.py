@@ -696,6 +696,20 @@ class FakePool:
         self.released_connections.append(connection)
 
 
+class FakePostgresKnowledgeExtractionSagaStateRepository:
+    def __init__(self, connection: object) -> None:
+        if not isinstance(connection, FakeConnection):
+            raise TypeError("connection must be FakeConnection")
+        self.connection = connection
+
+    async def load_workflow_state(self, workflow_run_id: str) -> object | None:
+        del workflow_run_id
+        return None
+
+    async def save_workflow_state(self, state: object) -> None:
+        del state
+
+
 class FakePostgresWorkflowRuntimeUnitOfWork:
     instances: list[FakePostgresWorkflowRuntimeUnitOfWork] = []
 
@@ -920,6 +934,11 @@ def _patch_drain_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         composition,
         "PostgresWorkflowRuntimeUnitOfWork",
         FakePostgresWorkflowRuntimeUnitOfWork,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresKnowledgeExtractionSagaStateRepository",
+        FakePostgresKnowledgeExtractionSagaStateRepository,
     )
     monkeypatch.setattr(
         composition,
@@ -1343,3 +1362,14 @@ def test_command_log_lists_pending_commands_only_for_resume_contract() -> None:
     assert "AND status = $2" in source
     assert "WorkflowCommandStatus.PENDING.value" in source
     assert "ORDER BY run_after ASC, created_at ASC" in source
+
+
+def test_after_upload_drain_receives_workflow_state_repository_for_pause_guard() -> (
+    None
+):
+    source = Path(
+        "src/interfaces/composition/knowledge_extraction_workflow_after_upload.py",
+    ).read_text(encoding="utf-8")
+
+    assert "PostgresKnowledgeExtractionSagaStateRepository" in source
+    assert "workflow_state_repository=" in source
