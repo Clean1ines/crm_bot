@@ -30,37 +30,24 @@ class LlmAttemptCapacityObservation:
         _require_non_empty_text(self.outcome_class, "outcome_class")
         _require_timezone_aware(self.observed_at, "observed_at")
 
-        _require_optional_non_negative_int(
-            self.remaining_minute_requests,
-            "remaining_minute_requests",
-        )
-        _require_optional_non_negative_int(
-            self.remaining_minute_tokens,
-            "remaining_minute_tokens",
-        )
-        _require_optional_non_negative_int(
-            self.remaining_daily_requests,
-            "remaining_daily_requests",
-        )
-        _require_optional_non_negative_int(
-            self.remaining_daily_tokens,
-            "remaining_daily_tokens",
-        )
-        _require_optional_non_negative_int(
-            self.actual_prompt_tokens,
-            "actual_prompt_tokens",
-        )
-        _require_optional_non_negative_int(
-            self.actual_completion_tokens,
-            "actual_completion_tokens",
-        )
-        _require_optional_non_negative_int(
-            self.actual_total_tokens,
-            "actual_total_tokens",
-        )
+        for field_name, int_value in (
+            ("remaining_minute_requests", self.remaining_minute_requests),
+            ("remaining_minute_tokens", self.remaining_minute_tokens),
+            ("remaining_daily_requests", self.remaining_daily_requests),
+            ("remaining_daily_tokens", self.remaining_daily_tokens),
+            ("actual_prompt_tokens", self.actual_prompt_tokens),
+            ("actual_completion_tokens", self.actual_completion_tokens),
+            ("actual_total_tokens", self.actual_total_tokens),
+        ):
+            if int_value is not None:
+                _require_non_negative_int(int_value, field_name)
 
-        _require_optional_timezone_aware(self.minute_reset_at, "minute_reset_at")
-        _require_optional_timezone_aware(self.daily_reset_at, "daily_reset_at")
+        for field_name, datetime_value in (
+            ("minute_reset_at", self.minute_reset_at),
+            ("daily_reset_at", self.daily_reset_at),
+        ):
+            if datetime_value is not None:
+                _require_timezone_aware(datetime_value, field_name)
 
     @classmethod
     def from_payload(
@@ -179,29 +166,11 @@ def _require_non_empty_text(value: str, field_name: str) -> None:
         raise ValueError(f"{field_name} must be non-empty")
 
 
-def _require_optional_non_negative_int(
-    value: int | None,
-    field_name: str,
-) -> None:
-    if value is None:
-        return
-    _require_non_negative_int(value, field_name)
-
-
 def _require_non_negative_int(value: int, field_name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{field_name} must be int")
     if value < 0:
         raise ValueError(f"{field_name} must be >= 0")
-
-
-def _require_optional_timezone_aware(
-    value: datetime | None,
-    field_name: str,
-) -> None:
-    if value is None:
-        return
-    _require_timezone_aware(value, field_name)
 
 
 def _require_timezone_aware(value: datetime, field_name: str) -> None:

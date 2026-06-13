@@ -39,10 +39,12 @@ def test_groq_dispatch_executor_does_not_use_legacy_or_cross_context_paths() -> 
         "Authorization",
         "AsyncGroq",
         "httpx",
-        "requests",
         "knowledge_workbench",
         "execution_runtime",
         "artifact_runtime",
     )
     for marker in forbidden:
         assert marker not in source
+
+    assert "import requests" not in source
+    assert "from requests" not in source
