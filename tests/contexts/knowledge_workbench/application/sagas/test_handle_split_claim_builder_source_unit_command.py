@@ -147,8 +147,19 @@ def _command(
         payload={
             "workflow_run_id": _workflow_run_id(),
             "source_document_ref": _document_ref().value,
+            "source_unit_ref": source_unit_refs[0],
             "source_unit_refs": source_unit_refs,
             "affected_work_item_refs": ("work-parent",),
+            "work_kind": "knowledge_workbench.claim_builder.section_extraction",
+            "scheduled_work_item_count": 1,
+            "estimated_prompt_tokens": 200000,
+            "active_model_ref": "qwen/qwen3-32b",
+            "input_size_preflight_decision": "SOURCE_SPLIT_REQUIRED",
+            "input_size_preflight_reason": (
+                "estimated prompt tokens exceed all automatic fallback input limits"
+            ),
+            "source_split_required": True,
+            "split_reason": "input_size_preflight",
             "llm_dispatch_preparation": {
                 "profile": {
                     "profile_id": "faq_claim_observations",
@@ -432,6 +443,37 @@ async def test_validates_pending_status() -> None:
 async def test_requires_single_source_unit_for_first_patch() -> None:
     with pytest.raises(ValueError, match="exactly one source_unit_ref"):
         await _execute(_command(source_unit_refs=("unit-1", "unit-2")))
+
+
+@pytest.mark.asyncio
+async def test_executes_with_truthful_split_payload_without_stale_handler_status() -> (
+    None
+):
+    (
+        result,
+        _,
+        scheduling_repository,
+        split_repository,
+        workflow_unit_of_work,
+    ) = await _execute()
+
+    assert result.parent_source_unit_ref == _parent_ref().value
+    assert len(scheduling_repository.saved_work_items) > 0
+    assert split_repository.loaded_ids == ["work-parent"]
+
+    command = _command()
+    assert command.payload["split_reason"] == "input_size_preflight"
+    assert command.payload["source_split_required"] is True
+    assert command.payload["source_unit_refs"] == (_parent_ref().value,)
+    assert command.payload["affected_work_item_refs"] == ("work-parent",)
+    assert ("split_handler_" + "status") not in command.payload
+    assert ("BLOCKED_" + "NOT_IMPLEMENTED") not in str(command.payload)
+
+    completed_event = workflow_unit_of_work.outbox.events[0]
+    assert (
+        completed_event.event_type
+        == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_COMPLETED.value
+    )
 
 
 @pytest.mark.asyncio

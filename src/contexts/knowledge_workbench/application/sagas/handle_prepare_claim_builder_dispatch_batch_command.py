@@ -486,7 +486,7 @@ def _source_split_payload(
             "input_size_preflight_reason",
         ),
         "source_split_required": True,
-        "split_handler_status": "BLOCKED_NOT_IMPLEMENTED",
+        "split_reason": "input_size_preflight",
     }
 
 

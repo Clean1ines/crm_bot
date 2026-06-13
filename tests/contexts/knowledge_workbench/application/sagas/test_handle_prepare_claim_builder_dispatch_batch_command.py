@@ -8,6 +8,7 @@ import pytest
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     HandlePrepareClaimBuilderDispatchBatchCommand,
     HandlePrepareClaimBuilderDispatchBatchCommandHandler,
+    HandlePrepareClaimBuilderDispatchBatchResult,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -198,6 +199,15 @@ class FakeCommandLogRepository:
         self.completed_command_ids.append(command_id)
         return _workflow_command(status=WorkflowCommandStatus.COMPLETED)
 
+    async def list_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+    ) -> tuple[WorkflowCommand, ...]:
+        del workflow_run_id
+        return tuple(self.pending_commands[:limit])
+
 
 @dataclass(slots=True)
 class FakeOutboxRepository:
@@ -334,7 +344,7 @@ async def _execute(
     input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b",
     source_split_required: bool = False,
 ) -> tuple[
-    object,
+    HandlePrepareClaimBuilderDispatchBatchResult,
     FakePrepareLlmDispatchBatch,
     FakeWorkflowRuntimeUnitOfWork,
 ]:
@@ -618,8 +628,19 @@ async def test_source_split_required_emits_split_required_event_and_command() ->
     assert command.payload["input_size_preflight_reason"] == (
         "estimated prompt tokens exceed all automatic fallback input limits"
     )
+    assert event.payload["source_split_required"] is True
+    assert event.payload["source_unit_refs"] == ("unit-1",)
+    assert event.payload["affected_work_item_refs"] == ("work-1",)
+    assert event.payload["split_reason"] == "input_size_preflight"
+    assert ("split_handler_" + "status") not in event.payload
+    assert ("BLOCKED_" + "NOT_IMPLEMENTED") not in str(event.payload)
+
     assert command.payload["source_split_required"] is True
-    assert command.payload["split_handler_status"] == "BLOCKED_NOT_IMPLEMENTED"
+    assert command.payload["source_unit_refs"] == ("unit-1",)
+    assert command.payload["affected_work_item_refs"] == ("work-1",)
+    assert command.payload["split_reason"] == "input_size_preflight"
+    assert ("split_handler_" + "status") not in command.payload
+    assert ("BLOCKED_" + "NOT_IMPLEMENTED") not in str(command.payload)
 
 
 @pytest.mark.asyncio
