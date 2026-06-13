@@ -924,8 +924,8 @@ prompt_id
 prompt_version
 llm_task_id
 llm_attempt_id
-raw_artifact_ref
-parsed_artifact_ref
+provider_raw_output_trace
+validated_prompt_output_trace
 applied_domain_entity_ref
 consolidation/publication step ref
 ```

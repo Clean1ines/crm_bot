@@ -126,12 +126,10 @@ class PostgresValidatedDraftClaimObservationPersistence(
                 llm_attempt_id,
                 prompt_id,
                 prompt_version,
-                raw_artifact_ref,
-                parsed_artifact_ref,
                 claim_index,
                 created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (observation_ref) DO UPDATE SET
                 source_unit_ref = EXCLUDED.source_unit_ref,
                 workflow_run_id = EXCLUDED.workflow_run_id,
@@ -142,8 +140,6 @@ class PostgresValidatedDraftClaimObservationPersistence(
                 llm_attempt_id = EXCLUDED.llm_attempt_id,
                 prompt_id = EXCLUDED.prompt_id,
                 prompt_version = EXCLUDED.prompt_version,
-                raw_artifact_ref = EXCLUDED.raw_artifact_ref,
-                parsed_artifact_ref = EXCLUDED.parsed_artifact_ref,
                 claim_index = EXCLUDED.claim_index,
                 created_at = EXCLUDED.created_at
             """,
@@ -157,8 +153,6 @@ class PostgresValidatedDraftClaimObservationPersistence(
             candidate.dispatch_attempt_id,
             candidate.prompt_id,
             candidate.prompt_version,
-            None,
-            None,
             candidate.claim_index,
             created_at,
         )

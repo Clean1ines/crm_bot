@@ -12,8 +12,6 @@ CREATE TABLE IF NOT EXISTS draft_claim_observation_provenance (
     llm_attempt_id text NOT NULL,
     prompt_id text NOT NULL,
     prompt_version text NOT NULL,
-    raw_artifact_ref text NOT NULL,
-    parsed_artifact_ref text NOT NULL,
     claim_index integer NOT NULL,
     created_at timestamptz NOT NULL,
 
@@ -47,12 +45,6 @@ CREATE TABLE IF NOT EXISTS draft_claim_observation_provenance (
     CONSTRAINT chk_draft_claim_observation_provenance_prompt_version_non_empty
         CHECK (length(trim(prompt_version)) > 0),
 
-    CONSTRAINT chk_draft_claim_observation_provenance_raw_artifact_ref_non_empty
-        CHECK (length(trim(raw_artifact_ref)) > 0),
-
-    CONSTRAINT chk_draft_claim_observation_provenance_parsed_artifact_ref_non_empty
-        CHECK (length(trim(parsed_artifact_ref)) > 0),
-
     CONSTRAINT chk_draft_claim_observation_provenance_claim_index_non_negative
         CHECK (claim_index >= 0)
 );
@@ -68,6 +60,3 @@ CREATE INDEX IF NOT EXISTS idx_draft_claim_observation_provenance_work_item
 
 CREATE INDEX IF NOT EXISTS idx_draft_claim_observation_provenance_llm_task
     ON draft_claim_observation_provenance (llm_task_id);
-
-CREATE INDEX IF NOT EXISTS idx_draft_claim_observation_provenance_artifacts
-    ON draft_claim_observation_provenance (raw_artifact_ref, parsed_artifact_ref);

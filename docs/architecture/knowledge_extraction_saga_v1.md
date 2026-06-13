@@ -521,7 +521,7 @@ Prompt A work item:
   workflow_run_id + stage_run_id + work_item_id + work_item_attempt_id + llm_attempt_id + parsed
 
 draft observation:
-  parsed_artifact_ref + claim_index
+  validated_prompt_output_trace + claim_index
 
 draft embedding:
   draft_observation_ref + embedding_model_id + embedding_contract_version

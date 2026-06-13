@@ -1,0 +1,532 @@
+== pytest ==
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0
+rootdir: /home/haku/crm_bot
+configfile: pytest.ini
+plugins: langsmith-0.8.0, anyio-4.12.1, cov-7.1.0, asyncio-1.3.0, env-1.6.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 18 items
+
+tests/contexts/knowledge_workbench/extraction/infrastructure/postgres/test_postgres_validated_draft_claim_observation_persistence.py . [  5%]
+....                                                                     [ 27%]
+tests/architecture/test_new_contexts_persistence_migrations.py ......... [ 77%]
+....                                                                     [100%]
+
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.3-final-0 ________________
+
+Name                                                                                                                            Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+src/__init__.py                                                                                                                     0      0   100%
+src/application/ports/logger_port.py                                                                                               13      5    62%   44, 52, 60, 68, 76
+src/contexts/__init__.py                                                                                                            0      0   100%
+src/contexts/capacity_runtime/__init__.py                                                                                           0      0   100%
+src/contexts/capacity_runtime/application/__init__.py                                                                               0      0   100%
+src/contexts/capacity_runtime/application/ports/__init__.py                                                                         0      0   100%
+src/contexts/capacity_runtime/application/ports/llm_attempt_capacity_observation_repository_port.py                                93     93     0%   1-211
+src/contexts/capacity_runtime/domain/__init__.py                                                                                    3      3     0%   1-13
+src/contexts/capacity_runtime/domain/capacity_decision.py                                                                         125    125     0%   1-169
+src/contexts/capacity_runtime/domain/capacity_policy.py                                                                            24     24     0%   1-62
+src/contexts/conversation_runtime/__init__.py                                                                                       0      0   100%
+src/contexts/conversation_runtime/application/__init__.py                                                                           0      0   100%
+src/contexts/conversation_runtime/domain/__init__.py                                                                                0      0   100%
+src/contexts/conversation_runtime/infrastructure/__init__.py                                                                        0      0   100%
+src/contexts/conversation_runtime/interfaces/__init__.py                                                                            0      0   100%
+src/contexts/embedding_runtime/__init__.py                                                                                          0      0   100%
+src/contexts/embedding_runtime/domain/__init__.py                                                                                   0      0   100%
+src/contexts/embedding_runtime/domain/entities/__init__.py                                                                          0      0   100%
+src/contexts/embedding_runtime/domain/entities/embedding_task.py                                                                   21     21     0%   1-46
+src/contexts/embedding_runtime/domain/entities/embedding_vector.py                                                                 20     20     0%   1-33
+src/contexts/embedding_runtime/domain/state_machines/__init__.py                                                                    0      0   100%
+src/contexts/embedding_runtime/domain/state_machines/embedding_task_state_machine.py                                               38     38     0%   1-87
+src/contexts/embedding_runtime/domain/value_objects/__init__.py                                                                     0      0   100%
+src/contexts/embedding_runtime/domain/value_objects/embedding_dimensions.py                                                         8      8     0%   1-12
+src/contexts/embedding_runtime/domain/value_objects/embedding_input_ref.py                                                          8      8     0%   1-12
+src/contexts/embedding_runtime/domain/value_objects/embedding_model_id.py                                                           8      8     0%   1-12
+src/contexts/embedding_runtime/domain/value_objects/embedding_task_status.py                                                       11     11     0%   1-15
+src/contexts/embedding_runtime/domain/value_objects/embedding_vector_ref.py                                                         8      8     0%   1-12
+src/contexts/execution_runtime/__init__.py                                                                                          0      0   100%
+src/contexts/execution_runtime/application/__init__.py                                                                              0      0   100%
+src/contexts/execution_runtime/application/ports/__init__.py                                                                        3      3     0%   1-4
+src/contexts/execution_runtime/application/ports/work_item_attempt_dispatch_read_repository_port.py                                39     39     0%   1-60
+src/contexts/execution_runtime/application/ports/work_item_attempt_dispatch_repository_port.py                                     43     43     0%   1-62
+src/contexts/execution_runtime/application/ports/work_item_attempt_outcome_repository_port.py                                      64     64     0%   1-99
+src/contexts/execution_runtime/application/ports/work_item_lease_repository_port.py                                                33     33     0%   1-49
+src/contexts/execution_runtime/application/ports/work_item_progress_read_repository_port.py                                        56     56     0%   1-129
+src/contexts/execution_runtime/application/ports/work_item_scheduling_repository_port.py                                            8      8     0%   1-18
+src/contexts/execution_runtime/application/ports/work_item_split_supersede_repository_port.py                                       4      4     0%   1-8
+src/contexts/execution_runtime/application/ports/work_item_unit_of_work_port.py                                                    12     12     0%   1-50
+src/contexts/execution_runtime/application/use_cases/__init__.py                                                                    2      2     0%   1-11
+src/contexts/execution_runtime/application/use_cases/cancel_work_item.py                                                           35     35     0%   1-62
+src/contexts/execution_runtime/application/use_cases/complete_work_item.py                                                         32     32     0%   1-55
+src/contexts/execution_runtime/application/use_cases/defer_work_item.py                                                            37     37     0%   1-66
+src/contexts/execution_runtime/application/use_cases/ensure_work_items_scheduled.py                                                98     98     0%   1-174
+src/contexts/execution_runtime/application/use_cases/fail_work_item.py                                                             51     51     0%   1-90
+src/contexts/execution_runtime/application/use_cases/lease_admitted_work_items.py                                                  85     85     0%   1-139
+src/contexts/execution_runtime/application/use_cases/lease_due_work_item.py                                                        42     42     0%   1-72
+src/contexts/execution_runtime/application/use_cases/lease_work_item.py                                                            46     46     0%   1-86
+src/contexts/execution_runtime/application/use_cases/reclaim_expired_leases.py                                                     47     47     0%   1-98
+src/contexts/execution_runtime/application/use_cases/record_work_item_attempt_outcome.py                                           26     26     0%   1-51
+src/contexts/execution_runtime/application/use_cases/supersede_waiting_work_items_for_split.py                                     37     37     0%   1-76
+src/contexts/execution_runtime/domain/__init__.py                                                                                  10     10     0%   1-18
+src/contexts/execution_runtime/domain/entities/__init__.py                                                                          0      0   100%
+src/contexts/execution_runtime/domain/entities/work_item.py                                                                        52     52     0%   1-77
+src/contexts/execution_runtime/domain/entities/work_item_attempt.py                                                                26     26     0%   1-32
+src/contexts/execution_runtime/domain/events/__init__.py                                                                            0      0   100%
+src/contexts/execution_runtime/domain/events/work_item_events.py                                                                   56     56     0%   1-83
+src/contexts/execution_runtime/domain/state_machines/__init__.py                                                                    0      0   100%
+src/contexts/execution_runtime/domain/state_machines/work_item_state_machine.py                                                    94     94     0%   1-280
+src/contexts/execution_runtime/domain/value_objects/__init__.py                                                                     0      0   100%
+src/contexts/execution_runtime/domain/value_objects/lease_token.py                                                                 12     12     0%   1-19
+src/contexts/execution_runtime/domain/value_objects/retry_policy.py                                                                21     21     0%   1-31
+src/contexts/execution_runtime/domain/value_objects/wait_until.py                                                                  14     14     0%   1-21
+src/contexts/execution_runtime/domain/value_objects/work_item_status.py                                                            18     18     0%   1-35
+src/contexts/execution_runtime/domain/value_objects/work_kind.py                                                                   13     13     0%   1-23
+src/contexts/execution_runtime/domain/value_objects/worker_ref.py                                                                   8      8     0%   1-14
+src/contexts/execution_runtime/infrastructure/__init__.py                                                                           0      0   100%
+src/contexts/execution_runtime/interfaces/__init__.py                                                                               0      0   100%
+src/contexts/knowledge_workbench/__init__.py                                                                                        0      0   100%
+src/contexts/knowledge_workbench/application/__init__.py                                                                            0      0   100%
+src/contexts/knowledge_workbench/application/sagas/__init__.py                                                                     16     16     0%   1-97
+src/contexts/knowledge_workbench/application/sagas/advance_to_claim_builder_work_scheduling_phase.py                               65     65     0%   1-176
+src/contexts/knowledge_workbench/application/sagas/apply_source_ingestion_workflow_effects.py                                      91     91     0%   1-346
+src/contexts/knowledge_workbench/application/sagas/create_source_units_for_ingestion.py                                           139    139     0%   1-423
+src/contexts/knowledge_workbench/application/sagas/dispatch_knowledge_extraction_workflow_command.py                               86     86     0%   1-336
+src/contexts/knowledge_workbench/application/sagas/drain_knowledge_extraction_workflow_commands.py                                 65     65     0%   1-174
+src/contexts/knowledge_workbench/application/sagas/handle_execute_claim_builder_section_command.py                                437    437     0%   1-1251
+src/contexts/knowledge_workbench/application/sagas/handle_prepare_claim_builder_dispatch_batch_command.py                         227    227     0%   1-835
+src/contexts/knowledge_workbench/application/sagas/handle_reconcile_claim_builder_progress_command.py                             168    168     0%   1-559
+src/contexts/knowledge_workbench/application/sagas/handle_schedule_claim_builder_section_work_command.py                           95     95     0%   1-377
+src/contexts/knowledge_workbench/application/sagas/handle_split_claim_builder_source_unit_command.py                              152    152     0%   1-550
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_checkpoints.py                                             20     20     0%   1-35
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_command_handler_map.py                                     20     20     0%   1-70
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_saga.py                                                    67     67     0%   1-165
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_saga_ports.py                                              55     55     0%   1-118
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_saga_reconcile_unit_of_work.py                              6      6     0%   1-19
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_saga_source_checkpoint_reconciliation.py                   19     19     0%   1-103
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_saga_state.py                                             109    109     0%   1-153
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_source_phase_reconciliation.py                             58     58     0%   1-110
+src/contexts/knowledge_workbench/application/sagas/knowledge_extraction_workflow_definition.py                                    137    137     0%   1-623
+src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py                        38     38     0%   1-113
+src/contexts/knowledge_workbench/application/sagas/persist_accepted_source_ingestion_plan.py                                       58     58     0%   1-203
+src/contexts/knowledge_workbench/application/sagas/plan_claim_builder_section_work.py                                              81     81     0%   1-149
+src/contexts/knowledge_workbench/application/sagas/run_source_ingestion_first_phase.py                                            106    106     0%   1-234
+src/contexts/knowledge_workbench/application/sagas/schedule_claim_builder_section_work.py                                          88     88     0%   1-189
+src/contexts/knowledge_workbench/application/sagas/source_ingestion_admission.py                                                   59     59     0%   1-139
+src/contexts/knowledge_workbench/application/sagas/source_ingestion_segmentation_profiles.py                                       52     52     0%   1-81
+src/contexts/knowledge_workbench/application/sagas/source_ingestion_token_estimation.py                                            61     61     0%   1-107
+src/contexts/knowledge_workbench/application/sagas/source_ingestion_workflow_effects.py                                           121    121     0%   1-246
+src/contexts/knowledge_workbench/application/sagas/start_source_ingestion_workflow.py                                             101    101     0%   1-178
+src/contexts/knowledge_workbench/consolidation/__init__.py                                                                          0      0   100%
+src/contexts/knowledge_workbench/consolidation/application/__init__.py                                                              0      0   100%
+src/contexts/knowledge_workbench/consolidation/application/policies/__init__.py                                                     0      0   100%
+src/contexts/knowledge_workbench/consolidation/application/policies/cluster_sizing_policy.py                                       23     23     0%   1-64
+src/contexts/knowledge_workbench/consolidation/domain/__init__.py                                                                   0      0   100%
+src/contexts/knowledge_workbench/consolidation/domain/clustering/__init__.py                                                        0      0   100%
+src/contexts/knowledge_workbench/consolidation/domain/clustering/entities/__init__.py                                               0      0   100%
+src/contexts/knowledge_workbench/consolidation/domain/clustering/entities/draft_claim_cluster.py                                   17     17     0%   1-26
+src/contexts/knowledge_workbench/consolidation/domain/clustering/entities/draft_claim_subcluster.py                                19     19     0%   1-30
+src/contexts/knowledge_workbench/consolidation/domain/clustering/value_objects/__init__.py                                          0      0   100%
+src/contexts/knowledge_workbench/consolidation/domain/clustering/value_objects/cluster_member_ref.py                                6      6     0%   1-12
+src/contexts/knowledge_workbench/consolidation/domain/clustering/value_objects/cluster_ref.py                                       8      8     0%   1-12
+src/contexts/knowledge_workbench/consolidation/domain/clustering/value_objects/subcluster_ref.py                                    8      8     0%   1-12
+src/contexts/knowledge_workbench/consolidation/domain/entities/__init__.py                                                          0      0   100%
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/__init__.py                                                          0      0   100%
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/entities/__init__.py                                                 0      0   100%
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/entities/consolidated_surface.py                                    30     30     0%   1-53
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/value_objects/__init__.py                                            0      0   100%
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/value_objects/canonical_intent.py                                    8      8     0%   1-12
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/value_objects/consolidated_surface_ref.py                            8      8     0%   1-12
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/value_objects/ontology_tag.py                                        8      8     0%   1-12
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/value_objects/surface_evidence_ref.py                                8      8     0%   1-12
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/value_objects/surface_kind.py                                       17     17     0%   1-20
+src/contexts/knowledge_workbench/consolidation/domain/surfaces/value_objects/surface_relation.py                                   10     10     0%   1-17
+src/contexts/knowledge_workbench/consolidation/domain/value_objects/__init__.py                                                     0      0   100%
+src/contexts/knowledge_workbench/document_segmentation/__init__.py                                                                  0      0   100%
+src/contexts/knowledge_workbench/document_segmentation/domain/__init__.py                                                           4      4     0%   1-19
+src/contexts/knowledge_workbench/document_segmentation/domain/document_segment.py                                                  38     38     0%   1-43
+src/contexts/knowledge_workbench/document_segmentation/domain/markdown_segmentation_policy.py                                     200    200     0%   1-447
+src/contexts/knowledge_workbench/document_segmentation/domain/segmentation_budget.py                                               58     58     0%   1-90
+src/contexts/knowledge_workbench/domain/__init__.py                                                                                 0      0   100%
+src/contexts/knowledge_workbench/extraction/__init__.py                                                                             0      0   100%
+src/contexts/knowledge_workbench/extraction/application/__init__.py                                                                 0      0   100%
+src/contexts/knowledge_workbench/extraction/application/policies/__init__.py                                                        0      0   100%
+src/contexts/knowledge_workbench/extraction/application/policies/claim_builder_attempt_decision_policy.py                         119    119     0%   1-276
+src/contexts/knowledge_workbench/extraction/application/policies/claim_builder_attempt_next_action_policy.py                       90     90     0%   1-191
+src/contexts/knowledge_workbench/extraction/application/policies/claim_builder_output_validation_policy.py                        180    180     0%   1-349
+src/contexts/knowledge_workbench/extraction/application/policies/claim_builder_section_extraction_prompt_contract.py               68     68     0%   1-126
+src/contexts/knowledge_workbench/extraction/application/policies/draft_claim_embedding_input_builder.py                            25     25     0%   1-55
+src/contexts/knowledge_workbench/extraction/application/policies/draft_claim_observation_cleanup_policy.py                         55     55     0%   1-109
+src/contexts/knowledge_workbench/extraction/application/policies/empty_draft_claims_confirmation_policy.py                         26     26     0%   1-45
+src/contexts/knowledge_workbench/extraction/application/policies/prompt_fit_policy.py                                              51     51     0%   1-73
+src/contexts/knowledge_workbench/extraction/application/ports/__init__.py                                                           0      0   100%
+src/contexts/knowledge_workbench/extraction/application/ports/claim_builder_retry_action_read_repository_port.py                   66     66     0%   1-120
+src/contexts/knowledge_workbench/extraction/application/ports/draft_claim_observation_application_unit_of_work_port.py              8      8     0%   1-37
+src/contexts/knowledge_workbench/extraction/application/ports/draft_claim_observation_repository_port.py                            6      6     0%   1-16
+src/contexts/knowledge_workbench/extraction/application/ports/validated_draft_claim_observation_persistence_port.py                69     10    86%   42, 44, 48, 50, 55, 57, 71, 73, 85, 87
+src/contexts/knowledge_workbench/extraction/application/process_managers/__init__.py                                                0      0   100%
+src/contexts/knowledge_workbench/extraction/application/use_cases/__init__.py                                                       0      0   100%
+src/contexts/knowledge_workbench/extraction/application/use_cases/cancel_claim_extraction_stage.py                                 86     86     0%   1-169
+src/contexts/knowledge_workbench/extraction/application/use_cases/create_extraction_work_items.py                                  24     24     0%   1-51
+src/contexts/knowledge_workbench/extraction/application/use_cases/run_claim_extraction_stage.py                                   107    107     0%   1-236
+src/contexts/knowledge_workbench/extraction/domain/__init__.py                                                                      0      0   100%
+src/contexts/knowledge_workbench/extraction/domain/entities/__init__.py                                                             0      0   100%
+src/contexts/knowledge_workbench/extraction/domain/entities/draft_claim_observation.py                                             23     23     0%   1-42
+src/contexts/knowledge_workbench/extraction/domain/events/__init__.py                                                               0      0   100%
+src/contexts/knowledge_workbench/extraction/domain/value_objects/__init__.py                                                        0      0   100%
+src/contexts/knowledge_workbench/extraction/domain/value_objects/draft_claim_granularity.py                                         5      0   100%
+src/contexts/knowledge_workbench/extraction/domain/value_objects/draft_claim_observation_ref.py                                     8      8     0%   1-12
+src/contexts/knowledge_workbench/extraction/domain/value_objects/draft_claim_text.py                                                8      8     0%   1-12
+src/contexts/knowledge_workbench/extraction/domain/value_objects/evidence_block.py                                                  8      8     0%   1-12
+src/contexts/knowledge_workbench/extraction/domain/value_objects/exclusion_scope.py                                                 8      8     0%   1-12
+src/contexts/knowledge_workbench/extraction/domain/value_objects/possible_question.py                                               8      8     0%   1-12
+src/contexts/knowledge_workbench/extraction/infrastructure/postgres/__init__.py                                                     0      0   100%
+src/contexts/knowledge_workbench/extraction/infrastructure/postgres/postgres_validated_draft_claim_observation_persistence.py      32      2    94%   38, 45
+src/contexts/knowledge_workbench/infrastructure/__init__.py                                                                         0      0   100%
+src/contexts/knowledge_workbench/interfaces/__init__.py                                                                             0      0   100%
+src/contexts/knowledge_workbench/publication/__init__.py                                                                            0      0   100%
+src/contexts/knowledge_workbench/publication/domain/__init__.py                                                                     0      0   100%
+src/contexts/knowledge_workbench/publication/domain/entities/__init__.py                                                            0      0   100%
+src/contexts/knowledge_workbench/publication/domain/entities/knowledge_surface.py                                                  19     19     0%   1-28
+src/contexts/knowledge_workbench/publication/domain/entities/publication_run.py                                                    23     23     0%   1-37
+src/contexts/knowledge_workbench/publication/domain/value_objects/__init__.py                                                       0      0   100%
+src/contexts/knowledge_workbench/publication/domain/value_objects/knowledge_surface_ref.py                                          8      8     0%   1-12
+src/contexts/knowledge_workbench/publication/domain/value_objects/publication_run_ref.py                                            8      8     0%   1-12
+src/contexts/knowledge_workbench/publication/domain/value_objects/publication_status.py                                            11     11     0%   1-15
+src/contexts/knowledge_workbench/source_management/__init__.py                                                                      0      0   100%
+src/contexts/knowledge_workbench/source_management/application/__init__.py                                                          0      0   100%
+src/contexts/knowledge_workbench/source_management/application/policies/__init__.py                                                 0      0   100%
+src/contexts/knowledge_workbench/source_management/application/policies/source_unit_split_policy.py                                58     58     0%   1-133
+src/contexts/knowledge_workbench/source_management/application/ports/__init__.py                                                    0      0   100%
+src/contexts/knowledge_workbench/source_management/application/ports/source_management_repository_port.py                           7      7     0%   1-19
+src/contexts/knowledge_workbench/source_management/application/ports/source_parser_port.py                                          5      5     0%   1-13
+src/contexts/knowledge_workbench/source_management/application/use_cases/__init__.py                                                0      0   100%
+src/contexts/knowledge_workbench/source_management/domain/__init__.py                                                               0      0   100%
+src/contexts/knowledge_workbench/source_management/domain/entities/__init__.py                                                      0      0   100%
+src/contexts/knowledge_workbench/source_management/domain/entities/source_document.py                                              22     22     0%   1-31
+src/contexts/knowledge_workbench/source_management/domain/entities/source_unit.py                                                  24     24     0%   1-41
+src/contexts/knowledge_workbench/source_management/domain/events/__init__.py                                                        0      0   100%
+src/contexts/knowledge_workbench/source_management/domain/events/source_events.py                                                  36     36     0%   1-57
+src/contexts/knowledge_workbench/source_management/domain/value_objects/__init__.py                                                 0      0   100%
+src/contexts/knowledge_workbench/source_management/domain/value_objects/heading_path.py                                            11     11     0%   1-15
+src/contexts/knowledge_workbench/source_management/domain/value_objects/source_document_ref.py                                      8      8     0%   1-12
+src/contexts/knowledge_workbench/source_management/domain/value_objects/source_format.py                                            8      8     0%   1-11
+src/contexts/knowledge_workbench/source_management/domain/value_objects/source_unit_kind.py                                        11     11     0%   1-14
+src/contexts/knowledge_workbench/source_management/domain/value_objects/source_unit_lineage.py                                     11     11     0%   1-20
+src/contexts/knowledge_workbench/source_management/domain/value_objects/source_unit_ref.py                                          8      8     0%   1-12
+src/contexts/knowledge_workbench/source_management/domain/value_objects/source_unit_text.py                                         8      8     0%   1-12
+src/contexts/knowledge_workbench/source_management/domain/value_objects/split_reason.py                                             8      8     0%   1-11
+src/contexts/knowledge_workbench/source_management/infrastructure/__init__.py                                                       0      0   100%
+src/contexts/knowledge_workbench/source_management/infrastructure/parsers/__init__.py                                               0      0   100%
+src/contexts/knowledge_workbench/source_management/infrastructure/parsers/markdown_source_parser.py                                48     48     0%   1-141
+src/contexts/llm_runtime/__init__.py                                                                                                0      0   100%
+src/contexts/llm_runtime/application/__init__.py                                                                                    0      0   100%
+src/contexts/llm_runtime/application/capacity/__init__.py                                                                           0      0   100%
+src/contexts/llm_runtime/application/capacity/project_llm_capacity_to_capacity_runtime.py                                         108    108     0%   1-206
+src/contexts/llm_runtime/application/capacity/resolve_llm_dispatch_input_size_preflight.py                                         51     51     0%   1-107
+src/contexts/llm_runtime/application/capacity/resolve_llm_dispatch_preparation_strategy.py                                         56     56     0%   1-138
+src/contexts/llm_runtime/application/capacity/select_active_llm_model_capacity.py                                                  56     56     0%   1-103
+src/contexts/llm_runtime/application/policies/__init__.py                                                                           0      0   100%
+src/contexts/llm_runtime/application/policies/llm_error_policy.py                                                                  38     38     0%   1-85
+src/contexts/llm_runtime/application/policies/llm_execution_recording_policy.py                                                    50     50     0%   1-133
+src/contexts/llm_runtime/application/policies/llm_json_output_validation_policy.py                                                 44     44     0%   1-93
+src/contexts/llm_runtime/application/policies/llm_quota_availability_policy.py                                                     67     67     0%   1-157
+src/contexts/llm_runtime/application/policies/llm_route_candidate_builder.py                                                       33     33     0%   1-74
+src/contexts/llm_runtime/application/policies/llm_route_candidate_preparation_policy.py                                            22     22     0%   1-61
+src/contexts/llm_runtime/application/policies/llm_route_planning_policy.py                                                        125    125     0%   1-351
+src/contexts/llm_runtime/application/ports/__init__.py                                                                              0      0   100%
+src/contexts/llm_runtime/application/ports/llm_dispatch_executor_port.py                                                           77     77     0%   1-133
+src/contexts/llm_runtime/application/ports/llm_output_validation_port.py                                                           21     21     0%   1-39
+src/contexts/llm_runtime/application/ports/llm_provider_input.py                                                                   21     21     0%   1-30
+src/contexts/llm_runtime/application/ports/llm_provider_port.py                                                                    24     24     0%   1-37
+src/contexts/llm_runtime/application/ports/llm_task_unit_of_work_port.py                                                           12     12     0%   1-40
+src/contexts/llm_runtime/application/results/__init__.py                                                                            2      2     0%   1-6
+src/contexts/llm_runtime/application/results/execute_llm_task_result.py                                                            48     48     0%   1-62
+src/contexts/llm_runtime/application/use_cases/__init__.py                                                                          0      0   100%
+src/contexts/llm_runtime/application/use_cases/execute_and_record_llm_task.py                                                      47     47     0%   1-101
+src/contexts/llm_runtime/application/use_cases/execute_llm_task.py                                                                 77     77     0%   1-272
+src/contexts/llm_runtime/application/use_cases/record_llm_task_execution.py                                                        24     24     0%   1-44
+src/contexts/llm_runtime/domain/__init__.py                                                                                        24     24     0%   1-45
+src/contexts/llm_runtime/domain/capacity/__init__.py                                                                                0      0   100%
+src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py                                                               119    119     0%   1-263
+src/contexts/llm_runtime/domain/capacity/llm_provider_account_capacity.py                                                          30     30     0%   1-50
+src/contexts/llm_runtime/domain/capacity/llm_task_capacity_profile.py                                                              30     30     0%   1-37
+src/contexts/llm_runtime/domain/entities/__init__.py                                                                                0      0   100%
+src/contexts/llm_runtime/domain/entities/llm_attempt.py                                                                            30     30     0%   1-35
+src/contexts/llm_runtime/domain/entities/llm_task.py                                                                               39     39     0%   1-50
+src/contexts/llm_runtime/domain/entities/model_profile.py                                                                          34     34     0%   1-46
+src/contexts/llm_runtime/domain/entities/provider_account.py                                                                       17     17     0%   1-27
+src/contexts/llm_runtime/domain/events/__init__.py                                                                                  0      0   100%
+src/contexts/llm_runtime/domain/events/llm_task_events.py                                                                          29     29     0%   1-44
+src/contexts/llm_runtime/domain/state_machines/__init__.py                                                                          0      0   100%
+src/contexts/llm_runtime/domain/state_machines/llm_task_state_machine.py                                                           41     41     0%   1-100
+src/contexts/llm_runtime/domain/value_objects/__init__.py                                                                           0      0   100%
+src/contexts/llm_runtime/domain/value_objects/input_ref.py                                                                          8      8     0%   1-14
+src/contexts/llm_runtime/domain/value_objects/llm_error_kind.py                                                                    13     13     0%   1-16
+src/contexts/llm_runtime/domain/value_objects/llm_route.py                                                                         10     10     0%   1-16
+src/contexts/llm_runtime/domain/value_objects/llm_task_status.py                                                                   13     13     0%   1-17
+src/contexts/llm_runtime/domain/value_objects/model_id.py                                                                          11     11     0%   1-15
+src/contexts/llm_runtime/domain/value_objects/model_lifecycle.py                                                                    6      6     0%   1-9
+src/contexts/llm_runtime/domain/value_objects/output_contract_ref.py                                                                8      8     0%   1-12
+src/contexts/llm_runtime/domain/value_objects/prompt_version.py                                                                     8      8     0%   1-12
+src/contexts/llm_runtime/domain/value_objects/provider_account_ref.py                                                               8      8     0%   1-12
+src/contexts/llm_runtime/domain/value_objects/provider_account_status.py                                                            5      5     0%   1-8
+src/contexts/llm_runtime/domain/value_objects/provider_id.py                                                                       13     13     0%   1-17
+src/contexts/llm_runtime/domain/value_objects/quota_decision.py                                                                    28     28     0%   1-39
+src/contexts/llm_runtime/domain/value_objects/rate_limit_profile.py                                                                14     14     0%   1-25
+src/contexts/llm_runtime/domain/value_objects/reasoning_effort.py                                                                   8      8     0%   1-11
+src/contexts/llm_runtime/domain/value_objects/reasoning_profile.py                                                                 25     25     0%   1-61
+src/contexts/llm_runtime/domain/value_objects/token_price.py                                                                       15     15     0%   1-20
+src/contexts/llm_runtime/domain/value_objects/token_usage.py                                                                       14     14     0%   1-19
+src/contexts/llm_runtime/domain/value_objects/validation_result.py                                                                 20     20     0%   1-26
+src/contexts/llm_runtime/infrastructure/__init__.py                                                                                 0      0   100%
+src/contexts/llm_runtime/infrastructure/config/__init__.py                                                                          0      0   100%
+src/contexts/llm_runtime/infrastructure/config/llm_runtime_provider_composition.py                                                 16     16     0%   1-45
+src/contexts/llm_runtime/infrastructure/config/llm_runtime_settings.py                                                             38     38     0%   1-105
+src/contexts/llm_runtime/infrastructure/providers/__init__.py                                                                       0      0   100%
+src/contexts/llm_runtime/infrastructure/providers/groq/__init__.py                                                                  0      0   100%
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_chat_request_builder.py                                                77     77     0%   1-145
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_dispatch_executor.py                                                  125    125     0%   1-315
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_env_config.py                                                          40     40     0%   1-88
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_http_provider_composition.py                                           20     20     0%   1-46
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_http_transport.py                                                      37     37     0%   1-98
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_httpx_client.py                                                        26     26     0%   1-63
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_model_catalog_seed.py                                                  27     27     0%   1-186
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_provider_adapter.py                                                    44     44     0%   1-111
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_provider_composition.py                                                29     29     0%   1-56
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_provider_response_mapper.py                                            88     88     0%   1-188
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_rate_limit_headers_mapper.py                                           48     48     0%   1-114
+src/contexts/llm_runtime/infrastructure/providers/groq/groq_transport_port.py                                                      14     14     0%   1-23
+src/contexts/llm_runtime/interfaces/__init__.py                                                                                     0      0   100%
+src/domain/__init__.py                                                                                                              0      0   100%
+src/domain/commercial/__init__.py                                                                                                   0      0   100%
+src/domain/commercial/commercial_truth.py                                                                                         245    245     0%   1-479
+src/domain/commercial/price_acquisition.py                                                                                        235    235     0%   1-326
+src/domain/commercial/price_knowledge.py                                                                                          257    257     0%   1-372
+src/domain/commercial/price_query.py                                                                                               43     43     0%   1-69
+src/domain/commercial/pricing.py                                                                                                   94     94     0%   1-146
+src/domain/control_plane/__init__.py                                                                                                0      0   100%
+src/domain/control_plane/memberships.py                                                                                             8      8     0%   3-16
+src/domain/control_plane/project_configuration.py                                                                                 110     50    55%   23, 37-47, 63, 77-87, 102-107, 118-127, 142, 165, 176, 191-199, 207-213, 217, 221-237, 241-244
+src/domain/control_plane/project_views.py                                                                                         128     41    68%   9, 13, 17-33, 37-41, 58, 73, 100, 115, 123, 151, 160-162, 176, 203, 215-225, 241, 253-263, 274
+src/domain/control_plane/roles.py                                                                                                  14     14     0%   3-30
+src/domain/display_names.py                                                                                                        21     15    29%   8-13, 20-30, 34-37, 49
+src/domain/identity/__init__.py                                                                                                     0      0   100%
+src/domain/identity/auth_providers.py                                                                                              11      0   100%
+src/domain/identity/user_views.py                                                                                                  85     35    59%   5, 9-21, 25-31, 46-48, 60, 80-87, 98-105, 114, 123, 132, 140
+src/domain/project_plane/__init__.py                                                                                                0      0   100%
+src/domain/project_plane/client_views.py                                                                                           56     56     0%   1-103
+src/domain/project_plane/event_views.py                                                                                            40     40     0%   1-60
+src/domain/project_plane/json_types.py                                                                                             23     16    30%   11-20, 24-34
+src/domain/project_plane/knowledge_document_lifecycle.py                                                                          149    149     0%   1-483
+src/domain/project_plane/knowledge_entry_kind.py                                                                                   22     22     0%   1-47
+src/domain/project_plane/knowledge_import_quality.py                                                                              150    150     0%   1-356
+src/domain/project_plane/knowledge_preprocessing.py                                                                                 4      4     0%   1-9
+src/domain/project_plane/knowledge_processing_modes.py                                                                             19     19     0%   1-38
+src/domain/project_plane/knowledge_views.py                                                                                       134    134     0%   1-151
+src/domain/project_plane/llm_routing/__init__.py                                                                                    8      8     0%   1-24
+src/domain/project_plane/llm_routing/invocations.py                                                                                64     64     0%   1-81
+src/domain/project_plane/llm_routing/key_slots.py                                                                                  20     20     0%   1-27
+src/domain/project_plane/llm_routing/limits.py                                                                                     42     42     0%   1-80
+src/domain/project_plane/llm_routing/models.py                                                                                     18     18     0%   1-23
+src/domain/project_plane/llm_routing/providers.py                                                                                  11     11     0%   1-16
+src/domain/project_plane/llm_routing/routes.py                                                                                     43     43     0%   1-65
+src/domain/project_plane/llm_routing/shared.py                                                                                     26     26     0%   1-37
+src/domain/project_plane/manager_assignments.py                                                                                    60     32    47%   39, 43-45, 48-54, 66, 83, 101-130, 149-159
+src/domain/project_plane/manager_notifications.py                                                                                  19     11    42%   34-57
+src/domain/project_plane/manager_reply_history.py                                                                                  41     41     0%   1-64
+src/domain/project_plane/memory_views.py                                                                                           20     20     0%   1-34
+src/domain/project_plane/model_usage_views.py                                                                                      63     63     0%   1-110
+src/domain/project_plane/production_retrieval.py                                                                                   35     35     0%   1-94
+src/domain/project_plane/queue_views.py                                                                                            45     45     0%   1-72
+src/domain/project_plane/rag_eval_retrieval.py                                                                                     26     26     0%   1-68
+src/domain/project_plane/thread_runtime.py                                                                                         49     49     0%   1-79
+src/domain/project_plane/thread_status.py                                                                                           6      0   100%
+src/domain/project_plane/thread_views.py                                                                                          140     45    68%   9-23, 27, 31-33, 37-39, 63-65, 95, 130-132, 140, 156-157, 164, 181, 189, 205, 223, 246, 262, 268, 274-276, 288, 296
+src/domain/runtime/__init__.py                                                                                                      0      0   100%
+src/domain/runtime/commercial_context.py                                                                                           59     59     0%   1-106
+src/domain/runtime/delivery.py                                                                                                     31     31     0%   1-56
+src/domain/runtime/dialog_state.py                                                                                                 51     51     0%   1-94
+src/domain/runtime/escalation.py                                                                                                   28     28     0%   1-57
+src/domain/runtime/evidence.py                                                                                                     77     77     0%   1-122
+src/domain/runtime/evidence_plan.py                                                                                               124    124     0%   1-284
+src/domain/runtime/graph_contract.py                                                                                              107    107     0%   13-334
+src/domain/runtime/intent_extraction.py                                                                                           179    179     0%   1-386
+src/domain/runtime/knowledge_search.py                                                                                             46     46     0%   1-83
+src/domain/runtime/language_policy.py                                                                                              82     82     0%   1-174
+src/domain/runtime/load_state.py                                                                                                   75     75     0%   1-118
+src/domain/runtime/persistence.py                                                                                                 214    214     0%   1-485
+src/domain/runtime/policy/__init__.py                                                                                               3      3     0%   1-4
+src/domain/runtime/policy/decision_engine.py                                                                                       79     79     0%   1-159
+src/domain/runtime/policy/handoff_confirmation.py                                                                                  40     40     0%   1-119
+src/domain/runtime/policy/intent_topic.py                                                                                          49     49     0%   1-109
+src/domain/runtime/policy/lifecycle.py                                                                                              9      9     0%   1-19
+src/domain/runtime/policy/repeat_detection.py                                                                                      75     75     0%   1-162
+src/domain/runtime/policy/result.py                                                                                                44     44     0%   1-85
+src/domain/runtime/policy/transitions.py                                                                                            5      5     0%   1-70
+src/domain/runtime/policy_decision.py                                                                                               2      2     0%   1-3
+src/domain/runtime/project_runtime_profile.py                                                                                      37     37     0%   1-78
+src/domain/runtime/prompting.py                                                                                                    51     51     0%   1-143
+src/domain/runtime/response_generation.py                                                                                          58     58     0%   1-120
+src/domain/runtime/source_authority.py                                                                                             56     56     0%   1-141
+src/domain/runtime/state_contracts.py                                                                                             147    147     0%   1-174
+src/domain/runtime/tool_execution.py                                                                                               25     25     0%   1-49
+src/domain/runtime/value_parsing.py                                                                                                38     38     0%   1-42
+src/infrastructure/__init__.py                                                                                                      0      0   100%
+src/infrastructure/app/__init__.py                                                                                                  0      0   100%
+src/infrastructure/app/resources.py                                                                                                33     33     0%   13-105
+src/infrastructure/commercial_price/__init__.py                                                                                     0      0   100%
+src/infrastructure/commercial_price/markdown_acquisition_adapter.py                                                               216    216     0%   1-643
+src/infrastructure/config/__init__.py                                                                                               0      0   100%
+src/infrastructure/config/settings.py                                                                                             113      8    93%   361-362, 372-378, 384
+src/infrastructure/db/__init__.py                                                                                                   0      0   100%
+src/infrastructure/db/repositories/__init__.py                                                                                     14      2    86%   33, 42
+src/infrastructure/db/repositories/client_repository.py                                                                            73     73     0%   3-220
+src/infrastructure/db/repositories/commercial_price_mappers.py                                                                    110    110     0%   1-253
+src/infrastructure/db/repositories/commercial_price_repository.py                                                                 115    115     0%   1-654
+src/infrastructure/db/repositories/event_repository.py                                                                             48     48     0%   5-269
+src/infrastructure/db/repositories/knowledge_db_codecs.py                                                                         129    129     0%   1-193
+src/infrastructure/db/repositories/knowledge_document_persistence.py                                                               22     22     0%   1-178
+src/infrastructure/db/repositories/knowledge_document_queries.py                                                                   23     23     0%   1-230
+src/infrastructure/db/repositories/knowledge_repository.py                                                                        127    127     0%   9-462
+src/infrastructure/db/repositories/knowledge_search_queries.py                                                                      3      3     0%   6-194
+src/infrastructure/db/repositories/knowledge_search_ranking.py                                                                    221    221     0%   1-548
+src/infrastructure/db/repositories/memory_repository.py                                                                            76     76     0%   7-325
+src/infrastructure/db/repositories/metrics_repository.py                                                                           45     45     0%   6-221
+src/infrastructure/db/repositories/model_usage_repository.py                                                                       50     50     0%   1-234
+src/infrastructure/db/repositories/project/__init__.py                                                                             10      0   100%
+src/infrastructure/db/repositories/project/base.py                                                                                126     77    39%   46-48, 59-60, 63, 66, 69, 72-89, 92, 95, 98, 101, 104-116, 123-134, 142-146, 155-166, 173-177, 183-188, 191-201
+src/infrastructure/db/repositories/project/project_channels.py                                                                      8      3    62%   21-42
+src/infrastructure/db/repositories/project/project_commands.py                                                                     32     24    25%   10-24, 27-32, 35-40, 43-69, 72-84, 87-91
+src/infrastructure/db/repositories/project/project_configuration.py                                                                25     18    28%   14-77, 102-128, 133-157, 162-186
+src/infrastructure/db/repositories/project/project_integrations.py                                                                  7      3    57%   19-41
+src/infrastructure/db/repositories/project/project_members.py                                                                      95     77    19%   19-21, 27-54, 61-111, 123-136, 143-165, 179-213, 219-240, 248-288, 291-303, 313-372, 377-378, 393-394, 406-417
+src/infrastructure/db/repositories/project/project_queries.py                                                                      81     71    12%   17-77, 80-94, 99-117, 120-139, 144-171, 176-187, 195-205
+src/infrastructure/db/repositories/project/project_tokens.py                                                                       80     66    18%   10-32, 35-50, 53, 56-78, 83-98, 101, 104-124, 127-136, 139-159, 164-173, 176-183, 186-194
+src/infrastructure/db/repositories/queue_repository.py                                                                             87     87     0%   8-329
+src/infrastructure/db/repositories/rag_eval_repository.py                                                                         275    275     0%   1-1627
+src/infrastructure/db/repositories/thread/__init__.py                                                                               5      0   100%
+src/infrastructure/db/repositories/thread/lifecycle.py                                                                             60     44    27%   11, 21-53, 56-78, 81-95, 98-102, 113, 116-119, 137-151, 168-171, 186-189
+src/infrastructure/db/repositories/thread/messages.py                                                                              39     29    26%   13, 16-38, 41-54, 67-82, 90-124
+src/infrastructure/db/repositories/thread/read.py                                                                                  66     49    26%   20-30, 35, 40-71, 82-149, 161, 179, 188, 227, 296-308
+src/infrastructure/db/repositories/thread/runtime_state.py                                                                         50     35    30%   17, 20-33, 36-53, 56-69, 79-101, 113-130, 133-148
+src/infrastructure/db/repositories/user_repository.py                                                                             277    231    17%   45, 55, 77-92, 96-99, 111-113, 121-133, 154-155, 179-268, 276-317, 331-343, 354, 366-399, 407-420, 434-448, 460-464, 470-475, 487-501, 507-558, 569-578, 584-595, 601-603, 619-634, 640-651, 657-667, 676-719, 732-771, 774-792, 803-829, 839-862, 870-879, 897-920, 928-951
+src/infrastructure/email/__init__.py                                                                                                0      0   100%
+src/infrastructure/email/sender.py                                                                                                 51     51     0%   3-101
+src/infrastructure/llm/__init__.py                                                                                                  0      0   100%
+src/infrastructure/llm/chunker.py                                                                                                 205    205     0%   1-312
+src/infrastructure/llm/embedding_service.py                                                                                       417    417     0%   10-1161
+src/infrastructure/llm/faq_claim_obs_contract.py                                                                                    8      8     0%   1-25
+src/infrastructure/llm/faq_workbench_claim_observations_generator.py                                                              320    320     0%   1-860
+src/infrastructure/llm/faq_workbench_final_reconciliation_generator.py                                                             92     92     0%   1-242
+src/infrastructure/llm/faq_workbench_registry_merge_generator.py                                                                  155    155     0%   1-338
+src/infrastructure/llm/groq_keyring.py                                                                                            269    269     0%   1-652
+src/infrastructure/llm/groq_llm_json_invocation.py                                                                                171    171     0%   1-370
+src/infrastructure/llm/groq_model_router.py                                                                                       207    207     0%   1-450
+src/infrastructure/llm/groq_quota_state.py                                                                                        199    199     0%   1-441
+src/infrastructure/llm/groq_rate_limit_headers.py                                                                                 119    119     0%   1-164
+src/infrastructure/llm/groq_router.py                                                                                             322    322     0%   1-661
+src/infrastructure/llm/knowledge_preprocessor.py                                                                                    9      9     0%   1-30
+src/infrastructure/llm/model_registry.py                                                                                           89     89     0%   6-174
+src/infrastructure/llm/model_selector.py                                                                                           34     34     0%   5-69
+src/infrastructure/llm/query_expander.py                                                                                           34     34     0%   7-98
+src/infrastructure/llm/rag_contract.py                                                                                             67     67     0%   12-176
+src/infrastructure/llm/rag_service.py                                                                                             117    117     0%   16-269
+src/infrastructure/llm/rate_limit_tracker.py                                                                                       52     52     0%   6-113
+src/infrastructure/llm/workbench_local_claim_embedding_adapter.py                                                                   8      8     0%   1-20
+src/infrastructure/llm/workbench_qwen_json_invocation.py                                                                          202    202     0%   1-453
+src/infrastructure/llm/workbench_retrieval_surface_embedding_adapter.py                                                             8      8     0%   1-20
+src/infrastructure/logging/__init__.py                                                                                              0      0   100%
+src/infrastructure/logging/logger.py                                                                                               93     58    38%   49-50, 54-57, 61-79, 87-89, 94-122, 131-138, 151, 159, 167, 175, 183, 208-236
+src/infrastructure/queue/__init__.py                                                                                                0      0   100%
+src/infrastructure/queue/handlers/__init__.py                                                                                       0      0   100%
+src/infrastructure/queue/handlers/metrics.py                                                                                       41     41     0%   3-88
+src/infrastructure/queue/handlers/notify_manager.py                                                                               113    113     0%   3-339
+src/infrastructure/queue/job_dispatcher.py                                                                                         31     31     0%   3-67
+src/infrastructure/queue/job_exceptions.py                                                                                          6      6     0%   4-22
+src/infrastructure/queue/job_types.py                                                                                               4      4     0%   7-11
+src/infrastructure/queue/retry_policy.py                                                                                           50     50     0%   3-93
+src/infrastructure/queue/runtime.py                                                                                                79     79     0%   3-171
+src/infrastructure/queue/stale_recovery.py                                                                                         16     16     0%   3-36
+src/infrastructure/queue/telegram_sender.py                                                                                        31     31     0%   3-68
+src/infrastructure/queue/worker.py                                                                                                  5      5     0%   3-11
+src/infrastructure/queue/worker_loop.py                                                                                            44     44     0%   3-123
+src/infrastructure/rag_eval/__init__.py                                                                                             0      0   100%
+src/infrastructure/rag_eval/adapters.py                                                                                           199    199     0%   1-531
+src/infrastructure/redis/__init__.py                                                                                                0      0   100%
+src/infrastructure/redis/cache_adapter.py                                                                                          41     41     0%   1-56
+src/infrastructure/redis/client.py                                                                                                 13     13     0%   5-28
+src/infrastructure/redis/lock.py                                                                                                   19     19     0%   7-63
+src/infrastructure/telegram/__init__.py                                                                                             0      0   100%
+src/infrastructure/telegram/http_client.py                                                                                         22     22     0%   3-47
+src/interfaces/__init__.py                                                                                                          0      0   100%
+src/interfaces/composition/__init__.py                                                                                              0      0   100%
+src/interfaces/composition/ai_playground.py                                                                                        60     60     0%   1-113
+src/interfaces/composition/commercial_price_acquisition.py                                                                          6      6     0%   1-23
+src/interfaces/composition/commercial_price_review.py                                                                              28     28     0%   1-74
+src/interfaces/composition/execute_prepared_llm_dispatch_attempt.py                                                                95     95     0%   1-227
+src/interfaces/composition/faq_workbench_cancel.py                                                                                 16     16     0%   1-52
+src/interfaces/composition/faq_workbench_clear.py                                                                                  16     16     0%   1-49
+src/interfaces/composition/faq_workbench_delete.py                                                                                 16     16     0%   1-55
+src/interfaces/composition/faq_workbench_document_cards.py                                                                         16     16     0%   1-280
+src/interfaces/composition/faq_workbench_documents.py                                                                              14     14     0%   1-40
+src/interfaces/composition/faq_workbench_evidence_trace.py                                                                         12     12     0%   1-35
+src/interfaces/composition/faq_workbench_import_quality.py                                                                         12     12     0%   1-35
+src/interfaces/composition/faq_workbench_parallel_processing.py                                                                    86     86     0%   1-316
+src/interfaces/composition/faq_workbench_progress.py                                                                                8      8     0%   1-27
+src/interfaces/composition/faq_workbench_publish_ready.py                                                                          40     40     0%   1-148
+src/interfaces/composition/faq_workbench_surface_curation.py                                                                       11     11     0%   1-27
+src/interfaces/composition/fastapi_lifespan.py                                                                                     79     79     0%   14-189
+src/interfaces/composition/knowledge_extraction_after_upload_composition.py                                                        41     41     0%   1-136
+src/interfaces/composition/knowledge_extraction_saga_reconcile.py                                                                  23     23     0%   1-66
+src/interfaces/composition/knowledge_extraction_workflow_after_upload.py                                                          115    115     0%   1-336
+src/interfaces/composition/knowledge_extraction_workflow_resume.py                                                                154    154     0%   1-432
+src/interfaces/composition/lease_llm_admitted_work_items.py                                                                       114    114     0%   1-213
+src/interfaces/composition/prepare_llm_dispatch_batch.py                                                                          136    136     0%   1-369
+src/interfaces/composition/project_repositories.py                                                                                  7      7     0%   8-24
+src/interfaces/composition/rag_eval_answerer.py                                                                                    16     16     0%   1-48
+src/interfaces/composition/source_ingestion_first_phase.py                                                                        168    168     0%   1-456
+src/interfaces/composition/start_llm_admitted_work_item_attempts.py                                                                76     76     0%   1-137
+src/interfaces/http/__init__.py                                                                                                     0      0   100%
+src/interfaces/http/ai_playground.py                                                                                               56     56     0%   1-139
+src/interfaces/http/app.py                                                                                                         86     86     0%   5-233
+src/interfaces/http/auth.py                                                                                                       150    150     0%   1-338
+src/interfaces/http/bot.py                                                                                                         25     25     0%   1-42
+src/interfaces/http/chat.py                                                                                                        29     29     0%   2-60
+src/interfaces/http/clients.py                                                                                                     15     15     0%   1-51
+src/interfaces/http/dependencies.py                                                                                               136    136     0%   16-472
+src/interfaces/http/knowledge.py                                                                                                  397    397     0%   8-1277
+src/interfaces/http/limits.py                                                                                                      15     15     0%   5-26
+src/interfaces/http/logs.py                                                                                                        61     61     0%   5-94
+src/interfaces/http/metrics.py                                                                                                     23     23     0%   5-56
+src/interfaces/http/projects.py                                                                                                   209    209     0%   1-567
+src/interfaces/http/rag_eval.py                                                                                                    11     11     0%   1-25
+src/interfaces/http/threads.py                                                                                                     66     66     0%   1-217
+src/interfaces/http/webhooks.py                                                                                                    70     70     0%   5-221
+src/interfaces/telegram/__init__.py                                                                                                 0      0   100%
+src/interfaces/telegram/client_bot.py                                                                                              67     67     0%   6-164
+src/interfaces/telegram/manager_bot.py                                                                                             37     37     0%   3-87
+src/interfaces/telegram/platform_admin/__init__.py                                                                                  0      0   100%
+src/interfaces/telegram/platform_admin/handlers.py                                                                                357    357     0%   5-769
+src/interfaces/telegram/platform_admin/keyboards.py                                                                                47     47     0%   5-146
+src/interfaces/telegram/platform_admin/knowledge_upload.py                                                                        151    151     0%   5-357
+src/interfaces/telegram/platform_admin/state.py                                                                                    52     52     0%   9-86
+src/interfaces/telegram/platform_bot.py                                                                                           103    103     0%   6-256
+src/tools/__init__.py                                                                                                              19     19     0%   24-100
+src/tools/builtins.py                                                                                                             259    259     0%   13-1052
+src/tools/http_tool.py                                                                                                            141    141     0%   5-366
+src/tools/registry.py                                                                                                             129    129     0%   5-341
+src/utils/encryption.py                                                                                                            32     24    25%   18-27, 34-38, 46-54
+src/utils/uuid_utils.py                                                                                                             5      3    40%   14-16
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                                                                                                                           23636  22780     4%
+Coverage HTML written to dir htmlcov
+============================= 18 passed in 11.58s ==============================
+
+== grep removed exact markers ==
+OK: removed artifact-ref markers are gone
+
+== ruff/mypy targeted ==
+3 files left unchanged
+All checks passed!
+Success: no issues found in 3 source files

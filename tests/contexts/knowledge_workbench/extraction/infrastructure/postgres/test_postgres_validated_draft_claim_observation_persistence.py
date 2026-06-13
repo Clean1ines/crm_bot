@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 
@@ -133,6 +134,19 @@ async def test_persisted_calls_preserve_workflow_source_work_item_dispatch_model
     assert provenance_args[7] == candidate.dispatch_attempt_id
     assert provenance_args[8] == candidate.prompt_id
     assert provenance_args[9] == candidate.prompt_version
-    assert provenance_args[10] is None
-    assert provenance_args[11] is None
-    assert provenance_args[12] == candidate.claim_index
+    assert provenance_args[10] == candidate.claim_index
+
+
+def test_provenance_schema_and_adapter_do_not_expose_removed_artifact_columns() -> None:
+    removed_columns = ("raw_" + "artifact_ref", "parsed_" + "artifact_ref")
+    schema_text = Path(
+        "migrations/089_create_draft_claim_observation_provenance.sql",
+    ).read_text(encoding="utf-8")
+    adapter_text = Path(
+        "src/contexts/knowledge_workbench/extraction/infrastructure/postgres/"
+        "postgres_validated_draft_claim_observation_persistence.py",
+    ).read_text(encoding="utf-8")
+
+    for column_name in removed_columns:
+        assert column_name not in schema_text
+        assert column_name not in adapter_text

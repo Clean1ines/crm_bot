@@ -47,11 +47,8 @@ EXPECTED_MIGRATIONS = {
         "work_item_attempt_id text NOT NULL",
         "llm_task_id text NOT NULL",
         "llm_attempt_id text NOT NULL",
-        "raw_artifact_ref text NOT NULL",
-        "parsed_artifact_ref text NOT NULL",
         "claim_index integer NOT NULL",
         "idx_draft_claim_observation_provenance_stage",
-        "idx_draft_claim_observation_provenance_artifacts",
     ),
     "090_create_knowledge_extraction_saga_tables.sql": (
         "CREATE TABLE IF NOT EXISTS knowledge_extraction_workflow_runs",
@@ -72,6 +69,12 @@ EXPECTED_MIGRATIONS = {
         "idx_source_documents_content_hash",
         "idx_source_units_document",
         "idx_source_units_document_ordinal",
+    ),
+    "101_drop_draft_claim_observation_artifact_ref_columns.sql": (
+        "ALTER TABLE draft_claim_observation_provenance",
+        "DROP COLUMN IF EXISTS",
+        "quote_ident('raw_' || 'artifact_ref')",
+        "quote_ident('parsed_' || 'artifact_ref')",
     ),
 }
 
@@ -291,8 +294,6 @@ def test_draft_claim_observation_provenance_migration_stays_extraction_trace_onl
         "llm_attempt_id text NOT NULL",
         "prompt_id text NOT NULL",
         "prompt_version text NOT NULL",
-        "raw_artifact_ref text NOT NULL",
-        "parsed_artifact_ref text NOT NULL",
         "claim_index integer NOT NULL",
     )
 
@@ -389,3 +390,25 @@ def test_knowledge_extraction_saga_migration_defines_canonical_durable_state() -
 
     assert not missing, "\n".join(missing)
     assert not offenders, "\n".join(offenders)
+
+
+def test_removed_draft_claim_observation_artifact_ref_nullable_migration_is_not_required() -> (
+    None
+):
+    assert not (
+        MIGRATIONS / "100_make_draft_claim_observation_artifact_refs_nullable.sql"
+    ).exists()
+
+
+def test_draft_claim_observation_provenance_migrations_do_not_expose_removed_artifact_ref_columns() -> (
+    None
+):
+    removed_columns = ("raw_" + "artifact_ref", "parsed_" + "artifact_ref")
+
+    for filename in (
+        "089_create_draft_claim_observation_provenance.sql",
+        "101_drop_draft_claim_observation_artifact_ref_columns.sql",
+    ):
+        text = _read_migration(filename)
+        for column_name in removed_columns:
+            assert column_name not in text
