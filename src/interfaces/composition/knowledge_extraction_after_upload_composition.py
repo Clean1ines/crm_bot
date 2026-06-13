@@ -4,11 +4,6 @@ from dataclasses import dataclass
 from typing import cast
 
 import asyncpg
-
-from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
-    LlmAttemptCapacityObservation,
-    LlmAttemptCapacityObservationRepositoryPort,
-)
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
     RecordWorkItemAttemptOutcome,
@@ -50,26 +45,6 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
 from src.interfaces.composition.source_ingestion_first_phase import (
     make_source_ingestion_first_phase,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class _NoopLlmAttemptCapacityObservationRepository(
-    LlmAttemptCapacityObservationRepositoryPort,
-):
-    """Explicit temporary capacity sink.
-
-    There is no Postgres capacity-observation adapter in main yet. The after-upload
-    composition still injects a concrete port so ExecuteClaimBuilderSection is not
-    blocked by missing dependencies when tests provide an LLM executor. Once
-    capacity_runtime grows a persistence adapter, this is the single composition
-    point to replace.
-    """
-
-    async def record_observation(
-        self,
-        observation: LlmAttemptCapacityObservation,
-    ) -> None:
-        del observation
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +125,5 @@ def make_knowledge_extraction_workflow_after_upload(
                 llm_executor=llm_executor,
             )
         ),
-        capacity_observation_repository=_NoopLlmAttemptCapacityObservationRepository(),
         claim_builder_output_validation_policy=claim_builder_output_validation_policy,
     )

@@ -11,6 +11,9 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
     LlmDispatchExecutorPort,
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
+from src.interfaces.composition import (
+    knowledge_extraction_after_upload_composition as composition,
+)
 from src.interfaces.composition.knowledge_extraction_after_upload_composition import (
     make_knowledge_extraction_workflow_after_upload,
 )
@@ -80,7 +83,7 @@ def test_factory_wires_execute_prepared_llm_dispatch_attempt_when_executor_is_pr
     )
 
     assert runner._execute_prepared_llm_dispatch_attempt is not None
-    assert runner._capacity_observation_repository is not None
+    assert runner._capacity_observation_repository is None
 
 
 def test_factory_with_fake_executor_is_ready_to_dispatch_beyond_schedule() -> None:
@@ -94,3 +97,8 @@ def test_factory_with_fake_executor_is_ready_to_dispatch_beyond_schedule() -> No
     assert runner._prepare_llm_dispatch_batch is not None
     assert runner._execute_prepared_llm_dispatch_attempt is not None
     assert runner._claim_builder_output_validation_policy is not None
+
+
+def test_factory_no_longer_contains_noop_capacity_observation_repository() -> None:
+    noop_name = "_Noop" + "LlmAttemptCapacityObservationRepository"
+    assert not hasattr(composition, noop_name)

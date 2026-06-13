@@ -8,6 +8,9 @@ import asyncpg
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
+from src.contexts.capacity_runtime.infrastructure.postgres.postgres_llm_attempt_capacity_observation_repository import (
+    PostgresLlmAttemptCapacityObservationRepository,
+)
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
@@ -305,7 +308,12 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt
                 ),
-                capacity_observation_repository=(self._capacity_observation_repository),
+                capacity_observation_repository=(
+                    self._capacity_observation_repository
+                    or PostgresLlmAttemptCapacityObservationRepository(
+                        cast(asyncpg.Connection, connection)
+                    )
+                ),
                 work_item_progress_read_repository=(
                     self._work_item_progress_read_repository
                     or PostgresWorkItemProgressReadRepository(

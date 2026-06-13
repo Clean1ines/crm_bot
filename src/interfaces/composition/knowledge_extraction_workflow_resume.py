@@ -7,8 +7,10 @@ from typing import Protocol, cast
 import asyncpg
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
-    LlmAttemptCapacityObservation,
     LlmAttemptCapacityObservationRepositoryPort,
+)
+from src.contexts.capacity_runtime.infrastructure.postgres.postgres_llm_attempt_capacity_observation_repository import (
+    PostgresLlmAttemptCapacityObservationRepository,
 )
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
@@ -314,7 +316,12 @@ class RunKnowledgeExtractionWorkflowResume:
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt
                 ),
-                capacity_observation_repository=self._capacity_observation_repository,
+                capacity_observation_repository=(
+                    self._capacity_observation_repository
+                    or PostgresLlmAttemptCapacityObservationRepository(
+                        cast(asyncpg.Connection, connection)
+                    )
+                ),
                 work_item_progress_read_repository=(
                     self._work_item_progress_read_repository
                     or PostgresWorkItemProgressReadRepository(
@@ -343,17 +350,6 @@ class RunKnowledgeExtractionWorkflowResume:
             raise
         finally:
             await self._pool.release(connection)
-
-
-@dataclass(frozen=True, slots=True)
-class _NoopLlmAttemptCapacityObservationRepository(
-    LlmAttemptCapacityObservationRepositoryPort,
-):
-    async def record_observation(
-        self,
-        observation: LlmAttemptCapacityObservation,
-    ) -> None:
-        del observation
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,7 +409,6 @@ def make_knowledge_extraction_workflow_resume(
                 llm_executor=llm_executor,
             )
         ),
-        capacity_observation_repository=_NoopLlmAttemptCapacityObservationRepository(),
         claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
     )
 

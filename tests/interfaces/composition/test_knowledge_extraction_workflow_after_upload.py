@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 
 import pytest
 
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservation,
+)
+
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
@@ -275,6 +279,30 @@ class FakeDraftClaimObservationPersistence:
         return PersistValidatedDraftClaimObservationsResult(
             persisted_count=len(candidates),
         )
+
+
+class FakeCapacityObservationRepository:
+    def __init__(self) -> None:
+        self.observations: list[LlmAttemptCapacityObservation] = []
+
+    async def record_observation(
+        self,
+        observation: LlmAttemptCapacityObservation,
+    ) -> None:
+        self.observations.append(observation)
+
+
+class FakePostgresLlmAttemptCapacityObservationRepository(
+    FakeCapacityObservationRepository
+):
+    instances: list["FakePostgresLlmAttemptCapacityObservationRepository"] = []
+
+    def __init__(self, connection: object) -> None:
+        if not isinstance(connection, FakeConnection):
+            raise TypeError("connection must be FakeConnection")
+        self.connection = connection
+        super().__init__()
+        FakePostgresLlmAttemptCapacityObservationRepository.instances.append(self)
 
 
 class FakePostgresValidatedDraftClaimObservationPersistence(
@@ -579,6 +607,12 @@ def _patch_drain_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         "PostgresWorkItemSchedulingRepository",
         FakePostgresWorkItemSchedulingRepository,
     )
+    FakePostgresLlmAttemptCapacityObservationRepository.instances = []
+    monkeypatch.setattr(
+        composition,
+        "PostgresLlmAttemptCapacityObservationRepository",
+        FakePostgresLlmAttemptCapacityObservationRepository,
+    )
     FakePostgresValidatedDraftClaimObservationPersistence.instances = []
     monkeypatch.setattr(
         composition,
@@ -779,3 +813,55 @@ async def test_after_upload_constructs_postgres_draft_claim_observation_persiste
         instance.connection is connection
         for instance in FakePostgresValidatedDraftClaimObservationPersistence.instances
     )
+
+
+@pytest.mark.asyncio
+async def test_after_upload_constructs_postgres_capacity_observation_repository_when_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_drain_dependencies(monkeypatch)
+    connection = FakeConnection()
+
+    runner = RunKnowledgeExtractionWorkflowAfterUpload(
+        source_ingestion_runner=FakeSourceIngestionRunner(completed=True),
+        pool=FakePool(connection),
+        prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
+    )
+
+    await runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=_source_ingestion_command(),
+            max_drain_commands=10,
+        )
+    )
+
+    assert FakePostgresLlmAttemptCapacityObservationRepository.instances
+    assert all(
+        instance.connection is connection
+        for instance in FakePostgresLlmAttemptCapacityObservationRepository.instances
+    )
+
+
+@pytest.mark.asyncio
+async def test_after_upload_uses_provided_capacity_observation_repository_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_drain_dependencies(monkeypatch)
+    connection = FakeConnection()
+    provided_repository = FakeCapacityObservationRepository()
+
+    runner = RunKnowledgeExtractionWorkflowAfterUpload(
+        source_ingestion_runner=FakeSourceIngestionRunner(completed=True),
+        pool=FakePool(connection),
+        prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
+        capacity_observation_repository=provided_repository,
+    )
+
+    await runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=_source_ingestion_command(),
+            max_drain_commands=10,
+        )
+    )
+
+    assert FakePostgresLlmAttemptCapacityObservationRepository.instances == []

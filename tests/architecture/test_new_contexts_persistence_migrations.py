@@ -76,6 +76,17 @@ EXPECTED_MIGRATIONS = {
         "quote_ident('raw_' || 'artifact_ref')",
         "quote_ident('parsed_' || 'artifact_ref')",
     ),
+    "102_create_llm_attempt_capacity_observations.sql": (
+        "CREATE TABLE IF NOT EXISTS llm_attempt_capacity_observations",
+        "observation_id text PRIMARY KEY",
+        "remaining_minute_requests integer NULL",
+        "remaining_daily_tokens integer NULL",
+        "actual_prompt_tokens integer NULL",
+        "actual_completion_tokens integer NULL",
+        "actual_total_tokens integer NULL",
+        "idx_llm_attempt_capacity_observations_provider_account_model",
+        "idx_llm_attempt_capacity_observations_observed_at",
+    ),
 }
 
 FORBIDDEN_LEGACY_MARKERS = (
@@ -113,6 +124,7 @@ REQUIRED_TABLES = (
     "knowledge_extraction_event_cursor",
     "source_documents",
     "source_units",
+    "llm_attempt_capacity_observations",
 )
 
 
