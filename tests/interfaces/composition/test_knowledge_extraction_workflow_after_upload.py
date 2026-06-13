@@ -14,6 +14,15 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_read_repository_port import (
     WorkItemAttemptDispatchForExecution,
 )
+from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_repository_port import (
+    WorkItemAttemptDispatchRecord,
+)
+from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_repository_port import (
+    WorkItemAttemptOutcomeRecord,
+)
+from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    LeasedWorkItemRecord,
+)
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
     RecordWorkItemAttemptOutcomeResult,
 )
@@ -22,6 +31,7 @@ from src.contexts.execution_runtime.domain.value_objects.lease_token import Leas
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
+from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
 )
@@ -85,6 +95,10 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
     LlmDispatchExecutionResult,
     LlmDispatchExecutionStatus,
 )
+from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
+    LlmDispatchExecutionInput,
+    LlmDispatchExecutorPort,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
     WorkflowCommandStatus,
@@ -114,9 +128,16 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 from src.interfaces.composition import (
     knowledge_extraction_workflow_after_upload as composition,
 )
+from src.interfaces.composition import (
+    knowledge_extraction_after_upload_composition as after_upload_composition,
+    prepare_llm_dispatch_batch as prepare_batch_composition,
+)
 from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttemptCommand,
     ExecutePreparedLlmDispatchAttemptResult,
+)
+from src.interfaces.composition.knowledge_extraction_after_upload_composition import (
+    make_knowledge_extraction_workflow_after_upload,
 )
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
     RunKnowledgeExtractionWorkflowAfterUpload,
@@ -400,6 +421,22 @@ class FakeExecutePreparedLlmDispatchAttempt:
 
 
 @dataclass(slots=True)
+class FakeLlmDispatchExecutor(LlmDispatchExecutorPort):
+    calls: list[LlmDispatchExecutionInput] = field(default_factory=list)
+
+    async def execute_dispatch(
+        self,
+        execution_input: LlmDispatchExecutionInput,
+    ) -> LlmDispatchExecutionResult:
+        self.calls.append(execution_input)
+        return LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.SUCCEEDED,
+            finished_at=_now(),
+            output_payload={"raw_text": _valid_claim_builder_output_text()},
+        )
+
+
+@dataclass(slots=True)
 class FakeDraftClaimObservationPersistence:
     persisted_candidates: list[tuple[ValidatedDraftClaimObservationCandidate, ...]] = (
         field(default_factory=list)
@@ -601,6 +638,20 @@ class FakeResourceUsageRepository:
         return usage
 
 
+class FakeTransaction:
+    async def __aenter__(self) -> object:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: object | None,
+    ) -> bool | None:
+        del exc_type, exc, tb
+        return None
+
+
 @dataclass(slots=True)
 class FakeConnection:
     command_log: FakeCommandLogRepository = field(
@@ -610,6 +661,22 @@ class FakeConnection:
         default_factory=lambda: (_source_unit(),)
     )
     scheduled_work_item_count: int = 0
+    scheduled_work_items: dict[str, WorkItem] = field(default_factory=dict)
+    scheduled_work_payloads: dict[str, Mapping[str, object]] = field(
+        default_factory=dict,
+    )
+    scheduled_work_payload_hashes: dict[str, str] = field(
+        default_factory=dict,
+    )
+    dispatch_records: dict[str, WorkItemAttemptDispatchRecord] = field(
+        default_factory=dict,
+    )
+    outcome_records: list[WorkItemAttemptOutcomeRecord] = field(
+        default_factory=list,
+    )
+
+    def transaction(self) -> FakeTransaction:
+        return FakeTransaction()
 
 
 class FakePool:
@@ -701,14 +768,12 @@ class FakePostgresWorkItemSchedulingRepository:
         if not isinstance(connection, FakeConnection):
             raise TypeError("connection must be FakeConnection")
         self.connection = connection
-        self.items: dict[str, WorkItem] = {}
-        self.payload_hashes: dict[str, str] = {}
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
-        return self.items.get(work_item_id)
+        return self.connection.scheduled_work_items.get(work_item_id)
 
     async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
-        return self.payload_hashes.get(work_item_id)
+        return self.connection.scheduled_work_payload_hashes.get(work_item_id)
 
     async def save_scheduled_work_item(
         self,
@@ -718,10 +783,126 @@ class FakePostgresWorkItemSchedulingRepository:
         payload_hash: str,
         payload: Mapping[str, object],
     ) -> None:
-        del idempotency_key, payload
-        self.items[item.work_item_id] = item
-        self.payload_hashes[item.work_item_id] = payload_hash
+        del idempotency_key
+        self.connection.scheduled_work_items[item.work_item_id] = item
+        self.connection.scheduled_work_payloads[item.work_item_id] = payload
+        self.connection.scheduled_work_payload_hashes[item.work_item_id] = payload_hash
         self.connection.scheduled_work_item_count += 1
+
+
+class FakePostgresWorkItemLeaseRepository:
+    def __init__(self, connection: object) -> None:
+        if not isinstance(connection, FakeConnection):
+            raise TypeError("connection must be FakeConnection")
+        self.connection = connection
+
+    async def peek_due_work_items(
+        self,
+        *,
+        work_kind: object,
+        requested_items: int,
+        now: datetime,
+    ) -> tuple[object, ...]:
+        del work_kind, requested_items, now
+        return ()
+
+    async def lease_due_work_item(
+        self,
+        *,
+        work_kind: object,
+        worker: WorkerRef,
+        lease_token: LeaseToken,
+        lease_expires_at: datetime,
+        now: datetime,
+    ) -> LeasedWorkItemRecord | None:
+        for work_item_id, item in self.connection.scheduled_work_items.items():
+            if item.work_kind != work_kind:
+                continue
+            if not item.is_due(now):
+                continue
+
+            leased = WorkItem(
+                work_item_id=item.work_item_id,
+                work_kind=item.work_kind,
+                status=WorkItemStatus.LEASED,
+                attempt_count=item.attempt_count + 1,
+                leased_by=worker,
+                lease_token=lease_token,
+                lease_expires_at=lease_expires_at,
+            )
+            self.connection.scheduled_work_items[work_item_id] = leased
+            return LeasedWorkItemRecord(
+                work_item=leased,
+                schedule_payload=self.connection.scheduled_work_payloads[work_item_id],
+            )
+
+        return None
+
+
+class FakePostgresWorkItemAttemptDispatchRepository:
+    def __init__(self, connection: object) -> None:
+        if not isinstance(connection, FakeConnection):
+            raise TypeError("connection must be FakeConnection")
+        self.connection = connection
+
+    async def save_started_dispatch_attempt(
+        self,
+        record: WorkItemAttemptDispatchRecord,
+    ) -> None:
+        self.connection.dispatch_records[record.attempt_id] = record
+
+
+class FakePostgresReadWorkItemAttemptDispatchRepository:
+    def __init__(self, connection: object) -> None:
+        if not isinstance(connection, FakeConnection):
+            raise TypeError("connection must be FakeConnection")
+        self.connection = connection
+
+    async def get_dispatch_for_execution(
+        self,
+        *,
+        attempt_id: str,
+    ) -> WorkItemAttemptDispatchForExecution | None:
+        record = self.connection.dispatch_records.get(attempt_id)
+        if record is None:
+            return None
+
+        return WorkItemAttemptDispatchForExecution(
+            attempt_id=record.attempt_id,
+            work_item_id=record.work_item_id,
+            attempt_number=record.attempt_number,
+            lease_token=LeaseToken(record.lease_token),
+            worker_ref=record.worker_ref,
+            dispatch_payload=record.dispatch_payload,
+            started_at=record.started_at,
+        )
+
+
+class FakePostgresWorkItemAttemptOutcomeRepository:
+    def __init__(self, connection: object) -> None:
+        if not isinstance(connection, FakeConnection):
+            raise TypeError("connection must be FakeConnection")
+        self.connection = connection
+
+    async def record_attempt_outcome(
+        self,
+        record: WorkItemAttemptOutcomeRecord,
+    ) -> WorkItem:
+        self.connection.outcome_records.append(record)
+        existing = self.connection.scheduled_work_items.get(record.work_item_id)
+        work_kind = (
+            existing.work_kind
+            if existing is not None
+            else CLAIM_BUILDER_SECTION_WORK_KIND
+        )
+        completed = WorkItem(
+            work_item_id=record.work_item_id,
+            work_kind=work_kind,
+            status=WorkItemStatus.COMPLETED,
+            attempt_count=record.attempt_number,
+        )
+        self.connection.scheduled_work_items[record.work_item_id] = completed
+        return completed
 
 
 def _patch_drain_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -752,6 +933,30 @@ def _patch_drain_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         composition,
         "PostgresValidatedDraftClaimObservationPersistence",
         FakePostgresValidatedDraftClaimObservationPersistence,
+    )
+
+
+def _patch_real_factory_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_drain_dependencies(monkeypatch)
+    monkeypatch.setattr(
+        prepare_batch_composition,
+        "PostgresWorkItemLeaseRepository",
+        FakePostgresWorkItemLeaseRepository,
+    )
+    monkeypatch.setattr(
+        prepare_batch_composition,
+        "PostgresWorkItemAttemptDispatchRepository",
+        FakePostgresWorkItemAttemptDispatchRepository,
+    )
+    monkeypatch.setattr(
+        after_upload_composition,
+        "PostgresReadWorkItemAttemptDispatchRepository",
+        FakePostgresReadWorkItemAttemptDispatchRepository,
+    )
+    monkeypatch.setattr(
+        after_upload_composition,
+        "PostgresWorkItemAttemptOutcomeRepository",
+        FakePostgresWorkItemAttemptOutcomeRepository,
     )
 
 
@@ -1036,6 +1241,79 @@ async def test_after_upload_execute_path_persists_valid_claims_and_leaves_reconc
     candidate = persistence.persisted_candidates[0][0]
     assert candidate.claim == "Body"
     assert candidate.source_unit_ref == _source_unit_ref()
+
+    reconcile_commands = [
+        command
+        for command in connection.command_log.commands
+        if command.command_type
+        == KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS.value
+    ]
+    assert len(reconcile_commands) == 1
+    assert reconcile_commands[0].status is WorkflowCommandStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_real_factory_with_fake_llm_executor_executes_and_persists_claims(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_real_factory_dependencies(monkeypatch)
+    connection = FakeConnection()
+    pool = FakePool(connection)
+    fake_executor = FakeLlmDispatchExecutor()
+    source_runner = FakeSourceIngestionRunner(completed=True)
+
+    def fake_source_ingestion_first_phase(
+        *,
+        pool: object,
+        project_repo: object,
+        user_repo: object,
+    ) -> FakeSourceIngestionRunner:
+        del pool, project_repo, user_repo
+        return source_runner
+
+    monkeypatch.setattr(
+        after_upload_composition,
+        "make_source_ingestion_first_phase",
+        fake_source_ingestion_first_phase,
+    )
+
+    runner = make_knowledge_extraction_workflow_after_upload(
+        pool=pool,
+        project_repo={},
+        user_repo=object(),
+        llm_executor=fake_executor,
+    )
+
+    result = await runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=_source_ingestion_command(),
+            max_drain_commands=3,
+        )
+    )
+
+    assert result.source_ingestion_completed is True
+    assert result.blocked_command_type is None
+    assert result.blocked_reason is None
+    assert source_runner.calls
+    assert len(fake_executor.calls) == 1
+    attempt_id = fake_executor.calls[0].attempt_id
+    assert attempt_id.endswith(":attempt:1")
+    assert "knowledge-workbench" in attempt_id
+    assert "claim-builder" in attempt_id
+    assert "section-extraction" in attempt_id
+    assert _source_unit_ref() in attempt_id
+    assert connection.dispatch_records
+    assert len(connection.outcome_records) == 1
+
+    persisted_batches = [
+        candidates
+        for instance in FakePostgresValidatedDraftClaimObservationPersistence.instances
+        for candidates in instance.persisted_candidates
+    ]
+    assert len(persisted_batches) == 1
+    assert len(persisted_batches[0]) == 1
+    assert persisted_batches[0][0].claim == "Body"
+    assert persisted_batches[0][0].source_unit_ref == _source_unit_ref()
 
     reconcile_commands = [
         command

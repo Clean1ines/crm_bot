@@ -137,12 +137,23 @@ def get_orchestrator() -> object:
     return src.interfaces.composition.fastapi_lifespan.orchestrator
 
 
+_LLM_DISPATCH_EXECUTOR_NOT_CONFIGURED_DETAIL = "LLM dispatch executor is not configured"
+
+
 def get_llm_dispatch_executor() -> LlmDispatchExecutorPort:
     """Return the composed LLM dispatch executor for claim-builder drains."""
-    runtime_settings = LlmRuntimeSettings.from_env_mapping(os.environ)
-    provider_components = LlmRuntimeProviderCompositionFactory(
-        settings=runtime_settings,
-    ).build()
+    try:
+        runtime_settings = LlmRuntimeSettings.from_env_mapping(os.environ)
+        provider_components = LlmRuntimeProviderCompositionFactory(
+            settings=runtime_settings,
+        ).build()
+    except ValueError as exc:
+        logger.warning(_LLM_DISPATCH_EXECUTOR_NOT_CONFIGURED_DETAIL)
+        raise HTTPException(
+            status_code=503,
+            detail=_LLM_DISPATCH_EXECUTOR_NOT_CONFIGURED_DETAIL,
+        ) from exc
+
     groq_components = provider_components.groq
     return GroqDispatchExecutor(
         transport=groq_components.provider.transport,
