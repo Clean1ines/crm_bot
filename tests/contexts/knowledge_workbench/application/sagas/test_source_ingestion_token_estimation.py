@@ -29,7 +29,7 @@ def _prompt_text(
     *,
     prompt_name: str = "claim_builder_section_extraction",
     node_id: str = "faq_claim_observations",
-    prompt_path: str = "src/agent/prompts/faq_surface_claim_observations.ru.txt",
+    prompt_path: str = "src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
     text: str = "NODE: faq_claim_observations\nReturn JSON.",
 ) -> WorkbenchPromptText:
     return WorkbenchPromptText(
@@ -57,7 +57,7 @@ def test_service_estimates_prompt_tokens() -> None:
     assert result == VerifiedPromptTokenEstimate(
         prompt_name="claim_builder_section_extraction",
         node_id="faq_claim_observations",
-        prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
+        prompt_path="src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
         prompt_token_count=123,
     )
     assert estimator.received_texts == ["NODE: faq_claim_observations\nReturn JSON."]
@@ -132,7 +132,7 @@ def test_prompt_text_and_verified_estimate_validate_input() -> None:
         VerifiedPromptTokenEstimate(
             prompt_name="claim_builder_section_extraction",
             node_id="faq_claim_observations",
-            prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
+            prompt_path="src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
             prompt_token_count=0,
         )
 

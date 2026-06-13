@@ -8,6 +8,11 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     ClaimBuilderSectionWorkPlan,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_section_extraction_prompt_contract import (
+    BuildClaimBuilderSectionExtractionPrompt,
+    ClaimBuilderSectionExtractionPromptContract,
+    ClaimBuilderSectionExtractionPromptInput,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,12 +47,27 @@ class MapClaimBuilderSectionPlansToExecutionScheduleResult:
 
 
 class MapClaimBuilderSectionPlansToExecutionSchedule:
+    def __init__(
+        self,
+        *,
+        prompt_builder: BuildClaimBuilderSectionExtractionPrompt | None = None,
+    ) -> None:
+        self._prompt_builder = (
+            BuildClaimBuilderSectionExtractionPrompt()
+            if prompt_builder is None
+            else prompt_builder
+        )
+
     def execute(
         self,
         command: MapClaimBuilderSectionPlansToExecutionScheduleCommand,
     ) -> MapClaimBuilderSectionPlansToExecutionScheduleResult:
         schedule_plans = tuple(
-            _map_plan_to_schedule_plan(plan) for plan in command.plans
+            _map_plan_to_schedule_plan(
+                plan=plan,
+                prompt_builder=self._prompt_builder,
+            )
+            for plan in command.plans
         )
         return MapClaimBuilderSectionPlansToExecutionScheduleResult(
             schedule_plans=schedule_plans,
@@ -55,8 +75,17 @@ class MapClaimBuilderSectionPlansToExecutionSchedule:
 
 
 def _map_plan_to_schedule_plan(
+    *,
     plan: ClaimBuilderSectionWorkPlan,
+    prompt_builder: BuildClaimBuilderSectionExtractionPrompt,
 ) -> WorkItemSchedulePlan:
+    prompt_contract = prompt_builder.execute(
+        ClaimBuilderSectionExtractionPromptInput(
+            source_unit_ref=plan.source_unit_ref.value,
+            heading_path=plan.heading_path,
+            source_unit_text=plan.source_unit_text,
+        ),
+    )
     return WorkItemSchedulePlan(
         work_item_id=plan.work_item_id,
         work_kind=plan.work_kind,
@@ -67,48 +96,25 @@ def _map_plan_to_schedule_plan(
             "source_unit_ref": plan.source_unit_ref.value,
             "source_unit_ordinal": plan.source_unit_ordinal,
             "phase": "claim_builder_section_extraction",
-            "provider_messages": _provider_messages(plan),
-            "claim_builder_provenance": _claim_builder_provenance(plan),
-        },
-    )
-
-
-def _provider_messages(
-    plan: ClaimBuilderSectionWorkPlan,
-) -> tuple[dict[str, str], ...]:
-    return (
-        {
-            "role": "system",
-            "content": (
-                "Extract draft claim observations as strict JSON. "
-                "Use prompt_id faq_claim_observations and return only JSON."
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"source_unit_ref: {plan.source_unit_ref.value}\n"
-                f"heading_path: {_format_heading_path(plan.heading_path)}\n\n"
-                f"{plan.source_unit_text}"
+            "provider_messages": prompt_contract.provider_messages,
+            "claim_builder_provenance": _claim_builder_provenance(
+                plan=plan,
+                prompt_contract=prompt_contract,
             ),
         },
     )
 
 
 def _claim_builder_provenance(
+    *,
     plan: ClaimBuilderSectionWorkPlan,
+    prompt_contract: ClaimBuilderSectionExtractionPromptContract,
 ) -> dict[str, str]:
     return {
         "workflow_run_id": plan.workflow_run_id,
         "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": plan.source_unit_ref.value,
         "work_item_id": plan.work_item_id,
-        "prompt_id": "faq_claim_observations",
-        "prompt_version": "v1",
+        "prompt_id": prompt_contract.prompt_id,
+        "prompt_version": prompt_contract.prompt_version,
     }
-
-
-def _format_heading_path(heading_path: tuple[str, ...]) -> str:
-    if not heading_path:
-        return "/"
-    return " / ".join(heading_path)

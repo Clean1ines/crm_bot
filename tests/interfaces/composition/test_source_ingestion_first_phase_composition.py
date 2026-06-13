@@ -379,7 +379,10 @@ class FakeInnerRunner:
 
 
 def _write_prompt_text(repo_root: Path, text: str) -> None:
-    prompt_path = repo_root / "src/agent/prompts/faq_surface_claim_observations.ru.txt"
+    prompt_path = (
+        repo_root
+        / "src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt"
+    )
     prompt_path.parent.mkdir(parents=True, exist_ok=True)
     prompt_path.write_text(text, encoding="utf-8")
 
@@ -914,7 +917,7 @@ def test_loads_prompt_text_and_estimates_prompt_tokens(tmp_path: Path) -> None:
     )
     assert (
         profile.prompt.prompt_path
-        == "src/agent/prompts/faq_surface_claim_observations.ru.txt"
+        == "src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt"
     )
     assert profile.prompt.node_id == "faq_claim_observations"
 

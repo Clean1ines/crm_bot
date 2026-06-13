@@ -26,7 +26,7 @@ def test_default_profile_describes_current_draft_observation_prompt() -> None:
     assert profile.prompt.node_id == "faq_claim_observations"
     assert (
         profile.prompt.prompt_path
-        == "src/agent/prompts/faq_surface_claim_observations.ru.txt"
+        == "src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt"
     )
     assert profile.prompt.prompt_token_count > 0
     assert profile.primary_model.profile_name == "primary_model"
@@ -39,7 +39,7 @@ def test_profile_validation_rejects_impossible_budget() -> None:
     prompt = WorkbenchPromptProfile(
         prompt_name="claim_builder_section_extraction",
         node_id="faq_claim_observations",
-        prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
+        prompt_path="src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
         prompt_token_count=5_000,
     )
     model = WorkbenchModelRequestBudgetProfile(
@@ -57,7 +57,7 @@ def test_profile_value_objects_reject_invalid_shapes() -> None:
         WorkbenchPromptProfile(
             prompt_name=" ",
             node_id="faq_claim_observations",
-            prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
+            prompt_path="src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
             prompt_token_count=1,
         )
 
@@ -65,7 +65,7 @@ def test_profile_value_objects_reject_invalid_shapes() -> None:
         WorkbenchPromptProfile(
             prompt_name="claim_builder_section_extraction",
             node_id=" ",
-            prompt_path="src/agent/prompts/faq_surface_claim_observations.ru.txt",
+            prompt_path="src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
             prompt_token_count=1,
         )
 

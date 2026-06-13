@@ -15,6 +15,10 @@ from src.contexts.knowledge_workbench.application.sagas.map_claim_builder_sectio
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     ClaimBuilderSectionWorkPlan,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_section_extraction_prompt_contract import (
+    BuildClaimBuilderSectionExtractionPrompt,
+    ClaimBuilderSectionExtractionPromptInput,
+)
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
     SourceDocumentRef,
 )
@@ -72,13 +76,16 @@ def test_maps_one_workbench_plan_to_execution_schedule_plan() -> None:
     assert schedule.payload["source_unit_ref"] == plan.source_unit_ref.value
     assert schedule.payload["source_unit_ordinal"] == plan.source_unit_ordinal
     assert schedule.payload["phase"] == "claim_builder_section_extraction"
+    prompt_contract = BuildClaimBuilderSectionExtractionPrompt().execute(
+        ClaimBuilderSectionExtractionPromptInput(
+            source_unit_ref=plan.source_unit_ref.value,
+            heading_path=plan.heading_path,
+            source_unit_text=plan.source_unit_text,
+        ),
+    )
+
     provider_messages = schedule.payload["provider_messages"]
-    assert isinstance(provider_messages, tuple)
-    assert provider_messages[0]["role"] == "system"
-    assert provider_messages[1]["role"] == "user"
-    assert "# Unit 0\n\nBody" in provider_messages[1]["content"]
-    assert "source-unit:project-1:abc:0" in provider_messages[1]["content"]
-    assert "Unit 0" in provider_messages[1]["content"]
+    assert provider_messages == prompt_contract.provider_messages
 
     claim_builder_provenance = schedule.payload["claim_builder_provenance"]
     assert claim_builder_provenance == {
@@ -86,8 +93,8 @@ def test_maps_one_workbench_plan_to_execution_schedule_plan() -> None:
         "stage_run_id": "claim_builder_section_extraction",
         "source_unit_ref": plan.source_unit_ref.value,
         "work_item_id": plan.work_item_id,
-        "prompt_id": "faq_claim_observations",
-        "prompt_version": "v1",
+        "prompt_id": prompt_contract.prompt_id,
+        "prompt_version": prompt_contract.prompt_version,
     }
 
 
@@ -129,10 +136,11 @@ def test_payload_hash_is_stable_through_execution_runtime_helper() -> None:
 
 
 def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> None:
+    plan = _plan()
     schedule = (
         MapClaimBuilderSectionPlansToExecutionSchedule()
         .execute(
-            _command((_plan(),)),
+            _command((plan,)),
         )
         .schedule_plans[0]
     )
@@ -154,9 +162,14 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> N
     assert "prompt_text" not in schedule.payload
 
     provenance = schedule.payload["claim_builder_provenance"]
-    assert "work_item_attempt_id" not in provenance
-    assert "llm_task_id" not in provenance
-    assert "llm_attempt_id" not in provenance
+    assert provenance == {
+        "workflow_run_id": plan.workflow_run_id,
+        "stage_run_id": "claim_builder_section_extraction",
+        "source_unit_ref": plan.source_unit_ref.value,
+        "work_item_id": plan.work_item_id,
+        "prompt_id": "faq_claim_observations",
+        "prompt_version": "v1",
+    }
 
 
 def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() -> None:
@@ -177,7 +190,8 @@ def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() ->
         "source_unit_ordinal",
         "provider_messages",
         "claim_builder_provenance",
-        "faq_claim_observations",
+        "BuildClaimBuilderSectionExtractionPrompt",
+        "ClaimBuilderSectionExtractionPromptInput",
     )
     forbidden_markers = (
         "EnsureWorkItemsScheduled",
@@ -194,6 +208,9 @@ def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() ->
         "raw_text",
         "text_preview",
         "prompt_text",
+        "Extract draft claim observations as strict JSON",
+        "Use prompt_id faq_claim_observations",
+        'prompt_version = "v1"',
         "Groq",
         "qwen",
     )
