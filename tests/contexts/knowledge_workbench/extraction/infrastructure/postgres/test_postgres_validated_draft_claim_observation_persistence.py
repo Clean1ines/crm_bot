@@ -27,6 +27,9 @@ class FakeConnection:
 def _candidate(index: int = 0) -> ValidatedDraftClaimObservationCandidate:
     return ValidatedDraftClaimObservationCandidate(
         workflow_run_id="workflow-1",
+        stage_run_id="claim_builder_section_extraction",
+        prompt_id="faq_claim_observations",
+        prompt_version="v1",
         source_document_ref="source-document-1",
         source_unit_ref="source-unit-1",
         source_unit_ordinal=3,
@@ -123,11 +126,13 @@ async def test_persisted_calls_preserve_workflow_source_work_item_dispatch_model
 
     assert provenance_args[1] == candidate.source_unit_ref
     assert provenance_args[2] == candidate.workflow_run_id
+    assert provenance_args[3] == candidate.stage_run_id
     assert provenance_args[4] == candidate.work_item_id
     assert provenance_args[5] == candidate.dispatch_attempt_id
+    assert provenance_args[6] == candidate.work_item_id
     assert provenance_args[7] == candidate.dispatch_attempt_id
-    assert (
-        provenance_args[8] == f"{candidate.provider}:claim_builder_section_extraction"
-    )
-    assert provenance_args[9] == candidate.model_ref
+    assert provenance_args[8] == candidate.prompt_id
+    assert provenance_args[9] == candidate.prompt_version
+    assert provenance_args[10] is None
+    assert provenance_args[11] is None
     assert provenance_args[12] == candidate.claim_index

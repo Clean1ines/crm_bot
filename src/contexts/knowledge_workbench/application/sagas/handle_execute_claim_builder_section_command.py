@@ -726,6 +726,13 @@ def _draft_claim_candidates(
     allocation = _allocation_mapping(dispatch_payload)
     provider = _require_mapping_text(allocation, "provider")
     model_ref = _require_mapping_text(allocation, "model_ref")
+    source_unit_ref = _source_unit_ref(dispatch_payload)
+    claim_builder_provenance = _claim_builder_provenance(
+        schedule_payload=schedule_payload,
+        workflow_run_id=workflow_run_id,
+        source_unit_ref=source_unit_ref,
+        work_item_id=work_item_id,
+    )
     validation_decision = _validation_decision_text(
         execution_result.validation_metadata
     )
@@ -735,11 +742,23 @@ def _draft_claim_candidates(
         candidates.append(
             ValidatedDraftClaimObservationCandidate(
                 workflow_run_id=workflow_run_id,
+                stage_run_id=_require_mapping_text(
+                    claim_builder_provenance,
+                    "stage_run_id",
+                ),
+                prompt_id=_require_mapping_text(
+                    claim_builder_provenance,
+                    "prompt_id",
+                ),
+                prompt_version=_require_mapping_text(
+                    claim_builder_provenance,
+                    "prompt_version",
+                ),
                 source_document_ref=_optional_mapping_text(
                     schedule_payload,
                     "source_document_ref",
                 ),
-                source_unit_ref=_source_unit_ref(dispatch_payload),
+                source_unit_ref=source_unit_ref,
                 source_unit_ordinal=_optional_mapping_int(
                     schedule_payload,
                     "source_unit_ordinal",
@@ -758,6 +777,41 @@ def _draft_claim_candidates(
             )
         )
     return tuple(candidates)
+
+
+def _claim_builder_provenance(
+    *,
+    schedule_payload: Mapping[str, object],
+    workflow_run_id: str,
+    source_unit_ref: str,
+    work_item_id: str,
+) -> Mapping[str, object]:
+    value = schedule_payload.get("claim_builder_provenance")
+    if not isinstance(value, Mapping):
+        raise ValueError("schedule_payload claim_builder_provenance must be mapping")
+
+    provenance_workflow_run_id = _require_mapping_text(value, "workflow_run_id")
+    if provenance_workflow_run_id != workflow_run_id:
+        raise ValueError(
+            "claim_builder_provenance workflow_run_id must match workflow_run_id"
+        )
+
+    provenance_source_unit_ref = _require_mapping_text(value, "source_unit_ref")
+    if provenance_source_unit_ref != source_unit_ref:
+        raise ValueError(
+            "claim_builder_provenance source_unit_ref must match source_unit_ref"
+        )
+
+    provenance_work_item_id = _require_mapping_text(value, "work_item_id")
+    if provenance_work_item_id != work_item_id:
+        raise ValueError(
+            "claim_builder_provenance work_item_id must match work_item_id"
+        )
+
+    _require_mapping_text(value, "stage_run_id")
+    _require_mapping_text(value, "prompt_id")
+    _require_mapping_text(value, "prompt_version")
+    return value
 
 
 def _source_unit_ref(dispatch_payload: Mapping[str, object]) -> str:

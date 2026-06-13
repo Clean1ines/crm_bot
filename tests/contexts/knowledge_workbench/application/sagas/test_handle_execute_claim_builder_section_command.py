@@ -24,6 +24,7 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_bui
     ClaimBuilderLlmDispatchOutputValidator,
     HandleExecuteClaimBuilderSectionCommand,
     HandleExecuteClaimBuilderSectionCommandHandler,
+    HandleExecuteClaimBuilderSectionResult,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationDecision,
@@ -97,6 +98,56 @@ def _work_item_id() -> str:
     return "work-1"
 
 
+def _claim_builder_provenance(
+    *,
+    workflow_run_id: str = _workflow_run_id(),
+    source_unit_ref: str = "section-1",
+    work_item_id: str = _work_item_id(),
+) -> dict[str, object]:
+    return {
+        "workflow_run_id": workflow_run_id,
+        "stage_run_id": "claim_builder_section_extraction",
+        "source_unit_ref": source_unit_ref,
+        "work_item_id": work_item_id,
+        "prompt_id": "faq_claim_observations",
+        "prompt_version": "v1",
+    }
+
+
+def _provider_messages(*, source_unit_ref: str = "section-1") -> list[dict[str, str]]:
+    return [
+        {
+            "role": "user",
+            "content": (
+                f"source_unit_ref: {source_unit_ref}\n"
+                "heading_path: /\n\n"
+                "Product System turns documents into knowledge. "
+                "Цены не описаны."
+            ),
+        }
+    ]
+
+
+def _schedule_payload(
+    *,
+    claim_builder_provenance: dict[str, object] | None = None,
+    source_unit_ref: str = "section-1",
+) -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_ref": source_unit_ref,
+        "source_unit_ordinal": 0,
+        "phase": "claim_builder_section_extraction",
+        "provider_messages": _provider_messages(source_unit_ref=source_unit_ref),
+        "claim_builder_provenance": _claim_builder_provenance(
+            source_unit_ref=source_unit_ref,
+        )
+        if claim_builder_provenance is None
+        else claim_builder_provenance,
+    }
+
+
 def _capacity_payload() -> dict[str, object]:
     return {
         "provider": "groq",
@@ -144,7 +195,10 @@ def _workflow_command(
     )
 
 
-def _dispatch() -> WorkItemAttemptDispatchForExecution:
+def _dispatch(
+    *,
+    schedule_payload: dict[str, object] | None = None,
+) -> WorkItemAttemptDispatchForExecution:
     return WorkItemAttemptDispatchForExecution(
         attempt_id=_attempt_id(),
         work_item_id=_work_item_id(),
@@ -153,19 +207,9 @@ def _dispatch() -> WorkItemAttemptDispatchForExecution:
         worker_ref="worker-1",
         dispatch_payload={
             "work_item_id": _work_item_id(),
-            "schedule_payload": {
-                "provider_messages": [
-                    {
-                        "role": "user",
-                        "content": (
-                            "source_unit_ref: section-1\n"
-                            "heading_path: /\n\n"
-                            "Product System turns documents into knowledge. "
-                            "Цены не описаны."
-                        ),
-                    }
-                ]
-            },
+            "schedule_payload": _schedule_payload()
+            if schedule_payload is None
+            else schedule_payload,
             "llm_allocation": {
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
@@ -180,7 +224,10 @@ def _dispatch() -> WorkItemAttemptDispatchForExecution:
 
 def _execution_result(
     status: LlmDispatchExecutionStatus = LlmDispatchExecutionStatus.SUCCEEDED,
+    *,
+    dispatch: WorkItemAttemptDispatchForExecution | None = None,
 ) -> ExecutePreparedLlmDispatchAttemptResult:
+    prepared_dispatch = _dispatch() if dispatch is None else dispatch
     if status is LlmDispatchExecutionStatus.SUCCEEDED:
         llm_result = LlmDispatchExecutionResult(
             status=status,
@@ -223,7 +270,7 @@ def _execution_result(
         )
 
     return ExecutePreparedLlmDispatchAttemptResult(
-        dispatch=_dispatch(),
+        dispatch=prepared_dispatch,
         llm_result=llm_result,
         outcome_result=RecordWorkItemAttemptOutcomeResult(
             work_item=WorkItem(
@@ -309,6 +356,15 @@ class FakeCommandLogRepository:
         del completed_at
         self.completed_command_ids.append(command_id)
         return _workflow_command(status=WorkflowCommandStatus.COMPLETED)
+
+    async def list_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+    ) -> tuple[WorkflowCommand, ...]:
+        del workflow_run_id
+        return tuple(self.pending_commands[:limit])
 
 
 @dataclass(slots=True)
@@ -450,10 +506,11 @@ async def _execute(
     workflow_command: WorkflowCommand | None = None,
     execution_result: ExecutePreparedLlmDispatchAttemptResult | None = None,
 ) -> tuple[
-    object,
+    HandleExecuteClaimBuilderSectionResult,
     FakeExecutePreparedLlmDispatchAttempt,
     FakeCapacityObservationRepository,
     FakeWorkflowRuntimeUnitOfWork,
+    FakeDraftClaimObservationPersistence,
 ]:
     executor = FakeExecutePreparedLlmDispatchAttempt(
         result=execution_result or _execution_result(),
@@ -843,6 +900,10 @@ async def test_valid_claims_are_persisted_as_draft_claim_observations() -> None:
     assert len(draft_persistence.candidates) == 1
     candidate = draft_persistence.candidates[0]
     assert candidate.workflow_run_id == _workflow_run_id()
+    assert candidate.stage_run_id == "claim_builder_section_extraction"
+    assert candidate.prompt_id == "faq_claim_observations"
+    assert candidate.prompt_version == "v1"
+    assert candidate.source_document_ref == "source-document:project-1:abc"
     assert candidate.source_unit_ref == "section-1"
     assert candidate.work_item_id == _work_item_id()
     assert candidate.dispatch_attempt_id == _attempt_id()
@@ -858,6 +919,76 @@ async def test_valid_claims_are_persisted_as_draft_claim_observations() -> None:
     assert snapshot is not None
     assert snapshot.domain_counters["claim_builder_persisted_draft_claim_count"] == 1
     assert snapshot.domain_counters["draft_claim_observation_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_valid_claim_persistence_requires_claim_builder_provenance() -> None:
+    schedule_payload = _schedule_payload()
+    del schedule_payload["claim_builder_provenance"]
+
+    with pytest.raises(ValueError, match="claim_builder_provenance"):
+        await _execute(
+            execution_result=_execution_result(
+                dispatch=_dispatch(schedule_payload=schedule_payload),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_valid_claim_persistence_rejects_mismatched_provenance_workflow_run_id() -> (
+    None
+):
+    schedule_payload = _schedule_payload(
+        claim_builder_provenance={
+            **_claim_builder_provenance(),
+            "workflow_run_id": "knowledge-extraction:other",
+        },
+    )
+
+    with pytest.raises(ValueError, match="workflow_run_id"):
+        await _execute(
+            execution_result=_execution_result(
+                dispatch=_dispatch(schedule_payload=schedule_payload),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_valid_claim_persistence_rejects_mismatched_provenance_source_unit_ref() -> (
+    None
+):
+    schedule_payload = _schedule_payload(
+        claim_builder_provenance={
+            **_claim_builder_provenance(),
+            "source_unit_ref": "section-other",
+        },
+    )
+
+    with pytest.raises(ValueError, match="source_unit_ref"):
+        await _execute(
+            execution_result=_execution_result(
+                dispatch=_dispatch(schedule_payload=schedule_payload),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_valid_claim_persistence_rejects_mismatched_provenance_work_item_id() -> (
+    None
+):
+    schedule_payload = _schedule_payload(
+        claim_builder_provenance={
+            **_claim_builder_provenance(),
+            "work_item_id": "work-other",
+        },
+    )
+
+    with pytest.raises(ValueError, match="work_item_id"):
+        await _execute(
+            execution_result=_execution_result(
+                dispatch=_dispatch(schedule_payload=schedule_payload),
+            ),
+        )
 
 
 @pytest.mark.asyncio

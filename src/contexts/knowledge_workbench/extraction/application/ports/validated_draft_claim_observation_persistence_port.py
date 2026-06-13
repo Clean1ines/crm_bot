@@ -11,6 +11,9 @@ from src.contexts.knowledge_workbench.extraction.domain.value_objects.draft_clai
 @dataclass(frozen=True, slots=True)
 class ValidatedDraftClaimObservationCandidate:
     workflow_run_id: str
+    stage_run_id: str
+    prompt_id: str
+    prompt_version: str
     source_document_ref: str | None
     source_unit_ref: str
     source_unit_ordinal: int | None
@@ -28,6 +31,9 @@ class ValidatedDraftClaimObservationCandidate:
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.workflow_run_id, "workflow_run_id")
+        _require_non_empty_text(self.stage_run_id, "stage_run_id")
+        _require_non_empty_text(self.prompt_id, "prompt_id")
+        _require_non_empty_text(self.prompt_version, "prompt_version")
         if self.source_document_ref is not None:
             _require_non_empty_text(self.source_document_ref, "source_document_ref")
         _require_non_empty_text(self.source_unit_ref, "source_unit_ref")
