@@ -152,6 +152,14 @@ class _ResolvedWorkflow:
     source_document_ref: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ResumeDrainSummary:
+    drained_inspected_count: int
+    drained_dispatched_count: int
+    blocked_command_type: str | None
+    blocked_reason: str | None
+
+
 class RunKnowledgeExtractionWorkflowResume:
     def __init__(
         self,
@@ -251,7 +259,7 @@ class RunKnowledgeExtractionWorkflowResume:
         *,
         workflow_run_id: str,
         max_drain_commands: int,
-    ) -> RunKnowledgeExtractionWorkflowResumeResult:
+    ) -> _ResumeDrainSummary:
         remaining_commands = max_drain_commands
         inspected_count = 0
         dispatched_count = 0
@@ -276,9 +284,7 @@ class RunKnowledgeExtractionWorkflowResume:
 
             remaining_commands -= drain_result.inspected_count
 
-        return RunKnowledgeExtractionWorkflowResumeResult(
-            workflow_run_id=workflow_run_id,
-            source_document_ref=workflow_run_id,
+        return _ResumeDrainSummary(
             drained_inspected_count=inspected_count,
             drained_dispatched_count=dispatched_count,
             blocked_command_type=blocked_command_type,

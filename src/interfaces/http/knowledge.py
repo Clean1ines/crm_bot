@@ -1538,6 +1538,7 @@ async def resume_knowledge_extraction_workflow(
         "workflow_run_id": transition_result.workflow_run_id,
         "status": transition_result.status,
         "resumed_at": transition_result.resumed_at.isoformat(),
+        "source_document_ref": drain_result.source_document_ref,
         "drained_inspected_count": drain_result.drained_inspected_count,
         "drained_dispatched_count": drain_result.drained_dispatched_count,
         "blocked_command_type": drain_result.blocked_command_type,

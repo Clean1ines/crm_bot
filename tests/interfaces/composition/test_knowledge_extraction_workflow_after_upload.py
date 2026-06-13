@@ -1373,3 +1373,92 @@ def test_after_upload_drain_receives_workflow_state_repository_for_pause_guard()
 
     assert "PostgresKnowledgeExtractionSagaStateRepository" in source
     assert "workflow_state_repository=" in source
+
+
+@pytest.mark.asyncio
+async def test_resume_workflow_drains_existing_workflow_without_source_ingestion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
+        DrainKnowledgeExtractionWorkflowCommandsResult,
+    )
+    from src.interfaces.composition import (
+        knowledge_extraction_workflow_resume as resume_composition,
+    )
+    from src.interfaces.composition.knowledge_extraction_workflow_resume import (
+        RunKnowledgeExtractionWorkflowResume,
+        RunKnowledgeExtractionWorkflowResumeCommand,
+    )
+
+    class FakeResumeConnection:
+        async def fetchrow(
+            self,
+            query: str,
+            project_id: str,
+            document_id: str,
+        ) -> Mapping[str, object]:
+            del query
+            assert project_id == "project-1"
+            assert document_id == _workflow_run_id()
+            return {
+                "workflow_run_id": _workflow_run_id(),
+                "source_document_ref": _source_document_ref().value,
+            }
+
+    class FakeResumePool:
+        def __init__(self) -> None:
+            self.connection = FakeResumeConnection()
+            self.acquire_count = 0
+            self.release_count = 0
+
+        async def acquire(self) -> FakeResumeConnection:
+            self.acquire_count += 1
+            return self.connection
+
+        async def release(self, connection: object) -> None:
+            assert connection is self.connection
+            self.release_count += 1
+
+    drain_workflow_run_ids: list[str] = []
+
+    async def fake_run_one_drain_transaction(
+        self: object,
+        *,
+        workflow_run_id: str,
+        max_commands: int,
+    ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
+        del self
+        assert max_commands == 1
+        drain_workflow_run_ids.append(workflow_run_id)
+        return DrainKnowledgeExtractionWorkflowCommandsResult(
+            workflow_run_id=workflow_run_id,
+            inspected_count=1,
+            dispatched_count=1,
+            blocked_count=0,
+            last_blocked_command_type=None,
+            last_blocked_reason=None,
+        )
+
+    monkeypatch.setattr(
+        resume_composition.RunKnowledgeExtractionWorkflowResume,
+        "_run_one_drain_transaction",
+        fake_run_one_drain_transaction,
+    )
+
+    pool = FakeResumePool()
+    result = await RunKnowledgeExtractionWorkflowResume(pool=pool).execute(
+        RunKnowledgeExtractionWorkflowResumeCommand(
+            project_id="project-1",
+            document_id=_workflow_run_id(),
+            max_drain_commands=1,
+        )
+    )
+
+    assert result.workflow_run_id == _workflow_run_id()
+    assert result.source_document_ref == _source_document_ref().value
+    assert result.drained_inspected_count == 1
+    assert result.drained_dispatched_count == 1
+    assert drain_workflow_run_ids == [_workflow_run_id()]
+    assert pool.acquire_count == 1
+    assert pool.release_count == 1

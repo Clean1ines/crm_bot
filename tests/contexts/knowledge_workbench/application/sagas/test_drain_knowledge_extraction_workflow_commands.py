@@ -16,6 +16,7 @@ from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extra
     COMMAND_HANDLER_NOT_IMPLEMENTED,
 )
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
+    WORKFLOW_MANUALLY_PAUSED,
     DrainKnowledgeExtractionWorkflowCommands,
     DrainKnowledgeExtractionWorkflowCommandsCommand,
 )
@@ -519,3 +520,30 @@ async def test_respects_max_commands() -> None:
     assert result.inspected_count == 1
     assert result.dispatched_count == 1
     assert workflow_unit_of_work.command_log.requested_limit == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_does_not_dispatch_or_consume_pending_command_when_workflow_paused() -> (
+    None
+):
+    pending_command = _workflow_command(
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+    )
+    result, scheduling_repository, workflow_unit_of_work = await _drain(
+        pending_commands=(pending_command,),
+        workflow_state_repository=FakeWorkflowStateRepository(
+            state=_workflow_state(KnowledgeExtractionWorkflowStatus.PAUSED),
+        ),
+    )
+
+    assert result.inspected_count == 1
+    assert result.dispatched_count == 0
+    assert result.blocked_count == 1
+    assert (
+        result.last_blocked_command_type
+        == KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+    )
+    assert result.last_blocked_reason == WORKFLOW_MANUALLY_PAUSED
+    assert pending_command.status is WorkflowCommandStatus.PENDING
+    assert scheduling_repository.saved_count == 0
+    assert workflow_unit_of_work.command_log.completed_command_ids == []
