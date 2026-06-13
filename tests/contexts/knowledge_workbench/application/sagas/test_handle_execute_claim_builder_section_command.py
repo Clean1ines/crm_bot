@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from pathlib import Path
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservation,
@@ -1179,3 +1180,17 @@ async def test_terminal_invalid_metadata_emits_terminal_failure_action() -> None
     snapshot = workflow_unit_of_work.progress_snapshots.snapshot
     assert snapshot is not None
     assert snapshot.domain_counters["claim_builder_terminal_invalid_count"] == 1
+
+
+def test_execute_retry_after_recorded_outcome_is_guarded_before_llm_call() -> None:
+    source = Path(
+        "src/interfaces/composition/execute_prepared_llm_dispatch_attempt.py",
+    ).read_text(encoding="utf-8")
+
+    recorded_lookup_index = source.index("get_recorded_attempt_outcome")
+    llm_call_index = source.index("execute_dispatch(")
+
+    assert recorded_lookup_index < llm_call_index
+    assert "recorded_outcome_reader=outcome_repository" in Path(
+        "src/interfaces/composition/knowledge_extraction_after_upload_composition.py",
+    ).read_text(encoding="utf-8")

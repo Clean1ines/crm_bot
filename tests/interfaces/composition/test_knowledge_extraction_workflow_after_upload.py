@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import pytest
+from pathlib import Path
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservation,
@@ -884,6 +885,14 @@ class FakePostgresWorkItemAttemptOutcomeRepository:
             raise TypeError("connection must be FakeConnection")
         self.connection = connection
 
+    async def get_recorded_attempt_outcome(
+        self,
+        *,
+        attempt_id: str,
+    ) -> object | None:
+        del attempt_id
+        return None
+
     async def record_attempt_outcome(
         self,
         record: WorkItemAttemptOutcomeRecord,
@@ -1323,3 +1332,14 @@ async def test_real_factory_with_fake_llm_executor_executes_and_persists_claims(
     ]
     assert len(reconcile_commands) == 1
     assert reconcile_commands[0].status is WorkflowCommandStatus.PENDING
+
+
+def test_command_log_lists_pending_commands_only_for_resume_contract() -> None:
+    source = Path(
+        "src/contexts/workflow_runtime/infrastructure/postgres/"
+        "postgres_command_log_repository.py",
+    ).read_text(encoding="utf-8")
+
+    assert "AND status = $2" in source
+    assert "WorkflowCommandStatus.PENDING.value" in source
+    assert "ORDER BY run_after ASC, created_at ASC" in source

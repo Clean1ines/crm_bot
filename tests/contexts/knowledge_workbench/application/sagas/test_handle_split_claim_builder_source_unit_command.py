@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import pytest
+from pathlib import Path
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
@@ -613,3 +614,20 @@ def test_prepare_follow_up_idempotency_differs_per_parent_source_unit() -> None:
     assert second_parent_ref.value in second.command_id.value
     assert first.payload["parent_source_unit_ref"] == first_parent_ref.value
     assert second.payload["parent_source_unit_ref"] == second_parent_ref.value
+
+
+def test_split_rerun_reuses_existing_child_units_and_supersede_is_idempotent() -> None:
+    split_source = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "handle_split_claim_builder_source_unit_command.py",
+    ).read_text(encoding="utf-8")
+    supersede_source = Path(
+        "src/contexts/execution_runtime/application/use_cases/"
+        "supersede_waiting_work_items_for_split.py",
+    ).read_text(encoding="utf-8")
+
+    assert "existing_child_units" in split_source
+    assert (
+        "parent_source_unit.unit_ref in source_unit.lineage.parent_refs" in split_source
+    )
+    assert "WorkItemStatus.SPLIT_SUPERSEDED" in supersede_source

@@ -5,6 +5,7 @@ from datetime import datetime
 import asyncpg
 
 from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_repository_port import (
+    RecordedWorkItemAttemptOutcome,
     WorkItemAttemptOutcomeRecord,
     WorkItemAttemptOutcomeRepositoryPort,
     WorkItemAttemptOutcomeStatus,
@@ -32,6 +33,69 @@ class PostgresWorkItemAttemptOutcomeRepository(
 
     def __init__(self, connection: asyncpg.Connection) -> None:
         self._connection = connection
+
+    async def get_recorded_attempt_outcome(
+        self,
+        *,
+        attempt_id: str,
+    ) -> RecordedWorkItemAttemptOutcome | None:
+        row = await self._connection.fetchrow(
+            """
+            SELECT
+                w.work_item_id,
+                w.work_kind,
+                w.status,
+                w.attempt_count,
+                w.leased_by,
+                w.lease_token,
+                w.lease_expires_at,
+                w.next_attempt_at,
+                w.last_error_kind,
+                a.attempt_id AS recorded_attempt_id,
+                a.attempt_number AS recorded_attempt_number,
+                a.finished_at AS recorded_finished_at,
+                a.outcome_status AS recorded_outcome_status,
+                a.error_kind AS recorded_error_kind
+            FROM execution_work_item_attempts a
+            JOIN execution_work_items w
+              ON w.work_item_id = a.work_item_id
+            WHERE a.attempt_id = $1
+              AND a.finished_at IS NOT NULL
+              AND a.outcome_status IS NOT NULL
+            """,
+            attempt_id,
+        )
+        if row is None:
+            return None
+
+        finished_at = row["recorded_finished_at"]
+        if not isinstance(finished_at, datetime):
+            raise TypeError("recorded_finished_at must be datetime")
+
+        attempt_number = row["recorded_attempt_number"]
+        if not isinstance(attempt_number, int):
+            raise TypeError("recorded_attempt_number must be int")
+
+        next_attempt_at = row["next_attempt_at"]
+        if next_attempt_at is not None and not isinstance(next_attempt_at, datetime):
+            raise TypeError("next_attempt_at must be datetime or None")
+
+        return RecordedWorkItemAttemptOutcome(
+            attempt_id=str(row["recorded_attempt_id"]),
+            work_item_id=str(row["work_item_id"]),
+            attempt_number=attempt_number,
+            finished_at=finished_at,
+            outcome_status=WorkItemAttemptOutcomeStatus(
+                str(row["recorded_outcome_status"]),
+            ),
+            error_kind=(
+                str(row["recorded_error_kind"])
+                if row["recorded_error_kind"] is not None
+                else None
+            ),
+            next_attempt_at=next_attempt_at,
+            work_item=_hydrate_work_item(row),
+        )
 
     async def record_attempt_outcome(
         self,

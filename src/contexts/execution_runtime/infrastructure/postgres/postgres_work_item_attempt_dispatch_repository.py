@@ -32,6 +32,7 @@ class PostgresWorkItemAttemptDispatchRepository(WorkItemAttemptDispatchRepositor
                 attempt_number,
                 started_at
             ) VALUES ($1, $2, $3, $4)
+            ON CONFLICT DO NOTHING
             """,
             record.attempt_id,
             record.work_item_id,
@@ -50,6 +51,7 @@ class PostgresWorkItemAttemptDispatchRepository(WorkItemAttemptDispatchRepositor
                 llm_allocation_payload,
                 dispatch_payload
             ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)
+            ON CONFLICT DO NOTHING
             """,
             record.attempt_id,
             record.work_item_id,

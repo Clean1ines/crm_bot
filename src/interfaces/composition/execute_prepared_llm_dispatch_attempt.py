@@ -10,6 +10,8 @@ from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch
     WorkItemAttemptDispatchReadRepositoryPort,
 )
 from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_repository_port import (
+    RecordedWorkItemAttemptOutcome,
+    WorkItemAttemptOutcomeRepositoryPort,
     WorkItemAttemptOutcomeStatus,
 )
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
@@ -105,6 +107,7 @@ class ExecutePreparedLlmDispatchAttempt:
     dispatch_repository: WorkItemAttemptDispatchReadRepositoryPort
     llm_executor: LlmDispatchExecutorPort
     outcome_recorder: RecordWorkItemAttemptOutcome
+    recorded_outcome_reader: WorkItemAttemptOutcomeRepositoryPort | None = None
 
     async def execute(
         self,
@@ -115,6 +118,24 @@ class ExecutePreparedLlmDispatchAttempt:
         )
         if dispatch is None:
             raise ValueError("dispatch attempt not found")
+
+        if self.recorded_outcome_reader is not None:
+            recorded_outcome = (
+                await self.recorded_outcome_reader.get_recorded_attempt_outcome(
+                    attempt_id=dispatch.attempt_id,
+                )
+            )
+            if recorded_outcome is not None:
+                return ExecutePreparedLlmDispatchAttemptResult(
+                    dispatch=dispatch,
+                    llm_result=_llm_result_from_recorded_outcome(
+                        recorded_outcome,
+                    ),
+                    outcome_result=RecordWorkItemAttemptOutcomeResult(
+                        work_item=recorded_outcome.work_item,
+                    ),
+                    validation_metadata=None,
+                )
 
         provider_llm_result = await self.llm_executor.execute_dispatch(
             LlmDispatchExecutionInput(
@@ -159,6 +180,35 @@ class ExecutePreparedLlmDispatchAttempt:
                 else None
             ),
         )
+
+
+def _llm_result_from_recorded_outcome(
+    recorded_outcome: RecordedWorkItemAttemptOutcome,
+) -> LlmDispatchExecutionResult:
+    status = _map_recorded_outcome_status(recorded_outcome.outcome_status)
+    return LlmDispatchExecutionResult(
+        status=status,
+        finished_at=recorded_outcome.finished_at,
+        output_payload={"already_recorded": True}
+        if status is LlmDispatchExecutionStatus.SUCCEEDED
+        else None,
+        error_kind=recorded_outcome.error_kind,
+        next_attempt_at=recorded_outcome.next_attempt_at,
+    )
+
+
+def _map_recorded_outcome_status(
+    status: WorkItemAttemptOutcomeStatus,
+) -> LlmDispatchExecutionStatus:
+    if status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
+        return LlmDispatchExecutionStatus.SUCCEEDED
+    if status is WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED:
+        return LlmDispatchExecutionStatus.RETRYABLE_FAILED
+    if status is WorkItemAttemptOutcomeStatus.TERMINAL_FAILED:
+        return LlmDispatchExecutionStatus.TERMINAL_FAILED
+    if status is WorkItemAttemptOutcomeStatus.DEFERRED:
+        return LlmDispatchExecutionStatus.DEFERRED
+    raise ValueError("unsupported recorded attempt outcome status")
 
 
 def _validate_output_if_requested(

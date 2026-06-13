@@ -150,3 +150,16 @@ def test_provenance_schema_and_adapter_do_not_expose_removed_artifact_columns() 
     for column_name in removed_columns:
         assert column_name not in schema_text
         assert column_name not in adapter_text
+
+
+def test_validated_draft_claim_persistence_is_observation_ref_upsert_based() -> None:
+    source = Path(
+        "src/contexts/knowledge_workbench/extraction/infrastructure/postgres/"
+        "postgres_validated_draft_claim_observation_persistence.py",
+    ).read_text(encoding="utf-8")
+
+    assert "ON CONFLICT (observation_ref) DO UPDATE SET" in source
+    assert "DELETE FROM draft_claim_observation_possible_questions" in source
+    assert "ON CONFLICT (observation_ref, ordinal) DO UPDATE SET" in source
+    assert "candidate.dispatch_attempt_id" in source
+    assert "candidate.claim_index" in source

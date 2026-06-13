@@ -8,6 +8,9 @@ from src.contexts.execution_runtime.application.ports.work_item_split_supersede_
 from src.contexts.execution_runtime.domain.state_machines.work_item_state_machine import (
     WorkItemStateMachine,
 )
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +53,10 @@ class SupersedeWaitingWorkItemsForSplit:
             item = await self._repository.load_work_item(work_item_id)
             if item is None:
                 raise ValueError(f"work item not found: {work_item_id}")
+
+            if item.status is WorkItemStatus.SPLIT_SUPERSEDED:
+                superseded_work_item_ids.append(item.work_item_id)
+                continue
 
             superseded_item = WorkItemStateMachine.mark_split_superseded_waiting(item)
             await self._repository.save_work_item(superseded_item)

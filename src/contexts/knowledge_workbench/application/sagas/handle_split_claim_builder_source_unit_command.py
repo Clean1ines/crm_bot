@@ -272,6 +272,14 @@ def _split_parent_source_unit(
     existing_source_units: tuple[SourceUnit, ...],
     occurred_at: datetime,
 ) -> tuple[SourceUnit, ...]:
+    existing_child_units = tuple(
+        source_unit
+        for source_unit in existing_source_units
+        if parent_source_unit.unit_ref in source_unit.lineage.parent_refs
+    )
+    if existing_child_units:
+        return existing_child_units
+
     max_existing_ordinal = max(
         (source_unit.ordinal for source_unit in existing_source_units),
         default=-1,

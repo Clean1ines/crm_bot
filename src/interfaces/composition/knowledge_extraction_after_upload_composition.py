@@ -60,16 +60,18 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
         try:
             async with connection.transaction():
                 asyncpg_connection = cast(asyncpg.Connection, connection)
+                outcome_repository = PostgresWorkItemAttemptOutcomeRepository(
+                    asyncpg_connection,
+                )
                 return await ExecutePreparedLlmDispatchAttempt(
                     dispatch_repository=PostgresReadWorkItemAttemptDispatchRepository(
                         asyncpg_connection,
                     ),
                     llm_executor=self.llm_executor,
                     outcome_recorder=RecordWorkItemAttemptOutcome(
-                        repository=PostgresWorkItemAttemptOutcomeRepository(
-                            asyncpg_connection,
-                        ),
+                        repository=outcome_repository,
                     ),
+                    recorded_outcome_reader=outcome_repository,
                 ).execute(command)
         finally:
             await self.pool.release(connection)
