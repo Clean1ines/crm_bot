@@ -1,6 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from src.contexts.knowledge_workbench.application.sagas.handle_generate_draft_claim_embeddings_command import (
+    HandleGenerateDraftClaimEmbeddingsCommand,
+    HandleGenerateDraftClaimEmbeddingsCommandHandler,
+)
+from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
+    EmbeddingGenerationPort,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_embedding_persistence_port import (
+    DraftClaimEmbeddingPersistencePort,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_embedding_read_repository_port import (
+    DraftClaimEmbeddingReadRepositoryPort,
+)
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
@@ -129,6 +142,15 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         work_item_split_supersede_repository: (
             WorkItemSplitSupersedeRepositoryPort | None
         ) = None,
+        draft_claim_embedding_read_repository: (
+            DraftClaimEmbeddingReadRepositoryPort | None
+        ) = None,
+        draft_claim_embedding_persistence: (
+            DraftClaimEmbeddingPersistencePort | None
+        ) = None,
+        embedding_generation_port: EmbeddingGenerationPort | None = None,
+        embedding_model_id: str | None = None,
+        embedding_dimensions: int | None = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = _canonical_command_type(workflow_command.command_type)
@@ -305,6 +327,47 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 ),
                 source_unit_repository=source_unit_repository,
                 knowledge_unit_of_work=knowledge_unit_of_work,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS
+        ):
+            if (
+                draft_claim_embedding_read_repository is None
+                or draft_claim_embedding_persistence is None
+                or embedding_generation_port is None
+                or embedding_model_id is None
+                or embedding_dimensions is None
+            ):
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleGenerateDraftClaimEmbeddingsCommandHandler().execute(
+                HandleGenerateDraftClaimEmbeddingsCommand(
+                    workflow_command=workflow_command,
+                ),
+                draft_claim_embedding_read_repository=draft_claim_embedding_read_repository,
+                draft_claim_embedding_persistence=draft_claim_embedding_persistence,
+                embedding_generation_port=embedding_generation_port,
+                embedding_model_id=embedding_model_id,
+                embedding_dimensions=embedding_dimensions,
                 workflow_unit_of_work=workflow_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(

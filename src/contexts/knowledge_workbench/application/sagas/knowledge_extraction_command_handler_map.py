@@ -52,6 +52,12 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
         ),
         handler_name="HandleReconcileClaimBuilderProgressCommandHandler",
     ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS
+        ),
+        handler_name="HandleGenerateDraftClaimEmbeddingsCommandHandler",
+    ),
 )
 
 

@@ -87,6 +87,16 @@ EXPECTED_MIGRATIONS = {
         "idx_llm_attempt_capacity_observations_provider_account_model",
         "idx_llm_attempt_capacity_observations_observed_at",
     ),
+    "103_create_draft_claim_embeddings.sql": (
+        "CREATE TABLE IF NOT EXISTS draft_claim_embeddings",
+        "embedding_ref text PRIMARY KEY",
+        "observation_ref text NOT NULL REFERENCES draft_claim_observations",
+        "embedding vector(384) NOT NULL",
+        "chk_draft_claim_embeddings_dimensions_384",
+        "uq_draft_claim_embeddings_observation_model_text",
+        "idx_draft_claim_embeddings_workflow_run",
+        "idx_draft_claim_embeddings_vector_ivfflat",
+    ),
 }
 
 FORBIDDEN_LEGACY_MARKERS = (
@@ -125,6 +135,7 @@ REQUIRED_TABLES = (
     "source_documents",
     "source_units",
     "llm_attempt_capacity_observations",
+    "draft_claim_embeddings",
 )
 
 
