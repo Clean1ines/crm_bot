@@ -56,6 +56,12 @@ from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry impor
     WorkflowTimelineEntry,
     WorkflowTimelineSeverity,
 )
+from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+    WorkflowCommandId,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
+    WorkflowIdempotencyKey,
+)
 from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
     WorkflowEventId,
 )
@@ -70,6 +76,10 @@ class DraftClaimCompactionApplyResultUseCasePort(Protocol):
 
 
 WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
+DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
+DRAFT_CLAIM_COMPACTION_WORKER_REF = (
+    "knowledge-workbench-draft-claim-compaction-dispatch"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +96,8 @@ class HandleApplyDraftClaimCompactionResult:
     next_work_type: str
     scheduled_work_item_count: int
     already_scheduled_work_item_count: int
+    appended_next_command_count: int
+    next_command_type: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +144,21 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
         if schedule.conflict_count:
             raise ValueError("draft claim compaction next work item schedule conflict")
 
+        next_workflow_command = _next_workflow_command_after_apply(
+            workflow_command=workflow_command,
+            apply_command=apply_command,
+            outcome=outcome,
+            schedule=schedule,
+        )
+        appended_next_command_count = 0
+        next_command_type: str | None = None
+        if next_workflow_command is not None:
+            await workflow_unit_of_work.command_log.append_pending_command(
+                next_workflow_command,
+            )
+            appended_next_command_count = 1
+            next_command_type = next_workflow_command.command_type
+
         await _append_applied_event(
             workflow_unit_of_work=workflow_unit_of_work,
             workflow_command=workflow_command,
@@ -144,12 +171,14 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
             apply_command=apply_command,
             outcome=outcome,
             schedule=schedule,
+            appended_next_command_count=appended_next_command_count,
         )
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
             workflow_run_id=apply_command.workflow_run_id,
             outcome=outcome,
             schedule=schedule,
+            appended_next_command_count=appended_next_command_count,
             occurred_at=workflow_command.updated_at,
         )
         await workflow_unit_of_work.timeline.append_entry(
@@ -166,7 +195,11 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
                 phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
                 severity=WorkflowTimelineSeverity.INFO,
                 message="Draft claim compaction result applied",
-                payload_summary=_progress_summary(outcome=outcome, schedule=schedule),
+                payload_summary=_progress_summary(
+                    outcome=outcome,
+                    schedule=schedule,
+                    appended_next_command_count=appended_next_command_count,
+                ),
                 occurred_at=workflow_command.updated_at,
                 source_ref=workflow_command.command_type,
             )
@@ -183,7 +216,11 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
                 phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
                 severity=WorkflowTimelineSeverity.INFO,
                 message=_next_timeline_message(outcome.next_decision.work_type),
-                payload_summary=_progress_summary(outcome=outcome, schedule=schedule),
+                payload_summary=_progress_summary(
+                    outcome=outcome,
+                    schedule=schedule,
+                    appended_next_command_count=appended_next_command_count,
+                ),
                 occurred_at=workflow_command.updated_at,
                 source_ref=workflow_command.command_type,
             )
@@ -201,6 +238,8 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
             next_work_type=outcome.next_decision.work_type.value,
             scheduled_work_item_count=schedule.created_count,
             already_scheduled_work_item_count=schedule.already_exists_count,
+            appended_next_command_count=appended_next_command_count,
+            next_command_type=next_command_type,
         )
 
 
@@ -292,6 +331,116 @@ async def _schedule_next_work(
     )
 
 
+def _next_workflow_command_after_apply(
+    *,
+    workflow_command: WorkflowCommand,
+    apply_command: DraftClaimCompactionApplyResultCommand,
+    outcome: DraftClaimCompactionApplyResultOutcome,
+    schedule: EnsureWorkItemsScheduledResult,
+) -> WorkflowCommand | None:
+    work_type = outcome.next_decision.work_type
+    if work_type in {
+        DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT,
+        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+        DraftClaimCompactionNextWorkItemType.MIXED,
+        DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
+    }:
+        scheduled_count = schedule.created_count + schedule.already_exists_count
+        if scheduled_count <= 0:
+            return None
+        batch_ref = _next_batch_ref(
+            group_ref=apply_command.group_ref,
+            next_work_item=outcome.next_decision.next_work_item,
+        )
+        return _prepare_dispatch_batch_command(
+            workflow_run_id=apply_command.workflow_run_id,
+            batch_ref=batch_ref,
+            scheduled_work_item_count=scheduled_count,
+            occurred_at=workflow_command.updated_at,
+        )
+
+    if work_type is DraftClaimCompactionNextWorkItemType.DONE:
+        return _reconcile_progress_command(
+            workflow_command=workflow_command,
+            apply_command=apply_command,
+            reason="done",
+        )
+
+    return None
+
+
+def _prepare_dispatch_batch_command(
+    *,
+    workflow_run_id: str,
+    batch_ref: str,
+    scheduled_work_item_count: int,
+    occurred_at,
+) -> WorkflowCommand:
+    idempotency_key = f"draft-claim-compaction-dispatch:{workflow_run_id}:{batch_ref}"
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+        ),
+        workflow_run_id=workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "work_kind": WORK_KIND.value,
+            "scheduled_work_item_count": scheduled_work_item_count,
+            "llm_dispatch_preparation": {
+                "profile": {
+                    "profile_id": "draft_claim_compaction",
+                    "estimated_prompt_tokens": 90000,
+                    "estimated_completion_tokens": 4000,
+                    "estimated_requests": 1,
+                },
+                "account_capacities": (),
+                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+                "requested_items": scheduled_work_item_count,
+                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+                "lease_token_prefix": (
+                    f"draft-claim-compaction-dispatch:{workflow_run_id}"
+                ),
+                "lease_ttl_seconds": 300,
+            },
+        },
+        status=WorkflowCommandStatus.PENDING,
+        run_after=occurred_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+
+
+def _reconcile_progress_command(
+    *,
+    workflow_command: WorkflowCommand,
+    apply_command: DraftClaimCompactionApplyResultCommand,
+    reason: str,
+) -> WorkflowCommand:
+    idempotency_key = (
+        f"draft-claim-compaction-progress:{apply_command.workflow_run_id}:"
+        f"{apply_command.group_ref}:{reason}:{apply_command.work_item_id}"
+    )
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
+        ),
+        workflow_run_id=apply_command.workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+        payload={
+            "workflow_run_id": apply_command.workflow_run_id,
+            "group_ref": apply_command.group_ref,
+            "caused_by_command_id": workflow_command.command_id.value,
+        },
+        status=WorkflowCommandStatus.PENDING,
+        run_after=workflow_command.updated_at,
+        created_at=workflow_command.updated_at,
+        updated_at=workflow_command.updated_at,
+    )
+
+
 async def _append_applied_event(
     *,
     workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
@@ -334,6 +483,7 @@ async def _append_next_event(
     apply_command: DraftClaimCompactionApplyResultCommand,
     outcome: DraftClaimCompactionApplyResultOutcome,
     schedule: EnsureWorkItemsScheduledResult,
+    appended_next_command_count: int,
 ) -> None:
     work_type = outcome.next_decision.work_type
     event_type = _next_event_type(work_type)
@@ -344,6 +494,7 @@ async def _append_next_event(
         "next_work_type": work_type.value,
         "scheduled_work_item_count": schedule.created_count,
         "already_scheduled_work_item_count": schedule.already_exists_count,
+        "appended_next_command_count": appended_next_command_count,
     }
     if work_type is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE:
         payload.update(
@@ -378,6 +529,7 @@ async def _save_progress_snapshot(
     workflow_run_id: str,
     outcome: DraftClaimCompactionApplyResultOutcome,
     schedule: EnsureWorkItemsScheduledResult,
+    appended_next_command_count: int,
     occurred_at,
 ) -> None:
     existing = await workflow_unit_of_work.progress_snapshots.get_snapshot(
@@ -396,6 +548,9 @@ async def _save_progress_snapshot(
             ),
             "draft_claim_compaction_already_scheduled_next_work_item_count": (
                 schedule.already_exists_count
+            ),
+            "draft_claim_compaction_appended_next_command_count": (
+                appended_next_command_count
             ),
         }
     )
@@ -435,6 +590,7 @@ def _progress_summary(
     *,
     outcome: DraftClaimCompactionApplyResultOutcome,
     schedule: EnsureWorkItemsScheduledResult,
+    appended_next_command_count: int,
 ) -> JsonObject:
     return {
         "created_node_count": len(outcome.created_node_refs),
@@ -443,6 +599,7 @@ def _progress_summary(
         "next_work_type": outcome.next_decision.work_type.value,
         "scheduled_work_item_count": schedule.created_count,
         "already_scheduled_work_item_count": schedule.already_exists_count,
+        "appended_next_command_count": appended_next_command_count,
     }
 
 

@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 
 import pytest
 
+from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
+    work_item_schedule_payload_hash,
+)
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.handle_apply_draft_claim_compaction_result_command import (
     HandleApplyDraftClaimCompactionResultCommand,
     HandleApplyDraftClaimCompactionResultCommandHandler,
@@ -209,14 +213,18 @@ class FakeReductionStateRepository:
 @dataclass(slots=True)
 class FakeWorkItemSchedulingRepository:
     saved_payloads: list[object] = field(default_factory=list)
+    existing_payload_hashes: dict[str, str] = field(default_factory=dict)
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
-        del work_item_id
-        return None
+        if work_item_id not in self.existing_payload_hashes:
+            return None
+        return WorkItem(
+            work_item_id=work_item_id,
+            work_kind=WorkKind("knowledge_workbench.draft_claim_compaction"),
+        )
 
     async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
-        del work_item_id
-        return None
+        return self.existing_payload_hashes.get(work_item_id)
 
     async def save_scheduled_work_item(
         self,
@@ -233,8 +241,10 @@ class FakeWorkItemSchedulingRepository:
 @dataclass(slots=True)
 class FakeCommandLog:
     completed: list[WorkflowCommandId] = field(default_factory=list)
+    pending_commands: list[WorkflowCommand] = field(default_factory=list)
 
     async def append_pending_command(self, command: WorkflowCommand) -> WorkflowCommand:
+        self.pending_commands.append(command)
         return command
 
     async def mark_command_completed(
@@ -392,7 +402,21 @@ async def test_applies_result_events_progress_timeline_and_completes_command() -
     assert workflow_uow.progress_snapshots.snapshot is not None
     assert workflow_uow.command_log.completed == [_command().command_id]
     assert result.next_work_type == "done"
+    assert result.appended_next_command_count == 1
+    assert result.next_command_type == (
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
+    )
     assert scheduling.saved_payloads == []
+    assert [
+        command.command_type for command in workflow_uow.command_log.pending_commands
+    ] == [
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
+    ]
+    assert workflow_uow.command_log.pending_commands[0].payload == {
+        "workflow_run_id": _workflow_run_id(),
+        "group_ref": "group-1",
+        "caused_by_command_id": _command().command_id.value,
+    }
 
 
 @pytest.mark.asyncio
@@ -432,6 +456,22 @@ async def test_schedules_next_work_item_for_reduced_rewrite_decision() -> None:
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED.value
         in [event.event_type for event in workflow_uow.outbox.events]
     )
+    assert [
+        command.command_type for command in workflow_uow.command_log.pending_commands
+    ] == [
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    ]
+    prepare_payload = workflow_uow.command_log.pending_commands[0].payload
+    assert prepare_payload["scheduled_work_item_count"] == 1
+    assert prepare_payload["llm_dispatch_preparation"]["requested_items"] == 1
+    assert (
+        prepare_payload["llm_dispatch_preparation"]["active_model_ref"]
+        == "openai/gpt-oss-120b"
+    )
+    assert (
+        prepare_payload["llm_dispatch_preparation"]["worker_ref"]
+        == "knowledge-workbench-draft-claim-compaction-dispatch"
+    )
 
 
 @pytest.mark.asyncio
@@ -462,6 +502,7 @@ async def test_waiting_user_model_choice_appends_event_without_scheduling() -> N
     )
 
     assert scheduling.saved_payloads == []
+    assert workflow_uow.command_log.pending_commands == []
     event = workflow_uow.outbox.events[-1]
     assert (
         event.event_type
@@ -538,3 +579,111 @@ def _apply_persistence() -> DraftClaimCompactionApplyPersistenceResult:
         superseded_node_count=2,
         already_exists_count=0,
     )
+
+
+@pytest.mark.asyncio
+async def test_schedules_prepare_command_after_next_compacted_work_item() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    scheduling = FakeWorkItemSchedulingRepository()
+    repository = FakeReductionStateRepository(
+        _decision(
+            DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+            node_refs=("compacted-a", "compacted-b"),
+        )
+    )
+    apply_use_case = FakeApplyResultUseCase(
+        _decision(
+            DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+            node_refs=("compacted-a", "compacted-b"),
+        )
+    )
+
+    result = await HandleApplyDraftClaimCompactionResultCommandHandler(
+        apply_result_use_case=apply_use_case,
+    ).execute(
+        HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_scheduling_repository=scheduling,
+    )
+
+    assert len(scheduling.saved_payloads) == 1
+    assert result.appended_next_command_count == 1
+    assert result.next_command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert [event.event_type for event in workflow_uow.outbox.events] == [
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED.value,
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED.value,
+    ]
+
+    command = workflow_uow.command_log.pending_commands[0]
+    assert command.command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert command.idempotency_key.value == (
+        "draft-claim-compaction-dispatch:"
+        "workflow-1:group-1:compacted_vs_compacted:compacted-a--compacted-b"
+    )
+    payload = command.payload
+    assert payload["workflow_run_id"] == _workflow_run_id()
+    assert payload["work_kind"] == "knowledge_workbench.draft_claim_compaction"
+    assert payload["scheduled_work_item_count"] == 1
+    dispatch_payload = payload["llm_dispatch_preparation"]
+    assert dispatch_payload["requested_items"] == 1
+    assert dispatch_payload["active_model_ref"] == "openai/gpt-oss-120b"
+    assert (
+        dispatch_payload["worker_ref"]
+        == "knowledge-workbench-draft-claim-compaction-dispatch"
+    )
+    assert dispatch_payload["account_capacities"] == ()
+
+
+@pytest.mark.asyncio
+async def test_appends_prepare_command_when_next_work_item_already_exists() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    work_type = DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
+    node_refs = ("compacted-a", "compacted-b")
+    schedule_payload = _expected_next_work_schedule_payload(work_type, node_refs)
+    work_item_id = (
+        "claim-compaction:workflow-1:"
+        "group-1:compacted_vs_compacted:compacted-a--compacted-b"
+    )
+    scheduling = FakeWorkItemSchedulingRepository(
+        existing_payload_hashes={
+            work_item_id: work_item_schedule_payload_hash(schedule_payload),
+        }
+    )
+    repository = FakeReductionStateRepository(_decision(work_type, node_refs=node_refs))
+    apply_use_case = FakeApplyResultUseCase(_decision(work_type, node_refs=node_refs))
+
+    result = await HandleApplyDraftClaimCompactionResultCommandHandler(
+        apply_result_use_case=apply_use_case,
+    ).execute(
+        HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_scheduling_repository=scheduling,
+    )
+
+    assert scheduling.saved_payloads == []
+    assert result.scheduled_work_item_count == 0
+    assert result.already_scheduled_work_item_count == 1
+    assert result.appended_next_command_count == 1
+    assert workflow_uow.command_log.pending_commands[0].command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+
+
+def _expected_next_work_schedule_payload(
+    work_type: DraftClaimCompactionNextWorkItemType,
+    node_refs: tuple[str, ...],
+) -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "group_ref": "group-1",
+        "batch_ref": f"group-1:{work_type.value}:{'--'.join(node_refs)}",
+        "prompt_variant": work_type.value,
+        "model_id": "openai/gpt-oss-120b",
+        "node_refs": list(node_refs),
+    }
