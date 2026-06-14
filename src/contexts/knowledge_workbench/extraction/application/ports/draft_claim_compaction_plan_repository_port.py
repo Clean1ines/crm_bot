@@ -6,6 +6,7 @@ from typing import Protocol
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionBatchCandidate,
+    DraftClaimCompactionBatchForDispatch,
     DraftClaimCompactionEdgeCandidate,
     DraftClaimCompactionGroupCandidate,
     DraftClaimForCompaction,
@@ -26,6 +27,18 @@ class DraftClaimCompactionPlanPersistenceResult:
 
 
 class DraftClaimCompactionPlanRepositoryPort(Protocol):
+    async def get_compaction_batch_by_ref(
+        self,
+        *,
+        batch_ref: str,
+    ) -> DraftClaimCompactionBatchForDispatch | None: ...
+
+    async def list_claims_for_compaction_batch(
+        self,
+        *,
+        batch_ref: str,
+    ) -> tuple[DraftClaimForCompaction, ...]: ...
+
     async def list_claims_for_compaction(
         self,
         *,

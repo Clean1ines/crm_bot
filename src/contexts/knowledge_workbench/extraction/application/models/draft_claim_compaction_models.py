@@ -110,6 +110,35 @@ class DraftClaimCompactionBatchCandidate:
         return len(self.member_observation_refs)
 
 
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionBatchForDispatch:
+    batch_ref: str
+    workflow_run_id: str
+    group_ref: str
+    prompt_variant: str
+    model_id: str
+    estimated_input_tokens: int
+    member_observation_refs: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _text(self.batch_ref, "batch_ref")
+        _text(self.workflow_run_id, "workflow_run_id")
+        _text(self.group_ref, "group_ref")
+        _text(self.prompt_variant, "prompt_variant")
+        _text(self.model_id, "model_id")
+        if self.estimated_input_tokens < 0:
+            raise ValueError("estimated_input_tokens must be >= 0")
+        _text_tuple(
+            self.member_observation_refs,
+            "member_observation_refs",
+            allow_empty=False,
+        )
+
+    @property
+    def member_count(self) -> int:
+        return len(self.member_observation_refs)
+
+
 def _text(value: str, name: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be non-empty text")

@@ -7,6 +7,7 @@ from typing import Protocol
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionBatchCandidate,
+    DraftClaimCompactionBatchForDispatch,
     DraftClaimCompactionEdgeCandidate,
     DraftClaimCompactionGroupCandidate,
     DraftClaimForCompaction,
@@ -27,6 +28,71 @@ class PostgresDraftClaimCompactionPlanRepository(
 ):
     def __init__(self, connection: DraftClaimCompactionPlanConnectionLike) -> None:
         self._connection = connection
+
+    async def get_compaction_batch_by_ref(
+        self,
+        *,
+        batch_ref: str,
+    ) -> DraftClaimCompactionBatchForDispatch | None:
+        rows = await self._connection.fetch(
+            """
+            SELECT b.batch_ref, b.workflow_run_id, b.group_ref, b.prompt_variant,
+                   b.model_id, b.estimated_input_tokens,
+                   COALESCE(
+                       array_agg(gm.observation_ref ORDER BY gm.member_rank)
+                       FILTER (WHERE gm.observation_ref IS NOT NULL),
+                       ARRAY[]::text[]
+                   ) AS member_observation_refs
+            FROM draft_claim_compaction_batches b
+            LEFT JOIN draft_claim_compaction_group_members gm
+                ON gm.group_ref = b.group_ref
+            WHERE b.batch_ref = $1
+            GROUP BY b.batch_ref, b.workflow_run_id, b.group_ref, b.prompt_variant,
+                     b.model_id, b.estimated_input_tokens
+            """,
+            batch_ref,
+        )
+        if not rows:
+            return None
+        return _batch_for_dispatch(rows[0])
+
+    async def list_claims_for_compaction_batch(
+        self,
+        *,
+        batch_ref: str,
+    ) -> tuple[DraftClaimForCompaction, ...]:
+        rows = await self._connection.fetch(
+            """
+            SELECT e.embedding_ref, e.workflow_run_id, e.source_document_ref,
+                   e.source_unit_ref, e.observation_ref, e.embedding_text,
+                   e.embedding_model_id, e.dimensions, e.embedding,
+                   o.claim, o.granularity, o.exclusion_scope,
+                   COALESCE(array_agg(q.question ORDER BY q.ordinal)
+                       FILTER (WHERE q.question IS NOT NULL), ARRAY[]::text[]) AS possible_questions,
+                   gm.member_rank,
+                   p.claim_index
+            FROM draft_claim_compaction_batches b
+            JOIN draft_claim_compaction_group_members gm
+                ON gm.group_ref = b.group_ref
+            JOIN draft_claim_embeddings e
+                ON e.observation_ref = gm.observation_ref
+            JOIN draft_claim_observations o
+                ON o.observation_ref = e.observation_ref
+            JOIN draft_claim_observation_provenance p
+                ON p.observation_ref = e.observation_ref
+            LEFT JOIN draft_claim_observation_possible_questions q
+                ON q.observation_ref = e.observation_ref
+            WHERE b.batch_ref = $1
+            GROUP BY e.embedding_ref, e.workflow_run_id, e.source_document_ref,
+                     e.source_unit_ref, e.observation_ref, e.embedding_text,
+                     e.embedding_model_id, e.dimensions, e.embedding,
+                     o.claim, o.granularity, o.exclusion_scope,
+                     gm.member_rank, p.claim_index
+            ORDER BY gm.member_rank, p.claim_index, e.observation_ref
+            """,
+            batch_ref,
+        )
+        return tuple(_claim(row) for row in rows)
 
     async def list_claims_for_compaction(
         self,
@@ -199,6 +265,20 @@ class PostgresDraftClaimCompactionPlanRepository(
             batch.member_count,
             created_at,
         )
+
+
+def _batch_for_dispatch(
+    row: Mapping[str, object],
+) -> DraftClaimCompactionBatchForDispatch:
+    return DraftClaimCompactionBatchForDispatch(
+        batch_ref=_s(row, "batch_ref"),
+        workflow_run_id=_s(row, "workflow_run_id"),
+        group_ref=_s(row, "group_ref"),
+        prompt_variant=_s(row, "prompt_variant"),
+        model_id=_s(row, "model_id"),
+        estimated_input_tokens=_i(row, "estimated_input_tokens"),
+        member_observation_refs=_strings(row["member_observation_refs"]),
+    )
 
 
 def _claim(row: Mapping[str, object]) -> DraftClaimForCompaction:
