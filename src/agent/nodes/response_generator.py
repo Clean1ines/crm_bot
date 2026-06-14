@@ -21,7 +21,6 @@ from src.domain.runtime.response_generation import (
 )
 from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
 from src.infrastructure.config.settings import settings
-from src.infrastructure.llm.groq_keyring import ainvoke_chat_with_rotation
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
@@ -73,11 +72,31 @@ class ChatGroqFactory(Protocol):
     ) -> ChatGroqClient: ...
 
 
+class ChatGroqClientFactory(Protocol):
+    def __call__(self, *, api_key: str) -> ChatGroqClient: ...
+
+
 # Test hook and lazy runtime cache.
 # Keep this symbol module-level so existing tests can patch
 # src.agent.nodes.response_generator.ChatGroq without importing langchain_groq
 # at import time.
 ChatGroq: ChatGroqFactory | None = None
+
+
+def _primary_groq_api_key() -> str:
+    value = str(settings.GROQ_API_KEY).strip()
+    if not value:
+        raise RuntimeError("GROQ_API_KEY is not configured")
+    return value
+
+
+async def _ainvoke_chat_once(
+    *,
+    make_client: ChatGroqClientFactory,
+    messages: list[tuple[str, str]],
+) -> ChatMessageResponse:
+    client = make_client(api_key=_primary_groq_api_key())
+    return await client.ainvoke(messages)
 
 
 def _chat_groq_class() -> ChatGroqFactory:
@@ -328,10 +347,9 @@ def create_response_generator_node(
                         api_key=api_key,
                     )
 
-                response = await ainvoke_chat_with_rotation(
+                response = await _ainvoke_chat_once(
                     make_client=_make_client,
                     messages=messages,
-                    operation_name="response_generator.ainvoke",
                 )
             response_text = (response.content or "").strip()
             input_lang = detect_language_hint(context.user_input)

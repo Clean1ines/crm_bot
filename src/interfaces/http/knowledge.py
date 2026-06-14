@@ -1235,24 +1235,10 @@ async def publish_knowledge_ready_answers(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_publish_ready import (
-        PublishReadyRejectedError,
-        publish_workbench_ready_surfaces,
+    _legacy_endpoint_gone(
+        capability="publish Workbench-ready surfaces",
+        target="Knowledge Workbench publication context",
     )
-
-    try:
-        return await publish_workbench_ready_surfaces(
-            pool=pool,
-            project_id=project_id,
-            document_id=document_id,
-        )
-    except LookupError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail="Knowledge document not found",
-        ) from exc
-    except PublishReadyRejectedError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{document_id}/retry-failed-batches")

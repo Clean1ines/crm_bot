@@ -62,7 +62,6 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     This belongs to composition, not infrastructure, because it wires DB-backed
     adapters, LLM services, and the process-wide tool registry together.
     """
-    from src.infrastructure.llm.query_expander import GroqQueryExpander
     from src.application.ports.knowledge.runtime_search import (
         KnowledgeRuntimeRetrievalPort,
     )
@@ -91,7 +90,6 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
 
     rag_service = RAGService(
         cast(KnowledgeRuntimeRetrievalPort, runtime_retrieval),
-        query_expander=GroqQueryExpander(),
     )
 
     tool_registry.register(SearchKnowledgeTool(rag_service))

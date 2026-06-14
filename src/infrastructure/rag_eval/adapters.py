@@ -27,7 +27,6 @@ from src.domain.project_plane.knowledge_views import (
     source_refs_from_excerpt,
 )
 from src.infrastructure.config.settings import settings
-from src.infrastructure.llm.groq_keyring import RotatingAsyncGroq
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -35,6 +34,13 @@ logger = get_logger(__name__)
 
 _RAG_EVAL_LLM_LOCK = asyncio.Lock()
 _RAG_EVAL_LAST_CALL_MONOTONIC = 0.0
+
+
+def _default_async_groq_client() -> AsyncGroq:
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    if api_key:
+        return AsyncGroq(api_key=api_key)
+    return AsyncGroq()
 
 
 def _rag_eval_llm_min_delay_seconds() -> float:
@@ -85,7 +91,7 @@ class GroqRagEvalJsonLlmAdapter:
         temperature: float = 0.1,
         max_tokens: int = 2048,
     ) -> None:
-        self._client = client or RotatingAsyncGroq()
+        self._client = client or _default_async_groq_client()
         self._model = model or settings.GROQ_MODEL
         self._fallback_model = fallback_model.strip() if fallback_model else None
         if self._fallback_model == self._model:

@@ -27,13 +27,9 @@ from src.domain.project_plane.knowledge_views import (
     KnowledgeDocumentView,
     KnowledgeSearchResultView,
 )
-from src.domain.project_plane.model_usage_views import ModelUsageEventCreate
 
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.knowledge_processing_modes import KnowledgeProcessingMode
-from src.infrastructure.db.repositories.model_usage_repository import (
-    ModelUsageRepository,
-)
 from src.infrastructure.db.repositories.knowledge_search_ranking import (
     optional_row_text,
     optional_row_value,
@@ -45,7 +41,17 @@ from src.infrastructure.db.repositories.knowledge_search_queries import (
     RUNTIME_PREVIEW_SEARCH_SQL,
     RUNTIME_VECTOR_SEARCH_SQL,
 )
-from src.infrastructure.llm.embedding_service import embed_text
+from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
+    EmbeddingGenerationPort,
+    EmbeddingGenerationRequest,
+)
+from src.contexts.embedding_runtime.infrastructure.composition.embedding_generation_provider_factory import (
+    make_embedding_generation_port,
+)
+from src.contexts.embedding_runtime.infrastructure.config.embedding_runtime_settings import (
+    EmbeddingRuntimeSettings,
+    load_embedding_runtime_settings,
+)
 from src.infrastructure.logging.logger import get_logger
 from src.utils.uuid_utils import ensure_uuid
 
@@ -112,9 +118,20 @@ def _surface_timestamp(value: object) -> datetime | None:
 
 
 class KnowledgeRepository:
-    def __init__(self, pool: asyncpg.Pool) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        *,
+        embedding_generation_port: EmbeddingGenerationPort | None = None,
+        embedding_runtime_settings: EmbeddingRuntimeSettings | None = None,
+    ) -> None:
         self.pool = pool
-        self._usage_repo = ModelUsageRepository(pool)
+        self._embedding_runtime_settings = (
+            embedding_runtime_settings or load_embedding_runtime_settings()
+        )
+        self._embedding_generation_port = (
+            embedding_generation_port or make_embedding_generation_port()
+        )
 
     async def resume_document_processing(
         self,
@@ -172,19 +189,22 @@ class KnowledgeRepository:
         if limit <= 0:
             return []
 
-        query_embedding_result = await embed_text(query)
-        query_embedding_str = pg_vector_text(query_embedding_result.embedding)
+        embedding_request = EmbeddingGenerationRequest(
+            texts=(query,),
+            model_id=self._embedding_runtime_settings.local_model,
+            expected_dimensions=self._embedding_runtime_settings.vector_dimensions,
+            task="retrieval.query",
+        )
+        query_embedding_result = await self._embedding_generation_port.embed(
+            embedding_request
+        )
+        query_embedding = (
+            query_embedding_result.embeddings[0]
+            if query_embedding_result.embeddings
+            else ()
+        )
+        query_embedding_str = pg_vector_text(list(query_embedding))
         project_uuid = ensure_uuid(project_id)
-
-        if query_embedding_result.usage is not None:
-            await self._usage_repo.record_event(
-                ModelUsageEventCreate.from_measurement(
-                    project_id=project_id,
-                    source="rag_search",
-                    measurement=query_embedding_result.usage,
-                    thread_id=thread_id,
-                )
-            )
 
         candidate_limit = max(limit * 10, 50)
 

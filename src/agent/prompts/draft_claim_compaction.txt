@@ -1,0 +1,151 @@
+NODE: draft_claim_compaction
+
+You receive one JSON object.
+
+Your task is to compact raw draft claims into fewer, richer, non-duplicating claims.
+
+Return only one JSON object.
+
+# Input
+
+{
+"claims": [
+{
+"id": "",
+"claim": "",
+"questions": [],
+"exclusion_scope": [],
+"granularity": "atomic"
+}
+]
+}
+
+# Output
+
+{
+"compacted_claims": [
+{
+"key": "",
+"claim": "",
+"claim_kind": "definition",
+"granularity": "atomic",
+"source_claim_refs": [],
+"triples": [],
+"merge_decision": "merged"
+}
+]
+}
+
+# Language
+
+Write `claim` in the same language as the input claims.
+Keep enum values in English.
+
+# Controlled claim_kind
+
+definition | property | capability | limitation | rule | condition | process | list | comparison | criterion | example_set | value | exception | other
+
+# Controlled granularity
+
+atomic | composite
+
+# Controlled merge_decision
+
+merged | unmerged
+
+# Triple schema
+
+{
+"subject": "",
+"predicate": "",
+"object": "",
+"qualifiers": []
+}
+
+# Allowed predicates
+
+is_a | has_capability | has_property | has_value | has_limitation | requires | supports | integrates_with | used_for | handles | transfers_to | provides | improves | checks | removes | creates | connects_to
+
+# Task rules
+
+1. Merge claims that express the same core meaning.
+2. Merge claims that answer the same or nearly the same questions with the same meaning.
+3. If one claim is a fuller version of another, keep the fuller meaning.
+4. If two claims overlap but one adds important content, produce one richer claim that preserves the added content.
+5. Keep claims separate when they describe different facts, different values, different limitations, different rules, or different processes.
+6. Keep useful composite claims composite when they represent one practical answer bundle.
+7. Do not create a vague mega-claim that hides distinct facts.
+8. Every input claim id must appear in exactly one `source_claim_refs` array.
+9. `source_claim_refs` must contain only input claim ids.
+10. If `source_claim_refs` contains more than one id, `merge_decision` must be `merged`.
+11. If `source_claim_refs` contains one id, `merge_decision` must be `unmerged`.
+12. `key` must be stable snake_case based on the compacted claim meaning.
+13. `claim_kind` must describe the compacted claim, not just the first source claim.
+14. `granularity` must describe the compacted claim.
+15. Build triples from the compacted claim meaning.
+16. Use triples only when they help represent the claim.
+17. If no useful triples are needed, use [].
+18. Do not output questions.
+19. Do not output exclusion_scope.
+
+# Compaction example
+
+Input claims:
+
+claim_1:
+claim = "The product is a knowledge-base platform."
+questions = ["What is the product?", "What platform is offered?"]
+exclusion_scope = ["Telegram assistant"]
+
+claim_2:
+claim = "The product is a knowledge-base platform for creating a verified AI knowledge base and using it in a Telegram assistant."
+questions = ["What is the product?", "How is the knowledge base used?"]
+exclusion_scope = ["web panel"]
+
+Output:
+
+{
+"compacted_claims": [
+{
+"key": "product_ai_knowledge_base_platform",
+"claim": "The product is a knowledge-base platform for creating a verified AI knowledge base and using it in a Telegram assistant.",
+"claim_kind": "definition",
+"granularity": "atomic",
+"source_claim_refs": ["claim_1", "claim_2"],
+"triples": [
+{
+"subject": "product",
+"predicate": "is_a",
+"object": "knowledge-base platform",
+"qualifiers": []
+},
+{
+"subject": "product",
+"predicate": "used_for",
+"object": "creating a verified AI knowledge base",
+"qualifiers": []
+},
+{
+"subject": "AI knowledge base",
+"predicate": "integrates_with",
+"object": "Telegram assistant",
+"qualifiers": []
+}
+],
+"merge_decision": "merged"
+}
+]
+}
+
+# Final self-check
+
+Before returning, verify:
+
+* output is valid JSON;
+* top-level key is exactly `compacted_claims`;
+* every item has key, claim, claim_kind, granularity, source_claim_refs, triples, merge_decision;
+* every input id appears exactly once across all source_claim_refs;
+* no unknown source ids are used;
+* no questions are returned;
+* no exclusion_scope is returned;
+* no text outside JSON.
