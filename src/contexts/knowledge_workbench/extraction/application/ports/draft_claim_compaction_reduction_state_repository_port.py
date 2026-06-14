@@ -114,3 +114,15 @@ class DraftClaimCompactionReductionStateRepositoryPort(Protocol):
         rewrite: DraftClaimReducedRewriteOutput,
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult: ...
+
+    async def list_final_compacted_nodes_for_preview(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> tuple[DraftClaimCompactionNode, ...]: ...
+
+    async def count_active_raw_nodes(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> int: ...

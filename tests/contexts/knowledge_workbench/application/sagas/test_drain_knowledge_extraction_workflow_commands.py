@@ -850,6 +850,7 @@ def _compaction_workflow_command(
         KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION,
         KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT,
         KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS,
+        KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW,
     ),
 )
 @pytest.mark.asyncio

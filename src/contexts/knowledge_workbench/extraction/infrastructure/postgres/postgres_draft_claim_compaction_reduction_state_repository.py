@@ -39,6 +39,7 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 class DraftClaimCompactionReductionStateConnectionLike(Protocol):
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]: ...
     async def execute(self, query: str, *args: object) -> object: ...
+    async def fetchval(self, query: str, *args: object) -> object: ...
 
 
 class PostgresDraftClaimCompactionReductionStateRepository(
@@ -582,6 +583,58 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             inserted_comparison_count=0,
             already_exists_count=requested_total - inserted_total,
         )
+
+    async def list_final_compacted_nodes_for_preview(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> tuple[DraftClaimCompactionNode, ...]:
+        rows = await self._connection.fetch(
+            """
+            SELECT node_ref, node_kind, active, source_claim_refs,
+                   supersedes_node_refs, estimated_input_tokens,
+                   compacted_key, compacted_claim, compacted_triples
+            FROM draft_claim_compaction_nodes
+            WHERE workflow_run_id = $1
+              AND active = true
+              AND node_kind = 'compacted'
+            ORDER BY group_ref, node_ref
+            """,
+            workflow_run_id,
+        )
+        if not rows:
+            return ()
+
+        source_rows = await self._connection.fetch(
+            """
+            SELECT node_ref, source_ref, source_kind
+            FROM draft_claim_compaction_node_sources
+            WHERE node_ref = ANY($1::text[])
+            ORDER BY node_ref, source_ref
+            """,
+            [str(row["node_ref"]) for row in rows],
+        )
+        sources_by_node = _sources_by_node(source_rows)
+        return tuple(_node(row, sources_by_node) for row in rows)
+
+    async def count_active_raw_nodes(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> int:
+        value = await self._connection.fetchval(
+            """
+            SELECT count(*)
+            FROM draft_claim_compaction_nodes
+            WHERE workflow_run_id = $1
+              AND active = true
+              AND node_kind = 'raw'
+            """,
+            workflow_run_id,
+        )
+        if not isinstance(value, int):
+            raise ValueError("active raw node count must be int")
+        return value
 
 
 def raw_node_ref(

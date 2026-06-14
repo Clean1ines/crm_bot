@@ -541,6 +541,11 @@ class FakeDraftClaimCompactionPlanRepository:
 
 
 @dataclass(slots=True)
+class FakeDraftClaimClusterPreviewRepository:
+    pass
+
+
+@dataclass(slots=True)
 class FakeDraftClaimCompactionReductionStateRepository:
     async def summarize_compaction_progress(
         self,
@@ -963,3 +968,23 @@ async def test_execute_draft_claim_compaction_no_implemented_unwired_gap() -> No
         )
 
     assert execute_dependency.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_build_cluster_preview_requires_preview_repository() -> None:
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        draft_claim_compaction_reduction_state_repository=(
+            FakeDraftClaimCompactionReductionStateRepository()
+        ),
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED

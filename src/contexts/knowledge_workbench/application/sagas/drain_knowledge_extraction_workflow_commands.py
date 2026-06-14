@@ -7,6 +7,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_cluster_preview_repository_port import (
+    DraftClaimClusterPreviewRepositoryPort,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
     DraftClaimCompactionOutputValidator,
 )
@@ -164,6 +167,8 @@ class DrainKnowledgeExtractionWorkflowCommands:
         draft_claim_compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort | None
         ) = None,
+        cluster_preview_repository: DraftClaimClusterPreviewRepositoryPort
+        | None = None,
         draft_claim_compaction_output_validator: (
             DraftClaimCompactionOutputValidator | None
         ) = None,
@@ -245,6 +250,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 draft_claim_compaction_reduction_state_repository=(
                     draft_claim_compaction_reduction_state_repository
                 ),
+                cluster_preview_repository=cluster_preview_repository,
                 draft_claim_compaction_output_validator=(
                     draft_claim_compaction_output_validator
                 ),
