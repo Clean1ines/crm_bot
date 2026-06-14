@@ -282,3 +282,21 @@ def test_done_when_only_single_active_node_remains() -> None:
 
     assert decision.work_type is DraftClaimCompactionNextWorkItemType.DONE
     assert decision.node_refs == ()
+
+
+def test_after_two_applied_compactions_compacted_vs_compacted_has_priority() -> None:
+    decision = _plan(
+        _state(
+            nodes=(
+                _raw("raw-5"),
+                _compacted("A"),
+                _compacted("B"),
+            ),
+        )
+    )
+
+    assert (
+        decision.work_type
+        is DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
+    )
+    assert decision.node_refs == ("A", "B")

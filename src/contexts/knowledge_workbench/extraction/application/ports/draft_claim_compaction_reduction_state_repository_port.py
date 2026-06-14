@@ -4,6 +4,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionOutputClaim,
+    DraftClaimReducedRewriteOutput,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionNode,
     DraftClaimCompactionPlannerState,
@@ -36,6 +40,30 @@ class DraftClaimCompactionReductionStatePersistenceResult:
                 raise ValueError(f"{field_name} must be >= 0")
 
 
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionApplyPersistenceResult:
+    inserted_node_count: int
+    updated_node_count: int
+    inserted_source_count: int
+    inserted_comparison_count: int
+    superseded_node_count: int
+    already_exists_count: int
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("inserted_node_count", self.inserted_node_count),
+            ("updated_node_count", self.updated_node_count),
+            ("inserted_source_count", self.inserted_source_count),
+            ("inserted_comparison_count", self.inserted_comparison_count),
+            ("superseded_node_count", self.superseded_node_count),
+            ("already_exists_count", self.already_exists_count),
+        ):
+            if not isinstance(value, int):
+                raise TypeError(f"{field_name} must be int")
+            if value < 0:
+                raise ValueError(f"{field_name} must be >= 0")
+
+
 class DraftClaimCompactionReductionStateRepositoryPort(Protocol):
     async def load_planner_state(
         self,
@@ -52,3 +80,28 @@ class DraftClaimCompactionReductionStateRepositoryPort(Protocol):
         raw_nodes: tuple[DraftClaimCompactionNode, ...],
         created_at: datetime,
     ) -> DraftClaimCompactionReductionStatePersistenceResult: ...
+
+    async def apply_compacted_claims_result(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        batch_ref: str,
+        work_item_id: str,
+        round_index: int,
+        compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...],
+        created_at: datetime,
+    ) -> DraftClaimCompactionApplyPersistenceResult: ...
+
+    async def apply_reduced_rewrite_result(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        batch_ref: str,
+        work_item_id: str,
+        round_index: int,
+        source_node_refs: tuple[str, ...],
+        rewrite: DraftClaimReducedRewriteOutput,
+        created_at: datetime,
+    ) -> DraftClaimCompactionApplyPersistenceResult: ...
