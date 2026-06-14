@@ -128,7 +128,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             edge.exclusion_scope_score,
             edge.granularity_score,
             edge.combined_score,
-            json.dumps(edge.signals, sort_keys=True),
+            json.dumps(dict(edge.signals), sort_keys=True),
             created_at,
         )
 

@@ -37,6 +37,9 @@ from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommandStatus,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_event import WorkflowEvent
+from src.contexts.workflow_runtime.domain.entities.workflow_progress_snapshot import (
+    WorkflowProgressSnapshot,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry import (
     WorkflowTimelineEntry,
     WorkflowTimelineSeverity,
@@ -151,6 +154,15 @@ class HandleClusterDraftClaimsCommandHandler:
                 correlation_id=workflow_command.command_id.value,
             )
         )
+        await _save_progress_snapshot(
+            workflow_unit_of_work=workflow_unit_of_work,
+            workflow_run_id=workflow_run_id,
+            candidate_edge_count=persistence.requested_edge_count,
+            group_count=persistence.requested_group_count,
+            batch_count=persistence.requested_batch_count,
+            scheduled_work_item_count=schedule.created_count,
+            occurred_at=workflow_command.updated_at,
+        )
         await workflow_unit_of_work.timeline.append_entry(
             WorkflowTimelineEntry(
                 timeline_entry_id=f"workflow-timeline:{workflow_run_id}:DraftClaimCompactionPlanBuilt:{workflow_command.command_id.value}",
@@ -197,6 +209,60 @@ def _plan(workflow_run_id: str, batch) -> WorkItemSchedulePlan:
             "model_id": batch.model_id,
             "source_claim_refs": list(batch.member_observation_refs),
         },
+    )
+
+
+async def _save_progress_snapshot(
+    *,
+    workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+    workflow_run_id: str,
+    candidate_edge_count: int,
+    group_count: int,
+    batch_count: int,
+    scheduled_work_item_count: int,
+    occurred_at,
+) -> None:
+    existing = await workflow_unit_of_work.progress_snapshots.get_snapshot(
+        workflow_run_id,
+    )
+    domain_counters = dict(existing.domain_counters) if existing is not None else {}
+    domain_counters["draft_claim_compaction_candidate_edge_count"] = (
+        candidate_edge_count
+    )
+    domain_counters["draft_claim_compaction_group_count"] = group_count
+    domain_counters["draft_claim_compaction_batch_count"] = batch_count
+    domain_counters["draft_claim_compaction_scheduled_work_item_count"] = (
+        scheduled_work_item_count
+    )
+    await workflow_unit_of_work.progress_snapshots.save_snapshot(
+        WorkflowProgressSnapshot(
+            workflow_run_id=workflow_run_id,
+            current_phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
+            workflow_status="RUNNING",
+            total_work_items=existing.total_work_items if existing is not None else 0,
+            scheduled_work_items=(
+                existing.scheduled_work_items if existing is not None else 0
+            )
+            + scheduled_work_item_count,
+            running_work_items=0,
+            completed_work_items=(
+                existing.completed_work_items if existing is not None else 0
+            ),
+            deferred_work_items=existing.deferred_work_items
+            if existing is not None
+            else 0,
+            retryable_failed_work_items=(
+                existing.retryable_failed_work_items if existing is not None else 0
+            ),
+            terminal_failed_work_items=(
+                existing.terminal_failed_work_items if existing is not None else 0
+            ),
+            blocked_work_items=0,
+            domain_counters=domain_counters,
+            started_at=existing.started_at if existing is not None else occurred_at,
+            updated_at=occurred_at,
+            completed_at=existing.completed_at if existing is not None else None,
+        ),
     )
 
 
