@@ -17,6 +17,10 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
+    DraftClaimCompactionGroupCandidate,
+    DraftClaimForCompaction,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_batch_budget_policy import (
     DraftClaimCompactionBatchBudgetPolicy,
 )
@@ -28,6 +32,12 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
     DraftClaimCompactionPlanRepositoryPort,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
+    DraftClaimCompactionReductionStateRepositoryPort,
+)
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
+    build_initial_raw_node,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -89,6 +99,9 @@ class HandleClusterDraftClaimsCommandHandler:
         compaction_plan_repository: DraftClaimCompactionPlanRepositoryPort,
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        compaction_reduction_state_repository: (
+            DraftClaimCompactionReductionStateRepositoryPort
+        ),
     ) -> HandleClusterDraftClaimsResult:
         workflow_command = command.workflow_command
         if (
@@ -119,6 +132,18 @@ class HandleClusterDraftClaimsCommandHandler:
             batches=budget_plan.batches,
             created_at=workflow_command.updated_at,
         )
+        claims_by_ref = {claim.observation_ref: claim for claim in claims}
+        for group in budget_plan.groups:
+            await compaction_reduction_state_repository.seed_initial_planner_state(
+                workflow_run_id=workflow_run_id,
+                group_ref=group.group_ref,
+                raw_nodes=_raw_nodes_for_group(
+                    workflow_run_id=workflow_run_id,
+                    group=group,
+                    claims_by_ref=claims_by_ref,
+                ),
+                created_at=workflow_command.updated_at,
+            )
         schedule = await EnsureWorkItemsScheduled(
             work_item_scheduling_repository
         ).execute(
@@ -193,6 +218,29 @@ class HandleClusterDraftClaimsCommandHandler:
             scheduled_work_item_count=schedule.created_count,
             already_scheduled_work_item_count=schedule.already_exists_count,
         )
+
+
+def _raw_nodes_for_group(
+    *,
+    workflow_run_id: str,
+    group: DraftClaimCompactionGroupCandidate,
+    claims_by_ref: Mapping[str, DraftClaimForCompaction],
+):
+    return tuple(
+        build_initial_raw_node(
+            workflow_run_id=workflow_run_id,
+            group_ref=group.group_ref,
+            observation_ref=observation_ref,
+            estimated_input_tokens=_estimated_raw_claim_tokens(
+                claims_by_ref[observation_ref]
+            ),
+        )
+        for observation_ref in group.member_observation_refs
+    )
+
+
+def _estimated_raw_claim_tokens(claim: DraftClaimForCompaction) -> int:
+    return max(1, len(claim.embedding_text) // 4)
 
 
 def _plan(workflow_run_id: str, batch) -> WorkItemSchedulePlan:

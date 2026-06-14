@@ -496,6 +496,39 @@ async def test_known_unimplemented_execute_claim_builder_section_returns_blocked
     assert result.phase == operation.phase.value
 
 
+@dataclass(slots=True)
+class FakeDraftClaimCompactionPlanRepository:
+    pass
+
+
+@dataclass(slots=True)
+class FakeDraftClaimCompactionReductionStateRepository:
+    pass
+
+
+@pytest.mark.asyncio
+async def test_cluster_draft_claims_requires_reduction_state_repository() -> None:
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        draft_claim_compaction_plan_repository=FakeDraftClaimCompactionPlanRepository(),
+    )
+
+    operation = operation_by_command_type(
+        KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
+    )
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+    assert result.operation_key == operation.operation_key
+    assert result.phase == operation.phase.value
+
+
 @pytest.mark.asyncio
 async def test_unknown_command_type_raises_value_error() -> None:
     with pytest.raises(ValueError, match="unknown knowledge extraction command type"):

@@ -23,6 +23,13 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
     DraftClaimCompactionPlanPersistenceResult,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
+    DraftClaimCompactionReductionStatePersistenceResult,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionNode,
+    DraftClaimCompactionPlannerState,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
     WorkflowCommandStatus,
@@ -133,6 +140,44 @@ class FakeCompactionRepository:
             inserted_member_count=sum(group.member_count for group in groups),
             requested_batch_count=len(batches),
             inserted_batch_count=len(batches),
+            already_exists_count=0,
+        )
+
+
+@dataclass(slots=True)
+class FakeReductionStateRepository:
+    seeded_by_group: dict[str, tuple[DraftClaimCompactionNode, ...]] = field(
+        default_factory=dict
+    )
+
+    async def load_planner_state(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+    ) -> DraftClaimCompactionPlannerState | None:
+        del workflow_run_id, group_ref
+        return None
+
+    async def seed_initial_planner_state(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        raw_nodes: tuple[DraftClaimCompactionNode, ...],
+        created_at: datetime,
+    ) -> DraftClaimCompactionReductionStatePersistenceResult:
+        assert workflow_run_id == _workflow_run_id()
+        assert created_at == _now()
+        self.seeded_by_group[group_ref] = raw_nodes
+        requested_source_count = sum(len(node.sources) for node in raw_nodes)
+        return DraftClaimCompactionReductionStatePersistenceResult(
+            requested_node_count=len(raw_nodes),
+            inserted_node_count=len(raw_nodes),
+            requested_source_count=requested_source_count,
+            inserted_source_count=requested_source_count,
+            requested_comparison_count=0,
+            inserted_comparison_count=0,
             already_exists_count=0,
         )
 
@@ -303,6 +348,7 @@ async def test_rejects_wrong_command_type() -> None:
             compaction_plan_repository=FakeCompactionRepository(()),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
             workflow_unit_of_work=FakeWorkflowUnitOfWork(),
+            compaction_reduction_state_repository=FakeReductionStateRepository(),
         )
 
 
@@ -319,6 +365,7 @@ async def test_rejects_non_pending_command() -> None:
             compaction_plan_repository=FakeCompactionRepository(()),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
             workflow_unit_of_work=FakeWorkflowUnitOfWork(),
+            compaction_reduction_state_repository=FakeReductionStateRepository(),
         )
 
 
@@ -327,6 +374,7 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
     repository = FakeCompactionRepository((_claim("claim-a"), _claim("claim-b")))
     scheduling = FakeWorkItemSchedulingRepository()
     workflow_uow = FakeWorkflowUnitOfWork()
+    reduction_state = FakeReductionStateRepository()
 
     result = await HandleClusterDraftClaimsCommandHandler().execute(
         HandleClusterDraftClaimsCommand(
@@ -337,11 +385,36 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
         compaction_plan_repository=repository,
         work_item_scheduling_repository=scheduling,
         workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=reduction_state,
     )
 
     assert result.group_count >= 1
     assert result.batch_count >= 1
     assert len(repository.persisted_batches) == len(scheduling.saved_payloads)
+    assert set(reduction_state.seeded_by_group) == {
+        group.group_ref for group in repository.persisted_groups
+    }
+    assert sum(len(nodes) for nodes in reduction_state.seeded_by_group.values()) == sum(
+        group.member_count for group in repository.persisted_groups
+    )
+    for group_ref, nodes in reduction_state.seeded_by_group.items():
+        for node in nodes:
+            assert node.node_ref.startswith(f"raw:{_workflow_run_id()}:{group_ref}:")
+            assert node.node_kind.value == "raw"
+            assert node.active is True
+            assert len(node.source_claim_refs) == 1
+    assert set(reduction_state.seeded_by_group) == {
+        group.group_ref for group in repository.persisted_groups
+    }
+    assert sum(len(nodes) for nodes in reduction_state.seeded_by_group.values()) == sum(
+        group.member_count for group in repository.persisted_groups
+    )
+    for group_ref, nodes in reduction_state.seeded_by_group.items():
+        for node in nodes:
+            assert node.node_ref.startswith(f"raw:{_workflow_run_id()}:{group_ref}:")
+            assert node.node_kind.value == "raw"
+            assert node.active is True
+            assert len(node.source_claim_refs) == 1
     assert workflow_uow.outbox.events[0].event_type == (
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT.value
     )

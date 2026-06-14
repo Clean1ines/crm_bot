@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
     DraftClaimCompactionPlanRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
+    DraftClaimCompactionReductionStateRepositoryPort,
+)
 
 from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
     EmbeddingGenerationPort,
@@ -155,6 +158,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         draft_claim_compaction_plan_repository: (
             DraftClaimCompactionPlanRepositoryPort | None
         ) = None,
+        draft_claim_compaction_reduction_state_repository: (
+            DraftClaimCompactionReductionStateRepositoryPort | None
+        ) = None,
         workflow_state_repository: (
             KnowledgeExtractionSagaStateRepositoryPort | None
         ) = None,
@@ -229,6 +235,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 embedding_dimensions=embedding_dimensions,
                 draft_claim_compaction_plan_repository=(
                     draft_claim_compaction_plan_repository
+                ),
+                draft_claim_compaction_reduction_state_repository=(
+                    draft_claim_compaction_reduction_state_repository
                 ),
             )
             if not dispatch_result.dispatched:

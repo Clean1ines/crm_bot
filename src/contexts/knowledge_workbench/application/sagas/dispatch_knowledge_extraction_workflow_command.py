@@ -8,6 +8,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_cluster_draft_cla
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
     DraftClaimCompactionPlanRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
+    DraftClaimCompactionReductionStateRepositoryPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_generate_draft_claim_embeddings_command import (
     HandleGenerateDraftClaimEmbeddingsCommand,
     HandleGenerateDraftClaimEmbeddingsCommandHandler,
@@ -160,6 +163,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         embedding_dimensions: int | None = None,
         draft_claim_compaction_plan_repository: (
             DraftClaimCompactionPlanRepositoryPort | None
+        ) = None,
+        draft_claim_compaction_reduction_state_repository: (
+            DraftClaimCompactionReductionStateRepositoryPort | None
         ) = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
@@ -391,7 +397,10 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             )
 
         if command_type is KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS:
-            if draft_claim_compaction_plan_repository is None:
+            if (
+                draft_claim_compaction_plan_repository is None
+                or draft_claim_compaction_reduction_state_repository is None
+            ):
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
                     command_type=command_type.value,
@@ -406,6 +415,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 compaction_plan_repository=draft_claim_compaction_plan_repository,
                 work_item_scheduling_repository=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
+                compaction_reduction_state_repository=(
+                    draft_claim_compaction_reduction_state_repository
+                ),
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,
