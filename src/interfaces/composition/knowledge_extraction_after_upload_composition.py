@@ -23,6 +23,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_a
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
+    DraftClaimCompactionOutputValidator,
+)
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     ProjectLlmCapacityToCapacityRuntime,
 )
@@ -107,6 +110,7 @@ def make_knowledge_extraction_workflow_after_upload(
     )
 
     claim_builder_output_validation_policy = ClaimBuilderOutputValidationPolicy()
+    draft_claim_compaction_output_validator = DraftClaimCompactionOutputValidator()
     from src.contexts.embedding_runtime.infrastructure.composition.embedding_generation_provider_factory import (
         make_embedding_generation_port,
     )
@@ -123,6 +127,9 @@ def make_knowledge_extraction_workflow_after_upload(
             source_ingestion_runner=source_ingestion_runner,
             pool=pool,
             claim_builder_output_validation_policy=claim_builder_output_validation_policy,
+            draft_claim_compaction_output_validator=(
+                draft_claim_compaction_output_validator
+            ),
             embedding_generation_port=resolved_embedding_generation_port,
             embedding_model_id=embedding_settings.local_model,
             embedding_dimensions=embedding_settings.vector_dimensions,
@@ -148,6 +155,9 @@ def make_knowledge_extraction_workflow_after_upload(
             )
         ),
         claim_builder_output_validation_policy=claim_builder_output_validation_policy,
+        draft_claim_compaction_output_validator=(
+            draft_claim_compaction_output_validator
+        ),
         embedding_generation_port=resolved_embedding_generation_port,
         embedding_model_id=embedding_settings.local_model,
         embedding_dimensions=embedding_settings.vector_dimensions,

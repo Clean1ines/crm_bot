@@ -70,6 +70,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_bui
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
+    DraftClaimCompactionOutputValidator,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
     PersistValidatedDraftClaimObservationsPort,
 )
@@ -216,6 +219,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         draft_claim_compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort | None
         ) = None,
+        draft_claim_compaction_output_validator: (
+            DraftClaimCompactionOutputValidator | None
+        ) = None,
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
@@ -242,6 +248,10 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         )
         self._draft_claim_compaction_reduction_state_repository = (
             draft_claim_compaction_reduction_state_repository
+        )
+        self._draft_claim_compaction_output_validator = (
+            draft_claim_compaction_output_validator
+            or DraftClaimCompactionOutputValidator()
         )
 
     async def execute(
@@ -424,6 +434,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 ),
                 draft_claim_compaction_reduction_state_repository=(
                     draft_claim_compaction_reduction_state_repository
+                ),
+                draft_claim_compaction_output_validator=(
+                    self._draft_claim_compaction_output_validator
                 ),
                 workflow_state_repository=(
                     PostgresKnowledgeExtractionSagaStateRepository(

@@ -78,6 +78,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_bui
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
+    DraftClaimCompactionOutputValidator,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
     PersistValidatedDraftClaimObservationsPort,
 )
@@ -226,6 +229,9 @@ class RunKnowledgeExtractionWorkflowResume:
         draft_claim_compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort | None
         ) = None,
+        draft_claim_compaction_output_validator: (
+            DraftClaimCompactionOutputValidator | None
+        ) = None,
     ) -> None:
         self._pool = cast(_AsyncResumePoolLike, pool)
         self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
@@ -251,6 +257,10 @@ class RunKnowledgeExtractionWorkflowResume:
         )
         self._draft_claim_compaction_reduction_state_repository = (
             draft_claim_compaction_reduction_state_repository
+        )
+        self._draft_claim_compaction_output_validator = (
+            draft_claim_compaction_output_validator
+            or DraftClaimCompactionOutputValidator()
         )
 
     async def execute(
@@ -442,6 +452,9 @@ class RunKnowledgeExtractionWorkflowResume:
                 draft_claim_compaction_reduction_state_repository=(
                     draft_claim_compaction_reduction_state_repository
                 ),
+                draft_claim_compaction_output_validator=(
+                    self._draft_claim_compaction_output_validator
+                ),
                 workflow_state_repository=(
                     PostgresKnowledgeExtractionSagaStateRepository(
                         cast(asyncpg.Connection, connection)
@@ -497,6 +510,7 @@ def make_knowledge_extraction_workflow_resume(
         make_embedding_generation_port,
     )
 
+    draft_claim_compaction_output_validator = DraftClaimCompactionOutputValidator()
     embedding_settings = load_embedding_runtime_settings()
     resolved_embedding_generation_port = (
         embedding_generation_port
@@ -508,6 +522,9 @@ def make_knowledge_extraction_workflow_resume(
         return RunKnowledgeExtractionWorkflowResume(
             pool=pool,
             claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
+            draft_claim_compaction_output_validator=(
+                draft_claim_compaction_output_validator
+            ),
             embedding_generation_port=resolved_embedding_generation_port,
             embedding_model_id=embedding_settings.local_model,
             embedding_dimensions=embedding_settings.vector_dimensions,
@@ -532,6 +549,9 @@ def make_knowledge_extraction_workflow_resume(
             )
         ),
         claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
+        draft_claim_compaction_output_validator=(
+            draft_claim_compaction_output_validator
+        ),
         embedding_generation_port=resolved_embedding_generation_port,
         embedding_model_id=embedding_settings.local_model,
         embedding_dimensions=embedding_settings.vector_dimensions,

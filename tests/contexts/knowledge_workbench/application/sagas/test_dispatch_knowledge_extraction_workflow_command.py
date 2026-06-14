@@ -27,6 +27,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionPlannerState,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
+    DraftClaimCompactionOutputValidator,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionApplyPersistenceResult,
     DraftClaimCompactionReductionStatePersistenceResult,
@@ -851,3 +854,112 @@ async def test_prepare_draft_claim_compaction_dispatch_batch_dispatches_when_dep
         prepare.calls[0].work_kind.value == "knowledge_workbench.draft_claim_compaction"
     )
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
+
+
+def _execute_draft_claim_compaction_payload() -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "dispatch_attempt_id": "attempt-1",
+        "work_item_id": "work-item-1",
+        "group_ref": "group-1",
+        "batch_ref": "batch-1",
+        "round_index": 0,
+        "expected_output_kind": "compacted_claims",
+        "source_claim_refs": ["claim-a", "claim-b"],
+        "left_node_ref": "raw:workflow-1:group-1:claim-a",
+        "right_node_ref": "raw:workflow-1:group-1:claim-b",
+    }
+
+
+@dataclass(slots=True)
+class FakeExecutePreparedLlmDispatchAttempt:
+    calls: int = 0
+
+    async def execute(self, command) -> object:
+        del command
+        self.calls += 1
+        raise RuntimeError("fake execute should not be reached in wiring block tests")
+
+
+@dataclass(slots=True)
+class FakeCapacityObservationRepository:
+    observations: list[object] = field(default_factory=list)
+
+    async def record_observation(self, observation) -> None:
+        self.observations.append(observation)
+
+
+async def _dispatch_execute_draft_claim_compaction(
+    *,
+    execute_dependency: FakeExecutePreparedLlmDispatchAttempt | None,
+    capacity_repository: FakeCapacityObservationRepository | None,
+    validator: DraftClaimCompactionOutputValidator | None,
+):
+    return await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION,
+                payload=_execute_draft_claim_compaction_payload(),
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        execute_prepared_llm_dispatch_attempt=execute_dependency,
+        capacity_observation_repository=capacity_repository,
+        draft_claim_compaction_output_validator=validator,
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_draft_claim_compaction_blocks_when_execute_dependency_missing() -> (
+    None
+):
+    result = await _dispatch_execute_draft_claim_compaction(
+        execute_dependency=None,
+        capacity_repository=FakeCapacityObservationRepository(),
+        validator=DraftClaimCompactionOutputValidator(),
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_execute_draft_claim_compaction_blocks_when_capacity_repository_missing() -> (
+    None
+):
+    result = await _dispatch_execute_draft_claim_compaction(
+        execute_dependency=FakeExecutePreparedLlmDispatchAttempt(),
+        capacity_repository=None,
+        validator=DraftClaimCompactionOutputValidator(),
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_execute_draft_claim_compaction_blocks_when_validator_missing() -> None:
+    result = await _dispatch_execute_draft_claim_compaction(
+        execute_dependency=FakeExecutePreparedLlmDispatchAttempt(),
+        capacity_repository=FakeCapacityObservationRepository(),
+        validator=None,
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_execute_draft_claim_compaction_no_implemented_unwired_gap() -> None:
+    execute_dependency = FakeExecutePreparedLlmDispatchAttempt()
+
+    with pytest.raises(RuntimeError, match="fake execute should not be reached"):
+        await _dispatch_execute_draft_claim_compaction(
+            execute_dependency=execute_dependency,
+            capacity_repository=FakeCapacityObservationRepository(),
+            validator=DraftClaimCompactionOutputValidator(),
+        )
+
+    assert execute_dependency.calls == 1

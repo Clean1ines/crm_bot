@@ -15,6 +15,9 @@ from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
 from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extraction_workflow_command import (
     COMMAND_HANDLER_NOT_IMPLEMENTED,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
+    DraftClaimCompactionOutputValidator,
+)
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
     WORKFLOW_MANUALLY_PAUSED,
     DrainKnowledgeExtractionWorkflowCommands,
@@ -638,3 +641,106 @@ async def test_drain_blocks_prepare_draft_claim_compaction_dispatch_without_depe
         == KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
     )
     assert result.last_blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+def _execute_draft_claim_compaction_workflow_command() -> WorkflowCommand:
+    return WorkflowCommand(
+        command_id=WorkflowCommandId("workflow-command:ExecuteDraftClaimCompaction"),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value
+        ),
+        workflow_run_id=_workflow_run_id(),
+        idempotency_key=WorkflowIdempotencyKey(
+            f"ExecuteDraftClaimCompaction:{_workflow_run_id()}"
+        ),
+        payload={
+            "workflow_run_id": _workflow_run_id(),
+            "dispatch_attempt_id": "attempt-1",
+            "work_item_id": "work-item-1",
+            "group_ref": "group-1",
+            "batch_ref": "batch-1",
+            "round_index": 0,
+            "expected_output_kind": "compacted_claims",
+            "source_claim_refs": ["claim-a", "claim-b"],
+            "left_node_ref": "raw:workflow-1:group-1:claim-a",
+            "right_node_ref": "raw:workflow-1:group-1:claim-b",
+        },
+        status=WorkflowCommandStatus.PENDING,
+        run_after=_now(),
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
+@dataclass(slots=True)
+class FakeExecutePreparedLlmDispatchAttempt:
+    calls: int = 0
+
+    async def execute(self, command) -> object:
+        del command
+        self.calls += 1
+        raise RuntimeError("fake execute should not be reached in drain wiring tests")
+
+
+@dataclass(slots=True)
+class FakeCapacityObservationRepository:
+    observations: list[object] = field(default_factory=list)
+
+    async def record_observation(self, observation) -> None:
+        self.observations.append(observation)
+
+
+@pytest.mark.asyncio
+async def test_drain_blocks_execute_draft_claim_compaction_without_validator() -> None:
+    scheduling_repository = FakeWorkItemSchedulingRepository()
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork(
+        command_log=FakeCommandLogRepository(
+            pending_commands=(_execute_draft_claim_compaction_workflow_command(),)
+        )
+    )
+
+    result = await DrainKnowledgeExtractionWorkflowCommands().execute(
+        DrainKnowledgeExtractionWorkflowCommandsCommand(
+            workflow_run_id=_workflow_run_id(),
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=scheduling_repository,
+        workflow_unit_of_work=workflow_unit_of_work,
+        execute_prepared_llm_dispatch_attempt=FakeExecutePreparedLlmDispatchAttempt(),
+        capacity_observation_repository=FakeCapacityObservationRepository(),
+    )
+
+    assert result.inspected_count == 1
+    assert result.dispatched_count == 0
+    assert result.blocked_count == 1
+    assert (
+        result.last_blocked_command_type
+        == KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value
+    )
+    assert result.last_blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_drain_wires_execute_draft_claim_compaction_dependencies() -> None:
+    scheduling_repository = FakeWorkItemSchedulingRepository()
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork(
+        command_log=FakeCommandLogRepository(
+            pending_commands=(_execute_draft_claim_compaction_workflow_command(),)
+        )
+    )
+    execute_dependency = FakeExecutePreparedLlmDispatchAttempt()
+
+    with pytest.raises(RuntimeError, match="fake execute should not be reached"):
+        await DrainKnowledgeExtractionWorkflowCommands().execute(
+            DrainKnowledgeExtractionWorkflowCommandsCommand(
+                workflow_run_id=_workflow_run_id(),
+            ),
+            source_unit_repository=FakeSourceManagementRepository(),
+            knowledge_unit_of_work=scheduling_repository,
+            workflow_unit_of_work=workflow_unit_of_work,
+            execute_prepared_llm_dispatch_attempt=execute_dependency,
+            capacity_observation_repository=FakeCapacityObservationRepository(),
+            draft_claim_compaction_output_validator=DraftClaimCompactionOutputValidator(),
+        )
+
+    assert execute_dependency.calls == 1

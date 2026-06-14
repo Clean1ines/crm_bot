@@ -15,6 +15,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
+    DraftClaimCompactionOutputValidator,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_generate_draft_claim_embeddings_command import (
     HandleGenerateDraftClaimEmbeddingsCommand,
     HandleGenerateDraftClaimEmbeddingsCommandHandler,
@@ -48,6 +51,10 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_bui
     ExecutePreparedLlmDispatchAttemptPort,
     HandleExecuteClaimBuilderSectionCommand,
     HandleExecuteClaimBuilderSectionCommandHandler,
+)
+from src.contexts.knowledge_workbench.application.sagas.handle_execute_draft_claim_compaction_command import (
+    HandleExecuteDraftClaimCompactionCommand,
+    HandleExecuteDraftClaimCompactionCommandHandler,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
@@ -179,6 +186,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         draft_claim_compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort | None
         ) = None,
+        draft_claim_compaction_output_validator: (
+            DraftClaimCompactionOutputValidator | None
+        ) = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = _canonical_command_type(workflow_command.command_type)
@@ -248,6 +258,47 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     workflow_command=workflow_command,
                 ),
                 prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION
+        ):
+            if (
+                execute_prepared_llm_dispatch_attempt is None
+                or capacity_observation_repository is None
+                or draft_claim_compaction_output_validator is None
+            ):
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleExecuteDraftClaimCompactionCommandHandler().execute(
+                HandleExecuteDraftClaimCompactionCommand(
+                    workflow_command=workflow_command,
+                ),
+                execute_prepared_llm_dispatch_attempt=(
+                    execute_prepared_llm_dispatch_attempt
+                ),
+                capacity_observation_repository=capacity_observation_repository,
+                draft_claim_compaction_output_validator=(
+                    draft_claim_compaction_output_validator
+                ),
                 workflow_unit_of_work=workflow_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(

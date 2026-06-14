@@ -7,6 +7,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
+    DraftClaimCompactionOutputValidator,
+)
 
 from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
     EmbeddingGenerationPort,
@@ -161,6 +164,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         draft_claim_compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort | None
         ) = None,
+        draft_claim_compaction_output_validator: (
+            DraftClaimCompactionOutputValidator | None
+        ) = None,
         workflow_state_repository: (
             KnowledgeExtractionSagaStateRepositoryPort | None
         ) = None,
@@ -238,6 +244,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 ),
                 draft_claim_compaction_reduction_state_repository=(
                     draft_claim_compaction_reduction_state_repository
+                ),
+                draft_claim_compaction_output_validator=(
+                    draft_claim_compaction_output_validator
                 ),
             )
             if not dispatch_result.dispatched:
