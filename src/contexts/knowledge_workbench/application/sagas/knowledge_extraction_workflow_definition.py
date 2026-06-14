@@ -31,6 +31,7 @@ class KnowledgeExtractionCanonicalCommandType(StrEnum):
     PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH = (
         "PrepareDraftClaimCompactionDispatchBatch"
     )
+    EXECUTE_DRAFT_CLAIM_COMPACTION = "ExecuteDraftClaimCompaction"
     APPLY_DRAFT_CLAIM_COMPACTION_RESULT = "ApplyDraftClaimCompactionResult"
     RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS = "ReconcileDraftClaimCompactionProgress"
     BUILD_CLUSTER_PREVIEW = "BuildClusterPreview"
@@ -63,6 +64,14 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     DRAFT_CLAIM_CLUSTERS_BUILT = "DraftClaimClustersBuilt"
     DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED = (
         "DraftClaimCompactionDispatchBatchPrepared"
+    )
+    DRAFT_CLAIM_COMPACTION_ATTEMPT_STARTED = "DraftClaimCompactionAttemptStarted"
+    DRAFT_CLAIM_COMPACTION_ATTEMPT_COMPLETED = "DraftClaimCompactionAttemptCompleted"
+    DRAFT_CLAIM_COMPACTION_ATTEMPT_RETRYABLE_FAILED = (
+        "DraftClaimCompactionAttemptRetryableFailed"
+    )
+    DRAFT_CLAIM_COMPACTION_ATTEMPT_TERMINAL_FAILED = (
+        "DraftClaimCompactionAttemptTerminalFailed"
     )
     DRAFT_CLAIM_COMPACTION_RESULT_APPLIED = "DraftClaimCompactionResultApplied"
     DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED = "DraftClaimCompactionNextWorkScheduled"
@@ -464,11 +473,57 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             success_event_type=(
                 KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED
             ),
-            next_command_types=(),
+            next_command_types=(
+                KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION,
+            ),
             affected_read_models=(
                 KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
                 KnowledgeExtractionReadModelName.CAPACITY_STATUS,
                 KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+                KnowledgeExtractionReadModelName.TIMELINE,
+            ),
+            recovery_scopes=(
+                KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
+                KnowledgeExtractionRecoveryScope.CLUSTER_BUILD,
+            ),
+            frontend_visibility=True,
+        ),
+        KnowledgeExtractionOperationContract(
+            operation_key="execute_draft_claim_compaction",
+            phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING,
+            command_type=(
+                KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION
+            ),
+            owner_contexts=(
+                "knowledge_workbench",
+                "execution_runtime",
+                "llm_runtime",
+                "capacity_runtime",
+                "workflow_runtime",
+            ),
+            unit_of_work_name="DraftClaimCompactionExecutionUnitOfWork",
+            idempotency_key_template=(
+                "draft-claim-compaction-execute:{dispatch_attempt_id}"
+            ),
+            success_event_type=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ATTEMPT_COMPLETED
+            ),
+            failure_event_types=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ATTEMPT_RETRYABLE_FAILED,
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ATTEMPT_TERMINAL_FAILED,
+            ),
+            intermediate_event_types=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ATTEMPT_STARTED,
+                KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED,
+            ),
+            next_command_types=(
+                KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT,
+                KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS,
+            ),
+            affected_read_models=(
+                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+                KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
+                KnowledgeExtractionReadModelName.CAPACITY_STATUS,
                 KnowledgeExtractionReadModelName.TIMELINE,
             ),
             recovery_scopes=(

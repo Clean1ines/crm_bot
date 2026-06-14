@@ -461,7 +461,9 @@ def test_prepare_draft_claim_compaction_dispatch_batch_operation_contract() -> N
         operation.success_event_type
         is KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED
     )
-    assert operation.next_command_types == ()
+    assert operation.next_command_types == (
+        KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION,
+    )
     assert operation.owner_contexts == (
         "knowledge_workbench",
         "execution_runtime",
@@ -474,3 +476,28 @@ def test_prepare_draft_claim_compaction_dispatch_batch_operation_contract() -> N
         KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
         KnowledgeExtractionReadModelName.TIMELINE,
     }
+
+
+def test_execute_draft_claim_compaction_operation_contract() -> None:
+    operation = _operation("execute_draft_claim_compaction")
+
+    assert operation.phase is KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING
+    assert (
+        operation.command_type
+        is KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION
+    )
+    assert (
+        operation.success_event_type
+        is KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ATTEMPT_COMPLETED
+    )
+    assert set(operation.next_command_types) == {
+        KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT,
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS,
+    }
+    assert operation.owner_contexts == (
+        "knowledge_workbench",
+        "execution_runtime",
+        "llm_runtime",
+        "capacity_runtime",
+        "workflow_runtime",
+    )

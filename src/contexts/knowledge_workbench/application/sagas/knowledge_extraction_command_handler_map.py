@@ -70,6 +70,12 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
     ),
     KnowledgeExtractionImplementedCommandHandler(
         command_type=(
+            KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION
+        ),
+        handler_name="HandleExecuteDraftClaimCompactionCommandHandler",
+    ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=(
             KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
         ),
         handler_name="HandleApplyDraftClaimCompactionResultCommandHandler",
