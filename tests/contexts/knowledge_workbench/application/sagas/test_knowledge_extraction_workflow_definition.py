@@ -408,3 +408,42 @@ def test_apply_draft_claim_compaction_result_operation_contract() -> None:
         KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
     }
     assert operation.frontend_visibility is True
+
+
+def test_cluster_draft_claims_routes_to_compaction_progress_reconciliation() -> None:
+    operation = _operation("cluster_draft_claims")
+
+    assert operation.next_command_types == (
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS,
+    )
+
+
+def test_reconcile_draft_claim_compaction_progress_operation_contract() -> None:
+    operation = _operation("reconcile_draft_claim_compaction_progress")
+
+    assert operation.phase is KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING
+    assert (
+        operation.command_type
+        is KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS
+    )
+    assert (
+        operation.success_event_type
+        is KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ALL_GROUPS_COMPACTED
+    )
+    assert operation.intermediate_event_types == (
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED,
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE,
+    )
+    assert operation.next_command_types == (
+        KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW,
+    )
+    assert operation.owner_contexts == (
+        "knowledge_workbench",
+        "execution_runtime",
+        "workflow_runtime",
+    )
+    assert set(operation.affected_read_models) == {
+        KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+        KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
+        KnowledgeExtractionReadModelName.TIMELINE,
+    }

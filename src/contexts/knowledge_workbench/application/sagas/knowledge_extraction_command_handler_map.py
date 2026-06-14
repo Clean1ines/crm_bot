@@ -68,6 +68,12 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
         ),
         handler_name="HandleApplyDraftClaimCompactionResultCommandHandler",
     ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS
+        ),
+        handler_name="HandleReconcileDraftClaimCompactionProgressCommandHandler",
+    ),
 )
 
 

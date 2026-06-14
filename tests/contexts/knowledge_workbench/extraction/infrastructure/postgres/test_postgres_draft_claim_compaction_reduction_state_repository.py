@@ -97,6 +97,39 @@ class FakeReductionStateConnection:
         raise AssertionError(f"unexpected execute query: {query}")
 
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
+        if "COUNT(*) FILTER" in query and "FROM draft_claim_compaction_nodes" in query:
+            workflow_run_id = _str_arg(args[0])
+            rows: list[Mapping[str, object]] = []
+            group_refs = sorted(
+                {
+                    str(node["group_ref"])
+                    for node in self.nodes.values()
+                    if node["workflow_run_id"] == workflow_run_id
+                }
+            )
+            for group_ref in group_refs:
+                nodes = [
+                    node
+                    for node in self.nodes.values()
+                    if node["workflow_run_id"] == workflow_run_id
+                    and node["group_ref"] == group_ref
+                ]
+                rows.append(
+                    {
+                        "group_ref": group_ref,
+                        "active_node_count": sum(
+                            1 for node in nodes if node["active"] is True
+                        ),
+                        "active_compacted_node_count": sum(
+                            1
+                            for node in nodes
+                            if node["active"] is True
+                            and node["node_kind"] == "compacted"
+                        ),
+                    }
+                )
+            return rows
+
         if (
             "FROM draft_claim_compaction_nodes" in query
             and "WHERE node_ref = ANY" in query
@@ -134,6 +167,43 @@ class FakeReductionStateConnection:
                 )
                 if source["node_ref"] in node_refs
             ]
+
+        if (
+            "COUNT(*) FILTER" in query
+            and "FROM draft_claim_compaction_comparisons" in query
+        ):
+            workflow_run_id = _str_arg(args[0])
+            group_refs = sorted(
+                {
+                    str(comparison["group_ref"])
+                    for comparison in self.comparisons.values()
+                    if comparison["workflow_run_id"] == workflow_run_id
+                }
+            )
+            rows: list[Mapping[str, object]] = []
+            for group_ref in group_refs:
+                comparisons = [
+                    comparison
+                    for comparison in self.comparisons.values()
+                    if comparison["workflow_run_id"] == workflow_run_id
+                    and comparison["group_ref"] == group_ref
+                ]
+                rows.append(
+                    {
+                        "group_ref": group_ref,
+                        "pending_comparison_count": sum(
+                            1
+                            for comparison in comparisons
+                            if comparison["status"] == "pending"
+                        ),
+                        "waiting_user_model_choice_comparison_count": sum(
+                            1
+                            for comparison in comparisons
+                            if comparison["status"] == "waiting_user_model_choice"
+                        ),
+                    }
+                )
+            return rows
 
         if "FROM draft_claim_compaction_comparisons" in query:
             workflow_run_id = _str_arg(args[0])
@@ -423,3 +493,61 @@ def _optional_str_arg(value: object) -> str | None:
     if value is None:
         return None
     return _str_arg(value)
+
+
+@pytest.mark.asyncio
+async def test_summarize_compaction_progress_counts_done_and_active_groups() -> None:
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-done",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-done",
+                observation_ref="claim-a",
+                estimated_input_tokens=10,
+            ),
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-done",
+                observation_ref="claim-b",
+                estimated_input_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-done",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(_compacted_claim(("claim-a", "claim-b")),),
+        created_at=_now(),
+    )
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-active",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-active",
+                observation_ref="claim-c",
+                estimated_input_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+
+    summary = await repository.summarize_compaction_progress(
+        workflow_run_id="workflow-1",
+    )
+
+    assert summary.group_count == 2
+    assert summary.done_group_count == 1
+    assert summary.active_group_count == 1
+    assert summary.waiting_user_model_choice_group_count == 0
+    assert summary.active_node_count == 2
+    assert summary.pending_comparison_count == 0

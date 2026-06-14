@@ -21,6 +21,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalCommandType,
     operation_by_command_type,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_progress import (
+    DraftClaimCompactionProgressSummary,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionPlannerState,
 )
@@ -536,6 +539,21 @@ class FakeDraftClaimCompactionPlanRepository:
 
 @dataclass(slots=True)
 class FakeDraftClaimCompactionReductionStateRepository:
+    async def summarize_compaction_progress(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> DraftClaimCompactionProgressSummary:
+        return DraftClaimCompactionProgressSummary(
+            workflow_run_id=workflow_run_id,
+            group_count=1,
+            done_group_count=0,
+            waiting_user_model_choice_group_count=0,
+            active_group_count=1,
+            active_node_count=2,
+            pending_comparison_count=1,
+        )
+
     async def load_planner_state(
         self,
         *,
@@ -707,4 +725,48 @@ def _apply_persistence_result() -> DraftClaimCompactionApplyPersistenceResult:
         inserted_comparison_count=1,
         superseded_node_count=2,
         already_exists_count=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_draft_claim_compaction_progress_requires_reduction_state_repository() -> (
+    None
+):
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_reconcile_draft_claim_compaction_progress_dispatches_when_dependency_exists() -> (
+    None
+):
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        draft_claim_compaction_reduction_state_repository=(
+            FakeDraftClaimCompactionReductionStateRepository()
+        ),
+    )
+
+    assert result.dispatched is True
+    assert (
+        result.handler_name
+        == "HandleReconcileDraftClaimCompactionProgressCommandHandler"
     )

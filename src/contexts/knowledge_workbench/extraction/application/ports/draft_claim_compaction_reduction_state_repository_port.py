@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_progress import (
+    DraftClaimCompactionProgressSummary,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
     DraftClaimCompactionOutputClaim,
     DraftClaimReducedRewriteOutput,
@@ -65,6 +68,12 @@ class DraftClaimCompactionApplyPersistenceResult:
 
 
 class DraftClaimCompactionReductionStateRepositoryPort(Protocol):
+    async def summarize_compaction_progress(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> DraftClaimCompactionProgressSummary: ...
+
     async def load_planner_state(
         self,
         *,

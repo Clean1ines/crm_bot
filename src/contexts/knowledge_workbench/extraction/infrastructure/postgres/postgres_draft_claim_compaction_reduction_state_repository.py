@@ -11,6 +11,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     ordered_pair,
     raw_claim_node_ref,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_progress import (
+    DraftClaimCompactionProgressSummary,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
     DraftClaimCompactionOutputClaim,
     DraftClaimCompactionTriple,
@@ -46,6 +49,95 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         connection: DraftClaimCompactionReductionStateConnectionLike,
     ) -> None:
         self._connection = connection
+
+    async def summarize_compaction_progress(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> DraftClaimCompactionProgressSummary:
+        node_rows = await self._connection.fetch(
+            """
+            SELECT group_ref,
+                   COUNT(*) FILTER (WHERE active = true) AS active_node_count,
+                   COUNT(*) FILTER (
+                       WHERE active = true AND node_kind = 'compacted'
+                   ) AS active_compacted_node_count
+            FROM draft_claim_compaction_nodes
+            WHERE workflow_run_id = $1
+            GROUP BY group_ref
+            ORDER BY group_ref
+            """,
+            workflow_run_id,
+        )
+        comparison_rows = await self._connection.fetch(
+            """
+            SELECT group_ref,
+                   COUNT(*) FILTER (WHERE status = 'pending') AS pending_comparison_count,
+                   COUNT(*) FILTER (
+                       WHERE status = 'waiting_user_model_choice'
+                   ) AS waiting_user_model_choice_comparison_count
+            FROM draft_claim_compaction_comparisons
+            WHERE workflow_run_id = $1
+            GROUP BY group_ref
+            ORDER BY group_ref
+            """,
+            workflow_run_id,
+        )
+
+        node_counts = {_str(row, "group_ref"): row for row in node_rows}
+        comparison_counts = {_str(row, "group_ref"): row for row in comparison_rows}
+        group_refs = tuple(sorted(set(node_counts) | set(comparison_counts)))
+
+        done_group_count = 0
+        waiting_group_count = 0
+        active_node_count = 0
+        pending_comparison_count = 0
+
+        for group_ref in group_refs:
+            node_row = node_counts.get(group_ref, {})
+            comparison_row = comparison_counts.get(group_ref, {})
+            group_active_node_count = _optional_int(node_row, "active_node_count")
+            group_active_compacted_node_count = _optional_int(
+                node_row,
+                "active_compacted_node_count",
+            )
+            group_pending_comparison_count = _optional_int(
+                comparison_row,
+                "pending_comparison_count",
+            )
+            group_waiting_comparison_count = _optional_int(
+                comparison_row,
+                "waiting_user_model_choice_comparison_count",
+            )
+
+            active_node_count += group_active_node_count
+            pending_comparison_count += group_pending_comparison_count
+
+            if group_waiting_comparison_count > 0:
+                waiting_group_count += 1
+                continue
+
+            if (
+                group_active_node_count == 1
+                and group_active_compacted_node_count == 1
+                and group_pending_comparison_count == 0
+            ):
+                done_group_count += 1
+
+        group_count = len(group_refs)
+        active_group_count = group_count - done_group_count - waiting_group_count
+        if active_group_count < 0:
+            active_group_count = 0
+
+        return DraftClaimCompactionProgressSummary(
+            workflow_run_id=workflow_run_id,
+            group_count=group_count,
+            done_group_count=done_group_count,
+            waiting_user_model_choice_group_count=waiting_group_count,
+            active_group_count=active_group_count,
+            active_node_count=active_node_count,
+            pending_comparison_count=pending_comparison_count,
+        )
 
     async def load_planner_state(
         self,
@@ -678,6 +770,13 @@ def _optional_str(row: Mapping[str, object], key: str) -> str | None:
 
 def _int(row: Mapping[str, object], key: str) -> int:
     value = row[key]
+    if not isinstance(value, int):
+        raise TypeError(f"{key} must be int")
+    return value
+
+
+def _optional_int(row: Mapping[str, object], key: str) -> int:
+    value = row.get(key, 0)
     if not isinstance(value, int):
         raise TypeError(f"{key} must be int")
     return value
