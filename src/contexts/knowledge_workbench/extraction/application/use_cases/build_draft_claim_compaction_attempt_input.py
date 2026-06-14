@@ -12,6 +12,14 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionBatchForDispatch,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimReducedRewriteInputClaim,
+    DraftClaimReducedRewritePayload,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionNode,
+    DraftClaimCompactionNodeKind,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_prompt_payload_builder import (
     DraftClaimCompactionPromptPayloadBuilder,
 )
@@ -94,18 +102,12 @@ class BuildDraftClaimCompactionAttemptInput:
             return await self._payload_unavailable(
                 batch=batch,
                 message=(
-                    "mixed compaction requires compacted output persistence "
+                    "mixed batch requires explicit raw and compacted node refs "
                     "before attempt payload can be built"
                 ),
             )
         if batch.prompt_variant == "reduced_rewrite":
-            return await self._payload_unavailable(
-                batch=batch,
-                message=(
-                    "reduced rewrite requires compacted output persistence "
-                    "before attempt payload can be built"
-                ),
-            )
+            return await self._reduced_rewrite(work_item=work_item, batch=batch)
         raise UnsupportedDraftClaimCompactionPromptVariant(
             f"unsupported draft claim compaction prompt_variant: {batch.prompt_variant}",
         )
@@ -148,6 +150,70 @@ class BuildDraftClaimCompactionAttemptInput:
             ),
         )
 
+    async def _reduced_rewrite(
+        self,
+        *,
+        work_item: WorkItem,
+        batch: DraftClaimCompactionBatchForDispatch,
+    ) -> DraftClaimCompactionAttemptInput:
+        state = await self.reduction_state_repository.load_planner_state(
+            workflow_run_id=batch.workflow_run_id,
+            group_ref=batch.group_ref,
+        )
+        if state is None:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "draft claim compaction reduction state is unavailable",
+            )
+        if not batch.member_observation_refs:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "reduced_rewrite batch does not contain compacted node refs yet",
+            )
+
+        nodes_by_ref = {node.node_ref: node for node in state.nodes}
+        missing_refs = tuple(
+            node_ref
+            for node_ref in batch.member_observation_refs
+            if node_ref not in nodes_by_ref
+        )
+        if missing_refs:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "reduced_rewrite batch does not contain compacted node refs yet: "
+                + ", ".join(missing_refs),
+            )
+
+        compacted_nodes = tuple(
+            nodes_by_ref[node_ref] for node_ref in batch.member_observation_refs
+        )
+        for node in compacted_nodes:
+            if node.node_kind is not DraftClaimCompactionNodeKind.COMPACTED:
+                raise DraftClaimCompactionPayloadUnavailable(
+                    "reduced_rewrite batch must reference compacted nodes only",
+                )
+            if not node.active:
+                raise DraftClaimCompactionPayloadUnavailable(
+                    "reduced_rewrite batch must reference active compacted nodes",
+                )
+
+        payload = DraftClaimReducedRewritePayload(
+            compacted_claims=tuple(
+                _reduced_input_claim(node) for node in compacted_nodes
+            )
+        ).to_json_dict()
+
+        return DraftClaimCompactionAttemptInput(
+            workflow_run_id=batch.workflow_run_id,
+            group_ref=batch.group_ref,
+            batch_ref=batch.batch_ref,
+            work_item_id=work_item.work_item_id,
+            prompt_kind=DraftClaimCompactionPromptKind.REDUCED_CLAIM_REWRITE,
+            prompt_ref=REDUCED_CLAIM_REWRITE_PROMPT_REF,
+            model_id=batch.model_id,
+            payload=payload,
+            expected_output_kind=(
+                DraftClaimCompactionExpectedOutputKind.REDUCED_REWRITE
+            ),
+        )
+
     async def _payload_unavailable(
         self,
         *,
@@ -182,3 +248,21 @@ def _parse_claim_compaction_work_item_id(work_item_id: str) -> tuple[str, str]:
             "work_item_id must include batch_ref",
         )
     return workflow_run_id, batch_ref
+
+
+def _reduced_input_claim(
+    node: DraftClaimCompactionNode,
+) -> DraftClaimReducedRewriteInputClaim:
+    if node.compacted_key is None:
+        raise DraftClaimCompactionPayloadUnavailable(
+            f"compacted node has no compacted_key: {node.node_ref}",
+        )
+    if node.compacted_claim is None:
+        raise DraftClaimCompactionPayloadUnavailable(
+            f"compacted node has no compacted_claim: {node.node_ref}",
+        )
+    return DraftClaimReducedRewriteInputClaim(
+        key=node.compacted_key,
+        claim=node.compacted_claim,
+        triples=node.compacted_triples,
+    )

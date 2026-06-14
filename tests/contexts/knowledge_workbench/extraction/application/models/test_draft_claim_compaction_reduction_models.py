@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionTriple,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID,
     PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID,
@@ -97,3 +100,54 @@ def test_next_work_item_wait_boundary_can_carry_degraded_candidate() -> None:
         decision.next_work_item.degraded_model_id
         == DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID
     )
+
+
+def test_compacted_node_accepts_semantic_fields() -> None:
+    triple = DraftClaimCompactionTriple(
+        subject="Product",
+        predicate="has_capability",
+        object="refunds",
+        qualifiers=(),
+    )
+
+    node = DraftClaimCompactionNode(
+        node_ref="compacted-node",
+        node_kind=DraftClaimCompactionNodeKind.COMPACTED,
+        source_claim_refs=("claim-a",),
+        compacted_key="refund_support",
+        compacted_claim="Product supports refunds.",
+        compacted_triples=(triple,),
+    )
+
+    assert node.compacted_key == "refund_support"
+    assert node.compacted_claim == "Product supports refunds."
+    assert node.compacted_triples == (triple,)
+
+
+def test_compacted_triples_must_be_tuple() -> None:
+    triple = DraftClaimCompactionTriple(
+        subject="Product",
+        predicate="has_capability",
+        object="refunds",
+        qualifiers=(),
+    )
+
+    with pytest.raises(TypeError, match="compacted_triples"):
+        DraftClaimCompactionNode(
+            node_ref="compacted-node",
+            node_kind=DraftClaimCompactionNodeKind.COMPACTED,
+            source_claim_refs=("claim-a",),
+            compacted_triples=[triple],
+        )
+
+
+def test_raw_node_still_works_without_semantic_fields() -> None:
+    node = DraftClaimCompactionNode(
+        node_ref="raw-node",
+        node_kind=DraftClaimCompactionNodeKind.RAW,
+        source_claim_refs=("claim-a",),
+    )
+
+    assert node.compacted_key is None
+    assert node.compacted_claim is None
+    assert node.compacted_triples == ()

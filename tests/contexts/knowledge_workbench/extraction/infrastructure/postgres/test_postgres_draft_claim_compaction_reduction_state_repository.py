@@ -313,6 +313,9 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
     assert len(active_nodes) == 1
     assert active_nodes[0].node_kind is DraftClaimCompactionNodeKind.COMPACTED
     assert active_nodes[0].source_claim_refs == ("claim-a", "claim-b")
+    assert active_nodes[0].compacted_key == "refund_support"
+    assert active_nodes[0].compacted_claim == "Product supports refunds."
+    assert active_nodes[0].compacted_triples == (_triple(),)
     assert len(inactive_nodes) == 2
     assert state.comparisons[0].status.value == "merged"
     assert state.comparisons[0].result_node_ref == active_nodes[0].node_ref

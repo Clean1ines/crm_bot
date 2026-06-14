@@ -13,6 +13,8 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
     DraftClaimCompactionOutputClaim,
+    DraftClaimCompactionTriple,
+    DraftClaimCompactionTriplePredicate,
     DraftClaimReducedRewriteOutput,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
@@ -54,7 +56,8 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         node_rows = await self._connection.fetch(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
-                   supersedes_node_refs, estimated_input_tokens
+                   supersedes_node_refs, estimated_input_tokens,
+                   compacted_key, compacted_claim, compacted_triples
             FROM draft_claim_compaction_nodes
             WHERE workflow_run_id = $1 AND group_ref = $2
             ORDER BY node_ref
@@ -358,7 +361,8 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rows = await self._connection.fetch(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
-                   supersedes_node_refs, estimated_input_tokens
+                   supersedes_node_refs, estimated_input_tokens,
+                   compacted_key, compacted_claim, compacted_triples
             FROM draft_claim_compaction_nodes
             WHERE node_ref = ANY($1::text[])
             ORDER BY node_ref
@@ -548,6 +552,9 @@ def _node(
             "supersedes_node_refs",
         ),
         estimated_input_tokens=_int(row, "estimated_input_tokens"),
+        compacted_key=_optional_str(row, "compacted_key"),
+        compacted_claim=_optional_str(row, "compacted_claim"),
+        compacted_triples=_triples(row.get("compacted_triples", [])),
     )
 
 
@@ -587,6 +594,54 @@ def _comparison_round(
         ):
             return _int(row, "round_index")
     raise KeyError("comparison round not found")
+
+
+def _triples(value: object) -> tuple[DraftClaimCompactionTriple, ...]:
+    parsed: object
+    if isinstance(value, str):
+        parsed = json.loads(value)
+    else:
+        parsed = value
+    if parsed is None:
+        return ()
+    if not isinstance(parsed, Sequence) or isinstance(
+        parsed,
+        (str, bytes, bytearray),
+    ):
+        raise TypeError("compacted_triples must be json array")
+    triples: list[DraftClaimCompactionTriple] = []
+    for item in parsed:
+        if not isinstance(item, Mapping):
+            raise TypeError("compacted_triples items must be objects")
+        triples.append(
+            DraftClaimCompactionTriple(
+                subject=_mapping_str(item, "subject"),
+                predicate=DraftClaimCompactionTriplePredicate(
+                    _mapping_str(item, "predicate"),
+                ),
+                object=_mapping_str(item, "object"),
+                qualifiers=_mapping_str_tuple(item.get("qualifiers", [])),
+            )
+        )
+    return tuple(triples)
+
+
+def _mapping_str(row: Mapping[str, object], key: str) -> str:
+    value = row[key]
+    if not isinstance(value, str) or not value.strip():
+        raise TypeError(f"{key} must be non-empty str")
+    return value
+
+
+def _mapping_str_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        raise TypeError("qualifiers must be list")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise TypeError("qualifiers must contain str")
+        result.append(item)
+    return tuple(result)
 
 
 def _json_text_tuple(value: object, field_name: str) -> tuple[str, ...]:

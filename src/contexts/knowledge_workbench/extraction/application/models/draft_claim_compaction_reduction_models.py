@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionTriple,
+)
+
 
 PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID = "openai/gpt-oss-120b"
 DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID = "llama-3.3-70b-versatile"
@@ -71,6 +75,9 @@ class DraftClaimCompactionNode:
     active: bool = True
     supersedes_node_refs: tuple[str, ...] = ()
     estimated_input_tokens: int = 1
+    compacted_key: str | None = None
+    compacted_claim: str | None = None
+    compacted_triples: tuple[DraftClaimCompactionTriple, ...] = ()
 
     def __post_init__(self) -> None:
         _text(self.node_ref, "node_ref")
@@ -86,6 +93,11 @@ class DraftClaimCompactionNode:
         )
         if self.estimated_input_tokens < 0:
             raise ValueError("estimated_input_tokens must be >= 0")
+        if self.compacted_key is not None:
+            _text(self.compacted_key, "compacted_key")
+        if self.compacted_claim is not None:
+            _text(self.compacted_claim, "compacted_claim")
+        _triples_tuple(self.compacted_triples)
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +256,18 @@ def _text_tuple(value: tuple[str, ...], name: str, *, allow_empty: bool) -> None
         raise ValueError(f"{name} must be non-empty")
     for item in value:
         _text(item, name)
+
+
+def _triples_tuple(
+    value: tuple[DraftClaimCompactionTriple, ...],
+) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError("compacted_triples must be tuple")
+    for triple in value:
+        if not isinstance(triple, DraftClaimCompactionTriple):
+            raise TypeError(
+                "compacted_triples must contain DraftClaimCompactionTriple",
+            )
 
 
 def _sources_tuple(value: tuple[DraftClaimCompactionNodeSource, ...]) -> None:
