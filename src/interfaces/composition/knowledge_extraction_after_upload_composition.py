@@ -8,6 +8,12 @@ from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissi
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
     RecordWorkItemAttemptOutcome,
 )
+from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
+    EmbeddingGenerationPort,
+)
+from src.contexts.embedding_runtime.infrastructure.config.embedding_runtime_settings import (
+    load_embedding_runtime_settings,
+)
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_dispatch_read_repository import (
     PostgresReadWorkItemAttemptDispatchRepository,
 )
@@ -83,6 +89,7 @@ def make_knowledge_extraction_workflow_after_upload(
     project_repo: object,
     user_repo: UserRepository,
     llm_executor: LlmDispatchExecutorPort | None = None,
+    embedding_generation_port: EmbeddingGenerationPort | None = None,
 ) -> RunKnowledgeExtractionWorkflowAfterUpload:
     """Build the after-upload composition root for the upload → claim-builder path.
 
@@ -100,12 +107,25 @@ def make_knowledge_extraction_workflow_after_upload(
     )
 
     claim_builder_output_validation_policy = ClaimBuilderOutputValidationPolicy()
+    from src.contexts.embedding_runtime.infrastructure.composition.embedding_generation_provider_factory import (
+        make_embedding_generation_port,
+    )
+
+    embedding_settings = load_embedding_runtime_settings()
+    resolved_embedding_generation_port = (
+        embedding_generation_port
+        if embedding_generation_port is not None
+        else make_embedding_generation_port(embedding_settings)
+    )
 
     if llm_executor is None:
         return RunKnowledgeExtractionWorkflowAfterUpload(
             source_ingestion_runner=source_ingestion_runner,
             pool=pool,
             claim_builder_output_validation_policy=claim_builder_output_validation_policy,
+            embedding_generation_port=resolved_embedding_generation_port,
+            embedding_model_id=embedding_settings.local_model,
+            embedding_dimensions=embedding_settings.vector_dimensions,
         )
 
     route_catalog = default_groq_llm_model_route_catalog()
@@ -128,4 +148,7 @@ def make_knowledge_extraction_workflow_after_upload(
             )
         ),
         claim_builder_output_validation_policy=claim_builder_output_validation_policy,
+        embedding_generation_port=resolved_embedding_generation_port,
+        embedding_model_id=embedding_settings.local_model,
+        embedding_dimensions=embedding_settings.vector_dimensions,
     )

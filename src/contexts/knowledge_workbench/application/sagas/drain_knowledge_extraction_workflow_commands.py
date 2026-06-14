@@ -2,6 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
+    EmbeddingGenerationPort,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_embedding_persistence_port import (
+    DraftClaimEmbeddingPersistencePort,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_embedding_read_repository_port import (
+    DraftClaimEmbeddingReadRepositoryPort,
+)
+
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
@@ -130,6 +140,15 @@ class DrainKnowledgeExtractionWorkflowCommands:
         work_item_split_supersede_repository: (
             WorkItemSplitSupersedeRepositoryPort | None
         ) = None,
+        draft_claim_embedding_read_repository: (
+            DraftClaimEmbeddingReadRepositoryPort | None
+        ) = None,
+        draft_claim_embedding_persistence: (
+            DraftClaimEmbeddingPersistencePort | None
+        ) = None,
+        embedding_generation_port: EmbeddingGenerationPort | None = None,
+        embedding_model_id: str | None = None,
+        embedding_dimensions: int | None = None,
         workflow_state_repository: (
             KnowledgeExtractionSagaStateRepositoryPort | None
         ) = None,
@@ -195,6 +214,13 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 work_item_split_supersede_repository=(
                     work_item_split_supersede_repository
                 ),
+                draft_claim_embedding_read_repository=(
+                    draft_claim_embedding_read_repository
+                ),
+                draft_claim_embedding_persistence=draft_claim_embedding_persistence,
+                embedding_generation_port=embedding_generation_port,
+                embedding_model_id=embedding_model_id,
+                embedding_dimensions=embedding_dimensions,
             )
             if not dispatch_result.dispatched:
                 blocked_count += 1

@@ -34,6 +34,22 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_s
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_split_supersede_repository import (
     PostgresWorkItemSplitSupersedeRepository,
 )
+from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
+    EmbeddingGenerationPort,
+)
+from src.contexts.embedding_runtime.infrastructure.config.embedding_runtime_settings import (
+    load_embedding_runtime_settings,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_embedding_persistence_port import (
+    DraftClaimEmbeddingPersistencePort,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_embedding_read_repository_port import (
+    DraftClaimEmbeddingReadRepositoryPort,
+)
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_embedding_repository import (
+    DraftClaimEmbeddingConnectionLike,
+    PostgresDraftClaimEmbeddingRepository,
+)
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
     DrainKnowledgeExtractionWorkflowCommands,
     DrainKnowledgeExtractionWorkflowCommandsCommand,
@@ -181,6 +197,15 @@ class RunKnowledgeExtractionWorkflowResume:
         draft_claim_observation_persistence: (
             PersistValidatedDraftClaimObservationsPort | None
         ) = None,
+        draft_claim_embedding_read_repository: (
+            DraftClaimEmbeddingReadRepositoryPort | None
+        ) = None,
+        draft_claim_embedding_persistence: (
+            DraftClaimEmbeddingPersistencePort | None
+        ) = None,
+        embedding_generation_port: EmbeddingGenerationPort | None = None,
+        embedding_model_id: str | None = None,
+        embedding_dimensions: int | None = None,
     ) -> None:
         self._pool = cast(_AsyncResumePoolLike, pool)
         self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
@@ -194,6 +219,13 @@ class RunKnowledgeExtractionWorkflowResume:
             or ClaimBuilderOutputValidationPolicy()
         )
         self._draft_claim_observation_persistence = draft_claim_observation_persistence
+        self._draft_claim_embedding_read_repository = (
+            draft_claim_embedding_read_repository
+        )
+        self._draft_claim_embedding_persistence = draft_claim_embedding_persistence
+        self._embedding_generation_port = embedding_generation_port
+        self._embedding_model_id = embedding_model_id
+        self._embedding_dimensions = embedding_dimensions
 
     async def execute(
         self,
@@ -303,6 +335,10 @@ class RunKnowledgeExtractionWorkflowResume:
         )
         await workflow_unit_of_work.start()
 
+        draft_claim_embedding_repository = PostgresDraftClaimEmbeddingRepository(
+            cast(DraftClaimEmbeddingConnectionLike, connection),
+        )
+
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
                 DrainKnowledgeExtractionWorkflowCommandsCommand(
@@ -351,6 +387,17 @@ class RunKnowledgeExtractionWorkflowResume:
                         cast(asyncpg.Connection, connection)
                     )
                 ),
+                draft_claim_embedding_read_repository=(
+                    self._draft_claim_embedding_read_repository
+                    or draft_claim_embedding_repository
+                ),
+                draft_claim_embedding_persistence=(
+                    self._draft_claim_embedding_persistence
+                    or draft_claim_embedding_repository
+                ),
+                embedding_generation_port=self._embedding_generation_port,
+                embedding_model_id=self._embedding_model_id,
+                embedding_dimensions=self._embedding_dimensions,
                 workflow_state_repository=(
                     PostgresKnowledgeExtractionSagaStateRepository(
                         cast(asyncpg.Connection, connection)
@@ -400,11 +447,26 @@ def make_knowledge_extraction_workflow_resume(
     *,
     pool: AsyncPool,
     llm_executor: LlmDispatchExecutorPort | None = None,
+    embedding_generation_port: EmbeddingGenerationPort | None = None,
 ) -> RunKnowledgeExtractionWorkflowResume:
+    from src.contexts.embedding_runtime.infrastructure.composition.embedding_generation_provider_factory import (
+        make_embedding_generation_port,
+    )
+
+    embedding_settings = load_embedding_runtime_settings()
+    resolved_embedding_generation_port = (
+        embedding_generation_port
+        if embedding_generation_port is not None
+        else make_embedding_generation_port(embedding_settings)
+    )
+
     if llm_executor is None:
         return RunKnowledgeExtractionWorkflowResume(
             pool=pool,
             claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
+            embedding_generation_port=resolved_embedding_generation_port,
+            embedding_model_id=embedding_settings.local_model,
+            embedding_dimensions=embedding_settings.vector_dimensions,
         )
 
     route_catalog = default_groq_llm_model_route_catalog()
@@ -426,6 +488,9 @@ def make_knowledge_extraction_workflow_resume(
             )
         ),
         claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
+        embedding_generation_port=resolved_embedding_generation_port,
+        embedding_model_id=embedding_settings.local_model,
+        embedding_dimensions=embedding_settings.vector_dimensions,
     )
 
 
