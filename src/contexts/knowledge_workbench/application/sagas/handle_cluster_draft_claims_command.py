@@ -54,11 +54,21 @@ from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry impor
     WorkflowTimelineEntry,
     WorkflowTimelineSeverity,
 )
+from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+    WorkflowCommandId,
+)
 from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
     WorkflowEventId,
 )
+from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
+    WorkflowIdempotencyKey,
+)
 
 WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
+DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
+DRAFT_CLAIM_COMPACTION_WORKER_REF = (
+    "knowledge-workbench-draft-claim-compaction-dispatch"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +189,18 @@ class HandleClusterDraftClaimsCommandHandler:
                 correlation_id=workflow_command.command_id.value,
             )
         )
+        scheduled_work_item_count = (
+            schedule.created_count + schedule.already_exists_count
+        )
+        if scheduled_work_item_count > 0:
+            await workflow_unit_of_work.command_log.append_pending_command(
+                _prepare_dispatch_batch_command(
+                    workflow_run_id=workflow_run_id,
+                    scheduled_work_item_count=scheduled_work_item_count,
+                    occurred_at=workflow_command.updated_at,
+                )
+            )
+
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
             workflow_run_id=workflow_run_id,
@@ -218,6 +240,48 @@ class HandleClusterDraftClaimsCommandHandler:
             scheduled_work_item_count=schedule.created_count,
             already_scheduled_work_item_count=schedule.already_exists_count,
         )
+
+
+def _prepare_dispatch_batch_command(
+    *,
+    workflow_run_id: str,
+    scheduled_work_item_count: int,
+    occurred_at,
+) -> WorkflowCommand:
+    idempotency_key = f"draft-claim-compaction-dispatch:{workflow_run_id}:initial"
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+        ),
+        workflow_run_id=workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "work_kind": WORK_KIND.value,
+            "scheduled_work_item_count": scheduled_work_item_count,
+            "llm_dispatch_preparation": {
+                "profile": {
+                    "profile_id": "draft_claim_compaction",
+                    "estimated_prompt_tokens": 90000,
+                    "estimated_completion_tokens": 4000,
+                    "estimated_requests": 1,
+                },
+                "account_capacities": (),
+                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+                "requested_items": scheduled_work_item_count,
+                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+                "lease_token_prefix": (
+                    f"draft-claim-compaction-dispatch:{workflow_run_id}"
+                ),
+                "lease_ttl_seconds": 300,
+            },
+        },
+        status=WorkflowCommandStatus.PENDING,
+        run_after=occurred_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
 
 
 def _raw_nodes_for_group(

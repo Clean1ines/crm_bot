@@ -547,3 +547,94 @@ async def test_drain_does_not_dispatch_or_consume_pending_command_when_workflow_
     assert pending_command.status is WorkflowCommandStatus.PENDING
     assert scheduling_repository.saved_count == 0
     assert workflow_unit_of_work.command_log.completed_command_ids == []
+
+
+def _draft_claim_compaction_workflow_command() -> WorkflowCommand:
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(
+            "workflow-command:PrepareDraftClaimCompactionDispatchBatch"
+        ),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+        ),
+        workflow_run_id=_workflow_run_id(),
+        idempotency_key=WorkflowIdempotencyKey(
+            f"PrepareDraftClaimCompactionDispatchBatch:{_workflow_run_id()}"
+        ),
+        payload={
+            "workflow_run_id": _workflow_run_id(),
+            "scheduled_work_item_count": 1,
+            "llm_dispatch_preparation": {
+                "profile": {
+                    "profile_id": "draft_claim_compaction",
+                    "estimated_prompt_tokens": 90000,
+                    "estimated_completion_tokens": 4000,
+                    "estimated_requests": 1,
+                },
+                "account_capacities": (
+                    {
+                        "provider": "groq",
+                        "account_ref": "groq_org_primary",
+                        "model_ref": "openai/gpt-oss-120b",
+                        "remaining_minute_requests": 1,
+                        "remaining_minute_tokens": 100000,
+                        "remaining_daily_requests": 100,
+                        "remaining_daily_tokens": 1000000,
+                    },
+                ),
+                "active_model_ref": "openai/gpt-oss-120b",
+                "requested_items": 1,
+                "worker_ref": "knowledge-workbench-draft-claim-compaction-dispatch",
+                "lease_token_prefix": (
+                    f"draft-claim-compaction-dispatch:{_workflow_run_id()}"
+                ),
+                "lease_ttl_seconds": 300,
+            },
+        },
+        status=WorkflowCommandStatus.PENDING,
+        run_after=_now(),
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_drains_prepare_draft_claim_compaction_dispatch_batch_command() -> None:
+    result, _, workflow_unit_of_work = await _drain(
+        pending_commands=(_draft_claim_compaction_workflow_command(),)
+    )
+
+    assert result.inspected_count == 1
+    assert result.dispatched_count == 1
+    assert result.blocked_count == 0
+    assert len(workflow_unit_of_work.command_log.completed_command_ids) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_blocks_prepare_draft_claim_compaction_dispatch_without_dependency() -> (
+    None
+):
+    scheduling_repository = FakeWorkItemSchedulingRepository()
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork(
+        command_log=FakeCommandLogRepository(
+            pending_commands=(_draft_claim_compaction_workflow_command(),)
+        )
+    )
+
+    result = await DrainKnowledgeExtractionWorkflowCommands().execute(
+        DrainKnowledgeExtractionWorkflowCommandsCommand(
+            workflow_run_id=_workflow_run_id(),
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=scheduling_repository,
+        workflow_unit_of_work=workflow_unit_of_work,
+    )
+
+    assert result.inspected_count == 1
+    assert result.dispatched_count == 0
+    assert result.blocked_count == 1
+    assert (
+        result.last_blocked_command_type
+        == KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert result.last_blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED

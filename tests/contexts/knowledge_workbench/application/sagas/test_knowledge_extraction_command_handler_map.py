@@ -81,3 +81,12 @@ def test_reconcile_draft_claim_compaction_progress_handler_is_registered() -> No
         )
         == "HandleReconcileDraftClaimCompactionProgressCommandHandler"
     )
+
+
+def test_prepare_draft_claim_compaction_dispatch_batch_handler_is_registered() -> None:
+    assert (
+        implemented_handler_name_for(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH
+        )
+        == "HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler"
+    )

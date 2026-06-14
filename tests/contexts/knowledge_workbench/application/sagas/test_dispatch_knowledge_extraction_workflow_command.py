@@ -770,3 +770,84 @@ async def test_reconcile_draft_claim_compaction_progress_dispatches_when_depende
         result.handler_name
         == "HandleReconcileDraftClaimCompactionProgressCommandHandler"
     )
+
+
+def _draft_claim_compaction_dispatch_payload() -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "scheduled_work_item_count": 1,
+        "llm_dispatch_preparation": {
+            "profile": {
+                "profile_id": "draft_claim_compaction",
+                "estimated_prompt_tokens": 90000,
+                "estimated_completion_tokens": 4000,
+                "estimated_requests": 1,
+            },
+            "account_capacities": (
+                {
+                    "provider": "groq",
+                    "account_ref": "groq_org_primary",
+                    "model_ref": "openai/gpt-oss-120b",
+                    "remaining_minute_requests": 1,
+                    "remaining_minute_tokens": 100000,
+                    "remaining_daily_requests": 100,
+                    "remaining_daily_tokens": 1000000,
+                },
+            ),
+            "active_model_ref": "openai/gpt-oss-120b",
+            "requested_items": 1,
+            "worker_ref": "knowledge-workbench-draft-claim-compaction-dispatch",
+            "lease_token_prefix": f"draft-claim-compaction-dispatch:{_workflow_run_id()}",
+            "lease_ttl_seconds": 300,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_prepare_draft_claim_compaction_dispatch_batch_requires_prepare_dependency() -> (
+    None
+):
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+                payload=_draft_claim_compaction_dispatch_payload(),
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_prepare_draft_claim_compaction_dispatch_batch_dispatches_when_dependency_exists() -> (
+    None
+):
+    prepare = FakePrepareLlmDispatchBatch()
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+                payload=_draft_claim_compaction_dispatch_payload(),
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        prepare_llm_dispatch_batch=prepare,
+    )
+
+    assert result.dispatched is True
+    assert (
+        result.handler_name
+        == "HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler"
+    )
+    assert len(prepare.calls) == 1
+    assert (
+        prepare.calls[0].work_kind.value == "knowledge_workbench.draft_claim_compaction"
+    )
+    assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"

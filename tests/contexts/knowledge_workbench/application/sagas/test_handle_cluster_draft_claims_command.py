@@ -209,8 +209,10 @@ class FakeWorkItemSchedulingRepository:
 @dataclass(slots=True)
 class FakeCommandLog:
     completed: list[WorkflowCommandId] = field(default_factory=list)
+    pending_commands: list[WorkflowCommand] = field(default_factory=list)
 
     async def append_pending_command(self, command: WorkflowCommand) -> WorkflowCommand:
+        self.pending_commands.append(command)
         return command
 
     async def mark_command_completed(
@@ -426,6 +428,18 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
     assert workflow_uow.progress_snapshots.snapshot.domain_counters[
         "draft_claim_compaction_batch_count"
     ] == len(repository.persisted_batches)
+    assert len(workflow_uow.command_log.pending_commands) == 1
+    prepare_command = workflow_uow.command_log.pending_commands[0]
+    assert prepare_command.command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert prepare_command.payload["work_kind"] == (
+        "knowledge_workbench.draft_claim_compaction"
+    )
+    dispatch_preparation = prepare_command.payload["llm_dispatch_preparation"]
+    assert isinstance(dispatch_preparation, dict)
+    assert dispatch_preparation["active_model_ref"] == "openai/gpt-oss-120b"
+    assert dispatch_preparation["requested_items"] == len(scheduling.saved_payloads)
     assert workflow_uow.command_log.completed == [
         WorkflowCommandId(
             "workflow-command:"

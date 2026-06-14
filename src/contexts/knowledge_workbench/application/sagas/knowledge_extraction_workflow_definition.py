@@ -28,6 +28,9 @@ class KnowledgeExtractionCanonicalCommandType(StrEnum):
     RECONCILE_CLAIM_BUILDER_PROGRESS = "ReconcileClaimBuilderProgress"
     GENERATE_DRAFT_CLAIM_EMBEDDINGS = "GenerateDraftClaimEmbeddings"
     CLUSTER_DRAFT_CLAIMS = "ClusterDraftClaims"
+    PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH = (
+        "PrepareDraftClaimCompactionDispatchBatch"
+    )
     APPLY_DRAFT_CLAIM_COMPACTION_RESULT = "ApplyDraftClaimCompactionResult"
     RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS = "ReconcileDraftClaimCompactionProgress"
     BUILD_CLUSTER_PREVIEW = "BuildClusterPreview"
@@ -58,6 +61,9 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     DRAFT_CLAIM_EMBEDDING_BATCH_COMPLETED = "DraftClaimEmbeddingBatchCompleted"
     DRAFT_CLAIM_EMBEDDINGS_GENERATED = "DraftClaimEmbeddingsGenerated"
     DRAFT_CLAIM_CLUSTERS_BUILT = "DraftClaimClustersBuilt"
+    DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED = (
+        "DraftClaimCompactionDispatchBatchPrepared"
+    )
     DRAFT_CLAIM_COMPACTION_RESULT_APPLIED = "DraftClaimCompactionResultApplied"
     DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED = "DraftClaimCompactionNextWorkScheduled"
     DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE = (
@@ -430,13 +436,45 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             idempotency_key_template="draft-claim-clusters:{workflow_run_id}",
             success_event_type=KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT,
             next_command_types=(
-                KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS,
+                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
             ),
             affected_read_models=(
                 KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
                 KnowledgeExtractionReadModelName.TIMELINE,
             ),
             recovery_scopes=(KnowledgeExtractionRecoveryScope.CLUSTER_BUILD,),
+            frontend_visibility=True,
+        ),
+        KnowledgeExtractionOperationContract(
+            operation_key="prepare_draft_claim_compaction_dispatch_batch",
+            phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING,
+            command_type=(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH
+            ),
+            owner_contexts=(
+                "knowledge_workbench",
+                "execution_runtime",
+                "llm_runtime",
+                "capacity_runtime",
+            ),
+            unit_of_work_name="DraftClaimCompactionDispatchBatchPreparationUnitOfWork",
+            idempotency_key_template=(
+                "draft-claim-compaction-dispatch:{workflow_run_id}:{worker_ref}"
+            ),
+            success_event_type=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED
+            ),
+            next_command_types=(),
+            affected_read_models=(
+                KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
+                KnowledgeExtractionReadModelName.CAPACITY_STATUS,
+                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+                KnowledgeExtractionReadModelName.TIMELINE,
+            ),
+            recovery_scopes=(
+                KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
+                KnowledgeExtractionRecoveryScope.CLUSTER_BUILD,
+            ),
             frontend_visibility=True,
         ),
         KnowledgeExtractionOperationContract(
