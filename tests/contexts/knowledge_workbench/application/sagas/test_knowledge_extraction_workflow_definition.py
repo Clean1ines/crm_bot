@@ -67,8 +67,16 @@ def test_every_canonical_command_type_is_bound_to_operation() -> None:
 
 
 def test_every_canonical_event_type_is_used_by_operation() -> None:
-    assert event_types_used_by_operations() == frozenset(
-        KnowledgeExtractionCanonicalEventType
+    out_of_band_workflow_control_events = frozenset(
+        {
+            KnowledgeExtractionCanonicalEventType.WORKFLOW_MANUALLY_PAUSED,
+            KnowledgeExtractionCanonicalEventType.WORKFLOW_MANUALLY_RESUMED,
+        }
+    )
+
+    assert event_types_used_by_operations() == (
+        frozenset(KnowledgeExtractionCanonicalEventType)
+        - out_of_band_workflow_control_events
     )
 
 
@@ -371,3 +379,32 @@ def test_split_claim_builder_source_unit_operation_contract() -> None:
         KnowledgeExtractionRecoveryScope.SOURCE_UNIT,
         KnowledgeExtractionRecoveryScope.CLAIM_BUILDER_SECTION,
     }
+
+
+def test_apply_draft_claim_compaction_result_operation_contract() -> None:
+    operation = _operation("apply_draft_claim_compaction_result")
+
+    assert operation.phase is KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING
+    assert (
+        operation.command_type
+        is KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
+    )
+    assert (
+        operation.success_event_type
+        is KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED
+    )
+    assert set(operation.intermediate_event_types) == {
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED,
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE,
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_CLUSTER_DONE,
+    }
+    assert set(operation.affected_read_models) == {
+        KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+        KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
+        KnowledgeExtractionReadModelName.TIMELINE,
+    }
+    assert set(operation.recovery_scopes) == {
+        KnowledgeExtractionRecoveryScope.CLUSTER_BUILD,
+        KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
+    }
+    assert operation.frontend_visibility is True

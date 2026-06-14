@@ -62,6 +62,12 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
         command_type=KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS,
         handler_name="HandleClusterDraftClaimsCommandHandler",
     ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
+        ),
+        handler_name="HandleApplyDraftClaimCompactionResultCommandHandler",
+    ),
 )
 
 

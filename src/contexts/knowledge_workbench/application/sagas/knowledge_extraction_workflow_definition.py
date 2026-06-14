@@ -28,6 +28,7 @@ class KnowledgeExtractionCanonicalCommandType(StrEnum):
     RECONCILE_CLAIM_BUILDER_PROGRESS = "ReconcileClaimBuilderProgress"
     GENERATE_DRAFT_CLAIM_EMBEDDINGS = "GenerateDraftClaimEmbeddings"
     CLUSTER_DRAFT_CLAIMS = "ClusterDraftClaims"
+    APPLY_DRAFT_CLAIM_COMPACTION_RESULT = "ApplyDraftClaimCompactionResult"
     BUILD_CLUSTER_PREVIEW = "BuildClusterPreview"
     PAUSE_FOR_CLUSTER_CONTRACT_REVIEW = "PauseForClusterContractReview"
 
@@ -56,6 +57,12 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     DRAFT_CLAIM_EMBEDDING_BATCH_COMPLETED = "DraftClaimEmbeddingBatchCompleted"
     DRAFT_CLAIM_EMBEDDINGS_GENERATED = "DraftClaimEmbeddingsGenerated"
     DRAFT_CLAIM_CLUSTERS_BUILT = "DraftClaimClustersBuilt"
+    DRAFT_CLAIM_COMPACTION_RESULT_APPLIED = "DraftClaimCompactionResultApplied"
+    DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED = "DraftClaimCompactionNextWorkScheduled"
+    DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE = (
+        "DraftClaimCompactionWaitingUserModelChoice"
+    )
+    DRAFT_CLAIM_COMPACTION_CLUSTER_DONE = "DraftClaimCompactionClusterDone"
     CLUSTER_PREVIEW_READY = "ClusterPreviewReady"
     CLUSTER_CONTRACT_REVIEW_REQUIRED = "ClusterContractReviewRequired"
     WORKFLOW_MANUALLY_PAUSED = "WorkflowManuallyPaused"
@@ -423,6 +430,40 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
                 KnowledgeExtractionReadModelName.TIMELINE,
             ),
             recovery_scopes=(KnowledgeExtractionRecoveryScope.CLUSTER_BUILD,),
+            frontend_visibility=True,
+        ),
+        KnowledgeExtractionOperationContract(
+            operation_key="apply_draft_claim_compaction_result",
+            phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING,
+            command_type=(
+                KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
+            ),
+            owner_contexts=(
+                "knowledge_workbench",
+                "execution_runtime",
+                "workflow_runtime",
+            ),
+            unit_of_work_name="DraftClaimCompactionResultApplicationUnitOfWork",
+            idempotency_key_template=(
+                "draft-claim-compaction-apply:{workflow_run_id}:{work_item_id}"
+            ),
+            success_event_type=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED
+            ),
+            intermediate_event_types=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED,
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE,
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_CLUSTER_DONE,
+            ),
+            affected_read_models=(
+                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+                KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
+                KnowledgeExtractionReadModelName.TIMELINE,
+            ),
+            recovery_scopes=(
+                KnowledgeExtractionRecoveryScope.CLUSTER_BUILD,
+                KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
+            ),
             frontend_visibility=True,
         ),
         KnowledgeExtractionOperationContract(

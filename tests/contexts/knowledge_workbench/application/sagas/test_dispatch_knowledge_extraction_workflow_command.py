@@ -21,6 +21,13 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalCommandType,
     operation_by_command_type,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionPlannerState,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
+    DraftClaimCompactionApplyPersistenceResult,
+    DraftClaimCompactionReductionStatePersistenceResult,
+)
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_document import (
     SourceDocument,
 )
@@ -87,7 +94,12 @@ def _document_ref() -> SourceDocumentRef:
 
 def _workflow_command(
     command_type: KnowledgeExtractionCanonicalCommandType,
+    *,
+    payload: dict[str, object] | None = None,
 ) -> WorkflowCommand:
+    if payload is None:
+        payload = _default_payload_for_command(command_type)
+
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{command_type.value}"),
         command_type=command_type.value,
@@ -95,17 +107,38 @@ def _workflow_command(
         idempotency_key=WorkflowIdempotencyKey(
             f"{command_type.value}:{_workflow_run_id()}"
         ),
-        payload={
-            "workflow_run_id": _workflow_run_id(),
-            "source_document_ref": _document_ref().value,
-            "scheduled_work_item_count": 1,
-            "llm_dispatch_preparation": _dispatch_preparation(),
-        },
+        payload=payload,
         status=WorkflowCommandStatus.PENDING,
         run_after=_now(),
         created_at=_now(),
         updated_at=_now(),
     )
+
+
+def _default_payload_for_command(
+    command_type: KnowledgeExtractionCanonicalCommandType,
+) -> dict[str, object]:
+    if (
+        command_type
+        is KnowledgeExtractionCanonicalCommandType.SCHEDULE_CLAIM_BUILDER_SECTION_WORK
+    ):
+        return {
+            "workflow_run_id": _workflow_run_id(),
+            "source_document_ref": _document_ref().value,
+            "llm_dispatch_preparation": _dispatch_preparation(),
+        }
+
+    if (
+        command_type
+        is KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+    ):
+        return {
+            "workflow_run_id": _workflow_run_id(),
+            "scheduled_work_item_count": 1,
+            "llm_dispatch_preparation": _dispatch_preparation(),
+        }
+
+    return {"workflow_run_id": _workflow_run_id()}
 
 
 def _dispatch_preparation() -> dict[str, object]:
@@ -503,7 +536,56 @@ class FakeDraftClaimCompactionPlanRepository:
 
 @dataclass(slots=True)
 class FakeDraftClaimCompactionReductionStateRepository:
-    pass
+    async def load_planner_state(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+    ) -> DraftClaimCompactionPlannerState | None:
+        del workflow_run_id, group_ref
+        return DraftClaimCompactionPlannerState(cluster_ref="group-1", nodes=())
+
+    async def seed_initial_planner_state(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        raw_nodes,
+        created_at: datetime,
+    ) -> DraftClaimCompactionReductionStatePersistenceResult:
+        del workflow_run_id, group_ref, raw_nodes, created_at
+        raise AssertionError("seed_initial_planner_state must not be called")
+
+    async def apply_compacted_claims_result(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        batch_ref: str,
+        work_item_id: str,
+        round_index: int,
+        compacted_claims,
+        created_at: datetime,
+    ) -> DraftClaimCompactionApplyPersistenceResult:
+        del workflow_run_id, group_ref, batch_ref, work_item_id
+        del round_index, compacted_claims, created_at
+        return _apply_persistence_result()
+
+    async def apply_reduced_rewrite_result(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        batch_ref: str,
+        work_item_id: str,
+        round_index: int,
+        source_node_refs,
+        rewrite,
+        created_at: datetime,
+    ) -> DraftClaimCompactionApplyPersistenceResult:
+        del workflow_run_id, group_ref, batch_ref, work_item_id
+        del round_index, source_node_refs, rewrite, created_at
+        return _apply_persistence_result()
 
 
 @pytest.mark.asyncio
@@ -540,3 +622,89 @@ async def test_unknown_command_type_raises_value_error() -> None:
             knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
             workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
         )
+
+
+@pytest.mark.asyncio
+async def test_apply_draft_claim_compaction_result_requires_reduction_state_repository() -> (
+    None
+):
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT,
+                payload=_apply_result_payload(),
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_apply_draft_claim_compaction_result_dispatches_when_dependencies_exist() -> (
+    None
+):
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT,
+                payload=_apply_result_payload(),
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        draft_claim_compaction_reduction_state_repository=(
+            FakeDraftClaimCompactionReductionStateRepository()
+        ),
+    )
+
+    assert result.dispatched is True
+    assert result.handler_name == "HandleApplyDraftClaimCompactionResultCommandHandler"
+
+
+def _apply_result_payload() -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "group_ref": "group-1",
+        "batch_ref": "batch-1",
+        "work_item_id": "work-item-1",
+        "round_index": 0,
+        "output_kind": "compacted_claims",
+        "left_node_ref": "raw:workflow-1:group-1:claim-a",
+        "right_node_ref": "raw:workflow-1:group-1:claim-b",
+        "compacted_claims": [
+            {
+                "key": "refund_support",
+                "claim": "Product supports refunds.",
+                "claim_kind": "capability",
+                "granularity": "atomic",
+                "source_claim_refs": ["claim-a", "claim-b"],
+                "triples": [
+                    {
+                        "subject": "Product",
+                        "predicate": "has_capability",
+                        "object": "refunds",
+                        "qualifiers": [],
+                    }
+                ],
+                "merge_decision": "merged",
+            }
+        ],
+        "reduced_rewrite": None,
+    }
+
+
+def _apply_persistence_result() -> DraftClaimCompactionApplyPersistenceResult:
+    return DraftClaimCompactionApplyPersistenceResult(
+        inserted_node_count=1,
+        updated_node_count=2,
+        inserted_source_count=2,
+        inserted_comparison_count=1,
+        superseded_node_count=2,
+        already_exists_count=0,
+    )

@@ -63,3 +63,12 @@ def test_reconcile_claim_builder_progress_is_implemented() -> None:
     assert implemented_handler_name_for(command_type) == (
         "HandleReconcileClaimBuilderProgressCommandHandler"
     )
+
+
+def test_apply_draft_claim_compaction_result_handler_is_registered() -> None:
+    assert (
+        implemented_handler_name_for(
+            KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
+        )
+        == "HandleApplyDraftClaimCompactionResultCommandHandler"
+    )

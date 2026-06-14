@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from src.contexts.knowledge_workbench.application.sagas.handle_apply_draft_claim_compaction_result_command import (
+    HandleApplyDraftClaimCompactionResultCommand,
+    HandleApplyDraftClaimCompactionResultCommandHandler,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_cluster_draft_claims_command import (
     HandleClusterDraftClaimsCommand,
     HandleClusterDraftClaimsCommandHandler,
@@ -385,6 +389,40 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 embedding_model_id=embedding_model_id,
                 embedding_dimensions=embedding_dimensions,
                 workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
+        ):
+            if draft_claim_compaction_reduction_state_repository is None:
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleApplyDraftClaimCompactionResultCommandHandler().execute(
+                HandleApplyDraftClaimCompactionResultCommand(
+                    workflow_command=workflow_command,
+                ),
+                workflow_unit_of_work=workflow_unit_of_work,
+                compaction_reduction_state_repository=(
+                    draft_claim_compaction_reduction_state_repository
+                ),
+                work_item_scheduling_repository=knowledge_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

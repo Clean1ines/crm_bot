@@ -1,0 +1,541 @@
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Protocol
+
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
+)
+from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
+    EnsureWorkItemsScheduled,
+    EnsureWorkItemsScheduledCommand,
+    EnsureWorkItemsScheduledResult,
+    WorkItemSchedulePlan,
+)
+from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
+    KnowledgeExtractionCanonicalCommandType,
+    KnowledgeExtractionCanonicalEventType,
+    KnowledgeExtractionCanonicalPhase,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_apply_result import (
+    DraftClaimCompactionApplyOutputKind,
+    DraftClaimCompactionApplyResultCommand,
+    DraftClaimCompactionApplyResultOutcome,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionOutputClaim,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID,
+    DraftClaimCompactionNextWorkItem,
+    DraftClaimCompactionNextWorkItemType,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
+    DraftClaimCompactionOutputValidator,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
+    DraftClaimCompactionReductionStateRepositoryPort,
+)
+from src.contexts.knowledge_workbench.extraction.application.use_cases.apply_draft_claim_compaction_result import (
+    ApplyDraftClaimCompactionResult,
+)
+from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
+    WorkflowRuntimeUnitOfWorkPort,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_command import (
+    WorkflowCommand,
+    WorkflowCommandStatus,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_event import WorkflowEvent
+from src.contexts.workflow_runtime.domain.entities.workflow_progress_snapshot import (
+    WorkflowProgressSnapshot,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry import (
+    WorkflowTimelineEntry,
+    WorkflowTimelineSeverity,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
+    WorkflowEventId,
+)
+from src.domain.project_plane.json_types import JsonObject, JsonValue
+
+
+class DraftClaimCompactionApplyResultUseCasePort(Protocol):
+    async def execute(
+        self,
+        command: DraftClaimCompactionApplyResultCommand,
+    ) -> DraftClaimCompactionApplyResultOutcome: ...
+
+
+WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
+
+
+@dataclass(frozen=True, slots=True)
+class HandleApplyDraftClaimCompactionResultCommand:
+    workflow_command: WorkflowCommand
+
+
+@dataclass(frozen=True, slots=True)
+class HandleApplyDraftClaimCompactionResult:
+    workflow_run_id: str
+    created_node_count: int
+    superseded_node_count: int
+    comparison_count: int
+    next_work_type: str
+    scheduled_work_item_count: int
+    already_scheduled_work_item_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class HandleApplyDraftClaimCompactionResultCommandHandler:
+    apply_result_use_case: DraftClaimCompactionApplyResultUseCasePort | None = None
+
+    async def execute(
+        self,
+        command: HandleApplyDraftClaimCompactionResultCommand,
+        *,
+        workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        compaction_reduction_state_repository: (
+            DraftClaimCompactionReductionStateRepositoryPort
+        ),
+        work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
+    ) -> HandleApplyDraftClaimCompactionResult:
+        workflow_command = command.workflow_command
+        if (
+            workflow_command.command_type
+            != KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT.value
+        ):
+            raise ValueError(
+                "workflow_command command_type must be ApplyDraftClaimCompactionResult"
+            )
+        if workflow_command.status is not WorkflowCommandStatus.PENDING:
+            raise ValueError("workflow_command status must be PENDING")
+
+        apply_command = _apply_command_from_payload(
+            workflow_command=workflow_command,
+        )
+        apply_result_use_case = self.apply_result_use_case
+        if apply_result_use_case is None:
+            apply_result_use_case = ApplyDraftClaimCompactionResult(
+                reduction_state_repository=compaction_reduction_state_repository,
+            )
+        outcome = await apply_result_use_case.execute(apply_command)
+
+        schedule = await _schedule_next_work(
+            workflow_run_id=apply_command.workflow_run_id,
+            group_ref=apply_command.group_ref,
+            next_work_item=outcome.next_decision.next_work_item,
+            work_item_scheduling_repository=work_item_scheduling_repository,
+        )
+        if schedule.conflict_count:
+            raise ValueError("draft claim compaction next work item schedule conflict")
+
+        await _append_applied_event(
+            workflow_unit_of_work=workflow_unit_of_work,
+            workflow_command=workflow_command,
+            apply_command=apply_command,
+            outcome=outcome,
+        )
+        await _append_next_event(
+            workflow_unit_of_work=workflow_unit_of_work,
+            workflow_command=workflow_command,
+            apply_command=apply_command,
+            outcome=outcome,
+            schedule=schedule,
+        )
+        await _save_progress_snapshot(
+            workflow_unit_of_work=workflow_unit_of_work,
+            workflow_run_id=apply_command.workflow_run_id,
+            outcome=outcome,
+            schedule=schedule,
+            occurred_at=workflow_command.updated_at,
+        )
+        await workflow_unit_of_work.timeline.append_entry(
+            WorkflowTimelineEntry(
+                timeline_entry_id=(
+                    f"workflow-timeline:{apply_command.workflow_run_id}:"
+                    f"DraftClaimCompactionResultApplied:"
+                    f"{workflow_command.command_id.value}"
+                ),
+                workflow_run_id=apply_command.workflow_run_id,
+                event_type=(
+                    KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED.value
+                ),
+                phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
+                severity=WorkflowTimelineSeverity.INFO,
+                message="Draft claim compaction result applied",
+                payload_summary=_progress_summary(outcome=outcome, schedule=schedule),
+                occurred_at=workflow_command.updated_at,
+                source_ref=workflow_command.command_type,
+            )
+        )
+        await workflow_unit_of_work.timeline.append_entry(
+            WorkflowTimelineEntry(
+                timeline_entry_id=(
+                    f"workflow-timeline:{apply_command.workflow_run_id}:"
+                    f"{_next_timeline_suffix(outcome.next_decision.work_type)}:"
+                    f"{workflow_command.command_id.value}"
+                ),
+                workflow_run_id=apply_command.workflow_run_id,
+                event_type=_next_event_type(outcome.next_decision.work_type).value,
+                phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
+                severity=WorkflowTimelineSeverity.INFO,
+                message=_next_timeline_message(outcome.next_decision.work_type),
+                payload_summary=_progress_summary(outcome=outcome, schedule=schedule),
+                occurred_at=workflow_command.updated_at,
+                source_ref=workflow_command.command_type,
+            )
+        )
+        await workflow_unit_of_work.command_log.mark_command_completed(
+            command_id=workflow_command.command_id,
+            completed_at=workflow_command.updated_at,
+        )
+
+        return HandleApplyDraftClaimCompactionResult(
+            workflow_run_id=apply_command.workflow_run_id,
+            created_node_count=len(outcome.created_node_refs),
+            superseded_node_count=len(outcome.superseded_node_refs),
+            comparison_count=len(outcome.comparison_refs),
+            next_work_type=outcome.next_decision.work_type.value,
+            scheduled_work_item_count=schedule.created_count,
+            already_scheduled_work_item_count=schedule.already_exists_count,
+        )
+
+
+def _apply_command_from_payload(
+    *,
+    workflow_command: WorkflowCommand,
+) -> DraftClaimCompactionApplyResultCommand:
+    payload = workflow_command.payload
+    if not isinstance(payload, Mapping):
+        raise ValueError("workflow command payload must be object")
+
+    workflow_run_id = _payload_text(payload, "workflow_run_id")
+    if workflow_run_id != workflow_command.workflow_run_id:
+        raise ValueError("payload workflow_run_id must match workflow command")
+
+    output_kind = DraftClaimCompactionApplyOutputKind(
+        _payload_text(payload, "output_kind")
+    )
+    compacted_claims_value = payload.get("compacted_claims", [])
+    reduced_rewrite_value = payload.get("reduced_rewrite")
+
+    compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...] = ()
+    reduced_rewrite = None
+    validator = DraftClaimCompactionOutputValidator()
+    if output_kind is DraftClaimCompactionApplyOutputKind.COMPACTED_CLAIMS:
+        compacted_claims_payload = _compacted_claims_payload(compacted_claims_value)
+        input_refs = _source_refs_from_compacted_claims(compacted_claims_payload)
+        compacted_claims = validator.validate(
+            payload={"compacted_claims": compacted_claims_payload},
+            input_claim_refs=input_refs,
+        ).compacted_claims
+    else:
+        reduced_rewrite = validator.validate_reduced_rewrite_output(
+            payload=_mapping_value(reduced_rewrite_value, "reduced_rewrite"),
+        )
+
+    return DraftClaimCompactionApplyResultCommand(
+        workflow_run_id=workflow_run_id,
+        group_ref=_payload_text(payload, "group_ref"),
+        batch_ref=_payload_text(payload, "batch_ref"),
+        work_item_id=_payload_text(payload, "work_item_id"),
+        round_index=_payload_int(payload, "round_index"),
+        left_node_ref=_payload_text(payload, "left_node_ref"),
+        right_node_ref=_payload_optional_text(payload, "right_node_ref"),
+        output_kind=output_kind,
+        compacted_claims=compacted_claims,
+        reduced_rewrite=reduced_rewrite,
+        created_at=workflow_command.updated_at,
+    )
+
+
+async def _schedule_next_work(
+    *,
+    workflow_run_id: str,
+    group_ref: str,
+    next_work_item: DraftClaimCompactionNextWorkItem,
+    work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
+) -> EnsureWorkItemsScheduledResult:
+    if next_work_item.work_type not in {
+        DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT,
+        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+        DraftClaimCompactionNextWorkItemType.MIXED,
+        DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
+    }:
+        return await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
+            EnsureWorkItemsScheduledCommand(plans=())
+        )
+
+    batch_ref = _next_batch_ref(
+        group_ref=group_ref,
+        next_work_item=next_work_item,
+    )
+    work_item_id = f"claim-compaction:{workflow_run_id}:{batch_ref}"
+    plan = WorkItemSchedulePlan(
+        work_item_id=work_item_id,
+        work_kind=WORK_KIND,
+        idempotency_key=work_item_id,
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "group_ref": group_ref,
+            "batch_ref": batch_ref,
+            "prompt_variant": next_work_item.work_type.value,
+            "model_id": next_work_item.primary_model_id,
+            "node_refs": list(next_work_item.node_refs),
+        },
+    )
+    return await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
+        EnsureWorkItemsScheduledCommand(plans=(plan,))
+    )
+
+
+async def _append_applied_event(
+    *,
+    workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+    workflow_command: WorkflowCommand,
+    apply_command: DraftClaimCompactionApplyResultCommand,
+    outcome: DraftClaimCompactionApplyResultOutcome,
+) -> None:
+    await workflow_unit_of_work.outbox.append_event(
+        WorkflowEvent(
+            event_id=WorkflowEventId(
+                f"workflow-event:{apply_command.workflow_run_id}:"
+                f"{KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED.value}:"
+                f"{workflow_command.command_id.value}"
+            ),
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED.value
+            ),
+            workflow_run_id=apply_command.workflow_run_id,
+            payload={
+                "workflow_run_id": apply_command.workflow_run_id,
+                "group_ref": apply_command.group_ref,
+                "batch_ref": apply_command.batch_ref,
+                "work_item_id": apply_command.work_item_id,
+                "created_node_refs": list(outcome.created_node_refs),
+                "superseded_node_refs": list(outcome.superseded_node_refs),
+                "comparison_refs": list(outcome.comparison_refs),
+                "next_work_type": outcome.next_decision.work_type.value,
+            },
+            occurred_at=workflow_command.updated_at,
+            causation_command_id=workflow_command.command_id,
+            correlation_id=workflow_command.command_id.value,
+        )
+    )
+
+
+async def _append_next_event(
+    *,
+    workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+    workflow_command: WorkflowCommand,
+    apply_command: DraftClaimCompactionApplyResultCommand,
+    outcome: DraftClaimCompactionApplyResultOutcome,
+    schedule: EnsureWorkItemsScheduledResult,
+) -> None:
+    work_type = outcome.next_decision.work_type
+    event_type = _next_event_type(work_type)
+    payload: JsonObject = {
+        "workflow_run_id": apply_command.workflow_run_id,
+        "group_ref": apply_command.group_ref,
+        "reason": outcome.next_decision.reason,
+        "next_work_type": work_type.value,
+        "scheduled_work_item_count": schedule.created_count,
+        "already_scheduled_work_item_count": schedule.already_exists_count,
+    }
+    if work_type is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE:
+        payload.update(
+            {
+                "primary_model_id": outcome.next_decision.next_work_item.primary_model_id,
+                "degraded_candidate_model_id": (
+                    outcome.next_decision.next_work_item.degraded_model_id
+                    or DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID
+                ),
+            }
+        )
+
+    await workflow_unit_of_work.outbox.append_event(
+        WorkflowEvent(
+            event_id=WorkflowEventId(
+                f"workflow-event:{apply_command.workflow_run_id}:"
+                f"{event_type.value}:{workflow_command.command_id.value}"
+            ),
+            event_type=event_type.value,
+            workflow_run_id=apply_command.workflow_run_id,
+            payload=payload,
+            occurred_at=workflow_command.updated_at,
+            causation_command_id=workflow_command.command_id,
+            correlation_id=workflow_command.command_id.value,
+        )
+    )
+
+
+async def _save_progress_snapshot(
+    *,
+    workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+    workflow_run_id: str,
+    outcome: DraftClaimCompactionApplyResultOutcome,
+    schedule: EnsureWorkItemsScheduledResult,
+    occurred_at,
+) -> None:
+    existing = await workflow_unit_of_work.progress_snapshots.get_snapshot(
+        workflow_run_id,
+    )
+    domain_counters = dict(existing.domain_counters) if existing is not None else {}
+    domain_counters.update(
+        {
+            "draft_claim_compaction_created_node_count": len(outcome.created_node_refs),
+            "draft_claim_compaction_superseded_node_count": len(
+                outcome.superseded_node_refs
+            ),
+            "draft_claim_compaction_comparison_count": len(outcome.comparison_refs),
+            "draft_claim_compaction_scheduled_next_work_item_count": (
+                schedule.created_count
+            ),
+            "draft_claim_compaction_already_scheduled_next_work_item_count": (
+                schedule.already_exists_count
+            ),
+        }
+    )
+    await workflow_unit_of_work.progress_snapshots.save_snapshot(
+        WorkflowProgressSnapshot(
+            workflow_run_id=workflow_run_id,
+            current_phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
+            workflow_status="RUNNING",
+            total_work_items=existing.total_work_items if existing is not None else 0,
+            scheduled_work_items=(
+                existing.scheduled_work_items if existing is not None else 0
+            )
+            + schedule.created_count,
+            running_work_items=0,
+            completed_work_items=(
+                existing.completed_work_items if existing is not None else 0
+            ),
+            deferred_work_items=existing.deferred_work_items
+            if existing is not None
+            else 0,
+            retryable_failed_work_items=(
+                existing.retryable_failed_work_items if existing is not None else 0
+            ),
+            terminal_failed_work_items=(
+                existing.terminal_failed_work_items if existing is not None else 0
+            ),
+            blocked_work_items=0,
+            domain_counters=domain_counters,
+            started_at=existing.started_at if existing is not None else occurred_at,
+            updated_at=occurred_at,
+            completed_at=existing.completed_at if existing is not None else None,
+        )
+    )
+
+
+def _progress_summary(
+    *,
+    outcome: DraftClaimCompactionApplyResultOutcome,
+    schedule: EnsureWorkItemsScheduledResult,
+) -> JsonObject:
+    return {
+        "created_node_count": len(outcome.created_node_refs),
+        "superseded_node_count": len(outcome.superseded_node_refs),
+        "comparison_count": len(outcome.comparison_refs),
+        "next_work_type": outcome.next_decision.work_type.value,
+        "scheduled_work_item_count": schedule.created_count,
+        "already_scheduled_work_item_count": schedule.already_exists_count,
+    }
+
+
+def _next_event_type(
+    work_type: DraftClaimCompactionNextWorkItemType,
+) -> KnowledgeExtractionCanonicalEventType:
+    if work_type is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE:
+        return KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE
+    if work_type is DraftClaimCompactionNextWorkItemType.DONE:
+        return KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_CLUSTER_DONE
+    return (
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED
+    )
+
+
+def _next_timeline_message(work_type: DraftClaimCompactionNextWorkItemType) -> str:
+    if work_type is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE:
+        return "Draft claim compaction waiting for user model choice"
+    if work_type is DraftClaimCompactionNextWorkItemType.DONE:
+        return "Draft claim compaction cluster completed"
+    return "Draft claim compaction next work scheduled"
+
+
+def _next_timeline_suffix(work_type: DraftClaimCompactionNextWorkItemType) -> str:
+    if work_type is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE:
+        return "DraftClaimCompactionWaitingUserModelChoice"
+    if work_type is DraftClaimCompactionNextWorkItemType.DONE:
+        return "DraftClaimCompactionClusterCompleted"
+    return "DraftClaimCompactionNextWorkScheduled"
+
+
+def _next_batch_ref(
+    *,
+    group_ref: str,
+    next_work_item: DraftClaimCompactionNextWorkItem,
+) -> str:
+    node_suffix = "--".join(next_work_item.node_refs)
+    if not node_suffix:
+        raise ValueError("next work item node_refs must be non-empty")
+    return f"{group_ref}:{next_work_item.work_type.value}:{node_suffix}"
+
+
+def _compacted_claims_payload(value: object) -> list[JsonValue]:
+    if not isinstance(value, list):
+        raise ValueError("compacted_claims must be list")
+    return value
+
+
+def _source_refs_from_compacted_claims(
+    compacted_claims: Sequence[JsonValue],
+) -> tuple[str, ...]:
+    refs: list[str] = []
+    for claim in compacted_claims:
+        claim_mapping = _mapping_value(claim, "compacted_claim")
+        source_refs = claim_mapping.get("source_claim_refs")
+        if not isinstance(source_refs, list):
+            raise ValueError("compacted_claim source_claim_refs must be list")
+        for source_ref in source_refs:
+            if not isinstance(source_ref, str) or not source_ref.strip():
+                raise ValueError("source_claim_refs must contain non-empty strings")
+            refs.append(source_ref)
+    return tuple(refs)
+
+
+def _mapping_value(value: object, field_name: str) -> Mapping[str, JsonValue]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field_name} must be object")
+    result: dict[str, JsonValue] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{field_name} keys must be str")
+        result[key] = item
+    return result
+
+
+def _payload_text(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"workflow command payload must include {key}")
+    return value
+
+
+def _payload_optional_text(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"workflow command payload {key} must be non-empty text")
+    return value
+
+
+def _payload_int(payload: Mapping[str, object], key: str) -> int:
+    value = payload.get(key)
+    if not isinstance(value, int):
+        raise ValueError(f"workflow command payload must include integer {key}")
+    return value
