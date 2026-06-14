@@ -35,11 +35,12 @@ def _command(
     *,
     command_id: str = "command-1",
     idempotency_key: str = "source-ingestion:workflow-1",
+    command_type: str = "IngestSourceDocument",
     payload: Mapping[str, object] | None = None,
 ) -> WorkflowCommand:
     return WorkflowCommand(
         command_id=WorkflowCommandId(command_id),
-        command_type="IngestSourceDocument",
+        command_type=command_type,
         workflow_run_id="workflow-1",
         idempotency_key=WorkflowIdempotencyKey(idempotency_key),
         payload={"source_document_ref": "source-document-1"}
@@ -177,6 +178,21 @@ async def test_append_pending_command_rejects_idempotency_payload_mismatch() -> 
     with pytest.raises(ValueError, match="different payload"):
         await repository.append_pending_command(
             _command(command_id="command-2", payload={"different": True})
+        )
+
+
+@pytest.mark.asyncio
+async def test_append_pending_command_rejects_idempotency_command_type_mismatch() -> (
+    None
+):
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+
+    await repository.append_pending_command(_command())
+
+    with pytest.raises(ValueError, match="different command_type"):
+        await repository.append_pending_command(
+            _command(command_id="command-2", command_type="DifferentCommand")
         )
 
 

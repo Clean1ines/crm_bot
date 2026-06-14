@@ -214,13 +214,15 @@ class FakeReductionStateRepository:
 class FakeWorkItemSchedulingRepository:
     saved_payloads: list[object] = field(default_factory=list)
     existing_payload_hashes: dict[str, str] = field(default_factory=dict)
+    existing_work_kinds: dict[str, WorkKind] = field(default_factory=dict)
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
-        if work_item_id not in self.existing_payload_hashes:
+        work_kind = self.existing_work_kinds.get(work_item_id)
+        if work_kind is None:
             return None
         return WorkItem(
             work_item_id=work_item_id,
-            work_kind=WorkKind("knowledge_workbench.draft_claim_compaction"),
+            work_kind=work_kind,
         )
 
     async def get_schedule_payload_hash(self, work_item_id: str) -> str | None:
@@ -234,17 +236,33 @@ class FakeWorkItemSchedulingRepository:
         payload_hash: str,
         payload: object,
     ) -> None:
-        del item, idempotency_key, payload_hash
+        del idempotency_key
         self.saved_payloads.append(payload)
+        self.existing_payload_hashes[item.work_item_id] = payload_hash
+        self.existing_work_kinds[item.work_item_id] = item.work_kind
 
 
 @dataclass(slots=True)
 class FakeCommandLog:
     completed: list[WorkflowCommandId] = field(default_factory=list)
     pending_commands: list[WorkflowCommand] = field(default_factory=list)
+    pending_by_idempotency_key: dict[str, WorkflowCommand] = field(default_factory=dict)
 
     async def append_pending_command(self, command: WorkflowCommand) -> WorkflowCommand:
+        existing = self.pending_by_idempotency_key.get(command.idempotency_key.value)
+        if existing is not None:
+            if existing.command_type != command.command_type:
+                raise ValueError("idempotency_key conflict has different command_type")
+            if existing.workflow_run_id != command.workflow_run_id:
+                raise ValueError(
+                    "idempotency_key conflict has different workflow_run_id"
+                )
+            if dict(existing.payload) != dict(command.payload):
+                raise ValueError("idempotency_key conflict has different payload")
+            return existing
+
         self.pending_commands.append(command)
+        self.pending_by_idempotency_key[command.idempotency_key.value] = command
         return command
 
     async def mark_command_completed(
@@ -652,7 +670,10 @@ async def test_appends_prepare_command_when_next_work_item_already_exists() -> N
     scheduling = FakeWorkItemSchedulingRepository(
         existing_payload_hashes={
             work_item_id: work_item_schedule_payload_hash(schedule_payload),
-        }
+        },
+        existing_work_kinds={
+            work_item_id: WorkKind("knowledge_workbench.draft_claim_compaction"),
+        },
     )
     repository = FakeReductionStateRepository(_decision(work_type, node_refs=node_refs))
     apply_use_case = FakeApplyResultUseCase(_decision(work_type, node_refs=node_refs))
@@ -687,3 +708,48 @@ def _expected_next_work_schedule_payload(
         "model_id": "openai/gpt-oss-120b",
         "node_refs": list(node_refs),
     }
+
+
+@pytest.mark.asyncio
+async def test_repeated_apply_dispatch_does_not_duplicate_next_prepare_command() -> (
+    None
+):
+    workflow_uow = FakeWorkflowUnitOfWork()
+    scheduling = FakeWorkItemSchedulingRepository()
+    work_type = DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
+    node_refs = ("compacted-a", "compacted-b")
+    repository = FakeReductionStateRepository(_decision(work_type, node_refs=node_refs))
+    apply_use_case = FakeApplyResultUseCase(_decision(work_type, node_refs=node_refs))
+
+    handler = HandleApplyDraftClaimCompactionResultCommandHandler(
+        apply_result_use_case=apply_use_case,
+    )
+    command = HandleApplyDraftClaimCompactionResultCommand(
+        workflow_command=_command(),
+    )
+
+    first = await handler.execute(
+        command,
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_scheduling_repository=scheduling,
+    )
+    second = await handler.execute(
+        command,
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_scheduling_repository=scheduling,
+    )
+
+    assert first.appended_next_command_count == 1
+    assert second.appended_next_command_count == 1
+    assert first.next_command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert second.next_command_type == first.next_command_type
+    assert len(workflow_uow.command_log.pending_commands) == 1
+    assert len(scheduling.saved_payloads) == 1
+    assert workflow_uow.command_log.pending_commands[0].idempotency_key.value == (
+        "draft-claim-compaction-dispatch:"
+        "workflow-1:group-1:compacted_vs_compacted:compacted-a--compacted-b"
+    )

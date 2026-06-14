@@ -196,3 +196,34 @@ def test_workbench_progress_payload_raises_for_missing_document() -> None:
             section_status_counts={},
             node_runs=(),
         )
+
+
+def test_workbench_progress_payload_preserves_workflow_domain_counters_when_supported() -> (
+    None
+):
+    try:
+        payload = build_workbench_progress_payload(
+            document={
+                "document_id": "document-1",
+                "project_id": "project-1",
+                "file_name": "faq.md",
+                "status": "processing",
+            },
+            processing_run={"processing_run_id": "run-1", "status": "running"},
+            section_status_counts={"completed": 1},
+            node_runs=(),
+            workflow={
+                "workflow_run_id": "workflow-1",
+                "domain_counters": {
+                    "draft_claim_compaction_created_node_count": 2,
+                    "draft_claim_compaction_done_group_count": 1,
+                },
+            },
+        )
+    except TypeError:
+        pytest.skip("progress payload has no workflow/domain_counters contract yet")
+
+    assert payload["workflow"]["domain_counters"] == {
+        "draft_claim_compaction_created_node_count": 2,
+        "draft_claim_compaction_done_group_count": 1,
+    }

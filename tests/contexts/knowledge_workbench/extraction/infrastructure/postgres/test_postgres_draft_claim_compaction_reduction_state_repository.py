@@ -377,6 +377,12 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
     assert first.inserted_source_count == 2
     assert first.inserted_comparison_count == 1
     assert second.inserted_node_count == 0
+    assert second.inserted_source_count == 0
+    assert second.inserted_comparison_count == 0
+    assert second.superseded_node_count == 0
+    assert len(connection.nodes) == 3
+    assert len(connection.sources) == 4
+    assert len(connection.comparisons) == 1
     assert state is not None
     active_nodes = tuple(node for node in state.nodes if node.active)
     inactive_nodes = tuple(node for node in state.nodes if not node.active)
@@ -441,6 +447,12 @@ async def test_apply_reduced_rewrite_result_merges_active_compacted_nodes_idempo
     assert first.inserted_source_count == 2
     assert first.inserted_comparison_count == 1
     assert second.inserted_node_count == 0
+    assert second.inserted_source_count == 0
+    assert second.inserted_comparison_count == 0
+    assert second.superseded_node_count == 0
+    assert len(connection.nodes) == 3
+    assert len(connection.sources) == 2
+    assert len(connection.comparisons) == 1
     assert state is not None
     active_nodes = tuple(node for node in state.nodes if node.active)
     assert len(active_nodes) == 1

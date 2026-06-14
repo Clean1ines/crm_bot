@@ -744,3 +744,154 @@ async def test_drain_wires_execute_draft_claim_compaction_dependencies() -> None
         )
 
     assert execute_dependency.calls == 1
+
+
+def _execute_draft_claim_compaction_payload() -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "dispatch_attempt_id": "attempt-1",
+        "work_item_id": "work-item-1",
+        "group_ref": "group-1",
+        "batch_ref": "batch-1",
+        "round_index": 0,
+        "expected_output_kind": "compacted_claims",
+        "source_claim_refs": ["claim-a", "claim-b"],
+        "left_node_ref": "raw:workflow-1:group-1:claim-a",
+        "right_node_ref": "raw:workflow-1:group-1:claim-b",
+    }
+
+
+def _apply_draft_claim_compaction_payload() -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "group_ref": "group-1",
+        "batch_ref": "batch-1",
+        "work_item_id": "work-item-1",
+        "round_index": 0,
+        "output_kind": "compacted_claims",
+        "left_node_ref": "raw:workflow-1:group-1:claim-a",
+        "right_node_ref": "raw:workflow-1:group-1:claim-b",
+        "compacted_claims": [
+            {
+                "key": "refund_support",
+                "claim": "Product supports refunds.",
+                "claim_kind": "capability",
+                "granularity": "atomic",
+                "source_claim_refs": ["claim-a", "claim-b"],
+                "triples": [
+                    {
+                        "subject": "Product",
+                        "predicate": "has_capability",
+                        "object": "refunds",
+                        "qualifiers": [],
+                    }
+                ],
+                "merge_decision": "merged",
+            }
+        ],
+        "reduced_rewrite": None,
+    }
+
+
+def _reconcile_draft_claim_compaction_payload() -> dict[str, object]:
+    return {
+        "workflow_run_id": _workflow_run_id(),
+        "group_ref": "group-1",
+        "caused_by_command_id": "workflow-command:apply",
+    }
+
+
+def _compaction_workflow_command(
+    command_type: KnowledgeExtractionCanonicalCommandType,
+) -> WorkflowCommand:
+    payload: dict[str, object]
+    if (
+        command_type
+        is KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION
+    ):
+        payload = _execute_draft_claim_compaction_payload()
+    elif (
+        command_type
+        is KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
+    ):
+        payload = _apply_draft_claim_compaction_payload()
+    elif (
+        command_type
+        is KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS
+    ):
+        payload = _reconcile_draft_claim_compaction_payload()
+    else:
+        payload = {
+            "workflow_run_id": _workflow_run_id(),
+            "source_document_ref": _document_ref().value,
+            "scheduled_work_item_count": 1,
+            "llm_dispatch_preparation": _dispatch_preparation(),
+        }
+
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(f"workflow-command:{command_type.value}"),
+        command_type=command_type.value,
+        workflow_run_id=_workflow_run_id(),
+        idempotency_key=WorkflowIdempotencyKey(
+            f"{command_type.value}:{_workflow_run_id()}"
+        ),
+        payload=payload,
+        status=WorkflowCommandStatus.PENDING,
+        run_after=_now(),
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
+@pytest.mark.parametrize(
+    "command_type",
+    (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+        KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION,
+        KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT,
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS,
+    ),
+)
+@pytest.mark.asyncio
+async def test_paused_workflow_blocks_draft_claim_compaction_commands(
+    command_type: KnowledgeExtractionCanonicalCommandType,
+) -> None:
+    pending_command = _compaction_workflow_command(command_type)
+
+    result, scheduling_repository, workflow_unit_of_work = await _drain(
+        pending_commands=(pending_command,),
+        workflow_state_repository=FakeWorkflowStateRepository(
+            state=_workflow_state(KnowledgeExtractionWorkflowStatus.PAUSED),
+        ),
+    )
+
+    assert result.inspected_count == 1
+    assert result.dispatched_count == 0
+    assert result.blocked_count == 1
+    assert result.last_blocked_command_type == command_type.value
+    assert result.last_blocked_reason == WORKFLOW_MANUALLY_PAUSED
+    assert scheduling_repository.saved_count == 0
+    assert workflow_unit_of_work.command_log.completed_command_ids == []
+
+
+@pytest.mark.asyncio
+async def test_running_workflow_drains_existing_prepare_compaction_command_after_resume() -> (
+    None
+):
+    pending_command = _compaction_workflow_command(
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH
+    )
+
+    result, _, workflow_unit_of_work = await _drain(
+        pending_commands=(pending_command,),
+        workflow_state_repository=FakeWorkflowStateRepository(
+            state=_workflow_state(KnowledgeExtractionWorkflowStatus.RUNNING),
+        ),
+    )
+
+    assert result.inspected_count == 1
+    assert result.dispatched_count == 1
+    assert result.blocked_count == 0
+    assert workflow_unit_of_work.command_log.completed_command_ids == [
+        pending_command.command_id
+    ]
