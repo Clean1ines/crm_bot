@@ -6,8 +6,11 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimForCompaction,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionOutputClaim,
     DraftClaimCompactionPromptClaim,
     DraftClaimCompactionPromptPayload,
+    DraftClaimReducedRewriteInputClaim,
+    DraftClaimReducedRewritePayload,
 )
 
 
@@ -34,6 +37,31 @@ class DraftClaimCompactionPromptPayloadBuilder:
                 for claim in claims
             ),
             prompt_variant="draft_vs_draft",
+        )
+
+    def build_reduced_rewrite_payload(
+        self,
+        compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...],
+    ) -> DraftClaimReducedRewritePayload:
+        if not isinstance(compacted_claims, tuple):
+            raise TypeError("compacted_claims must be tuple")
+        if not compacted_claims:
+            raise ValueError("compacted_claims must be non-empty")
+        for claim in compacted_claims:
+            if not isinstance(claim, DraftClaimCompactionOutputClaim):
+                raise TypeError(
+                    "compacted_claims must contain DraftClaimCompactionOutputClaim",
+                )
+
+        return DraftClaimReducedRewritePayload(
+            compacted_claims=tuple(
+                DraftClaimReducedRewriteInputClaim(
+                    key=claim.key,
+                    claim=claim.claim,
+                    triples=claim.triples,
+                )
+                for claim in sorted(compacted_claims, key=lambda claim: claim.key)
+            )
         )
 
 

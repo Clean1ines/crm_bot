@@ -170,3 +170,80 @@ def test_accepts_empty_triples() -> None:
     )
 
     assert output.compacted_claims[0].triples == ()
+
+
+def _valid_reduced_output() -> JsonObject:
+    return {
+        "key": "refund_support",
+        "claim": "Product supports refunds.",
+        "triples": [
+            {
+                "subject": "Product",
+                "predicate": "has_capability",
+                "object": "refunds",
+                "qualifiers": [],
+            }
+        ],
+    }
+
+
+def test_accepts_valid_reduced_rewrite_output() -> None:
+    output = DraftClaimCompactionOutputValidator().validate_reduced_rewrite_output(
+        payload=_valid_reduced_output(),
+    )
+
+    assert output.key == "refund_support"
+    assert output.claim == "Product supports refunds."
+    assert output.triples[0].predicate.value == "has_capability"
+
+
+def test_reduced_rewrite_output_rejects_missing_key() -> None:
+    payload = _valid_reduced_output()
+    del payload["key"]
+
+    with pytest.raises(InvalidDraftClaimCompactionOutput, match="key"):
+        DraftClaimCompactionOutputValidator().validate_reduced_rewrite_output(
+            payload=payload,
+        )
+
+
+def test_reduced_rewrite_output_rejects_missing_claim() -> None:
+    payload = _valid_reduced_output()
+    del payload["claim"]
+
+    with pytest.raises(InvalidDraftClaimCompactionOutput, match="claim"):
+        DraftClaimCompactionOutputValidator().validate_reduced_rewrite_output(
+            payload=payload,
+        )
+
+
+def test_reduced_rewrite_output_rejects_invalid_triples() -> None:
+    payload = _valid_reduced_output()
+    payload["triples"][0]["predicate"] = "causes"
+
+    with pytest.raises(InvalidDraftClaimCompactionOutput, match="predicate"):
+        DraftClaimCompactionOutputValidator().validate_reduced_rewrite_output(
+            payload=payload,
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    [
+        "unknown",
+        "source_claim_refs",
+        "merge_decision",
+        "claim_kind",
+        "granularity",
+    ],
+)
+def test_reduced_rewrite_output_rejects_unknown_top_level_fields(
+    field_name: str,
+) -> None:
+    payload = _valid_reduced_output()
+    payload[field_name] = "not allowed"
+
+    with pytest.raises(InvalidDraftClaimCompactionOutput, match=field_name):
+        DraftClaimCompactionOutputValidator().validate_reduced_rewrite_output(
+            payload=payload,
+        )

@@ -3,6 +3,10 @@ from __future__ import annotations
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimForCompaction,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionOutputClaim,
+    DraftClaimCompactionTriple,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_prompt_payload_builder import (
     DraftClaimCompactionPromptPayloadBuilder,
 )
@@ -86,3 +90,48 @@ def test_build_draft_vs_draft_payload_deduplicates_lists_preserving_order() -> N
 
     assert claim_json["questions"] == ["What is it?", "How does it work?"]
     assert claim_json["exclusion_scope"] == ["pricing", "delivery"]
+
+
+def _triple() -> DraftClaimCompactionTriple:
+    return DraftClaimCompactionTriple(
+        subject="Product",
+        predicate="has_capability",
+        object="refunds",
+        qualifiers=(),
+    )
+
+
+def _compacted_claim(key: str) -> DraftClaimCompactionOutputClaim:
+    return DraftClaimCompactionOutputClaim(
+        key=key,
+        claim=f"Claim {key}",
+        claim_kind="capability",
+        granularity="atomic",
+        source_claim_refs=(f"source-{key}",),
+        triples=(_triple(),),
+        merge_decision="unmerged",
+    )
+
+
+def test_build_reduced_rewrite_payload_drops_full_compaction_fields() -> None:
+    payload = DraftClaimCompactionPromptPayloadBuilder().build_reduced_rewrite_payload(
+        (_compacted_claim("beta"), _compacted_claim("alpha")),
+    )
+
+    payload_json = payload.to_json_dict()
+
+    assert [claim["key"] for claim in payload_json["compacted_claims"]] == [
+        "alpha",
+        "beta",
+    ]
+    claim_json = payload_json["compacted_claims"][0]
+    assert claim_json == {
+        "key": "alpha",
+        "claim": "Claim alpha",
+        "triples": [_triple().to_json_dict()],
+    }
+    assert "source_claim_refs" not in claim_json
+    assert "merge_decision" not in claim_json
+    assert "claim_kind" not in claim_json
+    assert "granularity" not in claim_json
+    assert "kind" not in claim_json

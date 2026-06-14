@@ -1,0 +1,41 @@
+NODE: reduced_claim_rewrite
+
+You receive one JSON object.
+
+Your task is to rewrite already compacted claims into one compacted semantic core.
+
+Return only one JSON object.
+
+# Input
+
+{
+  "compacted_claims": [
+    {
+      "key": "",
+      "claim": "",
+      "triples": []
+    }
+  ]
+}
+
+# Output
+
+{
+  "key": "",
+  "claim": "",
+  "triples": []
+}
+
+# Task rules
+
+1. The input claims are already known by the application to belong to one semantic merge candidate.
+2. Do not decide source refs.
+3. Do not decide merge decision.
+4. Rewrite only the final key, claim, and triples.
+5. Preserve the meaning of all input claims.
+6. Prefer a stable snake_case key based on the final meaning.
+7. Remove duplicate triples.
+8. Keep useful triples when still valid.
+9. Add triples only when clearly supported by the final rewritten claim.
+10. Return valid JSON only.
+11. Return no text outside JSON.

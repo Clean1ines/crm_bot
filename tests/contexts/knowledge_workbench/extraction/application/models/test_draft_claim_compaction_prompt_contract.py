@@ -7,6 +7,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionPromptClaim,
     DraftClaimCompactionPromptPayload,
     DraftClaimCompactionTriple,
+    DraftClaimReducedRewriteInputClaim,
+    DraftClaimReducedRewriteOutput,
+    DraftClaimReducedRewritePayload,
 )
 
 
@@ -92,3 +95,53 @@ def test_triple_rejects_invalid_predicate() -> None:
             object="refunds",
             qualifiers=(),
         )
+
+
+def _triple() -> DraftClaimCompactionTriple:
+    return DraftClaimCompactionTriple(
+        subject="Product",
+        predicate="has_capability",
+        object="refunds",
+        qualifiers=("public policy",),
+    )
+
+
+def test_reduced_input_claim_serializes_key_claim_triples_only() -> None:
+    claim = DraftClaimReducedRewriteInputClaim(
+        key="refund_support",
+        claim="Product supports refunds.",
+        triples=(_triple(),),
+    )
+
+    assert claim.to_json_dict() == {
+        "key": "refund_support",
+        "claim": "Product supports refunds.",
+        "triples": [_triple().to_json_dict()],
+    }
+
+
+def test_reduced_payload_serializes_compacted_claims_only() -> None:
+    claim = DraftClaimReducedRewriteInputClaim(
+        key="refund_support",
+        claim="Product supports refunds.",
+        triples=(_triple(),),
+    )
+    payload = DraftClaimReducedRewritePayload(compacted_claims=(claim,))
+
+    assert payload.to_json_dict() == {
+        "compacted_claims": [claim.to_json_dict()],
+    }
+
+
+def test_reduced_output_serializes_key_claim_triples_only() -> None:
+    output = DraftClaimReducedRewriteOutput(
+        key="refund_support",
+        claim="Product supports refunds.",
+        triples=(_triple(),),
+    )
+
+    assert output.to_json_dict() == {
+        "key": "refund_support",
+        "claim": "Product supports refunds.",
+        "triples": [_triple().to_json_dict()],
+    }

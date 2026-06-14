@@ -187,6 +187,72 @@ class DraftClaimCompactionOutput:
         return {"compacted_claims": claims_json}
 
 
+@dataclass(frozen=True, slots=True)
+class DraftClaimReducedRewriteInputClaim:
+    key: str
+    claim: str
+    triples: tuple[DraftClaimCompactionTriple, ...]
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.key, "key")
+        _require_non_empty_text(self.claim, "claim")
+        _require_triples_tuple(self.triples, "triples")
+
+    def to_json_dict(self) -> JsonObject:
+        triples_json: list[JsonValue] = [
+            triple.to_json_dict() for triple in self.triples
+        ]
+        return {
+            "key": self.key,
+            "claim": self.claim,
+            "triples": triples_json,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimReducedRewritePayload:
+    compacted_claims: tuple[DraftClaimReducedRewriteInputClaim, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.compacted_claims, tuple):
+            raise TypeError("compacted_claims must be tuple")
+        if not self.compacted_claims:
+            raise ValueError("compacted_claims must be non-empty")
+        for claim in self.compacted_claims:
+            if not isinstance(claim, DraftClaimReducedRewriteInputClaim):
+                raise TypeError(
+                    "compacted_claims must contain DraftClaimReducedRewriteInputClaim",
+                )
+
+    def to_json_dict(self) -> JsonObject:
+        claims_json: list[JsonValue] = [
+            claim.to_json_dict() for claim in self.compacted_claims
+        ]
+        return {"compacted_claims": claims_json}
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimReducedRewriteOutput:
+    key: str
+    claim: str
+    triples: tuple[DraftClaimCompactionTriple, ...]
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.key, "key")
+        _require_non_empty_text(self.claim, "claim")
+        _require_triples_tuple(self.triples, "triples")
+
+    def to_json_dict(self) -> JsonObject:
+        triples_json: list[JsonValue] = [
+            triple.to_json_dict() for triple in self.triples
+        ]
+        return {
+            "key": self.key,
+            "claim": self.claim,
+            "triples": triples_json,
+        }
+
+
 def draft_claim_compaction_allowed_claim_kinds() -> tuple[str, ...]:
     return tuple(kind.value for kind in DraftClaimCompactionClaimKind)
 
@@ -243,6 +309,17 @@ def _require_text_tuple(value: tuple[str, ...], field_name: str) -> None:
         raise TypeError(f"{field_name} must be tuple")
     for item in value:
         _require_non_empty_text(item, field_name)
+
+
+def _require_triples_tuple(
+    value: tuple[DraftClaimCompactionTriple, ...],
+    field_name: str,
+) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError(f"{field_name} must be tuple")
+    for triple in value:
+        if not isinstance(triple, DraftClaimCompactionTriple):
+            raise TypeError(f"{field_name} must contain DraftClaimCompactionTriple")
 
 
 def _json_string_list(values: tuple[str, ...]) -> list[JsonValue]:

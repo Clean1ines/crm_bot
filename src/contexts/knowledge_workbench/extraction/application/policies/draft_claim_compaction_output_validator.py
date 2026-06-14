@@ -11,6 +11,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionOutputClaim,
     DraftClaimCompactionTriple,
     DraftClaimCompactionTriplePredicate,
+    DraftClaimReducedRewriteOutput,
 )
 from src.domain.project_plane.json_types import JsonValue
 
@@ -32,6 +33,7 @@ _OUTPUT_CLAIM_FIELDS = frozenset(
     }
 )
 _TRIPLE_FIELDS = frozenset({"subject", "predicate", "object", "qualifiers"})
+_REDUCED_REWRITE_OUTPUT_FIELDS = frozenset({"key", "claim", "triples"})
 _FORBIDDEN_OUTPUT_FIELDS = frozenset(
     {
         "questions",
@@ -92,6 +94,37 @@ class DraftClaimCompactionOutputValidator:
             )
 
         return DraftClaimCompactionOutput(compacted_claims=tuple(compacted_claims))
+
+    def validate_reduced_rewrite_output(
+        self,
+        *,
+        payload: Mapping[str, JsonValue],
+    ) -> DraftClaimReducedRewriteOutput:
+        if not isinstance(payload, Mapping):
+            raise InvalidDraftClaimCompactionOutput("payload must be object")
+
+        payload_fields = set(payload.keys())
+        if payload_fields != _REDUCED_REWRITE_OUTPUT_FIELDS:
+            unknown_fields = tuple(
+                sorted(payload_fields - _REDUCED_REWRITE_OUTPUT_FIELDS)
+            )
+            missing_fields = tuple(
+                sorted(_REDUCED_REWRITE_OUTPUT_FIELDS - payload_fields)
+            )
+            details: list[str] = []
+            if unknown_fields:
+                details.append("unknown fields: " + ", ".join(unknown_fields))
+            if missing_fields:
+                details.append("missing fields: " + ", ".join(missing_fields))
+            raise InvalidDraftClaimCompactionOutput(
+                "reduced rewrite output field set is invalid: " + "; ".join(details),
+            )
+
+        return DraftClaimReducedRewriteOutput(
+            key=_non_empty_string(payload["key"], "key"),
+            claim=_non_empty_string(payload["claim"], "claim"),
+            triples=_triples(payload["triples"], "triples"),
+        )
 
 
 def _validate_compacted_claim(
