@@ -1,6 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from src.contexts.knowledge_workbench.application.sagas.handle_cluster_draft_claims_command import (
+    HandleClusterDraftClaimsCommand,
+    HandleClusterDraftClaimsCommandHandler,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
+    DraftClaimCompactionPlanRepositoryPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_generate_draft_claim_embeddings_command import (
     HandleGenerateDraftClaimEmbeddingsCommand,
     HandleGenerateDraftClaimEmbeddingsCommandHandler,
@@ -151,6 +158,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         embedding_generation_port: EmbeddingGenerationPort | None = None,
         embedding_model_id: str | None = None,
         embedding_dimensions: int | None = None,
+        draft_claim_compaction_plan_repository: (
+            DraftClaimCompactionPlanRepositoryPort | None
+        ) = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = _canonical_command_type(workflow_command.command_type)
@@ -368,6 +378,33 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 embedding_generation_port=embedding_generation_port,
                 embedding_model_id=embedding_model_id,
                 embedding_dimensions=embedding_dimensions,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if command_type is KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS:
+            if draft_claim_compaction_plan_repository is None:
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleClusterDraftClaimsCommandHandler().execute(
+                HandleClusterDraftClaimsCommand(workflow_command=workflow_command),
+                compaction_plan_repository=draft_claim_compaction_plan_repository,
+                work_item_scheduling_repository=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(

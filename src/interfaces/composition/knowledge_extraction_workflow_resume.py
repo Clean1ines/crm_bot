@@ -50,6 +50,13 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
     DraftClaimEmbeddingConnectionLike,
     PostgresDraftClaimEmbeddingRepository,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
+    DraftClaimCompactionPlanRepositoryPort,
+)
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_plan_repository import (
+    DraftClaimCompactionPlanConnectionLike,
+    PostgresDraftClaimCompactionPlanRepository,
+)
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
     DrainKnowledgeExtractionWorkflowCommands,
     DrainKnowledgeExtractionWorkflowCommandsCommand,
@@ -206,6 +213,9 @@ class RunKnowledgeExtractionWorkflowResume:
         embedding_generation_port: EmbeddingGenerationPort | None = None,
         embedding_model_id: str | None = None,
         embedding_dimensions: int | None = None,
+        draft_claim_compaction_plan_repository: (
+            DraftClaimCompactionPlanRepositoryPort | None
+        ) = None,
     ) -> None:
         self._pool = cast(_AsyncResumePoolLike, pool)
         self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
@@ -226,6 +236,9 @@ class RunKnowledgeExtractionWorkflowResume:
         self._embedding_generation_port = embedding_generation_port
         self._embedding_model_id = embedding_model_id
         self._embedding_dimensions = embedding_dimensions
+        self._draft_claim_compaction_plan_repository = (
+            draft_claim_compaction_plan_repository
+        )
 
     async def execute(
         self,
@@ -338,6 +351,12 @@ class RunKnowledgeExtractionWorkflowResume:
         draft_claim_embedding_repository = PostgresDraftClaimEmbeddingRepository(
             cast(DraftClaimEmbeddingConnectionLike, connection),
         )
+        draft_claim_compaction_plan_repository = (
+            self._draft_claim_compaction_plan_repository
+            or PostgresDraftClaimCompactionPlanRepository(
+                cast(DraftClaimCompactionPlanConnectionLike, connection)
+            )
+        )
 
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
@@ -398,6 +417,9 @@ class RunKnowledgeExtractionWorkflowResume:
                 embedding_generation_port=self._embedding_generation_port,
                 embedding_model_id=self._embedding_model_id,
                 embedding_dimensions=self._embedding_dimensions,
+                draft_claim_compaction_plan_repository=(
+                    draft_claim_compaction_plan_repository
+                ),
                 workflow_state_repository=(
                     PostgresKnowledgeExtractionSagaStateRepository(
                         cast(asyncpg.Connection, connection)

@@ -58,6 +58,10 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
         ),
         handler_name="HandleGenerateDraftClaimEmbeddingsCommandHandler",
     ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS,
+        handler_name="HandleClusterDraftClaimsCommandHandler",
+    ),
 )
 
 

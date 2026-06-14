@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
+    DraftClaimCompactionPlanRepositoryPort,
+)
 
 from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
     EmbeddingGenerationPort,
@@ -149,6 +152,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         embedding_generation_port: EmbeddingGenerationPort | None = None,
         embedding_model_id: str | None = None,
         embedding_dimensions: int | None = None,
+        draft_claim_compaction_plan_repository: (
+            DraftClaimCompactionPlanRepositoryPort | None
+        ) = None,
         workflow_state_repository: (
             KnowledgeExtractionSagaStateRepositoryPort | None
         ) = None,
@@ -221,6 +227,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 embedding_generation_port=embedding_generation_port,
                 embedding_model_id=embedding_model_id,
                 embedding_dimensions=embedding_dimensions,
+                draft_claim_compaction_plan_repository=(
+                    draft_claim_compaction_plan_repository
+                ),
             )
             if not dispatch_result.dispatched:
                 blocked_count += 1
