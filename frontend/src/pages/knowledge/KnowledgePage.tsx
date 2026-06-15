@@ -35,6 +35,7 @@ import { DocumentStatusBlock } from "./components/DocumentStatusBlock";
 import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
 import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
 import { KnowledgeDocumentCurationModal } from "./components/KnowledgeDocumentCurationModal";
+import { DraftClaimCurationWorkspaceModal } from "./components/DraftClaimCurationWorkspaceModal";
 import { AiPlaygroundPanel } from "./components/AiPlaygroundPanel";
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
@@ -67,6 +68,12 @@ type KnowledgeWorkflowLiveStateByDocument = Record<
   string,
   WorkbenchWorkflowLiveStateResponse
 >;
+
+type DraftClaimCurationTarget = {
+  documentId: string;
+  workflowRunId: string;
+  documentName: string;
+};
 
 type PriceFactActionVariables = {
   documentId: string;
@@ -545,6 +552,8 @@ export const KnowledgePage: React.FC = () => {
   const [curationDocumentId, setCurationDocumentId] = useState<string | null>(
     null,
   );
+  const [curationTarget, setCurationTarget] =
+    useState<DraftClaimCurationTarget | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<
     "documents" | "ai_playground"
@@ -1038,6 +1047,9 @@ export const KnowledgePage: React.FC = () => {
     );
     setCurationDocumentId((current) =>
       current === documentId ? null : current,
+    );
+    setCurationTarget((current) =>
+      current?.documentId === documentId ? null : current,
     );
     setDraftFiltersByDocument((current) =>
       omitDocumentState(current, documentId),
@@ -1803,9 +1815,11 @@ export const KnowledgePage: React.FC = () => {
                   }
                   onOpenCuration={(workflowRunId) => {
                     if (workflowRunId) {
-                      toast.success(
-                        `Курация готова для workflow ${workflowRunId}. Модалка будет подключена следующим шагом.`,
-                      );
+                      setCurationTarget({
+                        documentId: doc.id,
+                        workflowRunId,
+                        documentName: doc.file_name,
+                      });
                       return;
                     }
                     setCurationDocumentId(doc.id);
@@ -1842,10 +1856,23 @@ export const KnowledgePage: React.FC = () => {
                       publishReadyMutation.mutate(doc.id);
                       return;
                     }
-                    if (
-                      actionId === "open_curation" ||
-                      actionId === "open_published_surfaces"
-                    ) {
+                    if (actionId === "open_curation") {
+                      const workflowRunId =
+                        workflowLiveStates[doc.id]?.workflow.curation.workflow_run_id ??
+                        workflowLiveStates[doc.id]?.workflow.workflow_run_id ??
+                        null;
+                      if (workflowRunId) {
+                        setCurationTarget({
+                          documentId: doc.id,
+                          workflowRunId,
+                          documentName: doc.file_name,
+                        });
+                        return;
+                      }
+                      setCurationDocumentId(doc.id);
+                      return;
+                    }
+                    if (actionId === "open_published_surfaces") {
                       setCurationDocumentId(doc.id);
                       return;
                     }
@@ -1884,6 +1911,15 @@ export const KnowledgePage: React.FC = () => {
           }
           isDebugMode={isDebugMode}
           onClose={() => setDraftsDocumentId(null)}
+        />
+      )}
+
+      {curationTarget && projectId && (
+        <DraftClaimCurationWorkspaceModal
+          projectId={projectId}
+          workflowRunId={curationTarget.workflowRunId}
+          documentName={curationTarget.documentName}
+          onClose={() => setCurationTarget(null)}
         />
       )}
 

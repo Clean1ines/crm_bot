@@ -357,6 +357,83 @@ export type WorkbenchWorkflowLiveStateResponse = {
 };
 
 
+export type DraftClaimCurationEditablePayload = {
+  key: string;
+  claim: string;
+  claim_kind: string;
+  granularity: string;
+  source_claim_refs: string[];
+  triples: Record<string, unknown>[];
+  merge_decision: string;
+  possible_questions: string[];
+  exclusion_scope: string;
+  evidence_block: string;
+};
+
+export type DraftClaimCurationRawClaimProvenance = {
+  raw_claim_ref: string;
+  claim: string;
+  granularity: string;
+  possible_questions: string[];
+  exclusion_scope: string;
+  evidence_block: string;
+  source_unit_ref?: string | null;
+  source_unit_text?: string | null;
+  heading_path?: string[] | null;
+  created_at?: string | null;
+};
+
+export type DraftClaimCurationItemProvenance = {
+  raw_claims?: DraftClaimCurationRawClaimProvenance[];
+  source_units?: Record<string, unknown>[];
+};
+
+export type DraftClaimCurationItem = {
+  item_ref: string;
+  workspace_ref: string;
+  workflow_run_id: string;
+  group_ref: string;
+  compacted_node_ref: string;
+  source_claim_refs: string[];
+  original_payload: DraftClaimCurationEditablePayload;
+  editable_payload: DraftClaimCurationEditablePayload;
+  excluded: boolean;
+  exclusion_reason?: string | null;
+  provenance?: DraftClaimCurationItemProvenance;
+  audit?: Record<string, unknown>;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type DraftClaimCurationWorkspaceResponse = {
+  workspace: {
+    workspace_ref: string;
+    workflow_run_id: string;
+    project_id: string;
+    source_document_ref: string;
+    status: string;
+    created_at?: string | null;
+    updated_at?: string | null;
+  };
+  progress?: Record<string, unknown> | null;
+  items: DraftClaimCurationItem[];
+};
+
+export type DraftClaimCurationItemUpdatePayload = Partial<
+  Pick<
+    DraftClaimCurationEditablePayload,
+    | 'key'
+    | 'claim'
+    | 'claim_kind'
+    | 'granularity'
+    | 'triples'
+    | 'possible_questions'
+    | 'exclusion_scope'
+    | 'evidence_block'
+  >
+>;
+
+
 export type KnowledgeAnswerDraft = {
   id: string;
   title: string;
@@ -847,6 +924,58 @@ export const knowledgeApi = {
       {
         method: 'POST',
         body: JSON.stringify(payload),
+      },
+    ),
+
+  openCurationWorkspace: (projectId: string, workflowRunId: string) =>
+    authedJsonRequest<DraftClaimCurationWorkspaceResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/curation-workspace/open`,
+      {
+        method: 'POST',
+      },
+    ),
+
+  readCurationWorkspace: (projectId: string, workflowRunId: string) =>
+    authedJsonRequest<DraftClaimCurationWorkspaceResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/curation-workspace`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  updateCurationItem: (
+    projectId: string,
+    workflowRunId: string,
+    itemRef: string,
+    payload: DraftClaimCurationItemUpdatePayload,
+  ) =>
+    authedJsonRequest<DraftClaimCurationWorkspaceResponse | { item: DraftClaimCurationItem }>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/curation-workspace/items/${encodeURIComponent(itemRef)}`,
+      {
+        method: 'PATCH',
+        body: payload,
+      },
+    ),
+
+  excludeCurationItem: (
+    projectId: string,
+    workflowRunId: string,
+    itemRef: string,
+    reason?: string,
+  ) =>
+    authedJsonRequest<DraftClaimCurationWorkspaceResponse | { item: DraftClaimCurationItem }>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/curation-workspace/items/${encodeURIComponent(itemRef)}/exclude`,
+      {
+        method: 'POST',
+        body: reason?.trim() ? { exclusion_reason: reason.trim() } : {},
+      },
+    ),
+
+  includeCurationItem: (projectId: string, workflowRunId: string, itemRef: string) =>
+    authedJsonRequest<DraftClaimCurationWorkspaceResponse | { item: DraftClaimCurationItem }>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/curation-workspace/items/${encodeURIComponent(itemRef)}/include`,
+      {
+        method: 'POST',
       },
     ),
 
