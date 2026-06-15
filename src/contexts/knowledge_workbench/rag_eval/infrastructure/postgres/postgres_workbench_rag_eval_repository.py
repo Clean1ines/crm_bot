@@ -1,0 +1,462 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Protocol, cast
+
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalPromotedQuestion,
+    WorkbenchRagEvalQuestion,
+    WorkbenchRagEvalRetrievalResult,
+    WorkbenchRagEvalRun,
+    WorkbenchRagEvalRunStatus,
+    WorkbenchRagEvalSummary,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
+    WorkbenchRagEvalRepositoryPort,
+)
+from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
+    PublishedWorkbenchRetrievalResult,
+    PublishedWorkbenchRetrievalSourceRef,
+)
+
+
+PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL = """
+SELECT
+    entry.runtime_entry_id,
+    CASE
+        WHEN entry.source_refs ? 'workflow_run_id'
+        THEN 'draft-claim-curation-publication:' || (entry.source_refs->>'workflow_run_id')
+        ELSE NULL
+    END AS publication_id,
+    entry.project_id::text AS project_id,
+    entry.source_refs->>'source_document_ref' AS source_document_ref,
+    entry.fact_id,
+    entry.source_refs->>'curation_item_ref' AS curation_item_ref,
+    entry.claim,
+    entry.possible_questions,
+    fact.exclusion_scope,
+    NULL::text AS evidence_block,
+    entry.source_refs,
+    entry.source_refs->'source_claim_refs' AS source_claim_refs,
+    entry.embedding_text,
+    1.0::double precision AS score,
+    row_number() OVER (ORDER BY entry.created_at, entry.runtime_entry_id) AS rank
+FROM knowledge_workbench_runtime_retrieval_entries AS entry
+JOIN knowledge_workbench_canonical_facts AS fact
+  ON fact.fact_id = entry.fact_id
+WHERE entry.project_id = $1::uuid
+  AND entry.visibility = 'published'
+  AND entry.status = 'active'
+  AND fact.status = 'published'
+  AND ($2::text IS NULL OR (
+        entry.source_refs ? 'workflow_run_id'
+        AND 'draft-claim-curation-publication:' || (entry.source_refs->>'workflow_run_id') = $2
+      ))
+  AND ($3::text IS NULL OR entry.source_refs->>'source_document_ref' = $3)
+ORDER BY entry.created_at, entry.runtime_entry_id
+LIMIT $4
+"""
+
+
+class WorkbenchRagEvalConnectionLike(Protocol):
+    async def execute(self, query: str, *args: object) -> object: ...
+
+    async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]: ...
+
+    async def fetchrow(
+        self, query: str, *args: object
+    ) -> Mapping[str, object] | None: ...
+
+
+class WorkbenchRagEvalAcquireContextLike(Protocol):
+    async def __aenter__(self) -> WorkbenchRagEvalConnectionLike: ...
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> bool | None: ...
+
+
+class WorkbenchRagEvalPoolLike(Protocol):
+    def acquire(self) -> WorkbenchRagEvalAcquireContextLike: ...
+
+
+class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
+    def __init__(self, connection_or_pool: object) -> None:
+        self._connection_or_pool = connection_or_pool
+
+    async def create_run(self, *, run: WorkbenchRagEvalRun) -> WorkbenchRagEvalRun:
+        async with _connection(self._connection_or_pool) as connection:
+            await connection.execute(
+                """
+                INSERT INTO knowledge_workbench_rag_eval_runs (
+                    run_id, project_id, publication_id, source_document_ref,
+                    status, question_generation_model,
+                    question_generation_prompt_version, total_entries,
+                    total_questions, completed_questions, top1_hits,
+                    top3_hits, top5_hits, misses, created_at, started_at,
+                    completed_at, error_message
+                )
+                VALUES (
+                    $1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17, $18
+                )
+                """,
+                run.run_id,
+                run.project_id,
+                run.publication_id,
+                run.source_document_ref,
+                run.status.value,
+                run.question_generation_model,
+                run.question_generation_prompt_version,
+                run.total_entries,
+                run.total_questions,
+                run.completed_questions,
+                run.top1_hits,
+                run.top3_hits,
+                run.top5_hits,
+                run.misses,
+                run.created_at,
+                run.started_at,
+                run.completed_at,
+                run.error_message,
+            )
+        return run
+
+    async def list_published_entries_for_eval(
+        self,
+        *,
+        project_id: str,
+        publication_id: str | None,
+        source_document_ref: str | None,
+        limit: int,
+    ) -> tuple[PublishedWorkbenchRetrievalResult, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL,
+                project_id,
+                publication_id,
+                source_document_ref,
+                limit,
+            )
+        return tuple(_published_entry_from_row(row) for row in rows)
+
+    async def save_generated_questions(
+        self,
+        *,
+        questions: tuple[WorkbenchRagEvalQuestion, ...],
+    ) -> tuple[WorkbenchRagEvalQuestion, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            for question in questions:
+                await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_rag_eval_questions (
+                        question_id, run_id, project_id,
+                        expected_runtime_entry_id, expected_fact_id, question,
+                        question_kind, source, generation_model, prompt_version,
+                        status, created_at
+                    )
+                    VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT (question_id) DO NOTHING
+                    """,
+                    question.question_id,
+                    question.run_id,
+                    question.project_id,
+                    question.expected_runtime_entry_id,
+                    question.expected_fact_id,
+                    question.question,
+                    question.question_kind.value,
+                    question.source.value,
+                    question.generation_model,
+                    question.prompt_version,
+                    question.status.value,
+                    question.created_at,
+                )
+        return questions
+
+    async def save_retrieval_results(
+        self,
+        *,
+        results: tuple[WorkbenchRagEvalRetrievalResult, ...],
+    ) -> tuple[WorkbenchRagEvalRetrievalResult, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            for result in results:
+                await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_rag_eval_retrieval_results (
+                        result_id, run_id, question_id, project_id,
+                        expected_runtime_entry_id, matched_runtime_entry_id,
+                        matched_fact_id, rank, score, top1_hit, top3_hit,
+                        top5_hit, created_at
+                    )
+                    VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    ON CONFLICT (result_id) DO NOTHING
+                    """,
+                    result.result_id,
+                    result.run_id,
+                    result.question_id,
+                    result.project_id,
+                    result.expected_runtime_entry_id,
+                    result.matched_runtime_entry_id,
+                    result.matched_fact_id,
+                    result.rank,
+                    result.score,
+                    result.top1_hit,
+                    result.top3_hit,
+                    result.top5_hit,
+                    result.created_at,
+                )
+        return results
+
+    async def save_promoted_question_candidates(
+        self,
+        *,
+        promotions: tuple[WorkbenchRagEvalPromotedQuestion, ...],
+    ) -> tuple[WorkbenchRagEvalPromotedQuestion, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            for promotion in promotions:
+                await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_rag_eval_promoted_questions (
+                        promotion_id, run_id, question_id, project_id,
+                        target_runtime_entry_id, target_fact_id, question,
+                        status, created_at, applied_at
+                    )
+                    VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT (promotion_id) DO NOTHING
+                    """,
+                    promotion.promotion_id,
+                    promotion.run_id,
+                    promotion.question_id,
+                    promotion.project_id,
+                    promotion.target_runtime_entry_id,
+                    promotion.target_fact_id,
+                    promotion.question,
+                    promotion.status.value,
+                    promotion.created_at,
+                    promotion.applied_at,
+                )
+        return promotions
+
+    async def complete_run(
+        self,
+        *,
+        summary: WorkbenchRagEvalSummary,
+    ) -> WorkbenchRagEvalSummary:
+        async with _connection(self._connection_or_pool) as connection:
+            await connection.execute(
+                """
+                UPDATE knowledge_workbench_rag_eval_runs
+                SET status = $2,
+                    total_entries = $3,
+                    total_questions = $4,
+                    completed_questions = $5,
+                    top1_hits = $6,
+                    top3_hits = $7,
+                    top5_hits = $8,
+                    misses = $9,
+                    completed_at = $10,
+                    error_message = $11
+                WHERE run_id = $1
+                """,
+                summary.run_id,
+                summary.status.value,
+                summary.total_entries,
+                summary.total_questions,
+                summary.completed_questions,
+                summary.top1_hits,
+                summary.top3_hits,
+                summary.top5_hits,
+                summary.misses,
+                summary.completed_at,
+                summary.error_message,
+            )
+        return summary
+
+    async def get_latest_run(
+        self,
+        *,
+        project_id: str,
+    ) -> WorkbenchRagEvalSummary | None:
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT
+                    run.*,
+                    (
+                        SELECT count(*)
+                        FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
+                        WHERE promotion.run_id = run.run_id
+                          AND promotion.status = 'candidate'
+                    ) AS promotion_candidate_count
+                FROM knowledge_workbench_rag_eval_runs AS run
+                WHERE run.project_id = $1::uuid
+                ORDER BY run.created_at DESC
+                LIMIT 1
+                """,
+                project_id,
+            )
+        return _summary_from_row(row) if row is not None else None
+
+    async def get_run(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+    ) -> WorkbenchRagEvalSummary | None:
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                """
+                SELECT
+                    run.*,
+                    (
+                        SELECT count(*)
+                        FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
+                        WHERE promotion.run_id = run.run_id
+                          AND promotion.status = 'candidate'
+                    ) AS promotion_candidate_count
+                FROM knowledge_workbench_rag_eval_runs AS run
+                WHERE run.run_id = $1
+                  AND run.project_id = $2::uuid
+                """,
+                run_id,
+                project_id,
+            )
+        return _summary_from_row(row) if row is not None else None
+
+
+class _DirectConnectionContext:
+    def __init__(self, connection: WorkbenchRagEvalConnectionLike) -> None:
+        self._connection = connection
+
+    async def __aenter__(self) -> WorkbenchRagEvalConnectionLike:
+        return self._connection
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> bool | None:
+        return None
+
+
+def _connection(connection_or_pool: object):
+    acquire = getattr(connection_or_pool, "acquire", None)
+    if callable(acquire):
+        return cast(WorkbenchRagEvalPoolLike, connection_or_pool).acquire()
+    return _DirectConnectionContext(
+        cast(WorkbenchRagEvalConnectionLike, connection_or_pool)
+    )
+
+
+def _published_entry_from_row(
+    row: Mapping[str, object],
+) -> PublishedWorkbenchRetrievalResult:
+    source_ref = PublishedWorkbenchRetrievalSourceRef(
+        workflow_run_id=_optional_text_from_row(row, "workflow_run_id"),
+        source_document_ref=_optional_text_from_row(row, "source_document_ref"),
+        curation_item_ref=_optional_text_from_row(row, "curation_item_ref"),
+        source_claim_refs=_text_tuple(row.get("source_claim_refs")),
+    )
+    return PublishedWorkbenchRetrievalResult(
+        runtime_entry_id=_text_from_row(row, "runtime_entry_id"),
+        publication_id=_optional_text_from_row(row, "publication_id"),
+        project_id=_text_from_row(row, "project_id"),
+        source_document_ref=source_ref.source_document_ref,
+        fact_id=_text_from_row(row, "fact_id"),
+        curation_item_ref=source_ref.curation_item_ref,
+        claim=_text_from_row(row, "claim"),
+        possible_questions=_text_tuple(row.get("possible_questions")),
+        exclusion_scope=_optional_text_from_row(row, "exclusion_scope"),
+        evidence_block=_optional_text_from_row(row, "evidence_block"),
+        source_claim_refs=source_ref.source_claim_refs,
+        embedding_text=_text_from_row(row, "embedding_text"),
+        score=_float_from_row(row, "score"),
+        rank=_int_from_row(row, "rank"),
+        source_ref=source_ref,
+    )
+
+
+def _summary_from_row(row: Mapping[str, object]) -> WorkbenchRagEvalSummary:
+    return WorkbenchRagEvalSummary(
+        run_id=_text_from_row(row, "run_id"),
+        project_id=_text_from_row(row, "project_id"),
+        publication_id=_optional_text_from_row(row, "publication_id"),
+        source_document_ref=_optional_text_from_row(row, "source_document_ref"),
+        status=WorkbenchRagEvalRunStatus(_text_from_row(row, "status")),
+        total_entries=_int_from_row(row, "total_entries"),
+        total_questions=_int_from_row(row, "total_questions"),
+        completed_questions=_int_from_row(row, "completed_questions"),
+        top1_hits=_int_from_row(row, "top1_hits"),
+        top3_hits=_int_from_row(row, "top3_hits"),
+        top5_hits=_int_from_row(row, "top5_hits"),
+        misses=_int_from_row(row, "misses"),
+        promotion_candidate_count=_int_from_row(row, "promotion_candidate_count"),
+        created_at=_datetime_from_row(row, "created_at"),
+        completed_at=_optional_datetime_from_row(row, "completed_at"),
+        error_message=_optional_text_from_row(row, "error_message"),
+    )
+
+
+def _text_from_row(row: Mapping[str, object], key: str) -> str:
+    value = row.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text")
+    return value.strip()
+
+
+def _optional_text_from_row(row: Mapping[str, object], key: str) -> str | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError(f"{key} must be text or None")
+    stripped = value.strip()
+    return stripped or None
+
+
+def _text_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise TypeError("tuple source must be list")
+    return tuple(
+        item.strip() for item in value if isinstance(item, str) and item.strip()
+    )
+
+
+def _int_from_row(row: Mapping[str, object], key: str) -> int:
+    value = row.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{key} must be int")
+    return value
+
+
+def _float_from_row(row: Mapping[str, object], key: str) -> float:
+    value = row.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{key} must be numeric")
+    return float(value)
+
+
+def _datetime_from_row(row: Mapping[str, object], key: str) -> datetime:
+    value = row.get(key)
+    if not isinstance(value, datetime):
+        raise TypeError(f"{key} must be datetime")
+    return value
+
+
+def _optional_datetime_from_row(
+    row: Mapping[str, object],
+    key: str,
+) -> datetime | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        raise TypeError(f"{key} must be datetime or None")
+    return value

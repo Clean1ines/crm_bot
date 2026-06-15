@@ -141,6 +141,9 @@ from src.contexts.knowledge_workbench.curation.application.use_cases.publish_dra
     DraftClaimCurationPublicationNotFoundError,
     PublishDraftClaimCurationWorkspace,
 )
+from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
+    PostgresWorkbenchRagEvalRepository,
+)
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import (
@@ -1162,6 +1165,76 @@ async def publish_draft_claim_curation_workspace(
         ) from exc
 
     return result.to_json_dict()
+
+
+@router.post("/rag-eval/workbench/run")
+async def run_workbench_rag_eval(
+    project_id: str,
+    payload: dict[str, object] = Body(default_factory=dict),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    del payload
+    del pool
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    raise HTTPException(
+        status_code=501,
+        detail=(
+            "Workbench RAG Eval backend state and use case are available, "
+            "but production question generation is not connected yet."
+        ),
+    )
+
+
+@router.get("/rag-eval/workbench/latest")
+async def latest_workbench_rag_eval(
+    project_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    summary = await PostgresWorkbenchRagEvalRepository(pool).get_latest_run(
+        project_id=project_id
+    )
+    return {"run": summary.to_json_dict() if summary is not None else None}
+
+
+@router.get("/rag-eval/workbench/runs/{run_id}")
+async def get_workbench_rag_eval_run(
+    project_id: str,
+    run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    summary = await PostgresWorkbenchRagEvalRepository(pool).get_run(
+        run_id=run_id,
+        project_id=project_id,
+    )
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Workbench RAG Eval run not found")
+    return {"run": summary.to_json_dict()}
 
 
 @router.get("/{document_id}/workflow-live-state")
