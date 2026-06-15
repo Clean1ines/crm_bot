@@ -6,6 +6,12 @@ from src.contexts.embedding_runtime.infrastructure.composition.embedding_generat
 from src.contexts.embedding_runtime.infrastructure.config.embedding_runtime_settings import (
     load_embedding_runtime_settings,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_generation_route_policy import (
+    WorkbenchRagEvalQuestionGenerationRoutePolicy,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.generate_workbench_rag_eval_questions_batch import (
+    WorkbenchRagEvalQuestionGenerationBatchExecutor,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_question_runtime_embedding_text_builder import (
     PromotedQuestionRuntimeEmbeddingTextBuilder,
 )
@@ -39,12 +45,17 @@ def make_run_workbench_rag_eval(
     llm_dispatch_executor: LlmDispatchExecutorPort,
 ) -> RunWorkbenchRagEval:
     embedding_settings = load_embedding_runtime_settings()
+    route_policy = WorkbenchRagEvalQuestionGenerationRoutePolicy.default()
     question_generator = WorkbenchRagEvalQuestionGenerator.from_prompt_file(
         llm_dispatch_executor=llm_dispatch_executor,
     )
     return RunWorkbenchRagEval(
         rag_eval_repository=PostgresWorkbenchRagEvalRepository(pool),
-        question_generator=question_generator,
+        question_generation_batch_executor=WorkbenchRagEvalQuestionGenerationBatchExecutor(
+            question_generator=question_generator,
+            route_policy=route_policy,
+            max_parallel_jobs=route_policy.max_parallel_lanes,
+        ),
         search_published_workbench_runtime=SearchPublishedWorkbenchRuntime(
             published_retrieval_port=PostgresPublishedWorkbenchRetrievalRepository(
                 pool

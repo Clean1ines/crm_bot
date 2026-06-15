@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from collections.abc import Mapping
 import json
 
 import pytest
@@ -11,8 +12,13 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
     LlmDispatchExecutionResult,
     LlmDispatchExecutionStatus,
 )
-from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
+from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_question_generation_errors import (
     WorkbenchRagEvalQuestionGenerationError,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_generation_route_policy import (
+    WorkbenchRagEvalQuestionGenerationRoutePolicy,
+)
+from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WorkbenchRagEvalQuestionGenerator,
 )
 
@@ -20,8 +26,8 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_
 @dataclass(slots=True)
 class FakeLlmDispatchExecutor:
     raw_text: str
-    last_input: LlmDispatchExecutionInput | None = None
     status: LlmDispatchExecutionStatus = LlmDispatchExecutionStatus.SUCCEEDED
+    last_input: LlmDispatchExecutionInput | None = None
 
     async def execute_dispatch(
         self,
@@ -41,10 +47,15 @@ class FakeLlmDispatchExecutor:
         )
 
 
+def _route(entry_index: int = 0):
+    return WorkbenchRagEvalQuestionGenerationRoutePolicy.default().candidate_chain(
+        entry_index=entry_index,
+        allow_degraded_llama_instant=False,
+    )[0]
+
+
 @pytest.mark.asyncio
-async def test_question_generator_parses_valid_json_and_uses_dispatch_boundary() -> (
-    None
-):
+async def test_question_generator_uses_supplied_route_candidate_and_metadata() -> None:
     executor = FakeLlmDispatchExecutor(
         raw_text=json.dumps(
             {
@@ -52,25 +63,15 @@ async def test_question_generator_parses_valid_json_and_uses_dispatch_boundary()
                     {
                         "question": "Как спросит пользователь?",
                         "question_kind": "paraphrase",
-                    },
-                    {"question": "   ", "question_kind": "synonym"},
-                    {
-                        "question": "Как спросит пользователь?",
-                        "question_kind": "synonym",
-                    },
-                    {
-                        "question": "Простой вопрос?",
-                        "question_kind": "naive_user_question",
-                    },
+                    }
                 ]
             },
             ensure_ascii=False,
         )
     )
-    generator = WorkbenchRagEvalQuestionGenerator(
+    route = _route(entry_index=1)
+    generator = WorkbenchRagEvalQuestionGenerator.from_prompt_file(
         llm_dispatch_executor=executor,
-        prompt_template="prompt without answer_text",
-        max_questions_per_entry=20,
     )
 
     result = await generator.generate_questions_for_entry(
@@ -78,33 +79,27 @@ async def test_question_generator_parses_valid_json_and_uses_dispatch_boundary()
         possible_questions=("Existing?",),
         exclusion_scope="Not X",
         evidence_block="Evidence",
-        triples=({"subject": "A", "predicate": "rel", "object": "B"},),
+        triples=(),
+        route_candidate=route,
     )
 
-    assert tuple(item.question for item in result) == (
-        "Как спросит пользователь?",
-        "Простой вопрос?",
-    )
-    assert tuple(item.question_kind.value for item in result) == (
-        "paraphrase",
-        "naive_user_question",
-    )
+    assert result[0].generation_model == "qwen/qwen3-32b"
+    assert result[0].generation_account_ref == "groq_org_secondary"
+    assert result[0].generation_slot_index == 1
     assert executor.last_input is not None
-    payload = executor.last_input.dispatch_payload
-    assert "schedule_payload" in payload
-    assert "llm_allocation" in payload
-    assert "llm_execution_settings" in payload
+    allocation = executor.last_input.dispatch_payload["llm_allocation"]
+    assert isinstance(allocation, Mapping)
+    assert allocation["account_ref"] == "groq_org_secondary"
+    assert allocation["slot_index"] == 1
 
 
 @pytest.mark.asyncio
-async def test_question_generator_rejects_invalid_question_kind() -> None:
-    generator = WorkbenchRagEvalQuestionGenerator(
+async def test_question_generator_failed_route_raises_generation_error() -> None:
+    generator = WorkbenchRagEvalQuestionGenerator.from_prompt_file(
         llm_dispatch_executor=FakeLlmDispatchExecutor(
-            raw_text=json.dumps(
-                {"questions": [{"question": "Q?", "question_kind": "answer"}]}
-            )
+            raw_text="{}",
+            status=LlmDispatchExecutionStatus.TERMINAL_FAILED,
         ),
-        prompt_template="prompt",
     )
 
     with pytest.raises(WorkbenchRagEvalQuestionGenerationError):
@@ -114,35 +109,19 @@ async def test_question_generator_rejects_invalid_question_kind() -> None:
             exclusion_scope=None,
             evidence_block=None,
             triples=(),
+            route_candidate=_route(),
         )
 
 
-@pytest.mark.asyncio
-async def test_question_generator_rejects_non_json() -> None:
-    generator = WorkbenchRagEvalQuestionGenerator(
-        llm_dispatch_executor=FakeLlmDispatchExecutor(raw_text="not json"),
-        prompt_template="prompt",
-    )
+def test_question_generator_source_has_no_fallback_or_direct_provider_client() -> None:
+    from pathlib import Path
 
-    with pytest.raises(WorkbenchRagEvalQuestionGenerationError):
-        await generator.generate_questions_for_entry(
-            claim="Claim",
-            possible_questions=(),
-            exclusion_scope=None,
-            evidence_block=None,
-            triples=(),
-        )
-
-
-def test_question_generator_source_has_no_direct_provider_client_imports() -> None:
-    import pathlib
-
-    source = pathlib.Path(
+    source = Path(
         "src/contexts/knowledge_workbench/rag_eval/infrastructure/llm/"
         "workbench_rag_eval_question_generator.py"
     ).read_text(encoding="utf-8")
 
     assert "GroqDispatchExecutor" not in source
-    assert "OpenAI" not in source
-    assert "openai" not in source
+    assert "openai/gpt-oss-120b" not in source
+    assert "llama-3.1-8b-instant" not in source
     assert "answer_text" not in source

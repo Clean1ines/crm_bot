@@ -144,7 +144,8 @@ from src.contexts.knowledge_workbench.curation.application.use_cases.publish_dra
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
 )
-from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
+from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_question_generation_errors import (
+    WorkbenchRagEvalDegradedFallbackRequiredError,
     WorkbenchRagEvalQuestionGenerationError,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
@@ -661,6 +662,15 @@ def _optional_payload_int(payload: Mapping[str, object], key: str) -> int | None
 def _payload_int(payload: Mapping[str, object], key: str, *, default: int) -> int:
     value = _optional_payload_int(payload, key)
     return default if value is None else value
+
+
+def _payload_bool(payload: Mapping[str, object], key: str, *, default: bool) -> bool:
+    value = payload.get(key)
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise HTTPException(status_code=400, detail=f"{key} must be boolean")
+    return value
 
 
 @router.get("")
@@ -1222,6 +1232,11 @@ async def run_workbench_rag_eval(
     if top_k is not None and top_k < 5:
         raise HTTPException(status_code=400, detail="top_k must be at least 5")
     max_entries = _payload_int(payload, "max_entries", default=20)
+    allow_degraded_llama_instant = _payload_bool(
+        payload,
+        "allow_degraded_llama_instant",
+        default=False,
+    )
     if max_entries < 1 or max_entries > 50:
         raise HTTPException(
             status_code=400, detail="max_entries must be between 1 and 50"
@@ -1242,7 +1257,17 @@ async def run_workbench_rag_eval(
             top_k=top_k,
             max_entries=max_entries,
             now=datetime.now(timezone.utc),
+            allow_degraded_llama_instant=allow_degraded_llama_instant,
         )
+    except WorkbenchRagEvalDegradedFallbackRequiredError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "status": "requires_degraded_fallback_confirmation",
+                "message": str(exc),
+                "degraded_model": "llama-3.1-8b-instant",
+            },
+        ) from exc
     except WorkbenchRagEvalQuestionGenerationError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:

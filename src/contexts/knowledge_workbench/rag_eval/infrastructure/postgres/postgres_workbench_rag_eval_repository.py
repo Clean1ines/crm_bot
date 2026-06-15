@@ -81,6 +81,8 @@ SELECT
     question.source,
     question.generation_model,
     question.prompt_version,
+    question.generation_account_ref,
+    question.generation_slot_index,
     question.status,
     question.created_at,
     result.result_id,
@@ -289,9 +291,12 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                         question_id, run_id, project_id,
                         expected_runtime_entry_id, expected_fact_id, question,
                         question_kind, source, generation_model, prompt_version,
-                        status, created_at
+                        generation_account_ref, generation_slot_index, status, created_at
                     )
-                    VALUES ($1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    VALUES (
+                        $1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
+                        $11, $12, $13, $14
+                    )
                     ON CONFLICT (question_id) DO NOTHING
                     """,
                     question.question_id,
@@ -304,6 +309,8 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     question.source.value,
                     question.generation_model,
                     question.prompt_version,
+                    question.generation_account_ref,
+                    question.generation_slot_index,
                     question.status.value,
                     question.created_at,
                 )
@@ -673,6 +680,8 @@ class _QuestionDetailsDraft:
     source: WorkbenchRagEvalQuestionSource
     generation_model: str | None
     prompt_version: str | None
+    generation_account_ref: str | None
+    generation_slot_index: int | None
     status: WorkbenchRagEvalQuestionStatus
     created_at: datetime
     results: list[WorkbenchRagEvalRetrievalResultDetails] = field(default_factory=list)
@@ -689,6 +698,8 @@ class _QuestionDetailsDraft:
             source=self.source,
             generation_model=self.generation_model,
             prompt_version=self.prompt_version,
+            generation_account_ref=self.generation_account_ref,
+            generation_slot_index=self.generation_slot_index,
             status=self.status,
             created_at=self.created_at,
             results=tuple(self.results),
@@ -719,6 +730,12 @@ def _question_details_from_rows(
                 source=WorkbenchRagEvalQuestionSource(_text_from_row(row, "source")),
                 generation_model=_optional_text_from_row(row, "generation_model"),
                 prompt_version=_optional_text_from_row(row, "prompt_version"),
+                generation_account_ref=_optional_text_from_row(
+                    row, "generation_account_ref"
+                ),
+                generation_slot_index=_optional_int_from_row(
+                    row, "generation_slot_index"
+                ),
                 status=WorkbenchRagEvalQuestionStatus(_text_from_row(row, "status")),
                 created_at=_datetime_from_row(row, "created_at"),
             )
@@ -892,6 +909,15 @@ def _int_from_row(row: Mapping[str, object], key: str) -> int:
     value = row.get(key)
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{key} must be int")
+    return value
+
+
+def _optional_int_from_row(row: Mapping[str, object], key: str) -> int | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{key} must be int or None")
     return value
 
 

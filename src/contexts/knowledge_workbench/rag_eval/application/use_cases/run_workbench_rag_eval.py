@@ -17,11 +17,12 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalSummary,
 )
-from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_question_generator_port import (
-    WorkbenchRagEvalQuestionGeneratorPort,
-)
 from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
     WorkbenchRagEvalRepositoryPort,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.generate_workbench_rag_eval_questions_batch import (
+    WorkbenchRagEvalGeneratedEntryQuestions,
+    WorkbenchRagEvalQuestionGenerationBatchExecutor,
 )
 from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
     PublishedWorkbenchRetrievalResult,
@@ -34,7 +35,7 @@ from src.contexts.knowledge_workbench.retrieval.application.use_cases.search_pub
 @dataclass(frozen=True, slots=True)
 class RunWorkbenchRagEval:
     rag_eval_repository: WorkbenchRagEvalRepositoryPort
-    question_generator: WorkbenchRagEvalQuestionGeneratorPort
+    question_generation_batch_executor: WorkbenchRagEvalQuestionGenerationBatchExecutor
     search_published_workbench_runtime: SearchPublishedWorkbenchRuntime
     question_generation_prompt_version: str
     question_generation_model: str | None = None
@@ -49,10 +50,13 @@ class RunWorkbenchRagEval:
         top_k: int | None,
         max_entries: int,
         now: datetime,
+        allow_degraded_llama_instant: bool = False,
     ) -> WorkbenchRagEvalSummary:
         project_id = _require_text(project_id, "project_id")
         publication_id = _optional_text(publication_id)
         source_document_ref = _optional_text(source_document_ref)
+        if not isinstance(allow_degraded_llama_instant, bool):
+            raise TypeError("allow_degraded_llama_instant must be bool")
         limit = top_k if top_k is not None else self.default_top_k
         if limit < 5:
             raise ValueError("top_k must be at least 5")
@@ -91,10 +95,16 @@ class RunWorkbenchRagEval:
             limit=max_entries,
         )
 
-        questions = await self._create_questions(
+        generated_entries = (
+            await self.question_generation_batch_executor.generate_for_entries(
+                entries=entries,
+                allow_degraded_llama_instant=allow_degraded_llama_instant,
+            )
+        )
+        questions = self._create_questions(
             run_id=run_id,
             project_id=project_id,
-            entries=entries,
+            generated_entries=generated_entries,
             now=now,
         )
         saved_questions = await self.rag_eval_repository.save_generated_questions(
@@ -128,25 +138,19 @@ class RunWorkbenchRagEval:
         )
         return await self.rag_eval_repository.complete_run(summary=summary)
 
-    async def _create_questions(
+    def _create_questions(
         self,
         *,
         run_id: str,
         project_id: str,
-        entries: tuple[PublishedWorkbenchRetrievalResult, ...],
+        generated_entries: tuple[WorkbenchRagEvalGeneratedEntryQuestions, ...],
         now: datetime,
     ) -> tuple[WorkbenchRagEvalQuestion, ...]:
         result: list[WorkbenchRagEvalQuestion] = []
         seen_by_entry: dict[str, set[str]] = {}
 
-        for entry in entries:
-            generated = await self.question_generator.generate_questions_for_entry(
-                claim=entry.claim,
-                possible_questions=entry.possible_questions,
-                exclusion_scope=entry.exclusion_scope,
-                evidence_block=entry.evidence_block,
-                triples=(),
-            )
+        for item in generated_entries:
+            entry = item.entry
             baseline = tuple(
                 GeneratedWorkbenchRagEvalQuestion(
                     question=question,
@@ -157,8 +161,8 @@ class RunWorkbenchRagEval:
                 )
                 for question in entry.possible_questions
             )
-            for item in baseline + generated:
-                normalized = _normalize_question(item.question)
+            for question_item in baseline + item.generated_questions:
+                normalized = _normalize_question(question_item.question)
                 entry_seen = seen_by_entry.setdefault(entry.runtime_entry_id, set())
                 if normalized in entry_seen:
                     continue
@@ -170,13 +174,15 @@ class RunWorkbenchRagEval:
                         project_id=project_id,
                         expected_runtime_entry_id=entry.runtime_entry_id,
                         expected_fact_id=entry.fact_id,
-                        question=item.question.strip(),
-                        question_kind=item.question_kind,
-                        source=item.source,
-                        generation_model=item.generation_model,
-                        prompt_version=item.prompt_version,
+                        question=question_item.question.strip(),
+                        question_kind=question_item.question_kind,
+                        source=question_item.source,
+                        generation_model=question_item.generation_model,
+                        prompt_version=question_item.prompt_version,
                         status=WorkbenchRagEvalQuestionStatus.CREATED,
                         created_at=now,
+                        generation_account_ref=question_item.generation_account_ref,
+                        generation_slot_index=question_item.generation_slot_index,
                     )
                 )
 
@@ -265,23 +271,11 @@ def _summary(
     created_at: datetime,
     completed_at: datetime,
 ) -> WorkbenchRagEvalSummary:
-    question_ids = {question.question_id for question in questions}
-    top1_hits = {
-        result.question_id
-        for result in retrieval_results
-        if result.top1_hit and result.question_id in question_ids
-    }
-    top3_hits = {
-        result.question_id
-        for result in retrieval_results
-        if result.top3_hit and result.question_id in question_ids
-    }
-    top5_hits = {
-        result.question_id
-        for result in retrieval_results
-        if result.top5_hit and result.question_id in question_ids
-    }
-    misses = len(questions) - len(top5_hits)
+    completed_questions = len(questions)
+    top1_hits = sum(1 for result in retrieval_results if result.top1_hit)
+    top3_hits = sum(1 for result in retrieval_results if result.top3_hit)
+    top5_hits = sum(1 for result in retrieval_results if result.top5_hit)
+    misses = completed_questions - top5_hits
     return WorkbenchRagEvalSummary(
         run_id=run_id,
         project_id=project_id,
@@ -290,10 +284,10 @@ def _summary(
         status=WorkbenchRagEvalRunStatus.COMPLETED,
         total_entries=len(entries),
         total_questions=len(questions),
-        completed_questions=len(questions),
-        top1_hits=len(top1_hits),
-        top3_hits=len(top3_hits),
-        top5_hits=len(top5_hits),
+        completed_questions=completed_questions,
+        top1_hits=top1_hits,
+        top3_hits=top3_hits,
+        top5_hits=top5_hits,
         misses=misses,
         promotion_candidate_count=promotion_count,
         created_at=created_at,
@@ -313,12 +307,12 @@ def _expected_rank(
     return None
 
 
+def _normalize_question(question: str) -> str:
+    return " ".join(question.strip().casefold().split())
+
+
 def _id(*parts: str) -> str:
     return sha256(":".join(parts).encode("utf-8")).hexdigest()
-
-
-def _normalize_question(value: str) -> str:
-    return " ".join(value.casefold().split())
 
 
 def _require_text(value: str, field_name: str) -> str:

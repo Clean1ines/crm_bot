@@ -28,7 +28,7 @@ def test_workbench_rag_eval_retrieval_phase_uses_published_runtime_search() -> N
 
     assert "SearchPublishedWorkbenchRuntime" in source
     assert "search_published_workbench_runtime.execute" in source
-    assert "generate_questions_for_entry" in source
+    assert "question_generation_batch_executor.generate_for_entries" in source
     assert "answer" not in source
 
 
@@ -71,3 +71,24 @@ def test_workbench_rag_eval_apply_does_not_mutate_draft_or_legacy_tables() -> No
     )
     for marker in forbidden:
         assert marker not in sources
+
+
+def test_workbench_rag_eval_capacity_routing_is_outside_generator() -> None:
+    generator_source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/infrastructure/llm/"
+        "workbench_rag_eval_question_generator.py"
+    ).read_text(encoding="utf-8")
+    policy_source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/application/policies/"
+        "workbench_rag_eval_question_generation_route_policy.py"
+    ).read_text(encoding="utf-8")
+
+    assert "route_candidate" in generator_source
+    assert "openai/gpt-oss-120b" not in generator_source
+    assert "llama-3.1-8b-instant" not in generator_source
+    assert "GroqDispatchExecutor" not in generator_source
+
+    assert "qwen/qwen3-32b" in policy_source
+    assert "openai/gpt-oss-120b" in policy_source
+    assert "WORKBENCH_RAG_EVAL_FORBIDDEN_AUTOMATIC_MODEL_REFS" in policy_source
+    assert "llama-3.1-8b-instant" in policy_source

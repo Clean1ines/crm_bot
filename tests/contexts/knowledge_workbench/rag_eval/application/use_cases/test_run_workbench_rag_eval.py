@@ -16,6 +16,12 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalRun,
     WorkbenchRagEvalSummary,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_generation_route_policy import (
+    WorkbenchRagEvalQuestionGenerationRoutePolicy,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.generate_workbench_rag_eval_questions_batch import (
+    WorkbenchRagEvalQuestionGenerationBatchExecutor,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.run_workbench_rag_eval import (
     RunWorkbenchRagEval,
 )
@@ -133,6 +139,7 @@ class FakeRepository:
 @dataclass(slots=True)
 class FakeQuestionGenerator:
     calls: list[str] = field(default_factory=list)
+    account_refs: list[str] = field(default_factory=list)
 
     async def generate_questions_for_entry(
         self,
@@ -142,23 +149,29 @@ class FakeQuestionGenerator:
         exclusion_scope: str | None,
         evidence_block: str | None,
         triples: tuple[Mapping[str, object], ...],
+        route_candidate,
     ) -> tuple[GeneratedWorkbenchRagEvalQuestion, ...]:
         del possible_questions, exclusion_scope, evidence_block, triples
         self.calls.append(claim)
+        self.account_refs.append(route_candidate.account_ref)
         return (
             GeneratedWorkbenchRagEvalQuestion(
                 question=f"Generated {claim}?",
                 question_kind=WorkbenchRagEvalQuestionKind.PARAPHRASE,
                 source=WorkbenchRagEvalQuestionSource.GENERATED,
-                generation_model="fake-generator",
+                generation_model=route_candidate.model_ref,
                 prompt_version="test-v1",
+                generation_account_ref=route_candidate.account_ref,
+                generation_slot_index=route_candidate.slot_index,
             ),
             GeneratedWorkbenchRagEvalQuestion(
                 question=f"Generated {claim}?",
                 question_kind=WorkbenchRagEvalQuestionKind.SYNONYM,
                 source=WorkbenchRagEvalQuestionSource.GENERATED,
-                generation_model="fake-generator",
+                generation_model=route_candidate.model_ref,
                 prompt_version="test-v1",
+                generation_account_ref=route_candidate.account_ref,
+                generation_slot_index=route_candidate.slot_index,
             ),
         )
 
@@ -192,7 +205,11 @@ async def test_run_includes_baseline_generated_dedupes_and_metrics() -> None:
 
     summary = await RunWorkbenchRagEval(
         rag_eval_repository=repository,
-        question_generator=generator,
+        question_generation_batch_executor=WorkbenchRagEvalQuestionGenerationBatchExecutor(
+            question_generator=generator,
+            route_policy=WorkbenchRagEvalQuestionGenerationRoutePolicy.default(),
+            max_parallel_jobs=4,
+        ),
         search_published_workbench_runtime=search,
         question_generation_prompt_version="test-v1",
         question_generation_model="fake-generator",
@@ -217,6 +234,15 @@ async def test_run_includes_baseline_generated_dedupes_and_metrics() -> None:
     assert repository.promotions[0].status.value == "candidate"
     assert search.calls == ["Existing?", "miss me", "Generated Claim entry-1?"]
     assert generator.calls == ["Claim entry-1"]
+    assert generator.account_refs == ["groq_org_primary"]
+    generated_questions = tuple(
+        question
+        for question in repository.questions
+        if question.source.value == "generated"
+    )
+    assert generated_questions[0].generation_model == "qwen/qwen3-32b"
+    assert generated_questions[0].generation_account_ref == "groq_org_primary"
+    assert generated_questions[0].generation_slot_index == 0
 
 
 @pytest.mark.asyncio
@@ -224,7 +250,11 @@ async def test_run_rejects_top_k_below_five() -> None:
     with pytest.raises(ValueError):
         await RunWorkbenchRagEval(
             rag_eval_repository=FakeRepository(entries=()),
-            question_generator=FakeQuestionGenerator(),
+            question_generation_batch_executor=WorkbenchRagEvalQuestionGenerationBatchExecutor(
+                question_generator=FakeQuestionGenerator(),
+                route_policy=WorkbenchRagEvalQuestionGenerationRoutePolicy.default(),
+                max_parallel_jobs=4,
+            ),
             search_published_workbench_runtime=FakeSearchPublishedWorkbenchRuntime(),
             question_generation_prompt_version="test-v1",
         ).execute(

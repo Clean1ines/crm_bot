@@ -48,6 +48,8 @@ class GeneratedWorkbenchRagEvalQuestion:
     source: WorkbenchRagEvalQuestionSource
     generation_model: str | None
     prompt_version: str | None
+    generation_account_ref: str | None = None
+    generation_slot_index: int | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.question, "question")
@@ -55,6 +57,10 @@ class GeneratedWorkbenchRagEvalQuestion:
         _require_enum(self.source, WorkbenchRagEvalQuestionSource, "source")
         _require_optional_text(self.generation_model, "generation_model")
         _require_optional_text(self.prompt_version, "prompt_version")
+        _require_optional_text(self.generation_account_ref, "generation_account_ref")
+        _require_optional_non_negative_int(
+            self.generation_slot_index, "generation_slot_index"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +126,8 @@ class WorkbenchRagEvalQuestion:
     source: WorkbenchRagEvalQuestionSource
     generation_model: str | None
     prompt_version: str | None
+    generation_account_ref: str | None
+    generation_slot_index: int | None
     status: WorkbenchRagEvalQuestionStatus
     created_at: datetime
 
@@ -134,6 +142,10 @@ class WorkbenchRagEvalQuestion:
         _require_enum(self.source, WorkbenchRagEvalQuestionSource, "source")
         _require_optional_text(self.generation_model, "generation_model")
         _require_optional_text(self.prompt_version, "prompt_version")
+        _require_optional_text(self.generation_account_ref, "generation_account_ref")
+        _require_optional_non_negative_int(
+            self.generation_slot_index, "generation_slot_index"
+        )
         _require_enum(self.status, WorkbenchRagEvalQuestionStatus, "status")
         _require_datetime(self.created_at, "created_at")
 
@@ -258,6 +270,8 @@ class WorkbenchRagEvalQuestionDetails:
     status: WorkbenchRagEvalQuestionStatus
     created_at: datetime
     results: tuple[WorkbenchRagEvalRetrievalResultDetails, ...]
+    generation_account_ref: str | None = None
+    generation_slot_index: int | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.question_id, "question_id")
@@ -272,6 +286,10 @@ class WorkbenchRagEvalQuestionDetails:
         _require_optional_text(self.prompt_version, "prompt_version")
         _require_enum(self.status, WorkbenchRagEvalQuestionStatus, "status")
         _require_datetime(self.created_at, "created_at")
+        _require_optional_text(self.generation_account_ref, "generation_account_ref")
+        _require_optional_non_negative_int(
+            self.generation_slot_index, "generation_slot_index"
+        )
         if not isinstance(self.results, tuple):
             raise TypeError("results must be tuple")
 
@@ -287,6 +305,8 @@ class WorkbenchRagEvalQuestionDetails:
             "source": self.source.value,
             "generation_model": self.generation_model,
             "prompt_version": self.prompt_version,
+            "generation_account_ref": self.generation_account_ref,
+            "generation_slot_index": self.generation_slot_index,
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),
             "results": [result.to_json_dict() for result in self.results],
@@ -520,3 +540,9 @@ def _require_optional_datetime(value: datetime | None, field_name: str) -> None:
 def _require_enum(value: object, enum_type: type[StrEnum], field_name: str) -> None:
     if not isinstance(value, enum_type):
         raise TypeError(f"{field_name} must be {enum_type.__name__}")
+
+
+def _require_optional_non_negative_int(value: int | None, field_name: str) -> None:
+    if value is None:
+        return
+    _require_non_negative_int(value, field_name)

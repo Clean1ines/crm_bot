@@ -90,6 +90,7 @@ def test_workbench_rag_eval_run_endpoint_executes_use_case(monkeypatch) -> None:
             assert kwargs["source_document_ref"] is None
             assert kwargs["top_k"] == 5
             assert kwargs["max_entries"] == 20
+            assert kwargs["allow_degraded_llama_instant"] is False
             return _summary()
 
     def fake_factory(**kwargs):
@@ -359,3 +360,23 @@ def test_workbench_rag_eval_apply_candidate_endpoint(monkeypatch) -> None:
     assert payload["result"]["status"] == "applied"
     assert payload["result"]["embedding_count"] == 1
     assert "answer_text" not in str(payload)
+
+
+def test_workbench_rag_eval_run_endpoint_rejects_non_bool_degraded_flag(
+    monkeypatch,
+) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access", allow_access
+    )
+
+    response = _client().post(
+        "/api/projects/11111111-1111-1111-1111-111111111111/knowledge/rag-eval/workbench/run",
+        json={"top_k": 5, "max_entries": 20, "allow_degraded_llama_instant": "yes"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "allow_degraded_llama_instant must be boolean"

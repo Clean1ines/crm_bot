@@ -14,12 +14,18 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelExecutionSettings,
-    default_groq_llm_model_route_catalog,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_question_generation_errors import (
+    WorkbenchRagEvalQuestionGenerationError,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     GeneratedWorkbenchRagEvalQuestion,
     WorkbenchRagEvalQuestionKind,
     WorkbenchRagEvalQuestionSource,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_generation_route_policy import (
+    WorkbenchRagEvalQuestionGenerationRouteCandidate,
+    WorkbenchRagEvalQuestionGenerationRoutePolicy,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_question_generator_port import (
     WorkbenchRagEvalQuestionGeneratorPort,
@@ -32,19 +38,11 @@ WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION = (
 )
 
 
-class WorkbenchRagEvalQuestionGenerationError(RuntimeError):
-    pass
-
-
 @dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
     llm_dispatch_executor: LlmDispatchExecutorPort
     prompt_template: str
     prompt_version: str = WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION
-    provider: str = "groq"
-    account_ref: str = "groq_org_primary"
-    slot_index: int = 0
-    model_ref: str | None = None
     max_questions_per_entry: int = 20
 
     @classmethod
@@ -61,7 +59,7 @@ class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
 
     @property
     def generation_model(self) -> str:
-        return self._model_ref()
+        return WorkbenchRagEvalQuestionGenerationRoutePolicy.default().primary_model_ref
 
     async def generate_questions_for_entry(
         self,
@@ -71,6 +69,7 @@ class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
         exclusion_scope: str | None,
         evidence_block: str | None,
         triples: tuple[Mapping[str, object], ...],
+        route_candidate: WorkbenchRagEvalQuestionGenerationRouteCandidate,
     ) -> tuple[GeneratedWorkbenchRagEvalQuestion, ...]:
         claim = _require_text(claim, "claim")
         if self.max_questions_per_entry < 1:
@@ -78,7 +77,12 @@ class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
 
         result = await self.llm_dispatch_executor.execute_dispatch(
             LlmDispatchExecutionInput(
-                attempt_id=_stable_id("workbench-rag-eval-qgen-attempt", claim),
+                attempt_id=_stable_id(
+                    "workbench-rag-eval-qgen-attempt",
+                    claim,
+                    route_candidate.model_ref,
+                    route_candidate.account_ref,
+                ),
                 work_item_id=_stable_id("workbench-rag-eval-qgen-work", claim),
                 attempt_number=1,
                 dispatch_payload=self._dispatch_payload(
@@ -87,13 +91,15 @@ class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
                     exclusion_scope=exclusion_scope,
                     evidence_block=evidence_block,
                     triples=triples,
+                    route_candidate=route_candidate,
                 ),
                 started_at=datetime.now(timezone.utc),
             )
         )
         if result.status is not LlmDispatchExecutionStatus.SUCCEEDED:
             raise WorkbenchRagEvalQuestionGenerationError(
-                f"Question generation failed: {result.error_kind or result.status.value}"
+                f"Question generation failed on {route_candidate.model_ref}/"
+                f"{route_candidate.account_ref}: {result.error_kind or result.status.value}"
             )
         if result.output_payload is None:
             raise WorkbenchRagEvalQuestionGenerationError(
@@ -108,8 +114,10 @@ class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
 
         return _parse_generated_questions(
             raw_text=raw_text,
-            generation_model=self.generation_model,
+            generation_model=route_candidate.model_ref,
             prompt_version=self.prompt_version,
+            generation_account_ref=route_candidate.account_ref,
+            generation_slot_index=route_candidate.slot_index,
             max_questions=self.max_questions_per_entry,
         )
 
@@ -121,13 +129,8 @@ class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
         exclusion_scope: str | None,
         evidence_block: str | None,
         triples: tuple[Mapping[str, object], ...],
+        route_candidate: WorkbenchRagEvalQuestionGenerationRouteCandidate,
     ) -> Mapping[str, object]:
-        model_ref = self._model_ref()
-        execution_settings = (
-            default_groq_llm_model_route_catalog().execution_settings_for_model_ref(
-                model_ref
-            )
-        )
         return {
             "work_item_id": _stable_id("workbench-rag-eval-qgen-work", claim),
             "schedule_payload": {
@@ -149,18 +152,20 @@ class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
                 ],
             },
             "llm_allocation": {
-                "provider": self.provider,
-                "account_ref": self.account_ref,
-                "model_ref": model_ref,
-                "slot_index": self.slot_index,
+                "provider": route_candidate.provider,
+                "account_ref": route_candidate.account_ref,
+                "model_ref": route_candidate.model_ref,
+                "slot_index": route_candidate.slot_index,
             },
-            "llm_execution_settings": _execution_settings_payload(execution_settings),
+            "llm_execution_settings": _execution_settings_payload(
+                route_candidate.execution_settings
+            ),
+            "capacity_metadata": {
+                "input_token_limit": route_candidate.input_token_limit,
+                "output_token_limit": route_candidate.output_token_limit,
+                "route_role": route_candidate.role.value,
+            },
         }
-
-    def _model_ref(self) -> str:
-        if self.model_ref is not None and self.model_ref.strip():
-            return self.model_ref.strip()
-        return default_groq_llm_model_route_catalog().primary_model_ref()
 
 
 def _parse_generated_questions(
@@ -168,6 +173,8 @@ def _parse_generated_questions(
     raw_text: str,
     generation_model: str,
     prompt_version: str,
+    generation_account_ref: str,
+    generation_slot_index: int,
     max_questions: int,
 ) -> tuple[GeneratedWorkbenchRagEvalQuestion, ...]:
     try:
@@ -232,6 +239,8 @@ def _parse_generated_questions(
                 source=WorkbenchRagEvalQuestionSource.GENERATED,
                 generation_model=generation_model,
                 prompt_version=prompt_version,
+                generation_account_ref=generation_account_ref,
+                generation_slot_index=generation_slot_index,
             )
         )
 
