@@ -91,11 +91,9 @@ class PostgresClaimExtractionStageProgressQuery(
         value = await self._connection.fetchval(
             """
             SELECT count(*)
-            FROM pipeline_artifacts
-            WHERE payload ->> 'workflow_run_id' = $1
-              AND payload ->> 'stage_run_id' = $2
-              AND artifact_kind LIKE 'knowledge_workbench.claim_observations.%'
-              AND status NOT IN ('rejected', 'expired')
+            FROM draft_claim_observation_provenance
+            WHERE workflow_run_id = $1
+              AND stage_run_id = $2
             """,
             workflow_run_id,
             stage_run_id,

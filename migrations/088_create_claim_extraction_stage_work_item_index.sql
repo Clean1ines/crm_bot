@@ -28,11 +28,12 @@ CREATE INDEX IF NOT EXISTS idx_claim_extraction_stage_work_items_stage
 CREATE INDEX IF NOT EXISTS idx_claim_extraction_stage_work_items_work_item
     ON claim_extraction_stage_work_items (work_item_id);
 
-CREATE INDEX IF NOT EXISTS idx_pipeline_artifacts_claim_extraction_stage_payload
-    ON pipeline_artifacts (
-        (payload ->> 'workflow_run_id'),
-        (payload ->> 'stage_run_id'),
-        artifact_kind,
-        status
-    )
-    WHERE artifact_kind LIKE 'knowledge_workbench.claim_observations.%';
+-- Retired tail of this migration:
+-- The pipeline_artifacts table belonged to the removed Artifact Runtime prototype.
+-- Claim extraction progress now counts persisted draft_claim_observation_provenance rows.
+-- Keep this no-op notice so ordered migration chains can pass without restoring
+-- the retired pipeline_artifacts domain.
+DO $$
+BEGIN
+    RAISE NOTICE '088 retired pipeline_artifacts stage payload index: pipeline_artifacts no longer exists';
+END $$;
