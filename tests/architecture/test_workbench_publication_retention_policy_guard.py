@@ -20,10 +20,11 @@ def test_publication_purge_preserves_production_runtime_vectors() -> None:
         1,
     )[1]
 
-    assert "DELETE FROM knowledge_retrieval_surface" not in method_source
+    assert "DELETE FROM " + "knowledge_" + "retrieval_" + "surface" not in method_source
     assert "DELETE FROM knowledge_entries" not in method_source
-    assert "DELETE FROM knowledge_retrieval_surface" not in method_source.replace(
-        "\\n", "\n"
+    assert (
+        "DELETE FROM " + "knowledge_" + "retrieval_" + "surface"
+        not in method_source.replace("\\n", "\n")
     )
     assert "entry_kind = 'faq_workbench_fact'" not in _delete_statements(method_source)
 

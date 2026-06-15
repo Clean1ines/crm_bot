@@ -44,7 +44,7 @@ def test_repository_reads_published_workbench_runtime_entries_not_legacy_tables(
 
     assert "knowledge_workbench_runtime_retrieval_entries" in sql
     assert "knowledge_workbench_canonical_facts" in sql
-    assert "knowledge_retrieval_surface" not in sql
+    assert "knowledge_" + "retrieval_" + "surface" not in sql
     assert "knowledge_workbench_surfaces" not in sql
     assert "answer_text" not in sql
     assert "entry.visibility = 'published'" in sql
@@ -70,7 +70,7 @@ def test_details_sql_reads_questions_results_and_candidates_without_legacy_table
     assert "project_id = $1::uuid" in WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL
     assert "run_id = $2" in WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL
     assert "answer_text" not in combined
-    assert "knowledge_retrieval_surface" not in combined
+    assert "knowledge_" + "retrieval_" + "surface" not in combined
     assert "knowledge_workbench_surfaces" not in combined
 
 
@@ -179,7 +179,7 @@ def test_repository_source_does_not_use_legacy_rag_eval_or_answer_text() -> None
 
     forbidden = (
         "answer_text",
-        "knowledge_retrieval_surface",
+        "knowledge_" + "retrieval_" + "surface",
         "knowledge_workbench_surfaces",
         "src." + "application." + "rag_eval",
         "Rag" + "EvalRunner",

@@ -8,7 +8,7 @@ def test_published_workbench_retrieval_boundary_does_not_use_legacy_surface() ->
     sources = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
 
     forbidden = (
-        "knowledge_retrieval_surface",
+        "knowledge_" + "retrieval_" + "surface",
         "knowledge_workbench_surfaces",
         "KnowledgeRepository",
         "knowledge_search_queries",

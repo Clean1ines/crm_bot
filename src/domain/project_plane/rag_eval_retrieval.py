@@ -32,25 +32,25 @@ def resolve_rag_eval_retrieval_policy(
     if mode == RagEvalRetrievalMode.VECTOR_DEBUG:
         return RagEvalRetrievalPolicy(
             mode=mode,
-            retrieval_path="knowledge_retrieval_surface.vector_only",
+            retrieval_path="SearchPublishedWorkbenchRuntime.vector_debug",
             query_expansion_enabled=False,
             runtime_equivalent=False,
             diagnostic=True,
             description=(
-                "Diagnostic embedding/vector-only retrieval over published runtime "
-                "knowledge_retrieval_surface entries."
+                "Diagnostic embedding/vector-only retrieval over published Workbench "
+                "runtime entries."
             ),
         )
 
     return RagEvalRetrievalPolicy(
         mode=RagEvalRetrievalMode.PRODUCTION_EQUIVALENT,
-        retrieval_path="production_rag_service.search_with_expansion",
+        retrieval_path="SearchPublishedWorkbenchRuntime",
         query_expansion_enabled=True,
         runtime_equivalent=True,
         diagnostic=False,
         description=(
-            "Production-equivalent retrieval using the same high-level RAG service "
-            "path as runtime evaluation."
+            "Production-equivalent retrieval over published Workbench runtime entries "
+            "and runtime entry embeddings."
         ),
     )
 

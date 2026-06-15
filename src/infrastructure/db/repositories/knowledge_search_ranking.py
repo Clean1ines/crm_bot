@@ -39,7 +39,7 @@ class _PreviewTextFields:
 @dataclass(frozen=True, slots=True)
 class _PreviewOverlaps:
     search: float
-    answer: float
+    claim: float
     title: float
     questions: float
     synonyms: float
@@ -180,7 +180,7 @@ def _preview_overlaps(
 ) -> _PreviewOverlaps:
     return _PreviewOverlaps(
         search=keyword_overlap(query, fields.search_text),
-        answer=keyword_overlap(query, content),
+        claim=keyword_overlap(query, content),
         title=keyword_overlap(query, fields.title),
         questions=keyword_overlap(query, fields.questions),
         synonyms=keyword_overlap(query, fields.synonyms),
@@ -235,7 +235,7 @@ def _preview_generic_long_penalty(
 ) -> float:
     strongest_specific_overlap = max(
         overlaps.search,
-        overlaps.answer,
+        overlaps.claim,
         overlaps.questions,
     )
     if payload_len <= 1800:
@@ -264,7 +264,7 @@ def _preview_matched_fields(
         ),
         (overlaps.synonyms > 0.0, "synonyms"),
         (overlaps.tags > 0.0, "tags"),
-        (overlaps.answer > 0.0, "answer"),
+        (overlaps.claim > 0.0, "answer"),
         (overlaps.search > 0.0 or lexical_score > 0.0, "search_text"),
         (overlaps.embedding_text > 0.0, "embedding_text"),
         (exact_score > 0.0 or exact_phrase_bonus > 0.0, "exact"),
@@ -292,7 +292,7 @@ def _preview_final_score(
         + lexical_bonus
         + exact_score * 0.18
         + overlaps.search * 0.10
-        + overlaps.answer * 0.12
+        + overlaps.claim * 0.12
         + rare_token_bonus
         + exact_phrase_bonus
         + (0.78 if matches.exact_question else 0.0)
@@ -377,7 +377,7 @@ def _search_trace_from_row(
         retrieval_surface_role=(
             "production_runtime" if is_production_safe else "non_production"
         ),
-        displayed_field="answer",
+        displayed_field="claim",
         is_production_safe=is_production_safe,
     )
 

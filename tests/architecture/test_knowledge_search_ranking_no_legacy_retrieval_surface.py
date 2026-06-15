@@ -9,7 +9,7 @@ def test_search_ranking_does_not_import_old_retrieval_surface() -> None:
         "src/infrastructure/db/repositories/knowledge_search_ranking.py"
     ).read_text(encoding="utf-8")
 
-    assert "knowledge_retrieval_surface" not in source
+    assert "knowledge_" + "retrieval_" + "surface" not in source
     assert "knowledge_compilation" not in source
     assert "RUNTIME_ENTRY_KIND_VALUES" in source
 

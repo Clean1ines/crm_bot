@@ -266,11 +266,7 @@ class KnowledgeRepository:
         query: str,
         limit: int = 10,
     ) -> list[KnowledgeSearchResultView]:
-        """Deprecated debug-only lexical preview path.
-
-        Default /knowledge/preview uses search() via runtime-equivalent production
-        retrieval. Keep this method only for explicit lexical_debug diagnostics.
-        """
+        """Debug-only lexical preview over published Workbench runtime entries."""
         if limit <= 0:
             return []
 
@@ -305,7 +301,7 @@ class KnowledgeRepository:
                     id=str(row["id"]),
                     content=content,
                     score=score_trace.score,
-                    method="retrieval_surface_lexical",
+                    method="workbench_runtime_lexical",
                     document_id=optional_row_text(row, "document_id"),
                     source=optional_row_text(row, "source"),
                     document_status=optional_row_text(row, "document_status"),

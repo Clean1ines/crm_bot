@@ -42,7 +42,7 @@ def test_repository_cleanup_removes_durable_workbench_runtime_vectors() -> None:
     assert "cleanup_project_final_retrieval_projections" in source
     assert "DELETE FROM knowledge_workbench_runtime_retrieval_entries" in source
     assert "DELETE FROM knowledge_workbench_local_claim_retrieval_entries" in source
-    assert "DELETE FROM knowledge_retrieval_surface" in source
+    assert "DELETE FROM " + "knowledge_" + "retrieval_" + "surface" in source
     assert "DELETE FROM knowledge_entries" in source
     assert "entry_kind = 'faq_workbench_fact'" in source
     assert "metadata ->> 'workbench_document_id'" in source

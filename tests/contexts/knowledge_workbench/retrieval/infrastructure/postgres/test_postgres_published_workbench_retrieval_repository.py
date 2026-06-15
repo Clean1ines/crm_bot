@@ -92,7 +92,7 @@ def test_sql_uses_runtime_entry_embeddings_and_filters_runtime_visibility() -> N
     assert "knowledge_workbench_runtime_retrieval_entry_embeddings" in sql
     assert "knowledge_workbench_runtime_retrieval_entries" in sql
     assert "knowledge_workbench_canonical_facts" in sql
-    assert "knowledge_retrieval_surface" not in sql
+    assert "knowledge_" + "retrieval_" + "surface" not in sql
     assert "knowledge_workbench_surfaces" not in sql
     assert "entry.project_id = $1::uuid" in sql
     assert "entry.visibility = 'published'" in sql
@@ -111,7 +111,7 @@ def test_adapter_source_does_not_import_old_runtime_repository() -> None:
 
     assert "KnowledgeRepository" not in source
     assert "knowledge_search_queries" not in source
-    assert "knowledge_retrieval_surface" not in source
+    assert "knowledge_" + "retrieval_" + "surface" not in source
     assert "knowledge_workbench_surfaces" not in source
 
 

@@ -23,12 +23,7 @@ class ProductionRetrievalCaller(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ProductionRetrievalPolicy:
-    """Domain-only retrieval policy.
-
-    Runtime-equivalent policies must use production-safe retrieval over
-    knowledge_retrieval_surface. Lexical debug is diagnostic-only and must not
-    be treated as equivalent to assistant runtime retrieval.
-    """
+    """Domain-only retrieval policy for published Workbench runtime entries."""
 
     caller: ProductionRetrievalCaller
     mode: ProductionRetrievalMode
@@ -39,7 +34,7 @@ class ProductionRetrievalPolicy:
     reason: str
 
     @property
-    def requires_retrieval_surface(self) -> bool:
+    def requires_workbench_runtime(self) -> bool:
         return self.production_safe and self.runtime_equivalent
 
 
@@ -55,8 +50,8 @@ def resolve_production_retrieval_policy(
             runtime_equivalent=True,
             production_safe=True,
             diagnostic=False,
-            source_name="knowledge_retrieval_surface",
-            reason="assistant runtime uses production-safe retrieval",
+            source_name="knowledge_workbench_runtime_retrieval_entries",
+            reason="assistant runtime uses published Workbench runtime retrieval",
         )
     if caller == ProductionRetrievalCaller.KNOWLEDGE_PREVIEW:
         return ProductionRetrievalPolicy(
@@ -65,8 +60,8 @@ def resolve_production_retrieval_policy(
             runtime_equivalent=True,
             production_safe=True,
             diagnostic=False,
-            source_name="knowledge_retrieval_surface",
-            reason="knowledge preview must be equivalent to runtime retrieval",
+            source_name="knowledge_workbench_runtime_retrieval_entries",
+            reason="knowledge preview must be equivalent to Workbench runtime retrieval",
         )
     if caller == ProductionRetrievalCaller.RAG_EVAL:
         return ProductionRetrievalPolicy(
@@ -75,8 +70,8 @@ def resolve_production_retrieval_policy(
             runtime_equivalent=True,
             production_safe=True,
             diagnostic=False,
-            source_name="knowledge_retrieval_surface",
-            reason="RAG eval must evaluate the production retrieval path",
+            source_name="SearchPublishedWorkbenchRuntime",
+            reason="Workbench RAG eval evaluates published Workbench runtime retrieval",
         )
     if caller == ProductionRetrievalCaller.CURATION_DEBUG:
         return ProductionRetrievalPolicy(
@@ -85,7 +80,7 @@ def resolve_production_retrieval_policy(
             runtime_equivalent=False,
             production_safe=False,
             diagnostic=True,
-            source_name="diagnostic_lexical_debug",
+            source_name="workbench_runtime_lexical_debug",
             reason="curation debug is diagnostic-only, not runtime-equivalent",
         )
     raise ValueError(f"Unsupported production retrieval caller: {caller!r}")

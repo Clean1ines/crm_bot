@@ -43,7 +43,7 @@ class KnowledgeSearchTraceView:
     length_penalty: float = 0.0
     final_score: float = 0.0
     retrieval_surface_role: str = "runtime"
-    displayed_field: str = "answer"
+    displayed_field: str = "claim"
     is_production_safe: bool = True
 
 

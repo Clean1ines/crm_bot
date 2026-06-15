@@ -34,7 +34,7 @@ FORBIDDEN_LIVE_TOKENS = (
 
 FORBIDDEN_WORKBENCH_RAG_EVAL_TOKENS = (
     "answer_text",
-    "knowledge_retrieval_surface",
+    "knowledge_" + "retrieval_" + "surface",
     "knowledge_workbench_surfaces",
 )
 

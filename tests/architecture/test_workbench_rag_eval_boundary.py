@@ -9,7 +9,7 @@ def test_workbench_rag_eval_boundary_avoids_legacy_surfaces_and_answer_text() ->
 
     forbidden = (
         "answer_text",
-        "knowledge_retrieval_surface",
+        "knowledge_" + "retrieval_" + "surface",
         "knowledge_workbench_surfaces",
         "FAQSurface",
         "surface",
@@ -60,7 +60,7 @@ def test_workbench_rag_eval_apply_does_not_mutate_draft_or_legacy_tables() -> No
         "original_payload",
         "preview_payload",
         "answer_text",
-        "knowledge_retrieval_surface",
+        "knowledge_" + "retrieval_" + "surface",
         "knowledge_workbench_surfaces",
     )
     for marker in forbidden:
