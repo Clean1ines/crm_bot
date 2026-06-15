@@ -405,6 +405,22 @@ export type DraftClaimCurationItem = {
   updated_at?: string | null;
 };
 
+export type DraftClaimCurationPublicationResponse = {
+  status: string;
+  publication_id: string;
+  workflow_run_id: string;
+  project_id: string;
+  source_document_ref: string;
+  published_item_count: number;
+  excluded_item_count: number;
+  runtime_entry_count: number;
+  embedding_count: number;
+  deleted_draft_embedding_count: number;
+  automatic_processing_elapsed_seconds?: number | null;
+  published_at: string;
+};
+
+
 export type DraftClaimCurationWorkspaceResponse = {
   workspace: {
     workspace_ref: string;
@@ -930,6 +946,14 @@ export const knowledgeApi = {
   openCurationWorkspace: (projectId: string, workflowRunId: string) =>
     authedJsonRequest<DraftClaimCurationWorkspaceResponse>(
       `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/curation-workspace/open`,
+      {
+        method: 'POST',
+      },
+    ),
+
+  publishCurationWorkspace: (projectId: string, workflowRunId: string) =>
+    authedJsonRequest<DraftClaimCurationPublicationResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/curation-workspace/publish`,
       {
         method: 'POST',
       },

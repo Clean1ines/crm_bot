@@ -134,6 +134,13 @@ from src.contexts.knowledge_workbench.curation.application.use_cases.update_draf
     DraftClaimCurationItemUpdateError,
     UpdateDraftClaimCurationItem,
 )
+from src.contexts.knowledge_workbench.curation.application.use_cases.publish_draft_claim_curation_workspace import (
+    DraftClaimCurationPublicationAlreadyPublishedError,
+    DraftClaimCurationPublicationEmbeddingError,
+    DraftClaimCurationPublicationEmptyError,
+    DraftClaimCurationPublicationNotFoundError,
+    PublishDraftClaimCurationWorkspace,
+)
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import (
@@ -1080,6 +1087,81 @@ async def include_draft_claim_curation_item(
     except DraftClaimCurationItemExclusionError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"item": item.to_json_dict()}
+
+
+@router.post("/workflows/{workflow_run_id}/curation-workspace/publish")
+async def publish_draft_claim_curation_workspace(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    (
+        curation_repository,
+        _compaction_repository,
+        _draft_claim_repository,
+        _source_repository,
+        saga_state_repository,
+    ) = _curation_workspace_repositories(pool)
+    await _ensure_curation_workflow_project(
+        workflow_run_id=workflow_run_id,
+        project_id=project_id,
+        saga_state_repository=saga_state_repository,
+    )
+
+    from src.contexts.embedding_runtime.infrastructure.composition.embedding_generation_provider_factory import (
+        make_embedding_generation_port,
+    )
+    from src.contexts.embedding_runtime.infrastructure.config.embedding_runtime_settings import (
+        load_embedding_runtime_settings,
+    )
+    from src.contexts.knowledge_workbench.curation.infrastructure.postgres.postgres_draft_claim_curation_publication_repository import (
+        PostgresDraftClaimCurationPublicationRepository,
+    )
+
+    embedding_settings = load_embedding_runtime_settings()
+
+    try:
+        result = await PublishDraftClaimCurationWorkspace(
+            curation_workspace_repository=curation_repository,
+            curation_publication_repository=PostgresDraftClaimCurationPublicationRepository(
+                pool
+            ),
+            embedding_generation_port=make_embedding_generation_port(
+                embedding_settings
+            ),
+            embedding_model_id=embedding_settings.local_model,
+            embedding_dimensions=embedding_settings.vector_dimensions,
+        ).execute(
+            workflow_run_id=workflow_run_id,
+            published_at=datetime.now(timezone.utc),
+        )
+    except DraftClaimCurationPublicationNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Curation workspace not found"
+        ) from exc
+    except (
+        DraftClaimCurationPublicationAlreadyPublishedError,
+        DraftClaimCurationPublicationEmptyError,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DraftClaimCurationPublicationEmbeddingError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to generate publication embeddings",
+        ) from exc
+
+    return result.to_json_dict()
 
 
 @router.get("/{document_id}/workflow-live-state")

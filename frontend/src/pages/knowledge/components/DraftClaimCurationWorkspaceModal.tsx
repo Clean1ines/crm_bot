@@ -219,6 +219,25 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
     },
   });
 
+  const publishMutation = useMutation({
+    mutationFn: async () => {
+      const { data } = await knowledgeApi.publishCurationWorkspace(
+        projectId,
+        workflowRunId,
+      );
+      return data;
+    },
+    onSuccess: async (result) => {
+      toast.success(
+        `Опубликовано знаний: ${formatNumber(result.published_item_count)}, embeddings: ${formatNumber(result.embedding_count)}, удалено черновых embeddings: ${formatNumber(result.deleted_draft_embedding_count)}`,
+      );
+      await refreshWorkspace();
+    },
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error, 'Не удалось опубликовать curated claims'));
+    },
+  });
+
   const includeMutation = useMutation({
     mutationFn: async (item: DraftClaimCurationItem) => {
       await knowledgeApi.includeCurationItem(projectId, workflowRunId, item.item_ref);
@@ -236,7 +255,15 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
   const excludedCount = items.filter((item) => item.excluded).length;
   const publishableCount = itemCount - excludedCount;
   const isMutating =
-    saveMutation.isPending || excludeMutation.isPending || includeMutation.isPending;
+    saveMutation.isPending ||
+    excludeMutation.isPending ||
+    includeMutation.isPending ||
+    publishMutation.isPending;
+  const publishDisabled =
+    !workspace ||
+    workspace.workspace.status === 'published' ||
+    publishableCount <= 0 ||
+    publishMutation.isPending;
 
   return (
     <BaseModal
@@ -272,11 +299,18 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
           )}
           <button
             type="button"
-            disabled
-            title="Публикация будет подключена следующим шагом"
-            className="mt-3 rounded-lg bg-[var(--control-bg)] px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] opacity-60"
+            disabled={publishDisabled}
+            title={
+              workspace?.workspace.status === 'published'
+                ? 'Workspace уже опубликован'
+                : publishableCount <= 0
+                  ? 'Нет знаний для публикации'
+                  : 'Опубликовать curated compacted claims в runtime retrieval'
+            }
+            onClick={() => publishMutation.mutate()}
+            className="mt-3 rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-medium text-white disabled:bg-[var(--control-bg)] disabled:text-[var(--text-muted)] disabled:opacity-60"
           >
-            Опубликовать
+            {publishMutation.isPending ? 'Публикуем…' : 'Опубликовать'}
           </button>
         </div>
 
