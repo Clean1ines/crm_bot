@@ -37,7 +37,6 @@ def _row(
         "project_id": project_id,
         "fact_id": "fact-1",
         "claim": "Published compacted claim",
-        "answer_text": "Published compacted claim",
         "possible_questions": ["Question one?", "Question two?"],
         "embedding_text": "Claim:\\nPublished compacted claim",
         "source_refs": {
@@ -114,3 +113,10 @@ def test_adapter_source_does_not_import_old_runtime_repository() -> None:
     assert "knowledge_search_queries" not in source
     assert "knowledge_retrieval_surface" not in source
     assert "knowledge_workbench_surfaces" not in source
+
+
+def test_published_workbench_result_does_not_expose_answer_text() -> None:
+    sql = PUBLISHED_WORKBENCH_VECTOR_SEARCH_SQL
+
+    assert "entry.answer_text" not in sql
+    assert " answer_text" not in sql

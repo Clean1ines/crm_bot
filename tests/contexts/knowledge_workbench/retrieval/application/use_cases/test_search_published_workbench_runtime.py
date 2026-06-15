@@ -71,7 +71,6 @@ class FakeRetrievalPort:
                 fact_id="fact-1",
                 curation_item_ref="item-1",
                 claim="Published claim",
-                answer_text="Published claim",
                 possible_questions=("Question?",),
                 exclusion_scope="",
                 evidence_block=None,

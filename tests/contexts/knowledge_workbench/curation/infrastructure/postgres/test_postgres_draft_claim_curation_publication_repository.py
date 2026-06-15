@@ -28,3 +28,16 @@ def test_postgres_publication_repository_persists_runtime_then_deletes_draft_emb
     assert "editable_payload" not in source
     assert "original_payload" not in source
     assert "preview_payload" not in source
+
+
+def test_publish_repository_uses_answer_text_only_as_deprecated_db_compatibility() -> (
+    None
+):
+    source = Path(
+        "src/contexts/knowledge_workbench/curation/infrastructure/postgres/"
+        "postgres_draft_claim_curation_publication_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "answer_text is a deprecated runtime table compatibility column" in source
+    assert "answer_text, embedding_text" in source
+    assert "answer_text = EXCLUDED.answer_text" in source

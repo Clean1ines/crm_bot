@@ -249,6 +249,8 @@ async def _upsert_runtime_entry(
     publication: DraftClaimCurationPublicationCandidate,
     item: DraftClaimCurationPublicationItem,
 ) -> None:
+    # answer_text is a deprecated runtime table compatibility column.
+    # Published Workbench retrieval uses claim + embedding_text as semantic units.
     await connection.execute(
         """
         INSERT INTO knowledge_workbench_runtime_retrieval_entries (

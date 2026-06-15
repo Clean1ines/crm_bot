@@ -69,7 +69,6 @@ class PublishedWorkbenchRetrievalResult:
     fact_id: str
     curation_item_ref: str | None
     claim: str
-    answer_text: str
     possible_questions: tuple[str, ...]
     exclusion_scope: str | None
     evidence_block: str | None
@@ -87,7 +86,6 @@ class PublishedWorkbenchRetrievalResult:
         _require_text(self.fact_id, "fact_id")
         _require_optional_text(self.curation_item_ref, "curation_item_ref")
         _require_text(self.claim, "claim")
-        _require_text(self.answer_text, "answer_text")
         _require_text_tuple(self.possible_questions, "possible_questions")
         _require_optional_text(self.exclusion_scope, "exclusion_scope")
         _require_optional_text(self.evidence_block, "evidence_block")

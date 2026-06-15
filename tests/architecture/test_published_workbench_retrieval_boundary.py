@@ -37,3 +37,12 @@ def test_published_workbench_retrieval_uses_embedding_generation_port_only() -> 
     assert "EmbeddingGenerationPort" in source
     assert "EmbeddingGenerationRequest" in source
     assert 'task="retrieval.query"' in source
+
+
+def test_published_workbench_retrieval_model_has_no_answer_text_semantics() -> None:
+    source = Path(
+        "src/contexts/knowledge_workbench/retrieval/application/models/"
+        "published_workbench_retrieval.py"
+    ).read_text(encoding="utf-8")
+
+    assert "answer_text" not in source
