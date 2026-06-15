@@ -1,10 +1,7 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-
 import pytest
-
 from src.contexts.llm_runtime.application.policies.llm_route_planning_policy import (
     LlmRouteCandidate,
 )
@@ -55,11 +52,7 @@ class FakeProvider:
     result: LlmProviderResult
 
     def invoke(
-        self,
-        *,
-        task: LlmTask,
-        route: LlmRoute,
-        provider_input: LlmProviderInput,
+        self, *, task: LlmTask, route: LlmRoute, provider_input: LlmProviderInput
     ) -> LlmProviderResult:
         assert task.status is LlmTaskStatus.RUNNING
         assert task.selected_route == route
@@ -69,6 +62,8 @@ class FakeProvider:
 
 @dataclass(slots=True)
 class FakeLlmTaskUnitOfWork:
+    committed: bool = False
+    rolled_back: bool = False
     saved_tasks: list[LlmTask] = field(default_factory=list)
     saved_attempts: list[LlmAttempt] = field(default_factory=list)
     appended_events: list[LlmTaskEvent] = field(default_factory=list)
@@ -114,8 +109,8 @@ def _candidate(
     *,
     model: str = "model-1",
     account: str = "account-1",
-    context_window_tokens: int = 8_000,
-    max_output_tokens: int = 2_000,
+    context_window_tokens: int = 8000,
+    max_output_tokens: int = 2000,
     model_rank: int = 0,
     account_rank: int = 0,
 ) -> LlmRouteCandidate:
@@ -142,10 +137,9 @@ def _provider_input() -> LlmProviderInput:
     return LlmProviderInput(
         messages=(
             LlmProviderMessage(
-                role=LlmProviderMessageRole.USER,
-                content="Return JSON.",
+                role=LlmProviderMessageRole.USER, content="Return JSON."
             ),
-        ),
+        )
     )
 
 
@@ -172,13 +166,11 @@ def test_execute_and_record_success_commits_task_attempt_and_success_event() -> 
             LlmProviderSuccess(
                 raw_text='{"ok": true}',
                 usage=TokenUsage(input_tokens=10, output_tokens=5),
-            ),
+            )
         ),
-        repository=unit_of_work,
+        unit_of_work=unit_of_work,
     )
-
     outcome = use_case.execute(_command())
-
     assert outcome.kind is ExecuteLlmTaskOutcomeKind.SUCCEEDED
     assert unit_of_work.committed
     assert not unit_of_work.rolled_back
@@ -199,29 +191,19 @@ def test_execute_and_record_route_change_commits_retryable_task_and_failed_event
     None
 ):
     current = _candidate(
-        model="model-1",
-        account="account-1",
-        context_window_tokens=8_000,
-        model_rank=0,
+        model="model-1", account="account-1", context_window_tokens=8000, model_rank=0
     )
     larger = _candidate(
-        model="model-2",
-        account="account-1",
-        context_window_tokens=32_000,
-        model_rank=1,
+        model="model-2", account="account-1", context_window_tokens=32000, model_rank=1
     )
     unit_of_work = FakeLlmTaskUnitOfWork()
     use_case = ExecuteAndRecordLlmTask(
         provider=FakeProvider(
-            LlmProviderFailure(error_kind=LlmErrorKind.REQUEST_TOO_LARGE),
+            LlmProviderFailure(error_kind=LlmErrorKind.REQUEST_TOO_LARGE)
         ),
-        repository=unit_of_work,
+        unit_of_work=unit_of_work,
     )
-
-    outcome = use_case.execute(
-        _command(candidates=(current, larger)),
-    )
-
+    outcome = use_case.execute(_command(candidates=(current, larger)))
     assert outcome.kind is ExecuteLlmTaskOutcomeKind.ROUTE_CHANGE_REQUIRED
     assert outcome.route == larger.route
     assert unit_of_work.saved_tasks[0].status is LlmTaskStatus.RETRYABLE_FAILED
@@ -232,15 +214,11 @@ def test_execute_and_record_route_change_commits_retryable_task_and_failed_event
 def test_execute_and_record_rolls_back_when_recording_fails() -> None:
     unit_of_work = FakeLlmTaskUnitOfWork(fail_on_commit=True)
     use_case = ExecuteAndRecordLlmTask(
-        provider=FakeProvider(
-            LlmProviderSuccess(raw_text="ok"),
-        ),
-        repository=unit_of_work,
+        provider=FakeProvider(LlmProviderSuccess(raw_text="ok")),
+        unit_of_work=unit_of_work,
     )
-
     with pytest.raises(RuntimeError, match="commit failed"):
         use_case.execute(_command())
-
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back
     assert unit_of_work.actions == [
@@ -265,7 +243,6 @@ def test_execute_and_record_command_requires_timestamps() -> None:
             finished_at=_now(),
             occurred_at=_now(),
         )
-
     with pytest.raises(ValueError):
         ExecuteAndRecordLlmTaskCommand(
             task=_task(),

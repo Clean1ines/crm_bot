@@ -508,7 +508,7 @@ def test_source_guard() -> None:
         "knowledge_workbench_processing_runs",
         "SectionBatchQueueItem",
         "workbench_parallel_processing",
-        "process_workbench_document",
+        "process_" + "workbench_document",
         "RunClaimExtractionStageAsync",
         "RecordClaimExtractionSuccess",
         "ProcessClaimExtractionWorkItem",

@@ -6,7 +6,7 @@ from datetime import datetime
 class SourceRefView:
     source_index: int | None = None
     quote: str = ""
-    source_chunk_id: str | None = None
+    source_unit_ref: str | None = None
     start_offset: int | None = None
     end_offset: int | None = None
     confidence: float | None = None
@@ -15,8 +15,8 @@ class SourceRefView:
         payload: dict[str, object] = {"quote": self.quote}
         if self.source_index is not None:
             payload["source_index"] = self.source_index
-        if self.source_chunk_id is not None:
-            payload["source_chunk_id"] = self.source_chunk_id
+        if self.source_unit_ref is not None:
+            payload["source_unit_ref"] = self.source_unit_ref
         if self.start_offset is not None:
             payload["start_offset"] = self.start_offset
         if self.end_offset is not None:
@@ -77,15 +77,12 @@ class KnowledgeDocumentView:
     uploaded_by: str | None
     created_at: datetime | str | None
     updated_at: datetime | str | None
-    chunk_count: int
     preprocessing_mode: str | None = None
     preprocessing_status: str | None = None
     preprocessing_error: str | None = None
     preprocessing_model: str | None = None
     preprocessing_prompt_version: str | None = None
     preprocessing_metrics: object | None = None
-    structured_entries: int = 0
-    structured_chunk_count: int = 0
     source_unit_count: int = 0
     draft_claim_count: int = 0
     draft_claim_embedding_count: int = 0
@@ -111,15 +108,12 @@ class KnowledgeDocumentDetailView:
     uploaded_by: str | None
     created_at: datetime | str | None
     updated_at: datetime | str | None
-    chunk_count: int
     preprocessing_mode: str | None = None
     preprocessing_status: str | None = None
     preprocessing_error: str | None = None
     preprocessing_model: str | None = None
     preprocessing_prompt_version: str | None = None
     preprocessing_metrics: object | None = None
-    structured_entries: int = 0
-    structured_chunk_count: int = 0
     source_unit_count: int = 0
     draft_claim_count: int = 0
     draft_claim_embedding_count: int = 0
@@ -132,34 +126,3 @@ class KnowledgeDocumentDetailView:
     llm_tokens_total: int = 0
     llm_usage_events_count: int = 0
     llm_models: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeCompilerBatchView:
-    id: str
-    compiler_run_id: str
-    batch_index: int
-    batch_count: int
-    status: str
-    source_chunk_ids: object
-    source_chunk_indexes: object
-    attempt_count: int = 0
-    model: str = ""
-    prompt_version: str = ""
-    tokens_input: int = 0
-    tokens_output: int = 0
-    tokens_total: int = 0
-    error_type: str = ""
-    error_message: str = ""
-    started_at: datetime | str | None = None
-    finished_at: datetime | str | None = None
-    updated_at: datetime | str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class KnowledgeAnswerCandidateSummaryView:
-    total_count: int = 0
-    raw_count: int = 0
-    final_count: int = 0
-    rejected_count: int = 0
-    grounded_count: int = 0

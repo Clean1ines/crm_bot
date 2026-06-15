@@ -1,10 +1,7 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-
 import pytest
-
 from src.contexts.llm_runtime.application.ports.llm_task_unit_of_work_port import (
     LlmTaskEvent,
 )
@@ -31,6 +28,8 @@ from src.contexts.llm_runtime.domain.value_objects.token_usage import TokenUsage
 
 @dataclass(slots=True)
 class FakeLlmTaskUnitOfWork:
+    committed: bool = False
+    rolled_back: bool = False
     saved_tasks: list[LlmTask] = field(default_factory=list)
     saved_attempts: list[LlmAttempt] = field(default_factory=list)
     appended_events: list[LlmTaskEvent] = field(default_factory=list)
@@ -99,15 +98,9 @@ def test_record_llm_task_execution_commits_task_attempt_and_events_atomically() 
     task = _task()
     attempt = _attempt()
     event = LlmTaskSucceeded(task_id=task.task_id, occurred_at=_now())
-
-    RecordLlmTaskExecution(repository=unit_of_work).execute(
-        RecordLlmTaskExecutionCommand(
-            task=task,
-            attempt=attempt,
-            events=(event,),
-        ),
+    RecordLlmTaskExecution(unit_of_work=unit_of_work).execute(
+        RecordLlmTaskExecutionCommand(task=task, attempt=attempt, events=(event,))
     )
-
     assert unit_of_work.saved_tasks == [task]
     assert unit_of_work.saved_attempts == [attempt]
     assert unit_of_work.appended_events == [event]
@@ -124,11 +117,9 @@ def test_record_llm_task_execution_commits_task_attempt_and_events_atomically() 
 def test_record_llm_task_execution_can_commit_task_without_attempt_or_events() -> None:
     unit_of_work = FakeLlmTaskUnitOfWork()
     task = _task()
-
-    RecordLlmTaskExecution(repository=unit_of_work).execute(
-        RecordLlmTaskExecutionCommand(task=task),
+    RecordLlmTaskExecution(unit_of_work=unit_of_work).execute(
+        RecordLlmTaskExecutionCommand(task=task)
     )
-
     assert unit_of_work.saved_tasks == [task]
     assert unit_of_work.saved_attempts == []
     assert unit_of_work.appended_events == []
@@ -138,20 +129,10 @@ def test_record_llm_task_execution_can_commit_task_without_attempt_or_events() -
 
 def test_record_llm_task_execution_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeLlmTaskUnitOfWork(fail_on_commit=True)
-
     with pytest.raises(RuntimeError, match="commit failed"):
-        RecordLlmTaskExecution(repository=unit_of_work).execute(
-            RecordLlmTaskExecutionCommand(
-                task=_task(),
-                attempt=_attempt(),
-            ),
+        RecordLlmTaskExecution(unit_of_work=unit_of_work).execute(
+            RecordLlmTaskExecutionCommand(task=_task(), attempt=_attempt())
         )
-
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back
-    assert unit_of_work.actions == [
-        "save_task",
-        "save_attempt",
-        "commit",
-        "rollback",
-    ]
+    assert unit_of_work.actions == ["save_task", "save_attempt", "commit", "rollback"]

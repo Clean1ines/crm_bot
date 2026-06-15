@@ -239,7 +239,6 @@ def _document_view_from_row(row: asyncpg.Record) -> KnowledgeDocumentView:
         uploaded_by=_optional_text(row["uploaded_by"]),
         created_at=normalize_timestamp(row["created_at"]),
         updated_at=normalize_timestamp(row["updated_at"]),
-        chunk_count=source_unit_count,
         preprocessing_mode=_optional_text(row["preprocessing_mode"]),
         preprocessing_status=_optional_text(row["preprocessing_status"]),
         preprocessing_error=_optional_text(row["preprocessing_error"]),
@@ -248,8 +247,6 @@ def _document_view_from_row(row: asyncpg.Record) -> KnowledgeDocumentView:
             row["preprocessing_prompt_version"]
         ),
         preprocessing_metrics=row["preprocessing_metrics"],
-        structured_entries=runtime_entry_count,
-        structured_chunk_count=runtime_embedding_count,
         source_unit_count=source_unit_count,
         draft_claim_count=_row_int(row, "draft_claim_count"),
         draft_claim_embedding_count=_row_int(row, "draft_claim_embedding_count"),
@@ -280,7 +277,6 @@ def _document_detail_view_from_row(row: asyncpg.Record) -> KnowledgeDocumentDeta
         uploaded_by=_optional_text(row["uploaded_by"]),
         created_at=normalize_timestamp(row["created_at"]),
         updated_at=normalize_timestamp(row["updated_at"]),
-        chunk_count=source_unit_count,
         preprocessing_mode=_optional_text(row["preprocessing_mode"]),
         preprocessing_status=_optional_text(row["preprocessing_status"]),
         preprocessing_error=_optional_text(row["preprocessing_error"]),
@@ -289,8 +285,6 @@ def _document_detail_view_from_row(row: asyncpg.Record) -> KnowledgeDocumentDeta
             row["preprocessing_prompt_version"]
         ),
         preprocessing_metrics=row["preprocessing_metrics"],
-        structured_entries=runtime_entry_count,
-        structured_chunk_count=runtime_embedding_count,
         source_unit_count=source_unit_count,
         draft_claim_count=_row_int(row, "draft_claim_count"),
         draft_claim_embedding_count=_row_int(row, "draft_claim_embedding_count"),

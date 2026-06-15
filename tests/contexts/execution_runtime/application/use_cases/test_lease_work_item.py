@@ -1,10 +1,7 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-
 import pytest
-
 from src.contexts.execution_runtime.application.ports.work_item_unit_of_work_port import (
     WorkItemEvent,
 )
@@ -27,6 +24,8 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 
 @dataclass(slots=True)
 class FakeWorkItemUnitOfWork:
+    committed: bool = False
+    rolled_back: bool = False
     saved_items: list[WorkItem] = field(default_factory=list)
     saved_attempts: list[WorkItemAttempt] = field(default_factory=list)
     appended_events: list[WorkItemEvent] = field(default_factory=list)
@@ -81,23 +80,18 @@ def _command(item: WorkItem | None = None) -> LeaseWorkItemCommand:
 
 def test_lease_work_item_commits_item_attempt_and_event() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
-
-    result = LeaseWorkItem(repository=unit_of_work).execute(_command())
-
+    result = LeaseWorkItem(unit_of_work=unit_of_work).execute(_command())
     assert result.item.status is WorkItemStatus.LEASED
     assert result.item.attempt_count == 1
     assert result.item.leased_by == WorkerRef("worker-1")
     assert result.item.lease_token == LeaseToken("lease-1")
-
     assert result.attempt.attempt_id == "attempt-1"
     assert result.attempt.work_item_id == "work-1"
     assert result.attempt.attempt_number == 1
     assert result.attempt.started_at == _now()
-
     assert isinstance(result.event, WorkItemLeased)
     assert result.event.work_item_id == "work-1"
     assert result.event.worker_ref == "worker-1"
-
     assert unit_of_work.saved_items == [result.item]
     assert unit_of_work.saved_attempts == [result.attempt]
     assert unit_of_work.appended_events == [result.event]
@@ -113,10 +107,8 @@ def test_lease_work_item_commits_item_attempt_and_event() -> None:
 
 def test_lease_work_item_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeWorkItemUnitOfWork(fail_on_commit=True)
-
     with pytest.raises(RuntimeError, match="commit failed"):
-        LeaseWorkItem(repository=unit_of_work).execute(_command())
-
+        LeaseWorkItem(unit_of_work=unit_of_work).execute(_command())
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back
     assert unit_of_work.actions == [
@@ -130,7 +122,6 @@ def test_lease_work_item_rolls_back_when_commit_fails() -> None:
 
 def test_lease_work_item_command_requires_valid_timestamps_and_attempt_id() -> None:
     now = _now()
-
     with pytest.raises(ValueError):
         LeaseWorkItemCommand(
             item=_ready_item(),
@@ -140,7 +131,6 @@ def test_lease_work_item_command_requires_valid_timestamps_and_attempt_id() -> N
             now=datetime(2026, 6, 8, 12, 0),
             attempt_id="attempt-1",
         )
-
     with pytest.raises(ValueError):
         LeaseWorkItemCommand(
             item=_ready_item(),
@@ -150,7 +140,6 @@ def test_lease_work_item_command_requires_valid_timestamps_and_attempt_id() -> N
             now=now,
             attempt_id="attempt-1",
         )
-
     with pytest.raises(ValueError):
         LeaseWorkItemCommand(
             item=_ready_item(),

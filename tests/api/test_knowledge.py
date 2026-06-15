@@ -768,7 +768,7 @@ def test_upload_boundary_has_no_legacy_patch_points() -> None:
     forbidden = (
         "src.interfaces.composition.knowledge_upload",
         "upload_knowledge_file",
-        "upload_faq_workbench_knowledge_file",
+        "upload_faq_" + "workbench_knowledge_file",
         "KnowledgeService(",
         "process_knowledge_upload",
         "TASK_PROCESS_KNOWLEDGE_UPLOAD",

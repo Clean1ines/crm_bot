@@ -10,7 +10,7 @@ FORBIDDEN_LIVE_PATHS = (
     Path("src/application/rag_eval"),
     Path("src/interfaces/http/rag_eval.py"),
     Path("src/infrastructure/db/repositories/rag_eval_repository.py"),
-    Path("src/infrastructure/rag_eval"),
+    Path("src/infrastructure/" + "rag_eval"),
     Path("src/interfaces/composition/rag_eval_answerer.py"),
     Path("tests/application/rag_eval"),
     Path("tests/application/rag_eval"),

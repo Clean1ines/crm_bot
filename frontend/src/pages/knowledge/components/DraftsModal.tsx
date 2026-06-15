@@ -25,7 +25,7 @@ const draftSearchText = (draft: KnowledgeAnswerDraft): string => [
 
 const draftSourceChunkIndexes = (draft: KnowledgeAnswerDraft): number[] => {
   const indexes = new Set<number>();
-  for (const index of draft.source_chunk_indexes) {
+  for (const index of draft.source_unit_indexes) {
     indexes.add(index);
   }
   for (const ref of draft.source_refs) {
@@ -168,11 +168,11 @@ export const DraftsModal: React.FC<{
                         <DraftDetailRow label={t('knowledge.drafts.fields.sources')}>
                           <div className="space-y-2">
                             {draft.source_refs.map((ref, index) => (
-                              <div key={`${draft.id}-${index}-${ref.source_chunk_id || ref.source_index || 'source'}`} className="rounded-lg bg-[var(--control-bg)] p-2">
+                              <div key={`${draft.id}-${index}-${ref.source_unit_ref || ref.source_index || 'source'}`} className="rounded-lg bg-[var(--control-bg)] p-2">
                                 <div className="whitespace-pre-wrap">{ref.quote}</div>
                                 <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
                                   {isDebugMode && typeof ref.source_index === 'number' && <span>chunk {ref.source_index}</span>}
-                                  {isDebugMode && ref.source_chunk_id && <span>{ref.source_chunk_id}</span>}
+                                  {isDebugMode && ref.source_unit_ref && <span>{ref.source_unit_ref}</span>}
                                   {typeof ref.confidence === 'number' && <span>{formatPreviewScore(ref.confidence)}</span>}
                                 </div>
                               </div>
@@ -188,7 +188,7 @@ export const DraftsModal: React.FC<{
                             {draft.rejection_reason && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">reason: {draft.rejection_reason}</span>}
                             {isDebugMode && draft.batch_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">batch_index: {draft.batch_index}</span>}
                             {isDebugMode && draft.fragment_index !== null && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">fragment_index: {draft.fragment_index}</span>}
-                            {isDebugMode && sourceChunkIndexes.length > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">source_chunk_indexes: {sourceChunkIndexes.join(', ')}</span>}
+                            {isDebugMode && sourceChunkIndexes.length > 0 && <span className="rounded-full bg-[var(--control-bg)] px-2 py-1">source_unit_indexes: {sourceChunkIndexes.join(', ')}</span>}
                           </div>
                         </DraftDetailRow>
                       )}

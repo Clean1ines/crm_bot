@@ -11,7 +11,6 @@ This module wires the concrete application:
 Infrastructure modules must stay generic and must not import src.agent.
 """
 
-from typing import cast
 from contextlib import asynccontextmanager
 
 import asyncpg
@@ -62,12 +61,9 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     This belongs to composition, not infrastructure, because it wires DB-backed
     adapters, LLM services, and the process-wide tool registry together.
     """
-    from src.application.ports.knowledge.runtime_search import (
-        KnowledgeRuntimeRetrievalPort,
-    )
     from src.infrastructure.llm.rag_service import RAGService
-    from src.infrastructure.db.workbench_runtime_retrieval_repository import (
-        WorkbenchRuntimeRetrievalRepository,
+    from src.infrastructure.db.repositories.knowledge_repository import (
+        KnowledgeRepository,
     )
     from src.tools.builtins import (
         CRMCollectProfileTool,
@@ -81,16 +77,14 @@ def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
     )
     from src.tools.http_tool import HTTPTool
 
-    runtime_retrieval = WorkbenchRuntimeRetrievalRepository(db_pool)
     commercial_price_repo = CommercialPriceRepository(db_pool)
     thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
     queue_repo = QueueRepository(db_pool)
     project_tokens = ProjectTokenRepository(db_pool)
     project_members = ProjectMemberRepository(db_pool)
+    runtime_retrieval = KnowledgeRepository(db_pool)
 
-    rag_service = RAGService(
-        cast(KnowledgeRuntimeRetrievalPort, runtime_retrieval),
-    )
+    rag_service = RAGService(runtime_retrieval)
 
     tool_registry.register(SearchKnowledgeTool(rag_service))
     logger.info("Registered SearchKnowledgeTool")

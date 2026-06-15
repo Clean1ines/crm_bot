@@ -462,11 +462,11 @@ export type KnowledgeAnswerDraft = {
   question_variants: string[];
   synonyms: string[];
   tags: string[];
-  source_chunk_indexes: number[];
+  source_unit_indexes: number[];
   source_refs: Array<{
     quote: string;
     source_index?: number;
-    source_chunk_id?: string;
+    source_unit_ref?: string;
     start_offset?: number;
     end_offset?: number;
     confidence?: number;
@@ -710,7 +710,7 @@ export interface WorkbenchEvidenceTraceFinding {
   variants: unknown[];
   evidence_quotes: unknown[];
   source_refs: unknown[];
-  source_chunk_indexes: unknown[];
+  source_unit_indexes: unknown[];
   confidence?: number | null;
   reason?: string | null;
   granularity?: string | null;
@@ -734,7 +734,7 @@ export interface WorkbenchEvidenceTraceCanonicalFact {
   evidence_quotes: unknown[];
   source_refs: unknown[];
   source_section_ids: unknown[];
-  source_chunk_indexes: unknown[];
+  source_unit_indexes: unknown[];
   status: string;
   updated_at?: string | null;
 }
@@ -766,7 +766,7 @@ export interface WorkbenchEvidenceTraceSourceUnit {
   title: string;
   status: string;
   source_refs: unknown[];
-  source_chunk_indexes: unknown[];
+  source_unit_indexes: unknown[];
   metadata: Record<string, unknown>;
   text_excerpt: string;
   raw_text_excerpt: string;
@@ -857,91 +857,6 @@ export const knowledgeApi = {
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
       method: 'POST',
     }),
-
-  evidenceTrace: (projectId: string, documentId: string) =>
-    authedJsonRequest<WorkbenchEvidenceTraceResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}/evidence-trace`,
-      {
-        method: 'GET',
-      },
-    ),
-
-  approveSurface: (projectId: string, documentId: string, surfaceId: string) =>
-    authedJsonRequest<SurfaceCurationMutationResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}/surfaces/${surfaceId}/approve`,
-      {
-        method: 'POST',
-      },
-    ),
-
-  rejectSurface: (
-    projectId: string,
-    documentId: string,
-    surfaceId: string,
-    payload: SurfaceRejectRequest,
-  ) =>
-    authedJsonRequest<SurfaceCurationMutationResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}/surfaces/${surfaceId}/reject`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    ),
-
-  editSurface: (
-    projectId: string,
-    documentId: string,
-    surfaceId: string,
-    payload: SurfaceEditRequest,
-  ) =>
-    authedJsonRequest<SurfaceCurationMutationResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}/surfaces/${surfaceId}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify(payload),
-      },
-    ),
-
-  mergeFacts: (
-    projectId: string,
-    documentId: string,
-    targetFactId: string,
-    payload: SurfaceMergeFactsRequest,
-  ) =>
-    authedJsonRequest<SurfaceCurationMutationResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}/facts/${targetFactId}/merge`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    ),
-
-  deleteFact: (
-    projectId: string,
-    documentId: string,
-    factId: string,
-    payload: SurfaceDeleteFactRequest,
-  ) =>
-    authedJsonRequest<SurfaceCurationMutationResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}/facts/${factId}`,
-      {
-        method: 'DELETE',
-        body: JSON.stringify(payload),
-      },
-    ),
-
-  publishSelectedSurfaces: (
-    projectId: string,
-    documentId: string,
-    payload: SurfacePublishSelectedRequest,
-  ) =>
-    authedJsonRequest<SurfaceCurationMutationResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}/surfaces/publish-selected`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    ),
 
   openCurationWorkspace: (projectId: string, workflowRunId: string) =>
     authedJsonRequest<DraftClaimCurationWorkspaceResponse>(

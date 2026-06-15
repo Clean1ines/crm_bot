@@ -77,9 +77,6 @@ async def test_document_list_uses_workbench_counters_for_legacy_transport_fields
         project_id="22222222-2222-2222-2222-222222222222",
     )
 
-    assert documents[0].chunk_count == 7
-    assert documents[0].structured_entries == 6
-    assert documents[0].structured_chunk_count == 5
     assert documents[0].source_unit_count == 7
     assert documents[0].draft_claim_count == 11
     assert documents[0].draft_claim_embedding_count == 10
@@ -108,9 +105,8 @@ async def test_document_detail_uses_workbench_runtime_embedding_count() -> None:
     )
 
     assert document is not None
-    assert document.chunk_count == 7
-    assert document.structured_entries == 6
-    assert document.structured_chunk_count == 5
+    assert document.source_unit_count == 7
+    assert document.runtime_entry_count == 6
     assert document.runtime_embedding_count == 5
 
     query = _combined_queries(connection.queries)

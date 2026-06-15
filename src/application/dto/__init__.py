@@ -20,7 +20,6 @@ _EXPORT_MODULES: dict[str, str] = {
     "TelegramAdminProjectsDto": "src.application.dto.control_plane_dto",
     "UserProfileDto": "src.application.dto.auth_dto",
     "WebhookAckDto": "src.application.dto.webhook_dto",
-    "WorkbenchProcessDocumentJobPayloadDto": "src.application.workbench.dto",
 }
 
 

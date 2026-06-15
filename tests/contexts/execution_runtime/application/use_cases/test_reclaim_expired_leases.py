@@ -1,10 +1,7 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-
 import pytest
-
 from src.contexts.execution_runtime.application.ports.work_item_unit_of_work_port import (
     WorkItemEvent,
 )
@@ -32,6 +29,8 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 
 @dataclass(slots=True)
 class FakeWorkItemUnitOfWork:
+    committed: bool = False
+    rolled_back: bool = False
     saved_items: list[WorkItem] = field(default_factory=list)
     saved_attempts: list[WorkItemAttempt] = field(default_factory=list)
     appended_events: list[WorkItemEvent] = field(default_factory=list)
@@ -90,22 +89,17 @@ def _leased_item(
 def test_reclaim_expired_leases_commits_only_expired_leased_items() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
     expired = _leased_item(
-        work_item_id="expired-work",
-        lease_expires_delta=timedelta(seconds=30),
+        work_item_id="expired-work", lease_expires_delta=timedelta(seconds=30)
     )
     active = _leased_item(
-        work_item_id="active-work",
-        lease_expires_delta=timedelta(seconds=90),
+        work_item_id="active-work", lease_expires_delta=timedelta(seconds=90)
     )
     ready = _ready_item("ready-work")
-
-    result = ReclaimExpiredLeases(repository=unit_of_work).execute(
+    result = ReclaimExpiredLeases(unit_of_work=unit_of_work).execute(
         ReclaimExpiredLeasesCommand(
-            items=(expired, active, ready),
-            now=_now() + timedelta(seconds=30),
-        ),
+            items=(expired, active, ready), now=_now() + timedelta(seconds=30)
+        )
     )
-
     assert result.reclaimed_count == 1
     assert result.reclaimed_items[0].work_item_id == "expired-work"
     assert result.reclaimed_items[0].status is WorkItemStatus.READY
@@ -113,37 +107,28 @@ def test_reclaim_expired_leases_commits_only_expired_leased_items() -> None:
     assert result.reclaimed_items[0].leased_by is None
     assert result.reclaimed_items[0].lease_token is None
     assert result.reclaimed_items[0].lease_expires_at is None
-
     assert len(result.events) == 1
     assert isinstance(result.events[0], WorkItemLeaseExpired)
     assert result.events[0].work_item_id == "expired-work"
     assert result.events[0].previous_worker_ref == "worker-1"
-
     assert unit_of_work.saved_items == [result.reclaimed_items[0]]
     assert unit_of_work.appended_events == [result.events[0]]
     assert unit_of_work.committed
     assert not unit_of_work.rolled_back
-    assert unit_of_work.actions == [
-        "save_work_item",
-        "append_event",
-        "commit",
-    ]
+    assert unit_of_work.actions == ["save_work_item", "append_event", "commit"]
 
 
 def test_reclaim_expired_leases_does_not_commit_when_nothing_changed() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
     active = _leased_item(
-        work_item_id="active-work",
-        lease_expires_delta=timedelta(seconds=90),
+        work_item_id="active-work", lease_expires_delta=timedelta(seconds=90)
     )
-
-    result = ReclaimExpiredLeases(repository=unit_of_work).execute(
+    result = ReclaimExpiredLeases(unit_of_work=unit_of_work).execute(
         ReclaimExpiredLeasesCommand(
             items=(active, _ready_item("ready-work")),
             now=_now() + timedelta(seconds=30),
-        ),
+        )
     )
-
     assert result.reclaimed_count == 0
     assert result.reclaimed_items == ()
     assert result.events == ()
@@ -155,18 +140,14 @@ def test_reclaim_expired_leases_does_not_commit_when_nothing_changed() -> None:
 def test_reclaim_expired_leases_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeWorkItemUnitOfWork(fail_on_commit=True)
     expired = _leased_item(
-        work_item_id="expired-work",
-        lease_expires_delta=timedelta(seconds=30),
+        work_item_id="expired-work", lease_expires_delta=timedelta(seconds=30)
     )
-
     with pytest.raises(RuntimeError, match="commit failed"):
-        ReclaimExpiredLeases(repository=unit_of_work).execute(
+        ReclaimExpiredLeases(unit_of_work=unit_of_work).execute(
             ReclaimExpiredLeasesCommand(
-                items=(expired,),
-                now=_now() + timedelta(seconds=30),
-            ),
+                items=(expired,), now=_now() + timedelta(seconds=30)
+            )
         )
-
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back
     assert unit_of_work.actions == [
@@ -179,7 +160,4 @@ def test_reclaim_expired_leases_rolls_back_when_commit_fails() -> None:
 
 def test_reclaim_expired_leases_command_requires_timezone_aware_now() -> None:
     with pytest.raises(ValueError):
-        ReclaimExpiredLeasesCommand(
-            items=(),
-            now=datetime(2026, 6, 8, 12, 0),
-        )
+        ReclaimExpiredLeasesCommand(items=(), now=datetime(2026, 6, 8, 12, 0))

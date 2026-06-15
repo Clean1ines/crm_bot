@@ -114,9 +114,9 @@ def _mapping_source_ref_payload(payload: Mapping[str, object]) -> dict[str, obje
         "quote": quote,
     }
 
-    source_chunk_id = payload.get("source_chunk_id")
-    if source_chunk_id:
-        result["source_chunk_id"] = str(source_chunk_id)
+    source_unit_ref = payload.get("source_unit_ref")
+    if source_unit_ref:
+        result["source_unit_ref"] = str(source_unit_ref)
 
     start_offset = optional_int(payload.get("start_offset"))
     if start_offset is not None:
@@ -139,8 +139,8 @@ def source_ref_payload(ref: SourceRefView | Mapping[str, object]) -> dict[str, o
             "source_index": ref.source_index,
             "quote": ref.quote,
         }
-        if ref.source_chunk_id:
-            payload["source_chunk_id"] = ref.source_chunk_id
+        if ref.source_unit_ref:
+            payload["source_unit_ref"] = ref.source_unit_ref
         if ref.start_offset is not None:
             payload["start_offset"] = ref.start_offset
         if ref.end_offset is not None:
@@ -160,7 +160,7 @@ def source_ref_view_from_mapping(payload: Mapping[str, object]) -> SourceRefView
     return SourceRefView(
         source_index=cast(int, normalized["source_index"]),
         quote=cast(str, normalized["quote"]),
-        source_chunk_id=cast(str | None, normalized.get("source_chunk_id")),
+        source_unit_ref=cast(str | None, normalized.get("source_unit_ref")),
         start_offset=cast(int | None, normalized.get("start_offset")),
         end_offset=cast(int | None, normalized.get("end_offset")),
         confidence=cast(float | None, normalized.get("confidence")),

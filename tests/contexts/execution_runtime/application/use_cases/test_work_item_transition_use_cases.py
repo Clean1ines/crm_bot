@@ -1,10 +1,7 @@
 from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-
 import pytest
-
 from src.contexts.execution_runtime.application.ports.work_item_unit_of_work_port import (
     WorkItemEvent,
 )
@@ -49,6 +46,8 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 
 @dataclass(slots=True)
 class FakeWorkItemUnitOfWork:
+    committed: bool = False
+    rolled_back: bool = False
     saved_items: list[WorkItem] = field(default_factory=list)
     saved_attempts: list[WorkItemAttempt] = field(default_factory=list)
     appended_events: list[WorkItemEvent] = field(default_factory=list)
@@ -103,23 +102,14 @@ def _leased_item() -> WorkItem:
 def _assert_transition_committed(unit_of_work: FakeWorkItemUnitOfWork) -> None:
     assert unit_of_work.committed
     assert not unit_of_work.rolled_back
-    assert unit_of_work.actions == [
-        "save_work_item",
-        "append_event",
-        "commit",
-    ]
+    assert unit_of_work.actions == ["save_work_item", "append_event", "commit"]
 
 
 def test_complete_work_item_commits_completed_item_and_event() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
-
-    result = CompleteWorkItem(repository=unit_of_work).execute(
-        CompleteWorkItemCommand(
-            item=_leased_item(),
-            occurred_at=_now(),
-        ),
+    result = CompleteWorkItem(unit_of_work=unit_of_work).execute(
+        CompleteWorkItemCommand(item=_leased_item(), occurred_at=_now())
     )
-
     assert result.item.status is WorkItemStatus.COMPLETED
     assert isinstance(result.event, WorkItemCompleted)
     assert unit_of_work.saved_items == [result.item]
@@ -130,16 +120,14 @@ def test_complete_work_item_commits_completed_item_and_event() -> None:
 def test_defer_work_item_commits_deferred_item_and_event() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
     wait_until = WaitUntil(_now() + timedelta(seconds=60))
-
-    result = DeferWorkItem(repository=unit_of_work).execute(
+    result = DeferWorkItem(unit_of_work=unit_of_work).execute(
         DeferWorkItemCommand(
             item=_leased_item(),
             wait_until=wait_until,
             error_kind="minute_limit",
             occurred_at=_now(),
-        ),
+        )
     )
-
     assert result.item.status is WorkItemStatus.DEFERRED
     assert result.item.next_attempt_at == wait_until
     assert result.item.last_error_kind == "minute_limit"
@@ -152,17 +140,15 @@ def test_defer_work_item_commits_deferred_item_and_event() -> None:
 def test_fail_work_item_commits_retryable_failure() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
     next_attempt_at = WaitUntil(_now() + timedelta(seconds=10))
-
-    result = FailWorkItem(repository=unit_of_work).execute(
+    result = FailWorkItem(unit_of_work=unit_of_work).execute(
         FailWorkItemCommand(
             item=_leased_item(),
             mode=WorkItemFailureMode.RETRYABLE,
             error_kind="network_error",
             next_attempt_at=next_attempt_at,
             occurred_at=_now(),
-        ),
+        )
     )
-
     assert result.item.status is WorkItemStatus.RETRYABLE_FAILED
     assert result.item.next_attempt_at == next_attempt_at
     assert result.item.last_error_kind == "network_error"
@@ -173,16 +159,14 @@ def test_fail_work_item_commits_retryable_failure() -> None:
 
 def test_fail_work_item_commits_terminal_failure() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
-
-    result = FailWorkItem(repository=unit_of_work).execute(
+    result = FailWorkItem(unit_of_work=unit_of_work).execute(
         FailWorkItemCommand(
             item=_leased_item(),
             mode=WorkItemFailureMode.TERMINAL,
             error_kind="invalid_payload",
             occurred_at=_now(),
-        ),
+        )
     )
-
     assert result.item.status is WorkItemStatus.TERMINAL_FAILED
     assert result.item.next_attempt_at is None
     assert result.item.last_error_kind == "invalid_payload"
@@ -193,15 +177,11 @@ def test_fail_work_item_commits_terminal_failure() -> None:
 
 def test_cancel_work_item_commits_cancelled_item_and_event() -> None:
     unit_of_work = FakeWorkItemUnitOfWork()
-
-    result = CancelWorkItem(repository=unit_of_work).execute(
+    result = CancelWorkItem(unit_of_work=unit_of_work).execute(
         CancelWorkItemCommand(
-            item=_leased_item(),
-            reason="cancelled_by_user",
-            occurred_at=_now(),
-        ),
+            item=_leased_item(), reason="cancelled_by_user", occurred_at=_now()
+        )
     )
-
     assert result.item.status is WorkItemStatus.CANCELLED
     assert result.item.last_error_kind == "cancelled_by_user"
     assert isinstance(result.event, WorkItemCancelled)
@@ -211,15 +191,10 @@ def test_cancel_work_item_commits_cancelled_item_and_event() -> None:
 
 def test_transition_use_case_rolls_back_when_commit_fails() -> None:
     unit_of_work = FakeWorkItemUnitOfWork(fail_on_commit=True)
-
     with pytest.raises(RuntimeError, match="commit failed"):
-        CompleteWorkItem(repository=unit_of_work).execute(
-            CompleteWorkItemCommand(
-                item=_leased_item(),
-                occurred_at=_now(),
-            ),
+        CompleteWorkItem(unit_of_work=unit_of_work).execute(
+            CompleteWorkItemCommand(item=_leased_item(), occurred_at=_now())
         )
-
     assert not unit_of_work.committed
     assert unit_of_work.rolled_back
     assert unit_of_work.actions == [
@@ -232,17 +207,14 @@ def test_transition_use_case_rolls_back_when_commit_fails() -> None:
 
 def test_commands_validate_timestamps_and_required_failure_fields() -> None:
     naive = datetime(2026, 6, 8, 12, 0)
-
     with pytest.raises(ValueError):
         CompleteWorkItemCommand(item=_leased_item(), occurred_at=naive)
-
     with pytest.raises(ValueError):
         DeferWorkItemCommand(
             item=_leased_item(),
             wait_until=WaitUntil(_now() + timedelta(seconds=60)),
             occurred_at=naive,
         )
-
     with pytest.raises(ValueError):
         FailWorkItemCommand(
             item=_leased_item(),
@@ -250,7 +222,6 @@ def test_commands_validate_timestamps_and_required_failure_fields() -> None:
             error_kind="network_error",
             occurred_at=_now(),
         )
-
     with pytest.raises(ValueError):
         FailWorkItemCommand(
             item=_leased_item(),
@@ -259,10 +230,5 @@ def test_commands_validate_timestamps_and_required_failure_fields() -> None:
             next_attempt_at=WaitUntil(_now() + timedelta(seconds=10)),
             occurred_at=_now(),
         )
-
     with pytest.raises(ValueError):
-        CancelWorkItemCommand(
-            item=_leased_item(),
-            reason="",
-            occurred_at=_now(),
-        )
+        CancelWorkItemCommand(item=_leased_item(), reason="", occurred_at=_now())

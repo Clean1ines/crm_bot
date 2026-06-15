@@ -34,7 +34,6 @@ import { SourceUnitsModal } from "./components/SourceUnitsModal";
 import { DocumentStatusBlock } from "./components/DocumentStatusBlock";
 import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
 import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
-import { KnowledgeDocumentCurationModal } from "./components/KnowledgeDocumentCurationModal";
 import { DraftClaimCurationWorkspaceModal } from "./components/DraftClaimCurationWorkspaceModal";
 import { AiPlaygroundPanel } from "./components/AiPlaygroundPanel";
 
@@ -549,10 +548,7 @@ export const KnowledgePage: React.FC = () => {
   const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<
     string | null
   >(null);
-  const [curationDocumentId, setCurationDocumentId] = useState<string | null>(
-    null,
-  );
-  const [curationTarget, setCurationTarget] =
+  const [curationTarget, setDraftClaimCurationTarget] =
     useState<DraftClaimCurationTarget | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<
@@ -814,8 +810,8 @@ export const KnowledgePage: React.FC = () => {
                 (doc) => doc.id === report.document_id,
               );
               const sourceCount =
-                metricNumber(report.metrics, "raw_source_chunk_count") ??
-                metricNumber(report.metrics, "source_chunk_count") ??
+                metricNumber(report.metrics, "raw_source_unit_count") ??
+                metricNumber(report.metrics, "source_unit_count") ??
                 (document?.card_view?.sections.total ?? 0);
               return (
                 Boolean(document && isDocumentProcessing(document)) ||
@@ -980,9 +976,6 @@ export const KnowledgePage: React.FC = () => {
   const sourceUnitsModalResponse = sourceUnitsDocumentId
     ? sourceUnits[sourceUnitsDocumentId]
     : undefined;
-  const curationDocument = curationDocumentId
-    ? (documents.find((doc) => doc.id === curationDocumentId) ?? null)
-    : null;
   const deleteDocument = deleteDocumentId
     ? (documents.find((doc) => doc.id === deleteDocumentId) ?? null)
     : null;
@@ -1045,10 +1038,7 @@ export const KnowledgePage: React.FC = () => {
     setSourceUnitsDocumentId((current) =>
       current === documentId ? null : current,
     );
-    setCurationDocumentId((current) =>
-      current === documentId ? null : current,
-    );
-    setCurationTarget((current) =>
+    setDraftClaimCurationTarget((current) =>
       current?.documentId === documentId ? null : current,
     );
     setDraftFiltersByDocument((current) =>
@@ -1815,14 +1805,14 @@ export const KnowledgePage: React.FC = () => {
                   }
                   onOpenCuration={(workflowRunId) => {
                     if (workflowRunId) {
-                      setCurationTarget({
+                      setDraftClaimCurationTarget({
                         documentId: doc.id,
                         workflowRunId,
                         documentName: doc.file_name,
                       });
                       return;
                     }
-                    setCurationDocumentId(doc.id);
+                    toast.error("Не удалось открыть текущую рабочую область курации");
                   }}
                   workflowLiveState={workflowLiveStates[doc.id] ?? null}
                   workflowLiveStateLoading={
@@ -1862,18 +1852,18 @@ export const KnowledgePage: React.FC = () => {
                         workflowLiveStates[doc.id]?.workflow.workflow_run_id ??
                         null;
                       if (workflowRunId) {
-                        setCurationTarget({
+                        setDraftClaimCurationTarget({
                           documentId: doc.id,
                           workflowRunId,
                           documentName: doc.file_name,
                         });
                         return;
                       }
-                      setCurationDocumentId(doc.id);
+                      toast.error("Не удалось открыть текущую рабочую область курации");
                       return;
                     }
                     if (actionId === "open_published_surfaces") {
-                      setCurationDocumentId(doc.id);
+                      toast.error("Не удалось открыть текущую рабочую область курации");
                       return;
                     }
                     if (actionId === "delete_document") {
@@ -1881,7 +1871,7 @@ export const KnowledgePage: React.FC = () => {
                       return;
                     }
                     if (actionId === "open_workbench") {
-                      setCurationDocumentId(doc.id);
+                      toast.error("Не удалось открыть текущую рабочую область курации");
                     }
                   }}
                   formatSize={formatSize}
@@ -1919,16 +1909,7 @@ export const KnowledgePage: React.FC = () => {
           projectId={projectId}
           workflowRunId={curationTarget.workflowRunId}
           documentName={curationTarget.documentName}
-          onClose={() => setCurationTarget(null)}
-        />
-      )}
-
-      {curationDocumentId && curationDocument && projectId && (
-        <KnowledgeDocumentCurationModal
-          projectId={projectId}
-          documentId={curationDocumentId}
-          documentName={curationDocument.file_name}
-          onClose={() => setCurationDocumentId(null)}
+          onClose={() => setDraftClaimCurationTarget(null)}
         />
       )}
 
