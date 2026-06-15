@@ -2,6 +2,45 @@ import { authedJsonRequest } from '@shared/api/core/http';
 
 export type RagEvalRetrievalMode = 'production_equivalent' | 'vector_debug';
 
+export type WorkbenchRagEvalRunStatus = 'created' | 'running' | 'completed' | 'failed' | string;
+
+export type WorkbenchRagEvalRunSummary = {
+  run_id: string;
+  project_id: string;
+  publication_id?: string | null;
+  source_document_ref?: string | null;
+  status: WorkbenchRagEvalRunStatus;
+  question_generation_model?: string | null;
+  question_generation_prompt_version?: string | null;
+  total_entries: number;
+  total_questions: number;
+  completed_questions: number;
+  top1_hits: number;
+  top3_hits: number;
+  top5_hits: number;
+  misses: number;
+  promotion_candidate_count?: number;
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error_message?: string | null;
+};
+
+export type RunWorkbenchRagEvalRequest = {
+  publication_id?: string | null;
+  source_document_ref?: string | null;
+  top_k: number;
+  max_entries: number;
+};
+
+export type WorkbenchRagEvalRunResponse = {
+  run: WorkbenchRagEvalRunSummary;
+};
+
+export type WorkbenchRagEvalLatestResponse = {
+  run: WorkbenchRagEvalRunSummary | null;
+};
+
 export interface RagEvalFullRunAcceptedResponse {
   ok: boolean;
   queued: boolean;
@@ -338,6 +377,42 @@ const unwrap = async <T>(promise: Promise<{ data: T }>): Promise<T> => {
 };
 
 export const ragEvalApi = {
+
+  async runWorkbench(
+    projectId: string,
+    payload: RunWorkbenchRagEvalRequest,
+  ): Promise<WorkbenchRagEvalRunResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalRunResponse, RunWorkbenchRagEvalRequest>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/run`,
+        {
+          method: 'POST',
+          body: payload,
+        },
+      ),
+    );
+  },
+
+  async latestWorkbench(projectId: string): Promise<WorkbenchRagEvalLatestResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalLatestResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/latest`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async getWorkbenchRun(
+    projectId: string,
+    runId: string,
+  ): Promise<WorkbenchRagEvalLatestResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalLatestResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}`,
+        { method: 'GET' },
+      ),
+    );
+  },
 
   async getLatestReview(documentId: string): Promise<RagEvalLatestReviewResponse> {
     return unwrap(
