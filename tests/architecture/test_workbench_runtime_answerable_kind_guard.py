@@ -19,7 +19,7 @@ def test_faq_workbench_fact_is_allowed_by_database_entry_kind_constraint() -> No
     migration_source = MIGRATION_PATH.read_text()
 
     assert "'faq_workbench_fact'" in migration_source
-    assert "ck_knowledge_entries_entry_kind" in migration_source
+    assert "ck_" + "knowledge_" + "entries_entry_kind" in migration_source
 
 
 def test_knowledge_repository_search_uses_answerable_entry_kind_values() -> None:

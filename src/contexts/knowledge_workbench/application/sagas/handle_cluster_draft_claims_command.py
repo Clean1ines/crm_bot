@@ -17,9 +17,17 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_apply_result import (
+    raw_claim_node_ref,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionGroupCandidate,
     DraftClaimForCompaction,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionNode,
+    DraftClaimCompactionNodeKind,
+    DraftClaimCompactionNodeSource,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_batch_budget_policy import (
     DraftClaimCompactionBatchBudgetPolicy,
@@ -35,9 +43,6 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
-)
-from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
-    build_initial_raw_node,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -291,7 +296,7 @@ def _raw_nodes_for_group(
     claims_by_ref: Mapping[str, DraftClaimForCompaction],
 ):
     return tuple(
-        build_initial_raw_node(
+        _build_initial_raw_node(
             workflow_run_id=workflow_run_id,
             group_ref=group.group_ref,
             observation_ref=observation_ref,
@@ -300,6 +305,32 @@ def _raw_nodes_for_group(
             ),
         )
         for observation_ref in group.member_observation_refs
+    )
+
+
+def _build_initial_raw_node(
+    *,
+    workflow_run_id: str,
+    group_ref: str,
+    observation_ref: str,
+    estimated_input_tokens: int,
+) -> DraftClaimCompactionNode:
+    return DraftClaimCompactionNode(
+        node_ref=raw_claim_node_ref(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            observation_ref=observation_ref,
+        ),
+        node_kind=DraftClaimCompactionNodeKind.RAW,
+        source_claim_refs=(observation_ref,),
+        sources=(
+            DraftClaimCompactionNodeSource(
+                source_ref=observation_ref,
+                source_kind=DraftClaimCompactionNodeKind.RAW,
+            ),
+        ),
+        active=True,
+        estimated_input_tokens=estimated_input_tokens,
     )
 
 

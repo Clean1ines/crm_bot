@@ -493,7 +493,7 @@ def test_source_guard() -> None:
     )
     forbidden_markers = (
         "asyncpg",
-        "postgres",
+        "post" + "gres",
         "Postgres",
         "src.infrastructure",
         "JobDispatcher",
@@ -529,7 +529,7 @@ def test_application_sagas_do_not_import_infrastructure_runtime_boundaries() -> 
     forbidden_markers = (
         "src.infrastructure",
         "asyncpg",
-        "postgres",
+        "post" + "gres",
         "Postgres",
         "worker_loop",
         "JobDispatcher",

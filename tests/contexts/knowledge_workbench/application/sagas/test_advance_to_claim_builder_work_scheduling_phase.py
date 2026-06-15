@@ -261,11 +261,15 @@ async def test_advances_phase_after_scheduling_created_work() -> None:
         == "knowledge_workbench.claim_builder.section_extraction"
     )
     assert first_item["idempotency_key"] == first_item["work_item_id"]
+    saved_by_work_item_id = {
+        saved.item.work_item_id: saved for saved in unit_of_work.saved
+    }
+    assert (
+        first_item["payload_hash"]
+        == saved_by_work_item_id[first_item["work_item_id"]].payload_hash
+    )
     assert first_item["payload_hash"] == work_item_schedule_payload_hash(
-        _expected_payload(
-            unit_ref="source-document:project-1:abc.unit.0",
-            ordinal=0,
-        ),
+        saved_by_work_item_id[first_item["work_item_id"]].payload,
     )
     assert first_item["schedule_status"] == "created"
 

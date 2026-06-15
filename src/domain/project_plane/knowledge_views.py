@@ -86,6 +86,13 @@ class KnowledgeDocumentView:
     preprocessing_metrics: object | None = None
     structured_entries: int = 0
     structured_chunk_count: int = 0
+    source_unit_count: int = 0
+    draft_claim_count: int = 0
+    draft_claim_embedding_count: int = 0
+    curated_item_count: int = 0
+    runtime_entry_count: int = 0
+    runtime_embedding_count: int = 0
+    publication_count: int = 0
     llm_tokens_input: int = 0
     llm_tokens_output: int = 0
     llm_tokens_total: int = 0
@@ -113,6 +120,13 @@ class KnowledgeDocumentDetailView:
     preprocessing_metrics: object | None = None
     structured_entries: int = 0
     structured_chunk_count: int = 0
+    source_unit_count: int = 0
+    draft_claim_count: int = 0
+    draft_claim_embedding_count: int = 0
+    curated_item_count: int = 0
+    runtime_entry_count: int = 0
+    runtime_embedding_count: int = 0
+    publication_count: int = 0
     llm_tokens_input: int = 0
     llm_tokens_output: int = 0
     llm_tokens_total: int = 0

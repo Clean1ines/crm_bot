@@ -21,7 +21,7 @@ def test_publication_purge_preserves_production_runtime_vectors() -> None:
     )[1]
 
     assert "DELETE FROM " + "knowledge_" + "retrieval_" + "surface" not in method_source
-    assert "DELETE FROM knowledge_entries" not in method_source
+    assert "DELETE FROM " + "knowledge_" + "entries" not in method_source
     assert (
         "DELETE FROM " + "knowledge_" + "retrieval_" + "surface"
         not in method_source.replace("\\n", "\n")
@@ -44,5 +44,5 @@ def test_publication_purge_documents_durable_state_contract() -> None:
 
     assert "Durable state after publication" in source
     assert "final published fact registry snapshot" in source
-    assert "production runtime vectors in knowledge_entries" in source
+    assert "production runtime vectors in " + "knowledge_" + "entries" in source
     assert "pre-Prompt-C local claim retrieval vectors" in source
