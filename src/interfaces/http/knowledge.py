@@ -71,6 +71,10 @@ from src.interfaces.composition.knowledge_extraction_workflow_resume import (
     RunKnowledgeExtractionWorkflowResumeCommand,
     make_knowledge_extraction_workflow_resume,
 )
+from src.interfaces.composition.faq_workbench_workflow_live_state import (
+    WorkbenchWorkflowLiveStateNotFoundError,
+    fetch_workbench_workflow_live_state,
+)
 from src.infrastructure.config.settings import settings
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
     DraftClaimObservationReadModel,
@@ -986,6 +990,37 @@ async def include_draft_claim_curation_item(
     except DraftClaimCurationItemExclusionError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"item": item.to_json_dict()}
+
+
+@router.get("/{document_id}/workflow-live-state")
+async def knowledge_workflow_live_state(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns frontend-facing Workbench workflow live state for one document."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    try:
+        return await fetch_workbench_workflow_live_state(
+            pool=pool,
+            project_id=project_id,
+            document_id=document_id,
+        )
+    except WorkbenchWorkflowLiveStateNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Knowledge document not found",
+        ) from exc
 
 
 @router.get("/{document_id}/progress")
