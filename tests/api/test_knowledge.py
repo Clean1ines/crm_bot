@@ -1347,3 +1347,320 @@ async def test_draft_claims_endpoint_respects_limit_and_offset(
     ]
     assert response["count"] == 1
     assert response["items"][0]["observation_ref"] == "draft-claim-observation:2"
+
+
+@dataclass(slots=True)
+class _FakeCurationWorkspaceRepository:
+    snapshot: ClassVar[object | None] = None
+    instances: ClassVar[list["_FakeCurationWorkspaceRepository"]] = []
+
+    def __init__(self, pool: object) -> None:
+        del pool
+        _FakeCurationWorkspaceRepository.instances.append(self)
+
+    async def get_workspace_by_workflow_run_id(self, *, workflow_run_id: str):
+        del workflow_run_id
+        return _FakeCurationWorkspaceRepository.snapshot
+
+    async def create_workspace(self, *, workspace, items):
+        from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
+            DraftClaimCurationWorkspaceSnapshot,
+        )
+
+        _FakeCurationWorkspaceRepository.snapshot = DraftClaimCurationWorkspaceSnapshot(
+            workspace=workspace,
+            items=items,
+        )
+        return _FakeCurationWorkspaceRepository.snapshot
+
+    async def replace_item_editable_payload(
+        self,
+        *,
+        item_ref: str,
+        editable_payload,
+        updated_at: datetime,
+    ):
+        snapshot = _FakeCurationWorkspaceRepository.snapshot
+        assert snapshot is not None
+        item = snapshot.items[0]
+        assert item.item_ref == item_ref
+        from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
+            DraftClaimCurationWorkspaceItem,
+            DraftClaimCurationWorkspaceSnapshot,
+        )
+
+        updated = DraftClaimCurationWorkspaceItem(
+            item_ref=item.item_ref,
+            workspace_ref=item.workspace_ref,
+            workflow_run_id=item.workflow_run_id,
+            group_ref=item.group_ref,
+            compacted_node_ref=item.compacted_node_ref,
+            source_claim_refs=item.source_claim_refs,
+            original_payload=item.original_payload,
+            editable_payload=editable_payload,
+            excluded=item.excluded,
+            exclusion_reason=item.exclusion_reason,
+            created_at=item.created_at,
+            updated_at=updated_at,
+        )
+        _FakeCurationWorkspaceRepository.snapshot = DraftClaimCurationWorkspaceSnapshot(
+            workspace=snapshot.workspace,
+            items=(updated,),
+        )
+        return updated
+
+    async def set_item_excluded(
+        self,
+        *,
+        item_ref: str,
+        excluded: bool,
+        exclusion_reason: str | None,
+        updated_at: datetime,
+    ):
+        snapshot = _FakeCurationWorkspaceRepository.snapshot
+        assert snapshot is not None
+        item = snapshot.items[0]
+        assert item.item_ref == item_ref
+        from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
+            DraftClaimCurationWorkspaceItem,
+            DraftClaimCurationWorkspaceSnapshot,
+        )
+
+        updated = DraftClaimCurationWorkspaceItem(
+            item_ref=item.item_ref,
+            workspace_ref=item.workspace_ref,
+            workflow_run_id=item.workflow_run_id,
+            group_ref=item.group_ref,
+            compacted_node_ref=item.compacted_node_ref,
+            source_claim_refs=item.source_claim_refs,
+            original_payload=item.original_payload,
+            editable_payload=item.editable_payload,
+            excluded=excluded,
+            exclusion_reason=exclusion_reason,
+            created_at=item.created_at,
+            updated_at=updated_at,
+        )
+        _FakeCurationWorkspaceRepository.snapshot = DraftClaimCurationWorkspaceSnapshot(
+            workspace=snapshot.workspace,
+            items=(updated,),
+        )
+        return updated
+
+
+@dataclass(slots=True)
+class _FakeCompactionReductionRepository:
+    async def count_active_raw_nodes(self, *, workflow_run_id: str) -> int:
+        del workflow_run_id
+        return 0
+
+    async def list_final_compacted_nodes_for_preview(self, *, workflow_run_id: str):
+        from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+            DraftClaimCompactionNode,
+            DraftClaimCompactionNodeKind,
+        )
+
+        return (
+            DraftClaimCompactionNode(
+                node_ref=(
+                    "compacted:"
+                    + workflow_run_id
+                    + ":group-1:559cfb86ea804a483bcf8f6b28c8eec0"
+                ),
+                node_kind=DraftClaimCompactionNodeKind.COMPACTED,
+                source_claim_refs=("claim-a",),
+                active=True,
+                compacted_payload={
+                    "key": "refund_support",
+                    "claim": "Product supports refunds.",
+                    "claim_kind": "capability",
+                    "granularity": "atomic",
+                    "source_claim_refs": ["claim-a"],
+                    "triples": [],
+                    "merge_decision": "merged",
+                    "possible_questions": ["Q1"],
+                    "exclusion_scope": "",
+                    "evidence_block": "E1",
+                },
+            ),
+        )
+
+    async def summarize_compaction_progress(self, *, workflow_run_id: str):
+        from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_progress import (
+            DraftClaimCompactionProgressSummary,
+        )
+
+        return DraftClaimCompactionProgressSummary(
+            workflow_run_id=workflow_run_id,
+            group_count=1,
+            done_group_count=1,
+            waiting_user_model_choice_group_count=0,
+            active_group_count=0,
+            active_node_count=1,
+            pending_comparison_count=0,
+        )
+
+
+class _FakeDraftClaimObservationRepository(_FakeDraftClaimObservationReadRepository):
+    async def list_by_observation_refs(
+        self,
+        *,
+        observation_refs: tuple[str, ...],
+    ):
+        assert observation_refs == ("claim-a",)
+        return (_draft_claim_read_model(observation_ref="claim-a"),)
+
+
+class _FakeCurationSourceRepository(_FakeSourceManagementRepository):
+    def __init__(self) -> None:
+        super().__init__(
+            (
+                _source_unit(
+                    unit_ref="source-unit:1",
+                    ordinal=0,
+                    unit_kind=SourceUnitKind.SECTION,
+                    heading_path=("FAQ",),
+                    text="# FAQ\n\nBody",
+                ),
+            )
+        )
+
+    async def load_source_unit(self, unit_ref: SourceUnitRef):
+        assert unit_ref == SourceUnitRef("source-unit:1")
+        return self.units[0]
+
+
+def _patch_curation_http_repositories(monkeypatch: pytest.MonkeyPatch) -> None:
+    _FakeCurationWorkspaceRepository.snapshot = None
+    _FakeCurationWorkspaceRepository.instances = []
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimCurationWorkspaceRepository",
+        _FakeCurationWorkspaceRepository,
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimCompactionReductionStateRepository",
+        lambda pool: _FakeCompactionReductionRepository(),
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        lambda pool: _FakeDraftClaimObservationRepository(pool),
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresSourceManagementRepository",
+        lambda pool: _FakeCurationSourceRepository(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_open_curation_workspace_creates_items_from_compacted_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    _patch_curation_http_repositories(monkeypatch)
+
+    response = await knowledge.open_draft_claim_curation_workspace(
+        project_id="project-1",
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+
+    assert response["workspace"]["status"] == "draft"
+    assert response["items"][0]["editable_payload"]["claim"] == (
+        "Product supports refunds."
+    )
+    assert response["items"][0]["provenance"]["raw_claims"][0]["raw_claim_ref"] == (
+        "claim-a"
+    )
+    assert response["items"][0]["audit"] == {}
+
+
+@pytest.mark.asyncio
+async def test_update_curation_item_rejects_source_claim_refs_edit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    _patch_curation_http_repositories(monkeypatch)
+    await knowledge.open_draft_claim_curation_workspace(
+        project_id="project-1",
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+    snapshot = _FakeCurationWorkspaceRepository.snapshot
+    assert snapshot is not None
+    item_ref = snapshot.items[0].item_ref
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.update_draft_claim_curation_item(
+            project_id="project-1",
+            workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+            item_ref=item_ref,
+            updates={"source_claim_refs": ["claim-x"]},
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_exclude_and_include_curation_item(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    _patch_curation_http_repositories(monkeypatch)
+    await knowledge.open_draft_claim_curation_workspace(
+        project_id="project-1",
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+    snapshot = _FakeCurationWorkspaceRepository.snapshot
+    assert snapshot is not None
+    item_ref = snapshot.items[0].item_ref
+
+    excluded = await knowledge.exclude_draft_claim_curation_item(
+        project_id="project-1",
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        item_ref=item_ref,
+        payload={"exclusion_reason": "duplicate"},
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+    assert excluded["item"]["excluded"] is True
+    assert excluded["item"]["exclusion_reason"] == "duplicate"
+
+    included = await knowledge.include_draft_claim_curation_item(
+        project_id="project-1",
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        item_ref=item_ref,
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+    assert included["item"]["excluded"] is False
+    assert included["item"]["exclusion_reason"] is None

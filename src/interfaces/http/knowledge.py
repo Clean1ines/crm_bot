@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
+from typing import cast
 from fastapi import (
     APIRouter,
     Body,
@@ -22,6 +23,7 @@ from fastapi import (
 )
 
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
+from src.domain.project_plane.json_types import JsonObject
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhaseCommand,
 )
@@ -72,12 +74,47 @@ from src.interfaces.composition.knowledge_extraction_workflow_resume import (
 from src.infrastructure.config.settings import settings
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
     DraftClaimObservationReadModel,
+    DraftClaimObservationReadRepositoryPort,
 )
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_observation_read_repository import (
+    DraftClaimObservationReadConnectionLike,
     PostgresDraftClaimObservationReadRepository,
 )
+from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
+    SourceManagementRepositoryPort,
+)
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
+    AsyncSourceManagementConnectionLike,
     PostgresSourceManagementRepository,
+)
+from src.contexts.knowledge_workbench.curation.application.ports.draft_claim_curation_workspace_repository_port import (
+    DraftClaimCurationWorkspaceRepositoryPort,
+)
+from src.contexts.knowledge_workbench.curation.application.use_cases.read_draft_claim_curation_workspace import (
+    ReadDraftClaimCurationWorkspace,
+)
+from src.contexts.knowledge_workbench.curation.infrastructure.postgres.postgres_draft_claim_curation_workspace_repository import (
+    DraftClaimCurationWorkspaceConnectionLike,
+    PostgresDraftClaimCurationWorkspaceRepository,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
+    DraftClaimCompactionReductionStateRepositoryPort,
+)
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
+    DraftClaimCompactionReductionStateConnectionLike,
+    PostgresDraftClaimCompactionReductionStateRepository,
+)
+from src.contexts.knowledge_workbench.curation.application.use_cases.open_draft_claim_curation_workspace import (
+    DraftClaimCurationWorkspaceOpenError,
+    OpenDraftClaimCurationWorkspace,
+)
+from src.contexts.knowledge_workbench.curation.application.use_cases.set_draft_claim_curation_item_excluded import (
+    DraftClaimCurationItemExclusionError,
+    SetDraftClaimCurationItemExcluded,
+)
+from src.contexts.knowledge_workbench.curation.application.use_cases.update_draft_claim_curation_item import (
+    DraftClaimCurationItemUpdateError,
+    UpdateDraftClaimCurationItem,
 )
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
@@ -298,6 +335,70 @@ def _source_document_draft_claims_url(
         f"/api/projects/{project_id}/knowledge/source-documents/"
         f"{source_document_ref}/draft-claims"
     )
+
+
+def _source_document_ref_from_workflow_run_id(workflow_run_id: str) -> str | None:
+    prefix = "knowledge-extraction:"
+    if workflow_run_id.startswith(prefix):
+        source_document_ref = workflow_run_id[len(prefix) :]
+        if source_document_ref.strip():
+            return source_document_ref
+    return None
+
+
+def _curation_workspace_repositories(
+    pool: object,
+) -> tuple[
+    DraftClaimCurationWorkspaceRepositoryPort,
+    DraftClaimCompactionReductionStateRepositoryPort,
+    DraftClaimObservationReadRepositoryPort,
+    SourceManagementRepositoryPort,
+]:
+    curation_repository: DraftClaimCurationWorkspaceRepositoryPort = (
+        PostgresDraftClaimCurationWorkspaceRepository(
+            cast(DraftClaimCurationWorkspaceConnectionLike, pool)
+        )
+    )
+    compaction_repository: DraftClaimCompactionReductionStateRepositoryPort = (
+        PostgresDraftClaimCompactionReductionStateRepository(
+            cast(DraftClaimCompactionReductionStateConnectionLike, pool)
+        )
+    )
+    draft_claim_repository: DraftClaimObservationReadRepositoryPort = (
+        PostgresDraftClaimObservationReadRepository(
+            cast(DraftClaimObservationReadConnectionLike, pool)
+        )
+    )
+    source_repository: SourceManagementRepositoryPort = (
+        PostgresSourceManagementRepository(
+            cast(AsyncSourceManagementConnectionLike, pool)
+        )
+    )
+    return (
+        curation_repository,
+        compaction_repository,
+        draft_claim_repository,
+        source_repository,
+    )
+
+
+async def _read_curation_workspace_response(
+    *,
+    workflow_run_id: str,
+    curation_repository: DraftClaimCurationWorkspaceRepositoryPort,
+    compaction_repository: DraftClaimCompactionReductionStateRepositoryPort,
+    draft_claim_repository: DraftClaimObservationReadRepositoryPort,
+    source_repository: SourceManagementRepositoryPort,
+) -> JsonObject:
+    result = await ReadDraftClaimCurationWorkspace(
+        curation_workspace_repository=curation_repository,
+        compaction_reduction_state_repository=compaction_repository,
+        draft_claim_observation_read_repository=draft_claim_repository,
+        source_management_repository=source_repository,
+    ).execute(workflow_run_id=workflow_run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Curation workspace not found")
+    return result.to_json_dict()
 
 
 def _draft_claim_observation_read_model(
@@ -632,6 +733,183 @@ async def source_unit_draft_claims(
         "offset": offset,
         "items": [_draft_claim_observation_read_model(item) for item in items],
     }
+
+
+@router.post("/workflows/{workflow_run_id}/curation-workspace/open")
+async def open_draft_claim_curation_workspace(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    (
+        curation_repository,
+        compaction_repository,
+        draft_claim_repository,
+        source_repository,
+    ) = _curation_workspace_repositories(pool)
+    try:
+        await OpenDraftClaimCurationWorkspace(
+            curation_workspace_repository=curation_repository,
+            compaction_reduction_state_repository=compaction_repository,
+        ).execute(
+            workflow_run_id=workflow_run_id,
+            project_id=project_id,
+            source_document_ref=_source_document_ref_from_workflow_run_id(
+                workflow_run_id
+            ),
+            created_at=datetime.now(timezone.utc),
+        )
+    except DraftClaimCurationWorkspaceOpenError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return await _read_curation_workspace_response(
+        workflow_run_id=workflow_run_id,
+        curation_repository=curation_repository,
+        compaction_repository=compaction_repository,
+        draft_claim_repository=draft_claim_repository,
+        source_repository=source_repository,
+    )
+
+
+@router.get("/workflows/{workflow_run_id}/curation-workspace")
+async def read_draft_claim_curation_workspace(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    (
+        curation_repository,
+        compaction_repository,
+        draft_claim_repository,
+        source_repository,
+    ) = _curation_workspace_repositories(pool)
+    return await _read_curation_workspace_response(
+        workflow_run_id=workflow_run_id,
+        curation_repository=curation_repository,
+        compaction_repository=compaction_repository,
+        draft_claim_repository=draft_claim_repository,
+        source_repository=source_repository,
+    )
+
+
+@router.patch("/workflows/{workflow_run_id}/curation-workspace/items/{item_ref}")
+async def update_draft_claim_curation_item(
+    project_id: str,
+    workflow_run_id: str,
+    item_ref: str,
+    updates: dict[str, object] = Body(...),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    curation_repository = PostgresDraftClaimCurationWorkspaceRepository(pool)
+    try:
+        item = await UpdateDraftClaimCurationItem(
+            curation_workspace_repository=curation_repository,
+        ).execute(
+            workflow_run_id=workflow_run_id,
+            item_ref=item_ref,
+            updates=updates,
+            updated_at=datetime.now(timezone.utc),
+        )
+    except DraftClaimCurationItemUpdateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"item": item.to_json_dict()}
+
+
+@router.post("/workflows/{workflow_run_id}/curation-workspace/items/{item_ref}/exclude")
+async def exclude_draft_claim_curation_item(
+    project_id: str,
+    workflow_run_id: str,
+    item_ref: str,
+    payload: dict[str, object] | None = Body(default=None),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    body = payload or {}
+    reason = body.get("exclusion_reason")
+    if reason is not None and not isinstance(reason, str):
+        raise HTTPException(status_code=400, detail="exclusion_reason must be str")
+    curation_repository = PostgresDraftClaimCurationWorkspaceRepository(pool)
+    try:
+        item = await SetDraftClaimCurationItemExcluded(
+            curation_workspace_repository=curation_repository,
+        ).execute(
+            workflow_run_id=workflow_run_id,
+            item_ref=item_ref,
+            excluded=True,
+            exclusion_reason=reason,
+            updated_at=datetime.now(timezone.utc),
+        )
+    except DraftClaimCurationItemExclusionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"item": item.to_json_dict()}
+
+
+@router.post("/workflows/{workflow_run_id}/curation-workspace/items/{item_ref}/include")
+async def include_draft_claim_curation_item(
+    project_id: str,
+    workflow_run_id: str,
+    item_ref: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    curation_repository = PostgresDraftClaimCurationWorkspaceRepository(pool)
+    try:
+        item = await SetDraftClaimCurationItemExcluded(
+            curation_workspace_repository=curation_repository,
+        ).execute(
+            workflow_run_id=workflow_run_id,
+            item_ref=item_ref,
+            excluded=False,
+            exclusion_reason=None,
+            updated_at=datetime.now(timezone.utc),
+        )
+    except DraftClaimCurationItemExclusionError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"item": item.to_json_dict()}
 
 
 @router.get("/{document_id}/progress")
