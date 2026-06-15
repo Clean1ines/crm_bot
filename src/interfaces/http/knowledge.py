@@ -1688,7 +1688,7 @@ async def knowledge_source_units(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Returns Workbench evidence trace/source units for one document."""
+    """Returns source-ingestion source units for one document."""
 
     await _require_project_access(
         project_id=project_id,
@@ -1696,22 +1696,45 @@ async def knowledge_source_units(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_evidence_trace import (
-        WorkbenchEvidenceTraceNotFoundError,
-        fetch_workbench_evidence_trace,
-    )
 
-    try:
-        return await fetch_workbench_evidence_trace(
-            pool=pool,
-            project_id=project_id,
-            document_id=document_id,
-        )
-    except WorkbenchEvidenceTraceNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail="Knowledge document not found",
-        ) from exc
+    document_ref = SourceDocumentRef(document_id)
+    repository = PostgresSourceManagementRepository(pool)
+    source_document = await repository.load_source_document(document_ref)
+    if source_document is None:
+        raise HTTPException(status_code=404, detail="Knowledge document not found")
+
+    source_units = await repository.list_source_units_for_document(document_ref)
+
+    return {
+        "document_id": document_id,
+        "source_units": [
+            {
+                "id": unit.unit_ref.value,
+                "source_index": unit.ordinal,
+                "title": " / ".join(unit.heading_path.parts) or unit.unit_ref.value,
+                "content": unit.text.value,
+                "page": None,
+                "start_offset": None,
+                "end_offset": None,
+                "metadata": {
+                    "document_ref": unit.document_ref.value,
+                    "unit_kind": unit.unit_kind.value,
+                    "heading_path": list(unit.heading_path.parts),
+                    "lineage": {
+                        "parent_refs": [
+                            parent_ref.value for parent_ref in unit.lineage.parent_refs
+                        ],
+                    },
+                    "source_format": source_document.source_format.value,
+                },
+                "draft_count": 0,
+                "draft_titles": [],
+                "draft_ids": [],
+            }
+            for unit in source_units
+        ],
+        "total_count": len(source_units),
+    }
 
 
 @router.get("/{document_id}/import-quality")

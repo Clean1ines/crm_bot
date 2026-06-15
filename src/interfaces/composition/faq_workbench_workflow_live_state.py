@@ -316,7 +316,9 @@ class WorkbenchWorkflowLiveStateQuery:
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_observations AS o
-                    WHERE o.workflow_run_id = $3
+                    JOIN source_units AS u
+                      ON u.unit_ref = o.source_unit_ref
+                    WHERE u.document_ref = $2
                 ) AS draft_claim_count,
                 (
                     SELECT COUNT(*)::int
