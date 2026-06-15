@@ -202,6 +202,140 @@ class WorkbenchRagEvalPromotedQuestion:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalRetrievalResultDetails:
+    result_id: str
+    matched_runtime_entry_id: str
+    matched_fact_id: str
+    rank: int
+    score: float
+    top1_hit: bool
+    top3_hit: bool
+    top5_hit: bool
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_text(self.result_id, "result_id")
+        _require_text(self.matched_runtime_entry_id, "matched_runtime_entry_id")
+        _require_text(self.matched_fact_id, "matched_fact_id")
+        if self.rank < 1:
+            raise ValueError("rank must be positive")
+        if isinstance(self.score, bool) or not isinstance(self.score, (int, float)):
+            raise TypeError("score must be numeric")
+        if not isinstance(self.top1_hit, bool):
+            raise TypeError("top1_hit must be bool")
+        if not isinstance(self.top3_hit, bool):
+            raise TypeError("top3_hit must be bool")
+        if not isinstance(self.top5_hit, bool):
+            raise TypeError("top5_hit must be bool")
+        _require_datetime(self.created_at, "created_at")
+
+    def to_json_dict(self) -> JsonObject:
+        return {
+            "result_id": self.result_id,
+            "matched_runtime_entry_id": self.matched_runtime_entry_id,
+            "matched_fact_id": self.matched_fact_id,
+            "rank": self.rank,
+            "score": self.score,
+            "top1_hit": self.top1_hit,
+            "top3_hit": self.top3_hit,
+            "top5_hit": self.top5_hit,
+            "created_at": self.created_at.isoformat(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalQuestionDetails:
+    question_id: str
+    run_id: str
+    project_id: str
+    expected_runtime_entry_id: str
+    expected_fact_id: str
+    question: str
+    question_kind: WorkbenchRagEvalQuestionKind
+    source: WorkbenchRagEvalQuestionSource
+    generation_model: str | None
+    prompt_version: str | None
+    status: WorkbenchRagEvalQuestionStatus
+    created_at: datetime
+    results: tuple[WorkbenchRagEvalRetrievalResultDetails, ...]
+
+    def __post_init__(self) -> None:
+        _require_text(self.question_id, "question_id")
+        _require_text(self.run_id, "run_id")
+        _require_text(self.project_id, "project_id")
+        _require_text(self.expected_runtime_entry_id, "expected_runtime_entry_id")
+        _require_text(self.expected_fact_id, "expected_fact_id")
+        _require_text(self.question, "question")
+        _require_enum(self.question_kind, WorkbenchRagEvalQuestionKind, "question_kind")
+        _require_enum(self.source, WorkbenchRagEvalQuestionSource, "source")
+        _require_optional_text(self.generation_model, "generation_model")
+        _require_optional_text(self.prompt_version, "prompt_version")
+        _require_enum(self.status, WorkbenchRagEvalQuestionStatus, "status")
+        _require_datetime(self.created_at, "created_at")
+        if not isinstance(self.results, tuple):
+            raise TypeError("results must be tuple")
+
+    def to_json_dict(self) -> JsonObject:
+        return {
+            "question_id": self.question_id,
+            "run_id": self.run_id,
+            "project_id": self.project_id,
+            "expected_runtime_entry_id": self.expected_runtime_entry_id,
+            "expected_fact_id": self.expected_fact_id,
+            "question": self.question,
+            "question_kind": self.question_kind.value,
+            "source": self.source.value,
+            "generation_model": self.generation_model,
+            "prompt_version": self.prompt_version,
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "results": [result.to_json_dict() for result in self.results],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalPromotionCandidateDetails:
+    promotion_id: str
+    run_id: str
+    question_id: str
+    project_id: str
+    target_runtime_entry_id: str
+    target_fact_id: str
+    question: str
+    status: WorkbenchRagEvalPromotionStatus
+    created_at: datetime
+    applied_at: datetime | None
+
+    def __post_init__(self) -> None:
+        _require_text(self.promotion_id, "promotion_id")
+        _require_text(self.run_id, "run_id")
+        _require_text(self.question_id, "question_id")
+        _require_text(self.project_id, "project_id")
+        _require_text(self.target_runtime_entry_id, "target_runtime_entry_id")
+        _require_text(self.target_fact_id, "target_fact_id")
+        _require_text(self.question, "question")
+        _require_enum(self.status, WorkbenchRagEvalPromotionStatus, "status")
+        _require_datetime(self.created_at, "created_at")
+        _require_optional_datetime(self.applied_at, "applied_at")
+
+    def to_json_dict(self) -> JsonObject:
+        return {
+            "promotion_id": self.promotion_id,
+            "run_id": self.run_id,
+            "question_id": self.question_id,
+            "project_id": self.project_id,
+            "target_runtime_entry_id": self.target_runtime_entry_id,
+            "target_fact_id": self.target_fact_id,
+            "question": self.question,
+            "status": self.status.value,
+            "created_at": self.created_at.isoformat(),
+            "applied_at": self.applied_at.isoformat()
+            if self.applied_at is not None
+            else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalSummary:
     run_id: str
     project_id: str

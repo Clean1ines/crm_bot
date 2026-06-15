@@ -4,6 +4,8 @@ from typing import Protocol
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalPromotedQuestion,
+    WorkbenchRagEvalPromotionCandidateDetails,
+    WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestion,
     WorkbenchRagEvalRetrievalResult,
     WorkbenchRagEvalRun,
@@ -62,3 +64,17 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         run_id: str,
         project_id: str,
     ) -> WorkbenchRagEvalSummary | None: ...
+
+    async def list_run_questions(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> tuple[WorkbenchRagEvalQuestionDetails, ...]: ...
+
+    async def list_run_promotion_candidates(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> tuple[WorkbenchRagEvalPromotionCandidateDetails, ...]: ...

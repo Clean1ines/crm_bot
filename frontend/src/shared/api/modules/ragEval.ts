@@ -41,6 +41,55 @@ export type WorkbenchRagEvalLatestResponse = {
   run: WorkbenchRagEvalRunSummary | null;
 };
 
+export type WorkbenchRagEvalRetrievalResultDetails = {
+  result_id: string;
+  matched_runtime_entry_id: string;
+  matched_fact_id: string;
+  rank: number;
+  score: number;
+  top1_hit: boolean;
+  top3_hit: boolean;
+  top5_hit: boolean;
+  created_at: string;
+};
+
+export type WorkbenchRagEvalQuestionDetails = {
+  question_id: string;
+  run_id: string;
+  project_id: string;
+  expected_runtime_entry_id: string;
+  expected_fact_id: string;
+  question: string;
+  question_kind: string;
+  source: string;
+  generation_model?: string | null;
+  prompt_version?: string | null;
+  status: string;
+  created_at: string;
+  results: WorkbenchRagEvalRetrievalResultDetails[];
+};
+
+export type WorkbenchRagEvalPromotionCandidateDetails = {
+  promotion_id: string;
+  run_id: string;
+  question_id: string;
+  project_id: string;
+  target_runtime_entry_id: string;
+  target_fact_id: string;
+  question: string;
+  status: string;
+  created_at: string;
+  applied_at?: string | null;
+};
+
+export type WorkbenchRagEvalQuestionsResponse = {
+  questions: WorkbenchRagEvalQuestionDetails[];
+};
+
+export type WorkbenchRagEvalPromotionCandidatesResponse = {
+  candidates: WorkbenchRagEvalPromotionCandidateDetails[];
+};
+
 export interface RagEvalFullRunAcceptedResponse {
   ok: boolean;
   queued: boolean;
@@ -409,6 +458,30 @@ export const ragEvalApi = {
     return unwrap(
       authedJsonRequest<WorkbenchRagEvalLatestResponse>(
         `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async listWorkbenchQuestions(
+    projectId: string,
+    runId: string,
+  ): Promise<WorkbenchRagEvalQuestionsResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalQuestionsResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}/questions`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async listWorkbenchPromotionCandidates(
+    projectId: string,
+    runId: string,
+  ): Promise<WorkbenchRagEvalPromotionCandidatesResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalPromotionCandidatesResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}/promotion-candidates`,
         { method: 'GET' },
       ),
     );

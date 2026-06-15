@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, cast
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalPromotedQuestion,
+    WorkbenchRagEvalPromotionCandidateDetails,
+    WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestion,
+    WorkbenchRagEvalQuestionKind,
+    WorkbenchRagEvalQuestionSource,
+    WorkbenchRagEvalQuestionStatus,
     WorkbenchRagEvalRetrievalResult,
+    WorkbenchRagEvalRetrievalResultDetails,
     WorkbenchRagEvalRun,
     WorkbenchRagEvalRunStatus,
+    WorkbenchRagEvalPromotionStatus,
     WorkbenchRagEvalSummary,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
@@ -56,6 +64,59 @@ WHERE entry.project_id = $1::uuid
   AND ($3::text IS NULL OR entry.source_refs->>'source_document_ref' = $3)
 ORDER BY entry.created_at, entry.runtime_entry_id
 LIMIT $4
+"""
+
+
+WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL = """
+SELECT
+    question.question_id,
+    question.run_id,
+    question.project_id::text AS project_id,
+    question.expected_runtime_entry_id,
+    question.expected_fact_id,
+    question.question,
+    question.question_kind,
+    question.source,
+    question.generation_model,
+    question.prompt_version,
+    question.status,
+    question.created_at,
+    result.result_id,
+    result.matched_runtime_entry_id,
+    result.matched_fact_id,
+    result.rank,
+    result.score,
+    result.top1_hit,
+    result.top3_hit,
+    result.top5_hit,
+    result.created_at AS result_created_at
+FROM knowledge_workbench_rag_eval_questions AS question
+LEFT JOIN knowledge_workbench_rag_eval_retrieval_results AS result
+  ON result.question_id = question.question_id
+ AND result.run_id = question.run_id
+ AND result.project_id = question.project_id
+WHERE question.project_id = $1::uuid
+  AND question.run_id = $2
+ORDER BY question.created_at, question.question_id, result.rank NULLS LAST, result.created_at
+"""
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL = """
+SELECT
+    promotion_id,
+    run_id,
+    question_id,
+    project_id::text AS project_id,
+    target_runtime_entry_id,
+    target_fact_id,
+    question,
+    status,
+    created_at,
+    applied_at
+FROM knowledge_workbench_rag_eval_promoted_questions
+WHERE project_id = $1::uuid
+  AND run_id = $2
+ORDER BY created_at, promotion_id
 """
 
 
@@ -327,6 +388,34 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
             )
         return _summary_from_row(row) if row is not None else None
 
+    async def list_run_questions(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> tuple[WorkbenchRagEvalQuestionDetails, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL,
+                project_id,
+                run_id,
+            )
+        return _question_details_from_rows(rows)
+
+    async def list_run_promotion_candidates(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> tuple[WorkbenchRagEvalPromotionCandidateDetails, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL,
+                project_id,
+                run_id,
+            )
+        return tuple(_promotion_candidate_from_row(row) for row in rows)
+
 
 class _DirectConnectionContext:
     def __init__(self, connection: WorkbenchRagEvalConnectionLike) -> None:
@@ -350,6 +439,109 @@ def _connection(connection_or_pool: object):
         return cast(WorkbenchRagEvalPoolLike, connection_or_pool).acquire()
     return _DirectConnectionContext(
         cast(WorkbenchRagEvalConnectionLike, connection_or_pool)
+    )
+
+
+@dataclass(slots=True)
+class _QuestionDetailsDraft:
+    question_id: str
+    run_id: str
+    project_id: str
+    expected_runtime_entry_id: str
+    expected_fact_id: str
+    question: str
+    question_kind: WorkbenchRagEvalQuestionKind
+    source: WorkbenchRagEvalQuestionSource
+    generation_model: str | None
+    prompt_version: str | None
+    status: WorkbenchRagEvalQuestionStatus
+    created_at: datetime
+    results: list[WorkbenchRagEvalRetrievalResultDetails] = field(default_factory=list)
+
+    def to_details(self) -> WorkbenchRagEvalQuestionDetails:
+        return WorkbenchRagEvalQuestionDetails(
+            question_id=self.question_id,
+            run_id=self.run_id,
+            project_id=self.project_id,
+            expected_runtime_entry_id=self.expected_runtime_entry_id,
+            expected_fact_id=self.expected_fact_id,
+            question=self.question,
+            question_kind=self.question_kind,
+            source=self.source,
+            generation_model=self.generation_model,
+            prompt_version=self.prompt_version,
+            status=self.status,
+            created_at=self.created_at,
+            results=tuple(self.results),
+        )
+
+
+def _question_details_from_rows(
+    rows: list[Mapping[str, object]],
+) -> tuple[WorkbenchRagEvalQuestionDetails, ...]:
+    drafts: dict[str, _QuestionDetailsDraft] = {}
+    order: list[str] = []
+    for row in rows:
+        question_id = _text_from_row(row, "question_id")
+        draft = drafts.get(question_id)
+        if draft is None:
+            draft = _QuestionDetailsDraft(
+                question_id=question_id,
+                run_id=_text_from_row(row, "run_id"),
+                project_id=_text_from_row(row, "project_id"),
+                expected_runtime_entry_id=_text_from_row(
+                    row, "expected_runtime_entry_id"
+                ),
+                expected_fact_id=_text_from_row(row, "expected_fact_id"),
+                question=_text_from_row(row, "question"),
+                question_kind=WorkbenchRagEvalQuestionKind(
+                    _text_from_row(row, "question_kind")
+                ),
+                source=WorkbenchRagEvalQuestionSource(_text_from_row(row, "source")),
+                generation_model=_optional_text_from_row(row, "generation_model"),
+                prompt_version=_optional_text_from_row(row, "prompt_version"),
+                status=WorkbenchRagEvalQuestionStatus(_text_from_row(row, "status")),
+                created_at=_datetime_from_row(row, "created_at"),
+            )
+            drafts[question_id] = draft
+            order.append(question_id)
+
+        if row.get("result_id") is not None:
+            draft.results.append(_result_details_from_row(row))
+
+    return tuple(drafts[question_id].to_details() for question_id in order)
+
+
+def _result_details_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalRetrievalResultDetails:
+    return WorkbenchRagEvalRetrievalResultDetails(
+        result_id=_text_from_row(row, "result_id"),
+        matched_runtime_entry_id=_text_from_row(row, "matched_runtime_entry_id"),
+        matched_fact_id=_text_from_row(row, "matched_fact_id"),
+        rank=_int_from_row(row, "rank"),
+        score=_float_from_row(row, "score"),
+        top1_hit=_bool_from_row(row, "top1_hit"),
+        top3_hit=_bool_from_row(row, "top3_hit"),
+        top5_hit=_bool_from_row(row, "top5_hit"),
+        created_at=_datetime_from_row(row, "result_created_at"),
+    )
+
+
+def _promotion_candidate_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalPromotionCandidateDetails:
+    return WorkbenchRagEvalPromotionCandidateDetails(
+        promotion_id=_text_from_row(row, "promotion_id"),
+        run_id=_text_from_row(row, "run_id"),
+        question_id=_text_from_row(row, "question_id"),
+        project_id=_text_from_row(row, "project_id"),
+        target_runtime_entry_id=_text_from_row(row, "target_runtime_entry_id"),
+        target_fact_id=_text_from_row(row, "target_fact_id"),
+        question=_text_from_row(row, "question"),
+        status=WorkbenchRagEvalPromotionStatus(_text_from_row(row, "status")),
+        created_at=_datetime_from_row(row, "created_at"),
+        applied_at=_optional_datetime_from_row(row, "applied_at"),
     )
 
 
@@ -441,6 +633,13 @@ def _float_from_row(row: Mapping[str, object], key: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise TypeError(f"{key} must be numeric")
     return float(value)
+
+
+def _bool_from_row(row: Mapping[str, object], key: str) -> bool:
+    value = row.get(key)
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} must be bool")
+    return value
 
 
 def _datetime_from_row(row: Mapping[str, object], key: str) -> datetime:

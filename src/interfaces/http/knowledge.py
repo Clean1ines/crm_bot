@@ -1290,6 +1290,58 @@ async def get_workbench_rag_eval_run(
     return {"run": summary.to_json_dict()}
 
 
+@router.get("/rag-eval/workbench/runs/{run_id}/questions")
+async def list_workbench_rag_eval_questions(
+    project_id: str,
+    run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    repository = PostgresWorkbenchRagEvalRepository(pool)
+    summary = await repository.get_run(run_id=run_id, project_id=project_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Workbench RAG Eval run not found")
+    questions = await repository.list_run_questions(
+        project_id=project_id,
+        run_id=run_id,
+    )
+    return {"questions": [question.to_json_dict() for question in questions]}
+
+
+@router.get("/rag-eval/workbench/runs/{run_id}/promotion-candidates")
+async def list_workbench_rag_eval_promotion_candidates(
+    project_id: str,
+    run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    repository = PostgresWorkbenchRagEvalRepository(pool)
+    summary = await repository.get_run(run_id=run_id, project_id=project_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Workbench RAG Eval run not found")
+    candidates = await repository.list_run_promotion_candidates(
+        project_id=project_id,
+        run_id=run_id,
+    )
+    return {"candidates": [candidate.to_json_dict() for candidate in candidates]}
+
+
 @router.get("/{document_id}/workflow-live-state")
 async def knowledge_workflow_live_state(
     project_id: str,

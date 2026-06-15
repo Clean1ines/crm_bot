@@ -9,6 +9,13 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalPromotionCandidateDetails,
+    WorkbenchRagEvalPromotionStatus,
+    WorkbenchRagEvalQuestionDetails,
+    WorkbenchRagEvalQuestionKind,
+    WorkbenchRagEvalQuestionSource,
+    WorkbenchRagEvalQuestionStatus,
+    WorkbenchRagEvalRetrievalResultDetails,
     WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalSummary,
 )
@@ -153,3 +160,150 @@ def test_workbench_rag_eval_routes_are_in_knowledge_namespace() -> None:
     assert (
         "/api/projects/{project_id}/knowledge/rag-eval/workbench/runs/{run_id}" in paths
     )
+    assert (
+        "/api/projects/{project_id}/knowledge/rag-eval/workbench/runs/{run_id}/questions"
+        in paths
+    )
+    assert (
+        "/api/projects/{project_id}/knowledge/rag-eval/workbench/runs/{run_id}/promotion-candidates"
+        in paths
+    )
+
+
+class FakeWorkbenchRagEvalRepository:
+    def __init__(self, pool: object) -> None:
+        self.pool = pool
+
+    async def get_run(self, *, run_id: str, project_id: str):
+        if run_id == "missing-run":
+            return None
+        return _summary()
+
+    async def get_latest_run(self, *, project_id: str):
+        return _summary()
+
+    async def list_run_questions(self, *, project_id: str, run_id: str):
+        now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+        return (
+            WorkbenchRagEvalQuestionDetails(
+                question_id="question-1",
+                run_id=run_id,
+                project_id=project_id,
+                expected_runtime_entry_id="entry-expected",
+                expected_fact_id="fact-expected",
+                question="Как спросить?",
+                question_kind=WorkbenchRagEvalQuestionKind.PARAPHRASE,
+                source=WorkbenchRagEvalQuestionSource.GENERATED,
+                generation_model="model-1",
+                prompt_version="prompt-v1",
+                status=WorkbenchRagEvalQuestionStatus.CREATED,
+                created_at=now,
+                results=(
+                    WorkbenchRagEvalRetrievalResultDetails(
+                        result_id="result-1",
+                        matched_runtime_entry_id="entry-expected",
+                        matched_fact_id="fact-expected",
+                        rank=1,
+                        score=0.95,
+                        top1_hit=True,
+                        top3_hit=True,
+                        top5_hit=True,
+                        created_at=now,
+                    ),
+                ),
+            ),
+        )
+
+    async def list_run_promotion_candidates(self, *, project_id: str, run_id: str):
+        now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+        return (
+            WorkbenchRagEvalPromotionCandidateDetails(
+                promotion_id="promotion-1",
+                run_id=run_id,
+                question_id="question-1",
+                project_id=project_id,
+                target_runtime_entry_id="entry-expected",
+                target_fact_id="fact-expected",
+                question="Как спросить?",
+                status=WorkbenchRagEvalPromotionStatus.CANDIDATE,
+                created_at=now,
+                applied_at=None,
+            ),
+        )
+
+
+def test_workbench_rag_eval_questions_endpoint_returns_questions(monkeypatch) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access", allow_access
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge.PostgresWorkbenchRagEvalRepository",
+        FakeWorkbenchRagEvalRepository,
+    )
+
+    response = _client().get(
+        "/api/projects/11111111-1111-1111-1111-111111111111/knowledge/rag-eval/workbench/runs/run-1/questions",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["questions"][0]["question_id"] == "question-1"
+    assert (
+        payload["questions"][0]["results"][0]["matched_runtime_entry_id"]
+        == "entry-expected"
+    )
+    assert "answer_text" not in str(payload)
+
+
+def test_workbench_rag_eval_candidates_endpoint_returns_candidates(monkeypatch) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access", allow_access
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge.PostgresWorkbenchRagEvalRepository",
+        FakeWorkbenchRagEvalRepository,
+    )
+
+    response = _client().get(
+        "/api/projects/11111111-1111-1111-1111-111111111111/knowledge/rag-eval/workbench/runs/run-1/promotion-candidates",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidates"][0]["promotion_id"] == "promotion-1"
+    assert payload["candidates"][0]["status"] == "candidate"
+    assert "answer_text" not in str(payload)
+
+
+def test_workbench_rag_eval_details_endpoints_return_404_for_missing_run(
+    monkeypatch,
+) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access", allow_access
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge.PostgresWorkbenchRagEvalRepository",
+        FakeWorkbenchRagEvalRepository,
+    )
+
+    questions = _client().get(
+        "/api/projects/11111111-1111-1111-1111-111111111111/knowledge/rag-eval/workbench/runs/missing-run/questions",
+    )
+    candidates = _client().get(
+        "/api/projects/11111111-1111-1111-1111-111111111111/knowledge/rag-eval/workbench/runs/missing-run/promotion-candidates",
+    )
+
+    assert questions.status_code == 404
+    assert candidates.status_code == 404

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BarChart3, Loader2, Play, ShieldCheck, XCircle } from 'lucide-react';
+import { BarChart3, Loader2, Play, Search, ShieldCheck, XCircle } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
@@ -7,6 +7,9 @@ import { getErrorMessage } from '@shared/api/core/errors';
 import {
   ragEvalApi,
   type RunWorkbenchRagEvalRequest,
+  type WorkbenchRagEvalPromotionCandidateDetails,
+  type WorkbenchRagEvalQuestionDetails,
+  type WorkbenchRagEvalRetrievalResultDetails,
   type WorkbenchRagEvalRunSummary,
 } from '@shared/api/modules/ragEval';
 
@@ -46,6 +49,206 @@ const optionalTrimmed = (value: string): string | null => {
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 };
+
+const shortId = (value: string): string => (value.length > 14 ? `${value.slice(0, 14)}…` : value);
+
+const formatScore = (value: number): string => value.toFixed(4);
+
+const hitLabel = (result: WorkbenchRagEvalRetrievalResultDetails): string => {
+  if (result.top1_hit) return 'top-1';
+  if (result.top3_hit) return 'top-3';
+  if (result.top5_hit) return 'top-5';
+  return 'miss';
+};
+
+const expectedRank = (question: WorkbenchRagEvalQuestionDetails): number | null => {
+  const expected = question.results.find(
+    (result) => result.matched_runtime_entry_id === question.expected_runtime_entry_id,
+  );
+  return expected?.rank ?? null;
+};
+
+const bestMatch = (
+  question: WorkbenchRagEvalQuestionDetails,
+): WorkbenchRagEvalRetrievalResultDetails | null => question.results[0] ?? null;
+
+const QuestionsPanel: React.FC<{
+  questions: WorkbenchRagEvalQuestionDetails[];
+  loading: boolean;
+  error: unknown;
+}> = ({ questions, loading, error }) => (
+  <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
+    <div className="mb-4 flex items-start gap-3">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--control-bg)] text-[var(--text-secondary)]">
+        <Search className="h-5 w-5" />
+      </div>
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+          Questions & retrieval results
+        </h2>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">
+          Read-only: показаны generated/baseline questions и top-k matches. Никакие candidates здесь не применяются.
+        </p>
+      </div>
+    </div>
+
+    {loading && (
+      <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+        <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+        Загружаю вопросы и retrieval results…
+      </div>
+    )}
+
+    {Boolean(error) && !loading && (
+      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-500">
+        Не удалось загрузить questions: {getErrorMessage(error, 'unknown error')}
+      </div>
+    )}
+
+    {!loading && !error && questions.length === 0 && (
+      <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+        Для этого run пока нет сохранённых questions.
+      </div>
+    )}
+
+    <div className="space-y-3">
+      {questions.map((question) => {
+        const best = bestMatch(question);
+        const rank = expectedRank(question);
+        return (
+          <details
+            key={question.question_id}
+            className="rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-4"
+          >
+            <summary className="cursor-pointer list-none">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[var(--text-primary)]">
+                    {question.question}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
+                    <span>{question.question_kind}</span>
+                    <span>source: {question.source}</span>
+                    <span>status: {question.status}</span>
+                  </div>
+                </div>
+                <div className="grid gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-3 lg:min-w-[420px]">
+                  <div>
+                    <div className="text-[var(--text-muted)]">Expected</div>
+                    <div className="font-mono">{shortId(question.expected_runtime_entry_id)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[var(--text-muted)]">Expected rank</div>
+                    <div>{rank === null ? 'not in top-k' : rank}</div>
+                  </div>
+                  <div>
+                    <div className="text-[var(--text-muted)]">Best match</div>
+                    <div>{best ? `${shortId(best.matched_runtime_entry_id)} · ${hitLabel(best)}` : '—'}</div>
+                  </div>
+                </div>
+              </div>
+            </summary>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-left text-xs">
+                <thead className="text-[var(--text-muted)]">
+                  <tr>
+                    <th className="px-2 py-2">Rank</th>
+                    <th className="px-2 py-2">Matched runtime entry</th>
+                    <th className="px-2 py-2">Matched fact</th>
+                    <th className="px-2 py-2">Score</th>
+                    <th className="px-2 py-2">Hit flags</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {question.results.map((result) => (
+                    <tr key={result.result_id} className="border-t border-[var(--border-primary)]">
+                      <td className="px-2 py-2">{result.rank}</td>
+                      <td className="px-2 py-2 font-mono">{result.matched_runtime_entry_id}</td>
+                      <td className="px-2 py-2 font-mono">{result.matched_fact_id}</td>
+                      <td className="px-2 py-2">{formatScore(result.score)}</td>
+                      <td className="px-2 py-2">
+                        top1={String(result.top1_hit)} · top3={String(result.top3_hit)} · top5={String(result.top5_hit)}
+                      </td>
+                    </tr>
+                  ))}
+                  {question.results.length === 0 && (
+                    <tr>
+                      <td className="px-2 py-3 text-[var(--text-muted)]" colSpan={5}>
+                        Нет top-k matches для этого вопроса.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  </section>
+);
+
+const CandidatesPanel: React.FC<{
+  candidates: WorkbenchRagEvalPromotionCandidateDetails[];
+  loading: boolean;
+  error: unknown;
+}> = ({ candidates, loading, error }) => (
+  <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
+    <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+      Promotion candidates
+    </h2>
+    <p className="mt-1 text-sm text-[var(--text-muted)]">
+      Candidates пока не применяются автоматически. Apply/promote + embedding recalculation будут следующим patch.
+    </p>
+
+    {loading && (
+      <div className="mt-4 rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+        <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+        Загружаю candidates…
+      </div>
+    )}
+
+    {Boolean(error) && !loading && (
+      <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-500">
+        Не удалось загрузить candidates: {getErrorMessage(error, 'unknown error')}
+      </div>
+    )}
+
+    {!loading && !error && candidates.length === 0 && (
+      <div className="mt-4 rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+        Candidate questions для этого run не созданы.
+      </div>
+    )}
+
+    {candidates.length > 0 && (
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full text-left text-xs">
+          <thead className="text-[var(--text-muted)]">
+            <tr>
+              <th className="px-2 py-2">Question</th>
+              <th className="px-2 py-2">Target runtime entry</th>
+              <th className="px-2 py-2">Target fact</th>
+              <th className="px-2 py-2">Status</th>
+              <th className="px-2 py-2">Created</th>
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map((candidate) => (
+              <tr key={candidate.promotion_id} className="border-t border-[var(--border-primary)]">
+                <td className="max-w-xl px-2 py-2 text-[var(--text-primary)]">{candidate.question}</td>
+                <td className="px-2 py-2 font-mono">{candidate.target_runtime_entry_id}</td>
+                <td className="px-2 py-2 font-mono">{candidate.target_fact_id}</td>
+                <td className="px-2 py-2">{candidate.status}</td>
+                <td className="px-2 py-2">{formatDateTime(candidate.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+);
 
 const MetricCard: React.FC<{ label: string; value: string | number; hint?: string }> = ({
   label,
@@ -213,6 +416,26 @@ export const RagEvalPage: React.FC = () => {
 
   const visibleRun = lastRun ?? latestQuery.data?.run ?? null;
 
+  const questionsQuery = useQuery({
+    queryKey: ['workbench-rag-eval-questions', projectId, visibleRun?.run_id],
+    queryFn: async () => {
+      if (!projectId || !visibleRun) return { questions: [] };
+      return ragEvalApi.listWorkbenchQuestions(projectId, visibleRun.run_id);
+    },
+    enabled: Boolean(projectId && visibleRun?.run_id),
+    retry: false,
+  });
+
+  const candidatesQuery = useQuery({
+    queryKey: ['workbench-rag-eval-promotion-candidates', projectId, visibleRun?.run_id],
+    queryFn: async () => {
+      if (!projectId || !visibleRun) return { candidates: [] };
+      return ragEvalApi.listWorkbenchPromotionCandidates(projectId, visibleRun.run_id);
+    },
+    enabled: Boolean(projectId && visibleRun?.run_id),
+    retry: false,
+  });
+
   const validationError = useMemo(() => {
     if (topK < 5) return 'top_k должен быть не меньше 5';
     if (maxEntries < 1 || maxEntries > 50) return 'max_entries должен быть от 1 до 50';
@@ -362,6 +585,21 @@ export const RagEvalPage: React.FC = () => {
       )}
 
       <SummaryPanel run={visibleRun} loading={latestQuery.isLoading && !visibleRun} />
+
+      {visibleRun && (
+        <>
+          <QuestionsPanel
+            questions={questionsQuery.data?.questions ?? []}
+            loading={questionsQuery.isLoading}
+            error={questionsQuery.error}
+          />
+          <CandidatesPanel
+            candidates={candidatesQuery.data?.candidates ?? []}
+            loading={candidatesQuery.isLoading}
+            error={candidatesQuery.error}
+          />
+        </>
+      )}
     </div>
   );
 };
