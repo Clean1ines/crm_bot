@@ -59,6 +59,58 @@ class PostgresSourceManagementRepository(SourceManagementRepositoryPort):
             document.created_at,
         )
 
+        # Bridge the new source-ingestion vertical into the Workbench document
+        # read model used by the document list, progress, and workflow live-state
+        # endpoints. Without this row the workflow can start while the frontend
+        # has no document id to poll.
+        await self._connection.execute(
+            """
+            INSERT INTO knowledge_workbench_documents (
+                document_id,
+                project_id,
+                file_name,
+                source_type,
+                content_hash,
+                upload_id,
+                file_size_bytes,
+                status,
+                current_processing_run_id,
+                uploaded_by_actor_type,
+                uploaded_by_actor_id,
+                trusted_upload,
+                retention_state,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 0, 'processing', NULL, 'source_ingestion', $7, TRUE, 'active_processing', $8, $8)
+            ON CONFLICT (document_id) DO UPDATE SET
+                project_id = EXCLUDED.project_id,
+                file_name = EXCLUDED.file_name,
+                source_type = EXCLUDED.source_type,
+                content_hash = EXCLUDED.content_hash,
+                upload_id = EXCLUDED.upload_id,
+                status = CASE
+                    WHEN knowledge_workbench_documents.status IN ('processed', 'published')
+                    THEN knowledge_workbench_documents.status
+                    ELSE EXCLUDED.status
+                END,
+                uploaded_by_actor_type = EXCLUDED.uploaded_by_actor_type,
+                uploaded_by_actor_id = EXCLUDED.uploaded_by_actor_id,
+                trusted_upload = EXCLUDED.trusted_upload,
+                retention_state = EXCLUDED.retention_state,
+                updated_at = EXCLUDED.updated_at,
+                deleted_at = NULL
+            """,
+            document.document_ref.value,
+            document.project_id,
+            document.original_filename or document.document_ref.value,
+            document.source_format.value,
+            document.content_hash,
+            document.document_ref.value,
+            "source_ingestion",
+            document.created_at,
+        )
+
     async def load_source_document(
         self, document_ref: SourceDocumentRef
     ) -> SourceDocument | None:

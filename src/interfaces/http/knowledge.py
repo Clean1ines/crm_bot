@@ -394,7 +394,8 @@ async def _list_workbench_documents_fallback(
                 status,
                 created_at,
                 updated_at,
-                current_processing_run_id
+                current_processing_run_id,
+                file_size_bytes
             FROM knowledge_workbench_documents
             WHERE project_id = $1
               AND deleted_at IS NULL
@@ -418,6 +419,7 @@ async def _list_workbench_documents_fallback(
                 "project_id": document["project_id"],
                 "file_name": document["file_name"],
                 "status": document["status"],
+                "file_size": document.get("file_size_bytes", 0),
                 "created_at": (_optional_datetime_isoformat(created_at)),
                 "updated_at": (_optional_datetime_isoformat(updated_at)),
                 "current_processing_run_id": document.get("current_processing_run_id"),
