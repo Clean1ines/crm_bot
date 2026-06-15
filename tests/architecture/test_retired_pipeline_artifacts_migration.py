@@ -67,7 +67,7 @@ def test_later_migrations_do_not_require_pipeline_artifacts_relation() -> None:
         if "pipeline_artifacts" not in text:
             continue
 
-        allowed_drop = path.name == "099_drop_artifact_runtime_tables.sql" and (
+        allowed_drop = path.name == "112_drop_retired_legacy_knowledge_schema.sql" and (
             "DROP TABLE IF EXISTS pipeline_artifacts" in text
         )
         allowed_retired_notice = (

@@ -1,7 +1,3 @@
--- Canonical knowledge document preprocessing metadata.
--- Retired tail: old knowledge_base entry/preprocessing columns moved to
--- migrations/_retired_legacy/036_knowledge_preprocessing_mvp.sql.
-
 BEGIN;
 
 ALTER TABLE knowledge_documents
@@ -12,7 +8,19 @@ ALTER TABLE knowledge_documents
     ADD COLUMN IF NOT EXISTS preprocessing_prompt_version TEXT,
     ADD COLUMN IF NOT EXISTS preprocessing_metrics JSONB NOT NULL DEFAULT '{}'::jsonb;
 
+ALTER TABLE knowledge_base
+    ADD COLUMN IF NOT EXISTS entry_type TEXT NOT NULL DEFAULT 'chunk',
+    ADD COLUMN IF NOT EXISTS title TEXT,
+    ADD COLUMN IF NOT EXISTS source_excerpt TEXT,
+    ADD COLUMN IF NOT EXISTS questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS synonyms JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    ADD COLUMN IF NOT EXISTS embedding_text TEXT;
+
 CREATE INDEX IF NOT EXISTS idx_knowledge_documents_project_preprocessing_mode
     ON knowledge_documents(project_id, preprocessing_mode);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_document_entry_type
+    ON knowledge_base(document_id, entry_type);
 
 COMMIT;
