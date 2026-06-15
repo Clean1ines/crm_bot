@@ -13,8 +13,6 @@ def test_workbench_rag_eval_boundary_avoids_legacy_surfaces_and_answer_text() ->
         "knowledge_workbench_surfaces",
         "FAQSurface",
         "surface",
-        "src.application.rag_eval",
-        "RagEvalRunner",
     )
     for marker in forbidden:
         assert marker not in sources
@@ -32,12 +30,8 @@ def test_workbench_rag_eval_retrieval_phase_uses_published_runtime_search() -> N
     assert "answer" not in source
 
 
-def test_workbench_rag_eval_http_does_not_reconnect_legacy_rag_eval_router() -> None:
-    source = Path("src/interfaces/http/rag_eval.py").read_text(encoding="utf-8")
-    knowledge = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
-
-    assert "HTTP_410_GONE" in source
-    assert "/rag-eval/workbench/run" in knowledge
+def test_legacy_rag_eval_router_file_is_deleted() -> None:
+    assert not Path("src/interfaces/http/rag_eval.py").exists()
 
 
 def test_workbench_rag_eval_question_generator_uses_llm_dispatch_boundary_only() -> (

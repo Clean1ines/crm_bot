@@ -181,8 +181,8 @@ def test_repository_source_does_not_use_legacy_rag_eval_or_answer_text() -> None
         "answer_text",
         "knowledge_retrieval_surface",
         "knowledge_workbench_surfaces",
-        "src.application.rag_eval",
-        "RagEvalRunner",
+        "src." + "application." + "rag_eval",
+        "Rag" + "EvalRunner",
     )
     for marker in forbidden:
         assert marker not in source

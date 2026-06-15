@@ -645,7 +645,7 @@ export const RagEvalPage: React.FC = () => {
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
           Проверяет published compacted claims через новый Workbench runtime retrieval.
-          Frontend не вызывает legacy /api/rag-eval; promotion candidates применяются только через Workbench bulk/single apply.
+          Frontend не вызывает legacy RAG Eval API; promotion candidates применяются только через Workbench bulk/single apply.
         </p>
       </header>
 
