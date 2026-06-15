@@ -306,11 +306,13 @@ def test_ensure_work_items_scheduled_does_not_commit_or_rollback() -> None:
     assert "async def rollback" not in source
 
 
-def test_postgres_work_item_scheduling_repository_is_conflict_safe() -> None:
+def test_postgres_work_item_scheduling_repository_does_not_silently_ignore_conflicts() -> (
+    None
+):
     source = Path(
         "src/contexts/execution_runtime/infrastructure/postgres/"
         "postgres_work_item_scheduling_repository.py",
     ).read_text(encoding="utf-8")
 
-    assert "ON CONFLICT (work_item_id) DO NOTHING" in source
-    assert source.count("ON CONFLICT") >= 2
+    assert "ON CONFLICT" not in source
+    assert "DO NOTHING" not in source

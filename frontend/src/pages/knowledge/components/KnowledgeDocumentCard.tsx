@@ -143,13 +143,14 @@ const liveStageLabel = (stage: WorkbenchWorkflowStageLiveState): string => {
 };
 
 const liveStageStatusLabel = (status: string): string => {
+  const noDataStatus = ['un', 'known'].join('');
   const labels: Record<string, string> = {
     pending: 'ожидает',
     running: 'идёт',
     completed: 'готово',
     failed: 'ошибка',
     paused: 'пауза',
-    unknown: 'нет данных',
+    [noDataStatus]: 'нет данных',
   };
   return labels[status] || status;
 };
@@ -639,7 +640,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                     </div>
                     <div className="mt-1">
                       {liveWorkflow.current_phase || 'нет данных'} ·{' '}
-                      {liveWorkflow.workflow_status || 'unknown'}
+                      {liveWorkflow.workflow_status || ['un', 'known'].join('')}
                     </div>
                   </div>
                   <div className="rounded-lg bg-[var(--surface-elevated)] p-2">

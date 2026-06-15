@@ -86,9 +86,7 @@ class PostgresWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
                 next_attempt_at,
                 last_error_kind
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (work_item_id) DO NOTHING
-            """,
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)            """,
             item.work_item_id,
             item.work_kind.value,
             item.status.value,
@@ -107,9 +105,7 @@ class PostgresWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
                 payload_hash,
                 payload
             )
-            VALUES ($1, $2, $3, $4::jsonb)
-            ON CONFLICT (work_item_id) DO NOTHING
-            """,
+            VALUES ($1, $2, $3, $4::jsonb)            """,
             item.work_item_id,
             idempotency_key,
             payload_hash,

@@ -14,10 +14,11 @@ def test_started_attempt_ids_are_deterministic_from_work_item_attempt_count() ->
     )
 
 
-def test_postgres_attempt_dispatch_inserts_are_conflict_safe() -> None:
+def test_postgres_attempt_dispatch_inserts_do_not_silently_ignore_conflicts() -> None:
     source = Path(
         "src/contexts/execution_runtime/infrastructure/postgres/"
         "postgres_work_item_attempt_dispatch_repository.py",
     ).read_text(encoding="utf-8")
 
-    assert source.count("ON CONFLICT DO NOTHING") >= 2
+    assert "ON CONFLICT" not in source
+    assert "DO NOTHING" not in source
