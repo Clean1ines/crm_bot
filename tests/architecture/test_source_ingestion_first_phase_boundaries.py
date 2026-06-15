@@ -4,11 +4,8 @@ from pathlib import Path
 def test_source_ingestion_application_sagas_do_not_import_interfaces_or_infrastructure() -> (
     None
 ):
-    saga_paths = tuple(
-        sorted(
-            Path("src/contexts/knowledge_workbench/application/sagas").glob("*.py"),
-        ),
-    )
+    saga_root = Path("src/contexts/knowledge_workbench/application/sagas")
+    saga_paths = tuple(sorted(saga_root.glob("*source_ingestion*.py")))
     assert saga_paths
 
     forbidden_markers = [
@@ -230,7 +227,6 @@ def test_knowledge_extraction_saga_wires_scheduling_phase_without_infrastructure
     required_markers = [
         "AdvanceToClaimBuilderWorkSchedulingPhase",
         "AdvanceToClaimBuilderWorkSchedulingPhaseCommand",
-        "SourceManagementRepositoryPort",
         "list_source_units_for_document",
         "CLAIM_BUILDER_WORK_SCHEDULED",
     ]

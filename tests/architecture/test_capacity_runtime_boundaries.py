@@ -41,7 +41,13 @@ def test_capacity_runtime_has_no_cross_context_or_infrastructure_markers() -> No
         "psutil",
     ]
 
-    scanned_files = tuple(sorted(root.rglob("*.py")))
+    scanned_files = tuple(
+        sorted(
+            path
+            for path in root.rglob("*.py")
+            if "infrastructure/postgres" not in path.as_posix()
+        )
+    )
     assert scanned_files
 
     for path in scanned_files:

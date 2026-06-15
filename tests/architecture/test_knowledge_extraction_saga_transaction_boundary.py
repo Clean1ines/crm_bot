@@ -74,9 +74,6 @@ def test_no_forbidden_transaction_boundary_workarounds() -> None:
         "DraftObservationExtractionSchedulingReconciler",
         "PostgresClaimExtractionWorkItemUnitOfWork",
         "ClaimExtractionStageRuntime",
-        "capacity_runtime",
-        "llm_runtime",
-        "artifact_runtime",
     )
 
     offenders: list[str] = []

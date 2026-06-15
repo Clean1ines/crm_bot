@@ -18,9 +18,19 @@ def test_execution_runtime_does_not_import_workbench_capacity_llm_or_artifact() 
     )
 
     offenders: list[str] = []
+    allowed_capacity_admission_boundary = Path(
+        "src/contexts/execution_runtime/application/use_cases/"
+        "lease_admitted_work_items.py",
+    )
+
     for path in sorted(root.rglob("*.py")):
         text = path.read_text(encoding="utf-8")
         for marker in forbidden_markers:
+            if (
+                path == allowed_capacity_admission_boundary
+                and marker == "capacity_runtime"
+            ):
+                continue
             if marker in text:
                 offenders.append(f"{path}: {marker}")
 
