@@ -15,6 +15,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.use_cases.generate_wo
 from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_question_runtime_embedding_text_builder import (
     PromotedQuestionRuntimeEmbeddingTextBuilder,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotions_batch import (
+    ApplyWorkbenchRagEvalPromotionsBatch,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
     ApplyWorkbenchRagEvalPromotion,
 )
@@ -77,6 +80,20 @@ def make_apply_workbench_rag_eval_promotion(
 ) -> ApplyWorkbenchRagEvalPromotion:
     embedding_settings = load_embedding_runtime_settings()
     return ApplyWorkbenchRagEvalPromotion(
+        rag_eval_repository=PostgresWorkbenchRagEvalRepository(pool),
+        embedding_generation_port=make_embedding_generation_port(embedding_settings),
+        embedding_model_id=embedding_settings.local_model,
+        embedding_dimensions=embedding_settings.vector_dimensions,
+        embedding_text_builder=PromotedQuestionRuntimeEmbeddingTextBuilder(),
+    )
+
+
+def make_apply_workbench_rag_eval_promotions_batch(
+    *,
+    pool: object,
+) -> ApplyWorkbenchRagEvalPromotionsBatch:
+    embedding_settings = load_embedding_runtime_settings()
+    return ApplyWorkbenchRagEvalPromotionsBatch(
         rag_eval_repository=PostgresWorkbenchRagEvalRepository(pool),
         embedding_generation_port=make_embedding_generation_port(embedding_settings),
         embedding_model_id=embedding_settings.local_model,

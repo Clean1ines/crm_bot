@@ -97,6 +97,34 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         promotion_id: str,
     ) -> WorkbenchRagEvalPromotionApplicationTarget | None: ...
 
+    async def list_promotion_application_targets_for_ids(
+        self,
+        *,
+        project_id: str,
+        promotion_ids: Sequence[str],
+    ) -> tuple[WorkbenchRagEvalPromotionApplicationTarget, ...]: ...
+
+    async def list_promotion_application_targets_for_run(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> tuple[WorkbenchRagEvalPromotionApplicationTarget, ...]: ...
+
+    async def apply_promotion_candidates_for_target(
+        self,
+        *,
+        project_id: str,
+        promotion_ids: Sequence[str],
+        target_runtime_entry_id: str,
+        embedding_model_id: str,
+        dimensions: int,
+        embedding: Sequence[float],
+        embedding_text: str,
+        embedding_text_hash: str,
+        applied_at: datetime,
+    ) -> tuple[WorkbenchRagEvalPromotionApplyResult, ...]: ...
+
     async def apply_promotion_candidate(
         self,
         *,

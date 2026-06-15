@@ -109,6 +109,30 @@ export type WorkbenchRagEvalPromotionApplyResponse = {
   result: WorkbenchRagEvalPromotionApplyResult;
 };
 
+export type WorkbenchRagEvalPromotionBatchApplyMode = 'selected' | 'all_candidates_for_run';
+
+export type WorkbenchRagEvalPromotionBatchApplyRequest =
+  | {
+      mode: 'selected';
+      promotion_ids: string[];
+    }
+  | {
+      mode: 'all_candidates_for_run';
+      run_id: string;
+    };
+
+export type WorkbenchRagEvalPromotionBatchApplyResult = {
+  requested_count: number;
+  applied_count: number;
+  skipped_count: number;
+  embedding_recalculation_count: number;
+  errors: string[];
+};
+
+export type WorkbenchRagEvalPromotionBatchApplyResponse = {
+  result: WorkbenchRagEvalPromotionBatchApplyResult;
+};
+
 export interface RagEvalFullRunAcceptedResponse {
   ok: boolean;
   queued: boolean;
@@ -514,6 +538,24 @@ export const ragEvalApi = {
       authedJsonRequest<WorkbenchRagEvalPromotionApplyResponse>(
         `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/promotion-candidates/${encode(promotionId)}/apply`,
         { method: 'POST' },
+      ),
+    );
+  },
+
+  async applyWorkbenchPromotionCandidatesBatch(
+    projectId: string,
+    payload: WorkbenchRagEvalPromotionBatchApplyRequest,
+  ): Promise<WorkbenchRagEvalPromotionBatchApplyResponse> {
+    return unwrap(
+      authedJsonRequest<
+        WorkbenchRagEvalPromotionBatchApplyResponse,
+        WorkbenchRagEvalPromotionBatchApplyRequest
+      >(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/promotion-candidates/apply-batch`,
+        {
+          method: 'POST',
+          body: payload,
+        },
       ),
     );
   },

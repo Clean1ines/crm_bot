@@ -7,6 +7,7 @@ import { getErrorMessage } from '@shared/api/core/errors';
 import {
   ragEvalApi,
   type RunWorkbenchRagEvalRequest,
+  type WorkbenchRagEvalPromotionBatchApplyRequest,
   type WorkbenchRagEvalPromotionCandidateDetails,
   type WorkbenchRagEvalQuestionDetails,
   type WorkbenchRagEvalRetrievalResultDetails,
@@ -44,6 +45,10 @@ const statusClass = (status: string): string => {
   if (status === 'running' || status === 'created') return 'bg-amber-500/10 text-amber-600';
   return 'bg-[var(--control-bg)] text-[var(--text-secondary)]';
 };
+
+const isApplyableCandidate = (candidate: WorkbenchRagEvalPromotionCandidateDetails): boolean => (
+  candidate.status === 'candidate' || candidate.status === 'accepted'
+);
 
 const optionalTrimmed = (value: string): string | null => {
   const trimmed = value.trim();
@@ -194,14 +199,32 @@ const CandidatesPanel: React.FC<{
   loading: boolean;
   error: unknown;
   applyingPromotionId: string | null;
+  selectedPromotionIds: string[];
+  bulkApplying: boolean;
   onApply: (candidate: WorkbenchRagEvalPromotionCandidateDetails) => void;
-}> = ({ candidates, loading, error, applyingPromotionId, onApply }) => (
+  onToggleSelected: (candidate: WorkbenchRagEvalPromotionCandidateDetails) => void;
+  onSelectAllVisible: () => void;
+  onApplySelected: () => void;
+  onApplyAllForRun: () => void;
+}> = ({
+  candidates,
+  loading,
+  error,
+  applyingPromotionId,
+  selectedPromotionIds,
+  bulkApplying,
+  onApply,
+  onToggleSelected,
+  onSelectAllVisible,
+  onApplySelected,
+  onApplyAllForRun,
+}) => (
   <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
     <h2 className="text-lg font-semibold text-[var(--text-primary)]">
       Promotion candidates
     </h2>
     <p className="mt-1 text-sm text-[var(--text-muted)]">
-      Candidates пока не применяются автоматически. Apply/promote + embedding recalculation будут следующим patch.
+      Apply добавляет questions в published search surface; bulk apply пересчитывает runtime embeddings только для изменённых surfaces.
     </p>
 
     {loading && (
@@ -224,10 +247,41 @@ const CandidatesPanel: React.FC<{
     )}
 
     {candidates.length > 0 && (
-      <div className="mt-4 overflow-x-auto">
+      <div className="mt-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--control-bg)] p-3 text-sm">
+          <button
+            type="button"
+            onClick={onSelectAllVisible}
+            disabled={bulkApplying}
+            className="rounded-lg border border-[var(--border-primary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Select all visible
+          </button>
+          <button
+            type="button"
+            onClick={onApplySelected}
+            disabled={bulkApplying || selectedPromotionIds.length === 0}
+            className="rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {bulkApplying ? 'Applying…' : `Apply selected (${selectedPromotionIds.length})`}
+          </button>
+          <button
+            type="button"
+            onClick={onApplyAllForRun}
+            disabled={bulkApplying}
+            className="rounded-lg bg-[var(--control-bg-strong)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Apply all candidates for this run
+          </button>
+          <span className="text-xs text-[var(--text-muted)]">
+            Bulk apply добавляет выбранные failed questions в published search surface и пересчитывает runtime embeddings только для изменённых surfaces.
+          </span>
+        </div>
+        <div className="overflow-x-auto">
         <table className="min-w-full text-left text-xs">
           <thead className="text-[var(--text-muted)]">
             <tr>
+              <th className="px-2 py-2">Select</th>
               <th className="px-2 py-2">Question</th>
               <th className="px-2 py-2">Target runtime entry</th>
               <th className="px-2 py-2">Target fact</th>
@@ -239,6 +293,15 @@ const CandidatesPanel: React.FC<{
           <tbody>
             {candidates.map((candidate) => (
               <tr key={candidate.promotion_id} className="border-t border-[var(--border-primary)]">
+                <td className="px-2 py-2">
+                  <input
+                    type="checkbox"
+                    checked={selectedPromotionIds.includes(candidate.promotion_id)}
+                    disabled={!isApplyableCandidate(candidate) || bulkApplying}
+                    onChange={() => onToggleSelected(candidate)}
+                    aria-label={`Select promotion ${candidate.promotion_id}`}
+                  />
+                </td>
                 <td className="max-w-xl px-2 py-2 text-[var(--text-primary)]">{candidate.question}</td>
                 <td className="px-2 py-2 font-mono">{candidate.target_runtime_entry_id}</td>
                 <td className="px-2 py-2 font-mono">{candidate.target_fact_id}</td>
@@ -249,7 +312,8 @@ const CandidatesPanel: React.FC<{
                     type="button"
                     disabled={
                       applyingPromotionId === candidate.promotion_id ||
-                      !(candidate.status === 'candidate' || candidate.status === 'accepted')
+                      bulkApplying ||
+                      !isApplyableCandidate(candidate)
                     }
                     onClick={() => onApply(candidate)}
                     className="rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -261,6 +325,7 @@ const CandidatesPanel: React.FC<{
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     )}
   </section>
@@ -419,6 +484,7 @@ export const RagEvalPage: React.FC = () => {
   const [topK, setTopK] = useState(5);
   const [maxEntries, setMaxEntries] = useState(20);
   const [lastRun, setLastRun] = useState<WorkbenchRagEvalRunSummary | null>(null);
+  const [selectedPromotionIds, setSelectedPromotionIds] = useState<string[]>([]);
 
   const latestQuery = useQuery({
     queryKey: ['workbench-rag-eval-latest', projectId],
@@ -478,6 +544,31 @@ export const RagEvalPage: React.FC = () => {
     },
   });
 
+  const applyBatchMutation = useMutation({
+    mutationFn: async (payload: WorkbenchRagEvalPromotionBatchApplyRequest) => {
+      if (!projectId) throw new Error('project_id не найден в маршруте');
+      return ragEvalApi.applyWorkbenchPromotionCandidatesBatch(projectId, payload);
+    },
+    onSuccess: async (response) => {
+      setSelectedPromotionIds([]);
+      const result = response.result;
+      toast.success(
+        `Bulk apply: applied ${result.applied_count}, skipped ${result.skipped_count}, embeddings ${result.embedding_recalculation_count}`,
+      );
+      if (result.errors.length > 0) {
+        toast.error(`Bulk apply errors: ${result.errors.length}`);
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-promotion-candidates', projectId, visibleRun?.run_id] }),
+        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-questions', projectId, visibleRun?.run_id] }),
+        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-latest', projectId] }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, 'Bulk promotion apply не выполнился'));
+    },
+  });
+
   const runMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) throw new Error('project_id не найден в маршруте');
@@ -507,6 +598,42 @@ export const RagEvalPage: React.FC = () => {
     },
   });
 
+  const toggleSelectedPromotion = (candidate: WorkbenchRagEvalPromotionCandidateDetails): void => {
+    if (!isApplyableCandidate(candidate)) return;
+    setSelectedPromotionIds((current: string[]) => (
+      current.includes(candidate.promotion_id)
+        ? current.filter((id: string) => id !== candidate.promotion_id)
+        : [...current, candidate.promotion_id]
+    ));
+  };
+
+  const selectAllVisiblePromotions = (): void => {
+    const visibleIds = (candidatesQuery.data?.candidates ?? [])
+      .filter(isApplyableCandidate)
+      .map((candidate: WorkbenchRagEvalPromotionCandidateDetails) => candidate.promotion_id);
+    setSelectedPromotionIds(visibleIds);
+  };
+
+  const applySelectedPromotions = (): void => {
+    if (selectedPromotionIds.length === 0) return;
+    applyBatchMutation.mutate({
+      mode: 'selected',
+      promotion_ids: selectedPromotionIds,
+    });
+  };
+
+  const applyAllPromotionsForRun = (): void => {
+    if (!visibleRun) return;
+    const confirmed = window.confirm(
+      'Apply all candidate/accepted promotion candidates for this run? Runtime embeddings will be recalculated only for changed published surfaces.',
+    );
+    if (!confirmed) return;
+    applyBatchMutation.mutate({
+      mode: 'all_candidates_for_run',
+      run_id: visibleRun.run_id,
+    });
+  };
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
       <header>
@@ -518,7 +645,7 @@ export const RagEvalPage: React.FC = () => {
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
           Проверяет published compacted claims через новый Workbench runtime retrieval.
-          Frontend не вызывает legacy /api/rag-eval, не применяет promotion candidates и не пересчитывает embeddings.
+          Frontend не вызывает legacy /api/rag-eval; promotion candidates применяются только через Workbench bulk/single apply.
         </p>
       </header>
 
@@ -609,7 +736,7 @@ export const RagEvalPage: React.FC = () => {
           </button>
 
           <span className="text-sm text-[var(--text-muted)]">
-            Apply/promote и embedding recalculation будут отдельным patch.
+            Single/bulk apply обновляет published search surface и пересчитывает runtime embeddings.
           </span>
         </div>
       </section>
@@ -638,7 +765,13 @@ export const RagEvalPage: React.FC = () => {
                 ? applyPromotionMutation.variables?.promotion_id ?? null
                 : null
             }
+            selectedPromotionIds={selectedPromotionIds}
+            bulkApplying={applyBatchMutation.isPending}
             onApply={(candidate) => applyPromotionMutation.mutate(candidate)}
+            onToggleSelected={toggleSelectedPromotion}
+            onSelectAllVisible={selectAllVisiblePromotions}
+            onApplySelected={applySelectedPromotions}
+            onApplyAllForRun={applyAllPromotionsForRun}
           />
         </>
       )}

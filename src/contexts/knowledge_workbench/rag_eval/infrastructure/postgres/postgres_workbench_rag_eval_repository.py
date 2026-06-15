@@ -179,6 +179,26 @@ WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL = (
     + " FOR UPDATE OF promotion, entry, fact"
 )
 
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL = (
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL.replace(
+        "promotion.promotion_id = $2",
+        "promotion.promotion_id = ANY($2::text[])",
+    )
+)
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL.replace(
+    "promotion.promotion_id = $2",
+    "promotion.run_id = $2 AND promotion.status IN ('candidate', 'accepted', 'applied')",
+)
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL = (
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL
+    + " AND promotion.target_runtime_entry_id = $3"
+    + " FOR UPDATE OF promotion, entry, fact"
+)
+
 
 class WorkbenchRagEvalTransactionLike(Protocol):
     async def __aenter__(self) -> object: ...
@@ -521,6 +541,167 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 promotion_id,
             )
         return _promotion_application_target_from_row(row) if row is not None else None
+
+    async def list_promotion_application_targets_for_ids(
+        self,
+        *,
+        project_id: str,
+        promotion_ids: Sequence[str],
+    ) -> tuple[WorkbenchRagEvalPromotionApplicationTarget, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL,
+                project_id,
+                list(promotion_ids),
+            )
+        return tuple(_promotion_application_target_from_row(row) for row in rows)
+
+    async def list_promotion_application_targets_for_run(
+        self,
+        *,
+        project_id: str,
+        run_id: str,
+    ) -> tuple[WorkbenchRagEvalPromotionApplicationTarget, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL,
+                project_id,
+                run_id,
+            )
+        return tuple(_promotion_application_target_from_row(row) for row in rows)
+
+    async def apply_promotion_candidates_for_target(
+        self,
+        *,
+        project_id: str,
+        promotion_ids: Sequence[str],
+        target_runtime_entry_id: str,
+        embedding_model_id: str,
+        dimensions: int,
+        embedding: Sequence[float],
+        embedding_text: str,
+        embedding_text_hash: str,
+        applied_at: datetime,
+    ) -> tuple[WorkbenchRagEvalPromotionApplyResult, ...]:
+        requested_ids = tuple(promotion_ids)
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                rows = await connection.fetch(
+                    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL,
+                    project_id,
+                    list(requested_ids),
+                    target_runtime_entry_id,
+                )
+                if len(rows) != len(requested_ids):
+                    raise LookupError("Promotion candidates not found for target")
+
+                targets = tuple(
+                    _promotion_application_target_from_row(row) for row in rows
+                )
+                for target in targets:
+                    if target.target_runtime_entry_id != target_runtime_entry_id:
+                        raise RuntimeError("Promotion target runtime entry mismatch")
+                    if target.status not in (
+                        WorkbenchRagEvalPromotionStatus.CANDIDATE,
+                        WorkbenchRagEvalPromotionStatus.ACCEPTED,
+                    ):
+                        raise RuntimeError(
+                            "Promotion candidate status cannot be applied: "
+                            f"{target.status.value}"
+                        )
+
+                base = targets[0]
+                runtime_questions = _append_texts_once(
+                    base.runtime_possible_questions,
+                    tuple(target.question for target in targets),
+                )
+                fact_questions = _append_texts_once(
+                    base.fact_possible_questions,
+                    tuple(target.question for target in targets),
+                )
+
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_canonical_facts
+                    SET possible_questions = $3::jsonb,
+                        updated_at = $4
+                    WHERE project_id = $1::uuid
+                      AND fact_id = $2
+                    """,
+                    project_id,
+                    base.target_fact_id,
+                    _json_text_list(fact_questions),
+                    applied_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_runtime_retrieval_entries
+                    SET possible_questions = $3::jsonb,
+                        embedding_text = $4
+                    WHERE project_id = $1::uuid
+                      AND runtime_entry_id = $2
+                    """,
+                    project_id,
+                    base.target_runtime_entry_id,
+                    _json_text_list(runtime_questions),
+                    embedding_text,
+                )
+                await connection.execute(
+                    """
+                    DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings
+                    WHERE runtime_entry_id = $1
+                      AND embedding_model_id = $2
+                    """,
+                    base.target_runtime_entry_id,
+                    embedding_model_id,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings (
+                        runtime_entry_id, embedding_model_id, dimensions,
+                        embedding, embedding_text_hash, created_at
+                    )
+                    VALUES ($1, $2, $3, $4::vector, $5, $6)
+                    """,
+                    base.target_runtime_entry_id,
+                    embedding_model_id,
+                    dimensions,
+                    _pg_vector_text(tuple(float(value) for value in embedding)),
+                    embedding_text_hash,
+                    applied_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_promoted_questions
+                    SET status = 'applied',
+                        applied_at = $4
+                    WHERE project_id = $1::uuid
+                      AND promotion_id = ANY($2::text[])
+                      AND target_runtime_entry_id = $3
+                    """,
+                    project_id,
+                    list(requested_ids),
+                    target_runtime_entry_id,
+                    applied_at,
+                )
+
+        return tuple(
+            WorkbenchRagEvalPromotionApplyResult(
+                promotion_id=target.promotion_id,
+                run_id=target.run_id,
+                question_id=target.question_id,
+                project_id=target.project_id,
+                target_runtime_entry_id=target.target_runtime_entry_id,
+                target_fact_id=target.target_fact_id,
+                question=target.question,
+                status=WorkbenchRagEvalPromotionStatus.APPLIED,
+                possible_question_count=len(runtime_questions),
+                embedding_model_id=embedding_model_id,
+                embedding_count=1,
+                applied_at=applied_at,
+            )
+            for target in targets
+        )
 
     async def apply_promotion_candidate(
         self,
@@ -865,6 +1046,24 @@ def _optional_text_from_row(row: Mapping[str, object], key: str) -> str | None:
         raise TypeError(f"{key} must be text or None")
     stripped = value.strip()
     return stripped or None
+
+
+def _append_texts_once(
+    values: tuple[str, ...],
+    additions: tuple[str, ...],
+) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in (*values, *additions):
+        stripped = item.strip()
+        if not stripped:
+            continue
+        normalized = " ".join(stripped.casefold().split())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(stripped)
+    return tuple(result)
 
 
 def _append_text_once(

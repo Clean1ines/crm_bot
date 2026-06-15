@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalPromotionApplyResult,
+    WorkbenchRagEvalPromotionBatchApplyResult,
     WorkbenchRagEvalPromotionCandidateDetails,
     WorkbenchRagEvalPromotionStatus,
     WorkbenchRagEvalQuestionDetails,
@@ -380,3 +381,63 @@ def test_workbench_rag_eval_run_endpoint_rejects_non_bool_degraded_flag(
 
     assert response.status_code == 400
     assert response.json()["detail"] == "allow_degraded_llama_instant must be boolean"
+
+
+class FakeApplyPromotionsBatchUseCase:
+    async def execute(
+        self,
+        *,
+        project_id: str,
+        mode: str,
+        promotion_ids: tuple[str, ...],
+        run_id: str | None,
+        applied_at,
+    ):
+        del applied_at
+        assert project_id == "11111111-1111-1111-1111-111111111111"
+        assert mode == "selected"
+        assert promotion_ids == ("promotion-1", "promotion-2")
+        assert run_id is None
+        return WorkbenchRagEvalPromotionBatchApplyResult(
+            requested_count=2,
+            applied_count=2,
+            skipped_count=0,
+            embedding_recalculation_count=1,
+            errors=(),
+        )
+
+
+def test_workbench_rag_eval_apply_batch_endpoint(monkeypatch) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    def fake_factory(**kwargs):
+        assert "pool" in kwargs
+        return FakeApplyPromotionsBatchUseCase()
+
+    composition_module = ModuleType("src.interfaces.composition.workbench_rag_eval")
+    setattr(
+        composition_module,
+        "make_apply_workbench_rag_eval_promotions_batch",
+        fake_factory,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "src.interfaces.composition.workbench_rag_eval",
+        composition_module,
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access", allow_access
+    )
+
+    response = _client().post(
+        "/api/projects/11111111-1111-1111-1111-111111111111/knowledge/rag-eval/workbench/promotion-candidates/apply-batch",
+        json={"mode": "selected", "promotion_ids": ["promotion-1", "promotion-2"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()["result"]
+    assert payload["requested_count"] == 2
+    assert payload["applied_count"] == 2
+    assert payload["embedding_recalculation_count"] == 1

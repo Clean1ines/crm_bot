@@ -659,6 +659,45 @@ def _optional_payload_int(payload: Mapping[str, object], key: str) -> int | None
     return value
 
 
+def _payload_text(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise HTTPException(status_code=400, detail=f"{key} must be non-empty string")
+    return value.strip()
+
+
+def _optional_payload_text(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{key} must be string or null")
+    stripped = value.strip()
+    return stripped or None
+
+
+def _payload_text_tuple(
+    payload: Mapping[str, object],
+    key: str,
+    *,
+    default: tuple[str, ...],
+) -> tuple[str, ...]:
+    value = payload.get(key)
+    if value is None:
+        return default
+    if not isinstance(value, list):
+        raise HTTPException(status_code=400, detail=f"{key} must be an array")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise HTTPException(
+                status_code=400,
+                detail=f"{key} must contain non-empty strings",
+            )
+        result.append(item.strip())
+    return tuple(result)
+
+
 def _payload_int(payload: Mapping[str, object], key: str, *, default: int) -> int:
     value = _optional_payload_int(payload, key)
     return default if value is None else value
@@ -1320,6 +1359,52 @@ async def get_workbench_rag_eval_run(
     return {"run": summary.to_json_dict()}
 
 
+@router.post("/rag-eval/workbench/promotion-candidates/apply-batch")
+async def apply_workbench_rag_eval_promotion_candidates_batch(
+    project_id: str,
+    payload: Mapping[str, object],
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    mode = _payload_text(payload, "mode")
+    promotion_ids = _payload_text_tuple(payload, "promotion_ids", default=())
+    run_id = _optional_payload_text(payload, "run_id")
+
+    try:
+        from src.interfaces.composition.workbench_rag_eval import (
+            make_apply_workbench_rag_eval_promotions_batch,
+        )
+
+        result = await make_apply_workbench_rag_eval_promotions_batch(
+            pool=pool
+        ).execute(
+            project_id=project_id,
+            mode=mode,
+            promotion_ids=promotion_ids,
+            run_id=run_id,
+            applied_at=datetime.now(timezone.utc),
+        )
+    except WorkbenchRagEvalPromotionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WorkbenchRagEvalPromotionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WorkbenchRagEvalPromotionEmbeddingError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"result": result.to_json_dict()}
+
+
 @router.post("/rag-eval/workbench/promotion-candidates/{promotion_id}/apply")
 async def apply_workbench_rag_eval_promotion_candidate(
     project_id: str,
@@ -1758,14 +1843,6 @@ async def retighten_knowledge_document(document_id: str):
         capability=f"answer tightening for {document_id}",
         target="Workbench surface curation/refinement command",
     )
-
-
-def _optional_payload_text(payload: dict[str, object], key: str) -> str | None:
-    value = payload.get(key)
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
 
 
 @router.post("/{document_id}/surfaces/{surface_id}/approve")

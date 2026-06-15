@@ -438,6 +438,37 @@ class WorkbenchRagEvalPromotionApplyResult:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalPromotionBatchApplyResult:
+    requested_count: int
+    applied_count: int
+    skipped_count: int
+    embedding_recalculation_count: int
+    errors: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _require_non_negative_int(self.requested_count, "requested_count")
+        _require_non_negative_int(self.applied_count, "applied_count")
+        _require_non_negative_int(self.skipped_count, "skipped_count")
+        _require_non_negative_int(
+            self.embedding_recalculation_count,
+            "embedding_recalculation_count",
+        )
+        if not isinstance(self.errors, tuple):
+            raise TypeError("errors must be tuple")
+        for error in self.errors:
+            _require_text(error, "errors[]")
+
+    def to_json_dict(self) -> JsonObject:
+        return {
+            "requested_count": self.requested_count,
+            "applied_count": self.applied_count,
+            "skipped_count": self.skipped_count,
+            "embedding_recalculation_count": self.embedding_recalculation_count,
+            "errors": list(self.errors),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalSummary:
     run_id: str
     project_id: str
