@@ -1537,7 +1537,7 @@ async def knowledge_processing_progress(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Returns Workbench processing progress for one document."""
+    """Returns source-ingestion/Workbench processing progress for one document."""
 
     await _require_project_access(
         project_id=project_id,
@@ -1545,22 +1545,72 @@ async def knowledge_processing_progress(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_progress import (
-        WorkbenchProgressNotFoundError,
-        fetch_workbench_progress,
+
+    document_ref = SourceDocumentRef(document_id)
+    source_repository = PostgresSourceManagementRepository(pool)
+    source_document = await source_repository.load_source_document(document_ref)
+    if source_document is None:
+        raise HTTPException(status_code=404, detail="Knowledge document not found")
+
+    source_units = await source_repository.list_source_units_for_document(document_ref)
+    source_unit_count = len(source_units)
+
+    workflow_run_id = f"knowledge-extraction:{document_id}"
+    workflow_state_repository = PostgresKnowledgeExtractionSagaStateRepository(pool)
+    workflow_state = await workflow_state_repository.load_workflow_state(
+        workflow_run_id
     )
 
-    try:
-        return await fetch_workbench_progress(
-            pool=pool,
-            project_id=project_id,
-            document_id=document_id,
+    workflow_status = (
+        workflow_state.status.value if workflow_state is not None else "running"
+    )
+    current_phase = (
+        workflow_state.current_phase.value
+        if workflow_state is not None
+        else "source_units_created"
+    )
+    checkpoints = workflow_state.checkpoints if workflow_state is not None else ()
+
+    expected_count = sum(checkpoint.expected_count for checkpoint in checkpoints)
+    completed_count = sum(checkpoint.completed_count for checkpoint in checkpoints)
+    failed_count = sum(checkpoint.failed_count for checkpoint in checkpoints)
+    blocked_count = sum(checkpoint.blocked_count for checkpoint in checkpoints)
+
+    progress_percent = 0
+    if expected_count > 0:
+        progress_percent = max(
+            0,
+            min(100, round((completed_count / expected_count) * 100)),
         )
-    except WorkbenchProgressNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail="Knowledge document not found",
-        ) from exc
+    elif source_unit_count > 0:
+        progress_percent = 10
+
+    metrics = {
+        "source_unit_count": source_unit_count,
+        "raw_source_unit_count": source_unit_count,
+        "workflow_checkpoint_expected_count": expected_count,
+        "workflow_checkpoint_completed_count": completed_count,
+        "workflow_checkpoint_failed_count": failed_count,
+        "workflow_checkpoint_blocked_count": blocked_count,
+    }
+
+    updated_at = (
+        workflow_state.updated_at
+        if workflow_state is not None and workflow_state.updated_at is not None
+        else source_document.created_at
+    )
+
+    return {
+        "document_id": document_id,
+        "project_id": project_id,
+        "status": workflow_status,
+        "current_phase": current_phase,
+        "progress_percent": progress_percent,
+        "metrics": metrics,
+        "actions": [],
+        "issue": None,
+        "updated_at": updated_at.isoformat(),
+    }
 
 
 @router.post("/preview")

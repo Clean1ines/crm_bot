@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Protocol
@@ -130,12 +131,14 @@ class PostgresSourceManagementRepository(SourceManagementRepositoryPort):
                 unit.document_ref.value,
                 unit.unit_kind.value,
                 unit.text.value,
-                list(unit.heading_path.parts),
-                {
-                    "parent_refs": [
-                        parent_ref.value for parent_ref in unit.lineage.parent_refs
-                    ]
-                },
+                json.dumps(list(unit.heading_path.parts)),
+                json.dumps(
+                    {
+                        "parent_refs": [
+                            parent_ref.value for parent_ref in unit.lineage.parent_refs
+                        ]
+                    }
+                ),
                 unit.ordinal,
                 unit.created_at,
             )
@@ -225,6 +228,9 @@ def _required_datetime(row: Mapping[str, object], key: str) -> datetime:
 
 
 def _required_str_list(value: object, field_name: str) -> list[str]:
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        value = decoded
     if not isinstance(value, list):
         raise TypeError(f"{field_name} must be a list")
     result: list[str] = []
@@ -236,6 +242,9 @@ def _required_str_list(value: object, field_name: str) -> list[str]:
 
 
 def _parent_refs(value: object) -> list[str]:
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        value = decoded
     if not isinstance(value, Mapping):
         raise TypeError("lineage must be a mapping")
     raw_parent_refs = value.get("parent_refs", [])
