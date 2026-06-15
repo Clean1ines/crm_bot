@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Protocol
@@ -197,7 +198,7 @@ class PostgresKnowledgeExtractionSagaStateRepository(
             checkpoint.blocked_count,
             checkpoint.idempotency_key,
             checkpoint.last_event_ref,
-            dict(checkpoint.checkpoint_payload),
+            json.dumps(dict(checkpoint.checkpoint_payload)),
             checkpoint.updated_at,
         )
 

@@ -1673,7 +1673,7 @@ async def knowledge_import_quality_report(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Returns Workbench import quality report for one document."""
+    """Returns source-ingestion import quality for one Workbench document."""
 
     await _require_project_access(
         project_id=project_id,
@@ -1681,22 +1681,67 @@ async def knowledge_import_quality_report(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_import_quality import (
-        WorkbenchImportQualityNotFoundError,
-        fetch_workbench_import_quality_report,
-    )
 
-    try:
-        return await fetch_workbench_import_quality_report(
-            pool=pool,
-            project_id=project_id,
-            document_id=document_id,
+    document_ref = SourceDocumentRef(document_id)
+    repository = PostgresSourceManagementRepository(pool)
+    source_document = await repository.load_source_document(document_ref)
+    if source_document is None:
+        raise HTTPException(status_code=404, detail="Knowledge document not found")
+
+    source_units = await repository.list_source_units_for_document(document_ref)
+    source_units_count = len(source_units)
+    empty_units_count = sum(1 for unit in source_units if not unit.text.value.strip())
+    short_units_count = sum(
+        1 for unit in source_units if 0 < len(unit.text.value.strip()) < 120
+    )
+    table_like_units_count = sum(
+        1 for unit in source_units if "|" in unit.text.value or "\t" in unit.text.value
+    )
+    heading_counts: dict[str, int] = {}
+    for unit in source_units:
+        heading_key = " / ".join(unit.heading_path.parts)
+        if heading_key:
+            heading_counts[heading_key] = heading_counts.get(heading_key, 0) + 1
+    duplicated_headings_count = sum(1 for count in heading_counts.values() if count > 1)
+
+    warnings: list[dict[str, str]] = []
+    if source_units_count == 0:
+        warnings.append(
+            {
+                "code": "no_source_units",
+                "severity": "warning",
+                "message": "Source ingestion has not produced source units yet.",
+            }
         )
-    except WorkbenchImportQualityNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail="Knowledge document not found",
-        ) from exc
+    if empty_units_count > 0:
+        warnings.append(
+            {
+                "code": "empty_source_units",
+                "severity": "warning",
+                "message": "Some source units are empty.",
+            }
+        )
+
+    safe_to_compile = source_units_count > 0 and empty_units_count < source_units_count
+    status = "good" if safe_to_compile and not warnings else "needs_review"
+
+    return {
+        "document_id": document_id,
+        "status": status,
+        "safe_to_compile": safe_to_compile,
+        "source_format": source_document.source_format.value,
+        "extracted_text_chars": sum(len(unit.text.value) for unit in source_units),
+        "source_units_count": source_units_count,
+        "empty_units_count": empty_units_count,
+        "short_units_count": short_units_count,
+        "table_like_units_count": table_like_units_count,
+        "duplicated_headings_count": duplicated_headings_count,
+        "source_refs_ready": source_units_count > 0,
+        "warnings": warnings,
+        "recommended_action": (
+            "continue_processing" if safe_to_compile else "wait_for_source_units"
+        ),
+    }
 
 
 @router.get("/{document_id}/price-facts")
