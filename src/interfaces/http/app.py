@@ -2,13 +2,12 @@
 Canonical FastAPI application assembly for the HTTP interface layer.
 """
 
-from fastapi import Depends, FastAPI, Header, Query, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.application.errors import ApplicationError
 from src.infrastructure.config.settings import settings
-from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import (
     CorrelationIdMiddleware,
     configure_logging,
@@ -20,14 +19,8 @@ from src.interfaces.http.auth import router as auth_router
 from src.interfaces.http.bot import router as bot_router
 from src.interfaces.http.chat import router as chat_router
 from src.interfaces.http.clients import router as clients_router
-from src.interfaces.http.dependencies import (
-    get_pool,
-    get_project_repo,
-    get_user_repository,
-)
 from src.interfaces.http.knowledge import (
     UPLOAD_TOO_LARGE_DETAIL,
-    _require_project_access,
     router as knowledge_router,
 )
 from src.interfaces.http.limits import router as limits_router
@@ -182,37 +175,6 @@ async def global_exception_handler(request: Request, exc: Exception):
             "request_id": request_id,
         },
         headers=headers,
-    )
-
-
-@app.get("/api/projects/{project_id}/knowledge")
-async def list_workbench_document_cards(
-    project_id: str,
-    authorization: str | None = Header(default=None),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    """Return the card-shaped Workbench document read model used by the frontend."""
-
-    await _require_project_access(
-        project_id=project_id,
-        authorization=authorization,
-        project_repo=project_repo,
-        user_repo=user_repo,
-    )
-
-    from src.interfaces.composition.faq_workbench_document_cards import (
-        list_workbench_document_cards as fetch_cards,
-    )
-
-    return await fetch_cards(
-        pool=pool,
-        project_id=project_id,
-        limit=limit,
-        offset=offset,
     )
 
 
