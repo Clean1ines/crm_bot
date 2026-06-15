@@ -38,3 +38,19 @@ def test_workbench_rag_eval_http_does_not_reconnect_legacy_rag_eval_router() -> 
 
     assert "HTTP_410_GONE" in source
     assert "/rag-eval/workbench/run" in knowledge
+
+
+def test_workbench_rag_eval_question_generator_uses_llm_dispatch_boundary_only() -> (
+    None
+):
+    source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/infrastructure/llm/"
+        "workbench_rag_eval_question_generator.py"
+    ).read_text(encoding="utf-8")
+
+    assert "LlmDispatchExecutorPort" in source
+    assert "execute_dispatch" in source
+    assert "GroqDispatchExecutor" not in source
+    assert "OpenAI" not in source
+    assert "openai" not in source
+    assert "answer_text" not in source

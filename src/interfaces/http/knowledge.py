@@ -144,6 +144,9 @@ from src.contexts.knowledge_workbench.curation.application.use_cases.publish_dra
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
 )
+from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
+    WorkbenchRagEvalQuestionGenerationError,
+)
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import (
@@ -629,6 +632,30 @@ def _legacy_endpoint_gone(*, capability: str, target: str) -> None:
             ),
         },
     )
+
+
+def _optional_payload_str(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail=f"{key} must be string or null")
+    stripped = value.strip()
+    return stripped or None
+
+
+def _optional_payload_int(payload: Mapping[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise HTTPException(status_code=400, detail=f"{key} must be integer")
+    return value
+
+
+def _payload_int(payload: Mapping[str, object], key: str, *, default: int) -> int:
+    value = _optional_payload_int(payload, key)
+    return default if value is None else value
 
 
 @router.get("")
@@ -1175,22 +1202,48 @@ async def run_workbench_rag_eval(
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
+    llm_executor: LlmDispatchExecutorPort = Depends(get_llm_dispatch_executor),
 ):
-    del payload
-    del pool
     await _require_project_access(
         project_id=project_id,
         authorization=authorization,
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    raise HTTPException(
-        status_code=501,
-        detail=(
-            "Workbench RAG Eval backend state and use case are available, "
-            "but production question generation is not connected yet."
-        ),
-    )
+
+    publication_id = _optional_payload_str(payload, "publication_id")
+    source_document_ref = _optional_payload_str(payload, "source_document_ref")
+    top_k = _optional_payload_int(payload, "top_k")
+    if top_k is not None and top_k < 5:
+        raise HTTPException(status_code=400, detail="top_k must be at least 5")
+    max_entries = _payload_int(payload, "max_entries", default=20)
+    if max_entries < 1 or max_entries > 50:
+        raise HTTPException(
+            status_code=400, detail="max_entries must be between 1 and 50"
+        )
+
+    try:
+        from src.interfaces.composition.workbench_rag_eval import (
+            make_run_workbench_rag_eval,
+        )
+
+        summary = await make_run_workbench_rag_eval(
+            pool=pool,
+            llm_dispatch_executor=llm_executor,
+        ).execute(
+            project_id=project_id,
+            publication_id=publication_id,
+            source_document_ref=source_document_ref,
+            top_k=top_k,
+            max_entries=max_entries,
+            now=datetime.now(timezone.utc),
+        )
+    except WorkbenchRagEvalQuestionGenerationError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"run": summary.to_json_dict()}
 
 
 @router.get("/rag-eval/workbench/latest")
