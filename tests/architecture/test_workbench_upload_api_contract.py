@@ -24,9 +24,9 @@ def test_workbench_upload_api_contract_has_transferred_donor_semantics() -> None
         "Unsupported file type",
         "UPLOAD_TOO_LARGE_DETAIL",
         "Could not read file",
-        "DomainInvariantError",
-        "clear_workbench_project",
-        "ModelUsageRepository",
+        "RunSourceIngestionFirstPhaseCommand",
+        "RunKnowledgeExtractionWorkflowAfterUploadCommand",
+        "make_knowledge_extraction_workflow_after_upload",
     )
     for marker in required:
         assert marker in source
