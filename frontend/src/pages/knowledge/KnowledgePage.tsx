@@ -22,6 +22,7 @@ import {
   type KnowledgeCommercialTruthReviewResponse,
   type KnowledgeCommercialTruthReviewPolicy,
   type WorkbenchDocumentCardView,
+  type WorkbenchWorkflowLiveStateResponse,
 } from "@shared/api/modules/knowledge";
 import { BaseModal } from "@shared/ui";
 import { t } from "@shared/i18n";
@@ -61,6 +62,10 @@ type KnowledgePriceFactsByDocument = Record<
 type KnowledgeCommercialTruthReviewsByDocument = Record<
   string,
   KnowledgeCommercialTruthReviewResponse
+>;
+type KnowledgeWorkflowLiveStateByDocument = Record<
+  string,
+  WorkbenchWorkflowLiveStateResponse
 >;
 
 type PriceFactActionVariables = {
@@ -344,6 +349,18 @@ const processingProgressPercent = (doc: Document): number | null => {
   return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
 };
 
+const shouldFetchWorkflowLiveStateForDocument = (doc: Document): boolean => {
+  if (isDocumentProcessing(doc)) return true;
+  const actions = doc.card_view?.actions ?? [];
+  return actions.some(
+    (action) =>
+      action.visible &&
+      (action.action_id === "open_curation" ||
+        action.action_id === "resume_processing" ||
+        action.action_id === "cancel_processing"),
+  );
+};
+
 const processingProgressLabel = (doc: Document): string => {
   const total = doc.card_view?.sections.total ?? 0;
   if (total <= 0) return t("knowledge.document.preparingProcessing");
@@ -591,6 +608,51 @@ export const KnowledgePage: React.FC = () => {
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
   const documents = baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
+  const workflowLiveStateDocumentIds = documents
+    .filter(shouldFetchWorkflowLiveStateForDocument)
+    .slice(0, 6)
+    .map((doc) => doc.id)
+    .sort();
+
+  const workflowLiveStateQuery = useQuery({
+    queryKey: [
+      "knowledge-workflow-live-state",
+      projectId,
+      workflowLiveStateDocumentIds.join(","),
+    ],
+    queryFn: async () => {
+      if (!projectId || workflowLiveStateDocumentIds.length === 0) return {};
+
+      const states = await Promise.all(
+        workflowLiveStateDocumentIds.map(async (documentId) => {
+          try {
+            const { data } = await knowledgeApi.workflowLiveState(
+              projectId,
+              documentId,
+            );
+            return [documentId, data] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      return states.reduce<KnowledgeWorkflowLiveStateByDocument>((acc, item) => {
+        if (item !== null) {
+          acc[item[0]] = item[1];
+        }
+        return acc;
+      }, {});
+    },
+    enabled: !!projectId && workflowLiveStateDocumentIds.length > 0,
+    retry: false,
+    refetchInterval:
+      projectId && workflowLiveStateDocumentIds.length > 0 ? 1500 : false,
+    refetchIntervalInBackground: true,
+    staleTime: 0,
+  });
+  const workflowLiveStates = workflowLiveStateQuery.data || {};
+
   const reportableDocuments = documents.filter(
     (doc) =>
       isDocumentProcessing(doc) ||
@@ -1036,6 +1098,9 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-workflow-live-state", projectId],
+      });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t("knowledge.feedback.uploadError")));
@@ -1076,6 +1141,9 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-workflow-live-state", projectId],
+      });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t("knowledge.feedback.clearFailed")));
@@ -1101,6 +1169,9 @@ export const KnowledgePage: React.FC = () => {
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-workflow-live-state", projectId],
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-import-quality-reports", projectId],
@@ -1142,6 +1213,9 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-workflow-live-state", projectId],
+      });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t("knowledge.feedback.stopFailed")));
@@ -1163,6 +1237,9 @@ export const KnowledgePage: React.FC = () => {
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-workflow-live-state", projectId],
       });
     },
     onError: (err: unknown) => {
@@ -1187,6 +1264,9 @@ export const KnowledgePage: React.FC = () => {
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-workflow-live-state", projectId],
       });
     },
     onError: (err: unknown) => {
@@ -1721,7 +1801,30 @@ export const KnowledgePage: React.FC = () => {
                   onStopProcessing={() =>
                     cancelProcessingMutation.mutate(doc.id)
                   }
-                  onOpenCuration={() => setCurationDocumentId(doc.id)}
+                  onOpenCuration={(workflowRunId) => {
+                    if (workflowRunId) {
+                      toast.success(
+                        `Курация готова для workflow ${workflowRunId}. Модалка будет подключена следующим шагом.`,
+                      );
+                      return;
+                    }
+                    setCurationDocumentId(doc.id);
+                  }}
+                  workflowLiveState={workflowLiveStates[doc.id] ?? null}
+                  workflowLiveStateLoading={
+                    workflowLiveStateDocumentIds.includes(doc.id) &&
+                    (workflowLiveStateQuery.isLoading ||
+                      (workflowLiveStateQuery.isFetching &&
+                        !(workflowLiveStates[doc.id] ?? null)))
+                  }
+                  workflowLiveStateError={
+                    workflowLiveStateQuery.error
+                      ? getErrorMessage(
+                          workflowLiveStateQuery.error,
+                          "Не удалось загрузить live-state обработки",
+                        )
+                      : null
+                  }
                   onCardAction={(actionId) => {
                     if (actionId === "cancel_processing") {
                       cancelProcessingMutation.mutate(doc.id);

@@ -223,6 +223,140 @@ export type WorkbenchDocumentCardView = {
 
 
 
+export type WorkbenchWorkflowTimerLiveState = {
+  mode: 'running' | 'paused' | 'stopped' | 'completed' | 'published' | string;
+  active_elapsed_seconds: number;
+  wall_elapsed_seconds: number;
+  current_active_started_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  is_live: boolean;
+};
+
+export type WorkbenchWorkflowModelUsageLiveState = {
+  model_provider?: string | null;
+  model_name?: string | null;
+  call_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  duration_ms_total: number;
+};
+
+export type WorkbenchWorkflowUsageLiveState = {
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_tokens: number;
+  total_llm_calls: number;
+  model_summaries: WorkbenchWorkflowModelUsageLiveState[];
+};
+
+export type WorkbenchWorkflowStageLiveState = {
+  id: string;
+  label: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'unknown' | string;
+  current: number;
+  total: number;
+  message: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+};
+
+export type WorkbenchRetryTimerLiveState = {
+  retry_available_at?: string | null;
+  seconds_until_retry?: number | null;
+};
+
+export type WorkbenchSectionQueueItemLiveState = {
+  queue_item_id: string;
+  section_id: string;
+  section_index: number;
+  section_key: string;
+  status: string;
+  attempt_count: number;
+  lease_expires_at?: string | null;
+  claimed_by_worker_id?: string | null;
+  error_kind?: string | null;
+  retry_timer: WorkbenchRetryTimerLiveState;
+};
+
+export type WorkbenchSectionLaneLiveState = {
+  lane_index: number;
+  lane_id: string;
+  ready_count: number;
+  leased_count: number;
+  done_count: number;
+  failed_count: number;
+  waiting_count: number;
+  total_attempt_count: number;
+  max_attempt_count: number;
+  items: WorkbenchSectionQueueItemLiveState[];
+};
+
+export type WorkbenchLlmAttemptLiveState = {
+  node_run_id: string;
+  section_id?: string | null;
+  node_name: string;
+  node_kind: string;
+  status: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  duration_ms?: number | null;
+  model_provider?: string | null;
+  model_name?: string | null;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  error_kind?: string | null;
+  error_message_user?: string | null;
+};
+
+export type WorkbenchCurationLiveState = {
+  available: boolean;
+  reason_code: string;
+  workflow_run_id?: string | null;
+  workspace_ref?: string | null;
+  workspace_status?: string | null;
+  item_count: number;
+  excluded_item_count: number;
+};
+
+export type WorkbenchWorkflowActionLiveState = {
+  action_id:
+    | 'pause_processing'
+    | 'resume_processing'
+    | 'cancel_processing'
+    | 'open_curation'
+    | string;
+  visible: boolean;
+  enabled: boolean;
+  reason_code?: string | null;
+};
+
+export type WorkbenchWorkflowLiveState = {
+  workflow_run_id?: string | null;
+  source_document_ref?: string | null;
+  workflow_status?: string | null;
+  current_phase?: string | null;
+  timer: WorkbenchWorkflowTimerLiveState;
+  usage: WorkbenchWorkflowUsageLiveState;
+  stages: WorkbenchWorkflowStageLiveState[];
+  section_lanes: WorkbenchSectionLaneLiveState[];
+  llm_attempts: WorkbenchLlmAttemptLiveState[];
+  curation: WorkbenchCurationLiveState;
+  actions: WorkbenchWorkflowActionLiveState[];
+};
+
+export type WorkbenchWorkflowLiveStateResponse = {
+  document_id: string;
+  project_id: string;
+  file_name: string;
+  document_status: string;
+  current_processing_run_id?: string | null;
+  workflow: WorkbenchWorkflowLiveState;
+};
+
+
 export type KnowledgeAnswerDraft = {
   id: string;
   title: string;
@@ -713,6 +847,14 @@ export const knowledgeApi = {
       {
         method: 'POST',
         body: JSON.stringify(payload),
+      },
+    ),
+
+  workflowLiveState: (projectId: string, documentId: string) =>
+    authedJsonRequest<WorkbenchWorkflowLiveStateResponse>(
+      `/api/projects/${projectId}/knowledge/${encodeURIComponent(documentId)}/workflow-live-state`,
+      {
+        method: 'GET',
       },
     ),
 

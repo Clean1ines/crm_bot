@@ -6,6 +6,9 @@ import {
   type WorkbenchDocumentCardActionView,
   type WorkbenchDocumentCardUserMessage,
   type WorkbenchDocumentCardView,
+  type WorkbenchWorkflowActionLiveState,
+  type WorkbenchWorkflowLiveStateResponse,
+  type WorkbenchWorkflowStageLiveState,
 } from '@shared/api/modules/knowledge';
 
 type DocCardDocument = {
@@ -21,7 +24,10 @@ type KnowledgeDocumentCardProps = {
   isDeletePending: boolean;
   onRequestDelete: () => void;
   onCardAction: (actionId: string) => void;
-  onOpenCuration: () => void;
+  onOpenCuration: (workflowRunId?: string | null) => void;
+  workflowLiveState?: WorkbenchWorkflowLiveStateResponse | null;
+  workflowLiveStateLoading?: boolean;
+  workflowLiveStateError?: string | null;
   onStopProcessing: () => void;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
@@ -122,6 +128,64 @@ const cardText = (i18nKey: string | null | undefined, fallback: string): string 
   return translated && translated !== i18nKey ? translated : fallback;
 };
 
+const liveStageLabel = (stage: WorkbenchWorkflowStageLiveState): string => {
+  const labels: Record<string, string> = {
+    source_ingestion: 'Подготовка документа',
+    prompt_a_claim_extraction: 'Извлечение утверждений',
+    draft_claim_embeddings: 'Векторизация черновиков',
+    draft_claim_clustering: 'Группировка похожих утверждений',
+    draft_claim_compaction: 'Сжатие и объединение знаний',
+    cluster_preview: 'Подготовка предпросмотра',
+    curation: 'Курация',
+    publication: 'Публикация',
+  };
+  return labels[stage.id] || stage.label || stage.id;
+};
+
+const liveStageStatusLabel = (status: string): string => {
+  const labels: Record<string, string> = {
+    pending: 'ожидает',
+    running: 'идёт',
+    completed: 'готово',
+    failed: 'ошибка',
+    paused: 'пауза',
+    unknown: 'нет данных',
+  };
+  return labels[status] || status;
+};
+
+const liveActionLabel = (action: WorkbenchWorkflowActionLiveState): string => {
+  const labels: Record<string, string> = {
+    pause_processing: 'Пауза',
+    resume_processing: 'Продолжить',
+    cancel_processing: 'Остановить',
+    open_curation: 'Курация',
+  };
+  return labels[action.action_id] || action.action_id;
+};
+
+const canRunLiveAction = (action: WorkbenchWorkflowActionLiveState): boolean =>
+  action.enabled && action.action_id !== 'pause_processing';
+
+const liveActionClassName = (action: WorkbenchWorkflowActionLiveState): string => {
+  const base =
+    'rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+  if (action.action_id === 'cancel_processing') {
+    return `${base} bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)] hover:opacity-80`;
+  }
+  if (action.action_id === 'open_curation') {
+    return `${base} bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20`;
+  }
+  return `${base} bg-[var(--control-bg)] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)]`;
+};
+
+const formatMilliseconds = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return '—';
+  }
+  return `${(value / 1000).toFixed(1)} c`;
+};
+
 const messageClassName = (severity: string): string => {
   if (severity === 'error') {
     return 'border-[var(--accent-danger)]/30 bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]';
@@ -189,12 +253,23 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   onCardAction,
   onOpenCuration,
   onStopProcessing,
+  workflowLiveState,
+  workflowLiveStateLoading = false,
+  workflowLiveStateError = null,
   formatSize,
   knowledgeProcessingModeLabel,
 }) => {
   const cardView = doc.card_view;
-  const timerStartedAt = cardView?.timer.current_active_started_at || null;
-  const isLiveTimer = cardView?.timer.mode === 'running' && Boolean(timerStartedAt);
+  const liveWorkflow = workflowLiveState?.workflow ?? null;
+  const liveTimer = liveWorkflow?.timer ?? null;
+  const timerStartedAt =
+    liveTimer?.current_active_started_at ||
+    cardView?.timer.current_active_started_at ||
+    null;
+  const isLiveTimer =
+    liveTimer !== null
+      ? liveTimer.is_live && Boolean(timerStartedAt)
+      : cardView?.timer.mode === 'running' && Boolean(timerStartedAt);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [expandedClaimIds, setExpandedClaimIds] = useState<Set<string>>(
     () => new Set(),
@@ -297,16 +372,39 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         }`;
 
   const timerStartedAtMs = timerStartedAt ? Date.parse(timerStartedAt) : Number.NaN;
+  const baseActiveElapsedSeconds =
+    liveTimer?.active_elapsed_seconds ?? cardView.timer.active_elapsed_seconds;
   const liveActiveElapsedSeconds =
     isLiveTimer && Number.isFinite(timerStartedAtMs)
-      ? cardView.timer.active_elapsed_seconds +
+      ? baseActiveElapsedSeconds +
         Math.max(0, Math.floor((nowMs - timerStartedAtMs) / 1000))
-      : cardView.timer.active_elapsed_seconds;
+      : baseActiveElapsedSeconds;
   const elapsedText = formatDuration(liveActiveElapsedSeconds);
 
+  const liveUsage = liveWorkflow?.usage ?? null;
   const llmUsageText = `${formatNumber(
-    cardView.usage.total_tokens,
-  )} токенов · ${formatNumber(cardView.usage.llm_call_count)} LLM-выз.`;
+    liveUsage?.total_tokens ?? cardView.usage.total_tokens,
+  )} токенов · ${formatNumber(
+    liveUsage?.total_llm_calls ?? cardView.usage.llm_call_count,
+  )} LLM-выз.`;
+
+  const handleLiveAction = (action: WorkbenchWorkflowActionLiveState): void => {
+    if (!canRunLiveAction(action)) return;
+
+    if (action.action_id === 'cancel_processing') {
+      onStopProcessing();
+      return;
+    }
+
+    if (action.action_id === 'resume_processing') {
+      onCardAction('resume_processing');
+      return;
+    }
+
+    if (action.action_id === 'open_curation') {
+      onOpenCuration(liveWorkflow?.curation.workflow_run_id || liveWorkflow?.workflow_run_id);
+    }
+  };
 
   const handleCardAction = (action: WorkbenchDocumentCardActionView): void => {
     if (!action.enabled) return;
@@ -507,6 +605,180 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             </span>
           )}
         </div>
+
+        {(workflowLiveStateLoading || workflowLiveStateError || liveWorkflow) && (
+          <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="font-semibold text-[var(--text-primary)]">
+                Live-процесс обработки
+              </div>
+              {workflowLiveStateLoading && (
+                <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                  обновляем…
+                </span>
+              )}
+              {liveWorkflow?.workflow_run_id && (
+                <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                  workflow: {liveWorkflow.workflow_run_id}
+                </span>
+              )}
+            </div>
+
+            {workflowLiveStateError && (
+              <div className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-300">
+                {workflowLiveStateError}
+              </div>
+            )}
+
+            {liveWorkflow && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                    <div className="font-medium text-[var(--text-primary)]">
+                      Стадия
+                    </div>
+                    <div className="mt-1">
+                      {liveWorkflow.current_phase || 'нет данных'} ·{' '}
+                      {liveWorkflow.workflow_status || 'unknown'}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                    <div className="font-medium text-[var(--text-primary)]">
+                      Модели
+                    </div>
+                    <div className="mt-1 space-y-1">
+                      {liveWorkflow.usage.model_summaries.length > 0 ? (
+                        liveWorkflow.usage.model_summaries.slice(0, 3).map((model) => (
+                          <div
+                            key={`${model.model_provider || 'provider'}:${model.model_name || 'model'}`}
+                          >
+                            {model.model_provider || 'provider'} /{' '}
+                            {model.model_name || 'model'} · {formatNumber(model.call_count)} выз. ·{' '}
+                            {formatNumber(model.total_tokens)} ток.
+                          </div>
+                        ))
+                      ) : (
+                        <div>модели ещё не зафиксированы</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1 font-medium text-[var(--text-primary)]">
+                    Этапы
+                  </div>
+                  <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
+                    {liveWorkflow.stages.map((stage) => (
+                      <div
+                        key={stage.id}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
+                      >
+                        <span>{liveStageLabel(stage)}</span>
+                        <span className="text-[var(--text-muted)]">
+                          {liveStageStatusLabel(stage.status)}
+                          {stage.total > 0
+                            ? ` · ${formatNumber(stage.current)} / ${formatNumber(stage.total)}`
+                            : ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {liveWorkflow.section_lanes.length > 0 && (
+                  <details className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                    <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                      Потоки секций
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      {liveWorkflow.section_lanes.map((lane) => (
+                        <div key={`${lane.lane_index}:${lane.lane_id}`}>
+                          <div className="font-medium text-[var(--text-primary)]">
+                            Поток {lane.lane_index + 1}: ready {formatNumber(lane.ready_count)} · leased{' '}
+                            {formatNumber(lane.leased_count)} · done {formatNumber(lane.done_count)} · failed{' '}
+                            {formatNumber(lane.failed_count)} · waiting {formatNumber(lane.waiting_count)}
+                          </div>
+                          <div className="mt-1 space-y-1">
+                            {lane.items.slice(0, 6).map((item) => (
+                              <div
+                                key={item.queue_item_id}
+                                className="rounded bg-[var(--control-bg)] px-2 py-1"
+                              >
+                                секция {item.section_index} · {item.status} · попыток{' '}
+                                {formatNumber(item.attempt_count)}
+                                {item.retry_timer.seconds_until_retry !== null &&
+                                item.retry_timer.seconds_until_retry !== undefined
+                                  ? ` · retry через ${formatDuration(item.retry_timer.seconds_until_retry)}`
+                                  : ''}
+                                {item.error_kind ? ` · ${item.error_kind}` : ''}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
+                {liveWorkflow.llm_attempts.length > 0 && (
+                  <details className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                    <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                      LLM attempts
+                    </summary>
+                    <div className="mt-2 space-y-1">
+                      {liveWorkflow.llm_attempts.slice(0, 8).map((attempt) => (
+                        <div
+                          key={attempt.node_run_id}
+                          className="rounded bg-[var(--control-bg)] px-2 py-1"
+                        >
+                          <div>
+                            {attempt.node_name} · {attempt.status} ·{' '}
+                            {attempt.model_provider || 'provider'} / {attempt.model_name || 'model'}
+                          </div>
+                          <div className="text-[var(--text-muted)]">
+                            {formatNumber(attempt.total_tokens)} ток. ·{' '}
+                            {formatMilliseconds(attempt.duration_ms)}
+                            {attempt.error_message_user
+                              ? ` · ${attempt.error_message_user}`
+                              : ''}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+
+                <div className="flex flex-wrap gap-2">
+                  {liveWorkflow.actions
+                    .filter((action) => action.visible)
+                    .map((action) => (
+                      <button
+                        key={action.action_id}
+                        type="button"
+                        disabled={!canRunLiveAction(action)}
+                        title={
+                          action.action_id === 'pause_processing'
+                            ? 'Pause endpoint по workflow_run_id будет подключён отдельным patch'
+                            : action.reason_code || liveActionLabel(action)
+                        }
+                        onClick={() => handleLiveAction(action)}
+                        className={liveActionClassName(action)}
+                      >
+                        {liveActionLabel(action)}
+                      </button>
+                    ))}
+                </div>
+
+                {liveWorkflow.curation.available && liveWorkflow.curation.workflow_run_id && (
+                  <div className="rounded-lg bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)]">
+                    Курация готова: workflow_run_id {liveWorkflow.curation.workflow_run_id}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {cardView.messages.length > 0 && (
           <div className="space-y-2">

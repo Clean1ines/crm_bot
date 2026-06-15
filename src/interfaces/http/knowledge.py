@@ -7,9 +7,10 @@ vertical. Queue-based FAQ Workbench document upload is retired.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-from typing import cast
+from typing import Protocol, cast
 from fastapi import (
     APIRouter,
     Body,
@@ -147,6 +148,25 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
 _SOURCE_UNIT_TEXT_PREVIEW_LIMIT = 500
+
+
+class _WorkbenchDocumentListConnection(Protocol):
+    async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]: ...
+
+
+class _WorkbenchDocumentListAcquireContext(Protocol):
+    async def __aenter__(self) -> _WorkbenchDocumentListConnection: ...
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> bool | None: ...
+
+
+class _WorkbenchDocumentListPool(Protocol):
+    def acquire(self) -> _WorkbenchDocumentListAcquireContext: ...
 
 
 async def _maybe_await(value: object) -> object:
@@ -306,6 +326,12 @@ def _raise_source_ingestion_rejected(
     raise HTTPException(status_code=403, detail=admission_status.value)
 
 
+def _optional_datetime_isoformat(value: object) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return None
+
+
 def _jsonable(value: object) -> object:
     if is_dataclass(value) and not isinstance(value, type):
         return {key: _jsonable(item) for key, item in asdict(value).items()}
@@ -329,6 +355,63 @@ def _source_unit_read_model(unit: SourceUnit) -> dict[str, object]:
         "text_preview": text[:_SOURCE_UNIT_TEXT_PREVIEW_LIMIT],
         "text_length": len(text),
         "created_at": unit.created_at.isoformat(),
+    }
+
+
+async def _list_workbench_documents_fallback(
+    *,
+    pool: object,
+    project_id: str,
+    limit: int,
+    offset: int,
+) -> dict[str, object]:
+    async with cast(_WorkbenchDocumentListPool, pool).acquire() as connection:
+        rows = await connection.fetch(
+            """
+            SELECT
+                document_id,
+                project_id::text AS project_id,
+                file_name,
+                status,
+                created_at,
+                updated_at,
+                current_processing_run_id
+            FROM knowledge_workbench_documents
+            WHERE project_id = $1
+              AND deleted_at IS NULL
+            ORDER BY created_at DESC, document_id DESC
+            LIMIT $2 OFFSET $3
+            """,
+            project_id,
+            limit,
+            offset,
+        )
+
+    documents: list[dict[str, object]] = []
+    for row in rows:
+        document = dict(row)
+        created_at = document.get("created_at")
+        updated_at = document.get("updated_at")
+        documents.append(
+            {
+                "id": document["document_id"],
+                "document_id": document["document_id"],
+                "project_id": document["project_id"],
+                "file_name": document["file_name"],
+                "status": document["status"],
+                "created_at": (_optional_datetime_isoformat(created_at)),
+                "updated_at": (_optional_datetime_isoformat(updated_at)),
+                "current_processing_run_id": document.get("current_processing_run_id"),
+                "card_view": None,
+            }
+        )
+
+    return {
+        "documents": documents,
+        "items": documents,
+        "limit": limit,
+        "offset": offset,
+        "count": len(documents),
     }
 
 
@@ -555,6 +638,13 @@ async def list_knowledge_documents(
         authorization=authorization,
         project_repo=project_repo,
         user_repo=user_repo,
+    )
+
+    return await _list_workbench_documents_fallback(
+        pool=pool,
+        project_id=project_id,
+        limit=limit,
+        offset=offset,
     )
 
 

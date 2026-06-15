@@ -1846,3 +1846,63 @@ def test_curation_open_does_not_parse_source_document_ref_from_workflow_run_id()
         1,
     )[0]
     assert "workflow_project.source_document_ref" in curation_region
+
+
+@pytest.mark.asyncio
+async def test_list_knowledge_documents_returns_fallback_documents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    class FakeConnection:
+        async def fetch(
+            self,
+            query: str,
+            project_id: str,
+            limit: int,
+            offset: int,
+        ):
+            assert "knowledge_workbench_documents" in query
+            assert project_id == "project-1"
+            assert limit == 25
+            assert offset == 5
+            return [
+                {
+                    "document_id": "source-document:project-1:abc",
+                    "project_id": "project-1",
+                    "file_name": "faq.md",
+                    "status": "processing",
+                    "created_at": datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc),
+                    "updated_at": datetime(2026, 6, 15, 12, 1, tzinfo=timezone.utc),
+                    "current_processing_run_id": "processing-run-1",
+                }
+            ]
+
+    class FakeAcquire:
+        async def __aenter__(self):
+            return FakeConnection()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    class FakePool:
+        def acquire(self):
+            return FakeAcquire()
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+
+    response = await knowledge.list_knowledge_documents(
+        project_id="project-1",
+        authorization="Bearer valid-token",
+        limit=25,
+        offset=5,
+        pool=FakePool(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert response["documents"][0]["id"] == "source-document:project-1:abc"
+    assert response["documents"][0]["card_view"] is None
+    assert response["items"][0]["document_id"] == "source-document:project-1:abc"
+    assert response["count"] == 1
