@@ -8,9 +8,11 @@ from datetime import datetime, timezone
 import pytest
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
-    DraftClaimCompactionOutputClaim,
     DraftClaimCompactionTriple,
     DraftClaimReducedRewriteOutput,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.enriched_draft_claim_compaction_output import (
+    EnrichedDraftClaimCompactionOutputClaim,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionNodeKind,
@@ -38,6 +40,7 @@ class FakeReductionStateConnection:
             node_ref = _str_arg(args[0])
             if node_ref in self.nodes:
                 return "INSERT 0 0"
+            is_enriched_compacted_insert = len(args) >= 17
             self.nodes[node_ref] = {
                 "node_ref": node_ref,
                 "workflow_run_id": _str_arg(args[1]),
@@ -47,12 +50,30 @@ class FakeReductionStateConnection:
                 "source_claim_refs": json.loads(_str_arg(args[5])),
                 "supersedes_node_refs": json.loads(_str_arg(args[6])),
                 "estimated_input_tokens": _int_arg(args[7]),
-                "compacted_key": _optional_str_arg(args[8]) if len(args) > 10 else None,
+                "compacted_key": _optional_str_arg(args[8])
+                if is_enriched_compacted_insert
+                else None,
                 "compacted_claim": _optional_str_arg(args[9])
-                if len(args) > 10
+                if is_enriched_compacted_insert
+                else None,
+                "compacted_claim_kind": _optional_str_arg(args[10])
+                if is_enriched_compacted_insert
+                else None,
+                "compacted_granularity": _optional_str_arg(args[11])
+                if is_enriched_compacted_insert
+                else None,
+                "compacted_merge_decision": _optional_str_arg(args[12])
+                if is_enriched_compacted_insert
                 else None,
                 "compacted_triples": (
-                    json.loads(_str_arg(args[10])) if len(args) > 10 else []
+                    json.loads(_str_arg(args[13]))
+                    if is_enriched_compacted_insert
+                    else []
+                ),
+                "compacted_payload": (
+                    json.loads(_str_arg(args[14]))
+                    if is_enriched_compacted_insert
+                    else None
                 ),
             }
             return "INSERT 0 1"
@@ -392,6 +413,13 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
     assert active_nodes[0].compacted_key == "refund_support"
     assert active_nodes[0].compacted_claim == "Product supports refunds."
     assert active_nodes[0].compacted_triples == (_triple(),)
+    assert active_nodes[0].compacted_claim_kind == "capability"
+    assert active_nodes[0].compacted_granularity == "atomic"
+    assert active_nodes[0].compacted_merge_decision == "merged"
+    assert active_nodes[0].compacted_payload is not None
+    assert active_nodes[0].compacted_payload["possible_questions"] == ["Q1", "Q2"]
+    assert active_nodes[0].compacted_payload["exclusion_scope"] == "not X"
+    assert active_nodes[0].compacted_payload["evidence_block"] == "E1"
     assert len(inactive_nodes) == 2
     assert state.comparisons[0].status.value == "merged"
     assert state.comparisons[0].result_node_ref == active_nodes[0].node_ref
@@ -458,11 +486,29 @@ async def test_apply_reduced_rewrite_result_merges_active_compacted_nodes_idempo
     assert len(active_nodes) == 1
     assert active_nodes[0].source_claim_refs == ("claim-a", "claim-b", "claim-x")
     assert active_nodes[0].supersedes_node_refs == ("compacted-a", "compacted-b")
+    assert active_nodes[0].compacted_payload is not None
+    assert active_nodes[0].compacted_payload["key"] == "merged_refund_support"
+    assert (
+        active_nodes[0].compacted_payload["claim"]
+        == "Product supports refund workflows."
+    )
+    assert active_nodes[0].compacted_payload["possible_questions"] == [
+        "Question compacted-a",
+        "Question compacted-b",
+    ]
+    assert active_nodes[0].compacted_payload["exclusion_scope"] == (
+        "not compacted-a\nnot compacted-b"
+    )
+    assert active_nodes[0].compacted_payload["evidence_block"] == (
+        "Evidence compacted-a\n\nEvidence compacted-b"
+    )
     assert state.comparisons[0].status.value == "merged"
 
 
-def _compacted_claim(source_refs: tuple[str, ...]) -> DraftClaimCompactionOutputClaim:
-    return DraftClaimCompactionOutputClaim(
+def _compacted_claim(
+    source_refs: tuple[str, ...],
+) -> EnrichedDraftClaimCompactionOutputClaim:
+    return EnrichedDraftClaimCompactionOutputClaim(
         key="refund_support",
         claim="Product supports refunds.",
         claim_kind="capability",
@@ -470,6 +516,9 @@ def _compacted_claim(source_refs: tuple[str, ...]) -> DraftClaimCompactionOutput
         source_claim_refs=source_refs,
         triples=(_triple(),),
         merge_decision="merged" if len(source_refs) > 1 else "unmerged",
+        possible_questions=("Q1", "Q2"),
+        exclusion_scope="not X",
+        evidence_block="E1",
     )
 
 
@@ -486,18 +535,35 @@ def _active_compacted_node_row(
     node_ref: str,
     source_claim_refs: tuple[str, ...],
 ) -> dict[str, object]:
+    source_claim_refs_list = list(source_claim_refs)
+    payload = {
+        "key": node_ref,
+        "claim": node_ref,
+        "claim_kind": "capability",
+        "granularity": "atomic",
+        "source_claim_refs": source_claim_refs_list,
+        "triples": [],
+        "merge_decision": "merged",
+        "possible_questions": [f"Question {node_ref}"],
+        "exclusion_scope": f"not {node_ref}",
+        "evidence_block": f"Evidence {node_ref}",
+    }
     return {
         "node_ref": node_ref,
         "workflow_run_id": "workflow-1",
         "group_ref": "group-1",
         "node_kind": "compacted",
         "active": True,
-        "source_claim_refs": list(source_claim_refs),
+        "source_claim_refs": source_claim_refs_list,
         "supersedes_node_refs": [],
         "estimated_input_tokens": 0,
         "compacted_key": node_ref,
         "compacted_claim": node_ref,
+        "compacted_claim_kind": "capability",
+        "compacted_granularity": "atomic",
+        "compacted_merge_decision": "merged",
         "compacted_triples": [],
+        "compacted_payload": payload,
     }
 
 

@@ -6,6 +6,7 @@ from enum import StrEnum
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
     DraftClaimCompactionTriple,
 )
+from src.domain.project_plane.json_types import JsonObject, JsonValue
 
 
 PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID = "openai/gpt-oss-120b"
@@ -78,6 +79,10 @@ class DraftClaimCompactionNode:
     compacted_key: str | None = None
     compacted_claim: str | None = None
     compacted_triples: tuple[DraftClaimCompactionTriple, ...] = ()
+    compacted_claim_kind: str | None = None
+    compacted_granularity: str | None = None
+    compacted_merge_decision: str | None = None
+    compacted_payload: JsonObject | None = None
 
     def __post_init__(self) -> None:
         _text(self.node_ref, "node_ref")
@@ -98,6 +103,14 @@ class DraftClaimCompactionNode:
         if self.compacted_claim is not None:
             _text(self.compacted_claim, "compacted_claim")
         _triples_tuple(self.compacted_triples)
+        if self.compacted_claim_kind is not None:
+            _text(self.compacted_claim_kind, "compacted_claim_kind")
+        if self.compacted_granularity is not None:
+            _text(self.compacted_granularity, "compacted_granularity")
+        if self.compacted_merge_decision is not None:
+            _text(self.compacted_merge_decision, "compacted_merge_decision")
+        if self.compacted_payload is not None:
+            _json_object(self.compacted_payload, "compacted_payload")
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +281,28 @@ def _triples_tuple(
             raise TypeError(
                 "compacted_triples must contain DraftClaimCompactionTriple",
             )
+
+
+def _json_object(value: JsonObject, name: str) -> None:
+    if not isinstance(value, dict):
+        raise TypeError(f"{name} must be json object")
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise TypeError(f"{name} keys must be str")
+        _json_value(item, name)
+
+
+def _json_value(value: JsonValue, name: str) -> None:
+    if value is None or isinstance(value, str | int | float | bool):
+        return
+    if isinstance(value, list):
+        for item in value:
+            _json_value(item, name)
+        return
+    if isinstance(value, dict):
+        _json_object(value, name)
+        return
+    raise TypeError(f"{name} must be JSON-compatible")
 
 
 def _sources_tuple(value: tuple[DraftClaimCompactionNodeSource, ...]) -> None:

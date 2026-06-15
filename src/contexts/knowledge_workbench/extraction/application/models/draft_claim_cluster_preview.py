@@ -15,6 +15,9 @@ class DraftClaimClusterPreviewClaim:
     granularity: str | None
     source_claim_refs: tuple[str, ...]
     triples: tuple[JsonObject, ...]
+    possible_questions: tuple[str, ...]
+    exclusion_scope: str
+    evidence_block: str
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.key, field_name="key")
@@ -27,6 +30,11 @@ class DraftClaimClusterPreviewClaim:
             _require_non_empty_text(source_claim_ref, field_name="source_claim_ref")
         for triple in self.triples:
             _require_json_object(triple, field_name="triple")
+        for question in self.possible_questions:
+            _require_non_empty_text(question, field_name="possible_question")
+        if not isinstance(self.exclusion_scope, str):
+            raise TypeError("exclusion_scope must be str")
+        _require_non_empty_text(self.evidence_block, field_name="evidence_block")
 
     def to_payload(self) -> JsonObject:
         payload: JsonObject = {
@@ -36,6 +44,9 @@ class DraftClaimClusterPreviewClaim:
             "granularity": self.granularity,
             "source_claim_refs": list(self.source_claim_refs),
             "triples": [dict(triple) for triple in self.triples],
+            "possible_questions": list(self.possible_questions),
+            "exclusion_scope": self.exclusion_scope,
+            "evidence_block": self.evidence_block,
         }
         return payload
 
@@ -50,6 +61,9 @@ class DraftClaimClusterPreviewClaim:
             granularity=_payload_optional_text(payload, "granularity"),
             source_claim_refs=_payload_text_tuple(payload, "source_claim_refs"),
             triples=_payload_json_object_tuple(payload, "triples"),
+            possible_questions=_payload_text_tuple(payload, "possible_questions"),
+            exclusion_scope=_payload_text_allow_empty(payload, "exclusion_scope"),
+            evidence_block=_payload_text(payload, "evidence_block"),
         )
 
 
@@ -171,6 +185,13 @@ def _payload_text(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"payload {key} must be non-empty str")
+    return value
+
+
+def _payload_text_allow_empty(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"payload {key} must be str")
     return value
 
 

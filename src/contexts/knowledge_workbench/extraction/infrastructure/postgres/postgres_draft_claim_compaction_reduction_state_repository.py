@@ -15,10 +15,15 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionProgressSummary,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
-    DraftClaimCompactionOutputClaim,
+    DraftClaimCompactionClaimKind,
+    DraftClaimCompactionGranularity,
+    DraftClaimCompactionMergeDecision,
     DraftClaimCompactionTriple,
     DraftClaimCompactionTriplePredicate,
     DraftClaimReducedRewriteOutput,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.enriched_draft_claim_compaction_output import (
+    EnrichedDraftClaimCompactionOutputClaim,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionComparison,
@@ -34,6 +39,7 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
     DraftClaimCompactionReductionStatePersistenceResult,
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.domain.project_plane.json_types import JsonObject, JsonValue
 
 
 class DraftClaimCompactionReductionStateConnectionLike(Protocol):
@@ -150,7 +156,9 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
                    supersedes_node_refs, estimated_input_tokens,
-                   compacted_key, compacted_claim, compacted_triples
+                   compacted_key, compacted_claim, compacted_claim_kind,
+                   compacted_granularity, compacted_merge_decision,
+                   compacted_triples, compacted_payload
             FROM draft_claim_compaction_nodes
             WHERE workflow_run_id = $1 AND group_ref = $2
             ORDER BY node_ref
@@ -225,7 +233,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         batch_ref: str,
         work_item_id: str,
         round_index: int,
-        compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...],
+        compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
         del batch_ref, work_item_id
@@ -258,9 +266,10 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     INSERT INTO draft_claim_compaction_nodes
                     (node_ref, workflow_run_id, group_ref, node_kind, active,
                      source_claim_refs, supersedes_node_refs, estimated_input_tokens,
-                     compacted_key, compacted_claim, compacted_triples,
-                     created_at, updated_at)
-                    VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11::jsonb,$12,$13)
+                     compacted_key, compacted_claim, compacted_claim_kind,
+                     compacted_granularity, compacted_merge_decision,
+                     compacted_triples, compacted_payload, created_at, updated_at)
+                    VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17)
                     ON CONFLICT (node_ref) DO NOTHING
                     """,
                     node_ref,
@@ -273,7 +282,11 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     0,
                     claim.key,
                     claim.claim,
+                    claim.claim_kind.value,
+                    claim.granularity.value,
+                    claim.merge_decision.value,
                     _triples_json(claim.triples),
+                    _payload_json(claim.to_json_dict()),
                     created_at,
                     created_at,
                 )
@@ -354,6 +367,11 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         union_source_claim_refs = _dedupe_sorted(
             source_ref for node in source_nodes for source_ref in node.source_claim_refs
         )
+        inherited_claim = _inherited_reduced_claim(
+            source_nodes=source_nodes,
+            source_claim_refs=union_source_claim_refs,
+            rewrite=rewrite,
+        )
         node_ref = compacted_claim_node_ref(
             workflow_run_id=workflow_run_id,
             group_ref=group_ref,
@@ -369,9 +387,10 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 INSERT INTO draft_claim_compaction_nodes
                 (node_ref, workflow_run_id, group_ref, node_kind, active,
                  source_claim_refs, supersedes_node_refs, estimated_input_tokens,
-                 compacted_key, compacted_claim, compacted_triples,
-                 created_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11::jsonb,$12,$13)
+                 compacted_key, compacted_claim, compacted_claim_kind,
+                 compacted_granularity, compacted_merge_decision,
+                 compacted_triples, compacted_payload, created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12,$13,$14::jsonb,$15::jsonb,$16,$17)
                 ON CONFLICT (node_ref) DO NOTHING
                 """,
                 node_ref,
@@ -382,9 +401,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 json.dumps(list(union_source_claim_refs), sort_keys=True),
                 json.dumps(list(source_node_refs), sort_keys=True),
                 0,
-                rewrite.key,
-                rewrite.claim,
-                _triples_json(rewrite.triples),
+                inherited_claim.key,
+                inherited_claim.claim,
+                inherited_claim.claim_kind.value,
+                inherited_claim.granularity.value,
+                inherited_claim.merge_decision.value,
+                _triples_json(inherited_claim.triples),
+                _payload_json(inherited_claim.to_json_dict()),
                 created_at,
                 created_at,
             )
@@ -455,7 +478,9 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
                    supersedes_node_refs, estimated_input_tokens,
-                   compacted_key, compacted_claim, compacted_triples
+                   compacted_key, compacted_claim, compacted_claim_kind,
+                   compacted_granularity, compacted_merge_decision,
+                   compacted_triples, compacted_payload
             FROM draft_claim_compaction_nodes
             WHERE node_ref = ANY($1::text[])
             ORDER BY node_ref
@@ -593,7 +618,9 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
                    supersedes_node_refs, estimated_input_tokens,
-                   compacted_key, compacted_claim, compacted_triples
+                   compacted_key, compacted_claim, compacted_claim_kind,
+                   compacted_granularity, compacted_merge_decision,
+                   compacted_triples, compacted_payload
             FROM draft_claim_compaction_nodes
             WHERE workflow_run_id = $1
               AND active = true
@@ -700,6 +727,13 @@ def _node(
         compacted_key=_optional_str(row, "compacted_key"),
         compacted_claim=_optional_str(row, "compacted_claim"),
         compacted_triples=_triples(row.get("compacted_triples", [])),
+        compacted_claim_kind=_optional_str_if_present(row, "compacted_claim_kind"),
+        compacted_granularity=_optional_str_if_present(row, "compacted_granularity"),
+        compacted_merge_decision=_optional_str_if_present(
+            row,
+            "compacted_merge_decision",
+        ),
+        compacted_payload=_json_object_or_none(row.get("compacted_payload")),
     )
 
 
@@ -739,6 +773,150 @@ def _comparison_round(
         ):
             return _int(row, "round_index")
     raise KeyError("comparison round not found")
+
+
+def _inherited_reduced_claim(
+    *,
+    source_nodes: tuple[DraftClaimCompactionNode, ...],
+    source_claim_refs: tuple[str, ...],
+    rewrite: DraftClaimReducedRewriteOutput,
+) -> EnrichedDraftClaimCompactionOutputClaim:
+    payloads = tuple(_node_payload(node) for node in source_nodes)
+    possible_questions = _dedupe_preserving_order(
+        question
+        for payload in payloads
+        for question in _payload_text_tuple(payload, "possible_questions")
+    )
+    exclusion_scope_values = _dedupe_preserving_order(
+        _payload_text(payload, "exclusion_scope", allow_empty=True)
+        for payload in payloads
+    )
+    evidence_block_values = _dedupe_preserving_order(
+        _payload_text(payload, "evidence_block", allow_empty=False)
+        for payload in payloads
+    )
+    return EnrichedDraftClaimCompactionOutputClaim(
+        key=rewrite.key,
+        claim=rewrite.claim,
+        claim_kind=_inherited_claim_kind(payloads),
+        granularity=_inherited_granularity(payloads),
+        source_claim_refs=source_claim_refs,
+        triples=rewrite.triples,
+        merge_decision=DraftClaimCompactionMergeDecision.MERGED,
+        possible_questions=possible_questions,
+        exclusion_scope="\n".join(exclusion_scope_values),
+        evidence_block="\n\n".join(evidence_block_values),
+    )
+
+
+def _node_payload(node: DraftClaimCompactionNode) -> JsonObject:
+    if node.compacted_payload is None:
+        raise ValueError("source compacted nodes lack compacted_payload")
+    return node.compacted_payload
+
+
+def _inherited_claim_kind(
+    payloads: tuple[JsonObject, ...],
+) -> DraftClaimCompactionClaimKind:
+    values = tuple(
+        DraftClaimCompactionClaimKind(_payload_text(payload, "claim_kind"))
+        for payload in payloads
+    )
+    if len(set(values)) != 1:
+        raise ValueError("source compacted nodes have conflicting claim_kind")
+    return values[0]
+
+
+def _inherited_granularity(
+    payloads: tuple[JsonObject, ...],
+) -> DraftClaimCompactionGranularity:
+    values = tuple(
+        DraftClaimCompactionGranularity(_payload_text(payload, "granularity"))
+        for payload in payloads
+    )
+    if len(set(values)) == 1:
+        return values[0]
+    return DraftClaimCompactionGranularity.COMPOSITE
+
+
+def _payload_text_tuple(payload: JsonObject, key: str) -> tuple[str, ...]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        raise ValueError(f"compacted_payload {key} must be list")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"compacted_payload {key} must contain non-empty strings")
+        result.append(item)
+    return tuple(result)
+
+
+def _payload_text(
+    payload: JsonObject,
+    key: str,
+    *,
+    allow_empty: bool = False,
+) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str):
+        raise ValueError(f"compacted_payload {key} must be str")
+    stripped = value.strip()
+    if not stripped and not allow_empty:
+        raise ValueError(f"compacted_payload {key} must be non-empty str")
+    return stripped
+
+
+def _dedupe_preserving_order(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError("dedupe values must contain str")
+        stripped = value.strip()
+        if not stripped:
+            continue
+        if stripped in seen:
+            continue
+        seen.add(stripped)
+        result.append(stripped)
+    return tuple(result)
+
+
+def _payload_json(payload: JsonObject) -> str:
+    return json.dumps(payload, sort_keys=True)
+
+
+def _json_object_or_none(value: object) -> JsonObject | None:
+    if value is None:
+        return None
+    parsed: object
+    if isinstance(value, str):
+        parsed = json.loads(value)
+    else:
+        parsed = value
+    if not isinstance(parsed, Mapping):
+        raise TypeError("compacted_payload must be json object")
+    result: JsonObject = {}
+    for key, item in parsed.items():
+        if not isinstance(key, str):
+            raise TypeError("compacted_payload keys must be str")
+        result[key] = _json_value(item)
+    return result
+
+
+def _json_value(value: object) -> JsonValue:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Mapping):
+        result: JsonObject = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("json object keys must be str")
+            result[key] = _json_value(item)
+        return result
+    raise TypeError("value must be JSON-compatible")
 
 
 def _triples(value: object) -> tuple[DraftClaimCompactionTriple, ...]:
@@ -821,6 +999,12 @@ def _optional_str(row: Mapping[str, object], key: str) -> str | None:
     return value
 
 
+def _optional_str_if_present(row: Mapping[str, object], key: str) -> str | None:
+    if key not in row:
+        return None
+    return _optional_str(row, key)
+
+
 def _int(row: Mapping[str, object], key: str) -> int:
     value = row[key]
     if not isinstance(value, int):
@@ -852,7 +1036,7 @@ def _inserted(status: object) -> bool:
     return text.endswith(" 1") or text == "INSERT 1"
 
 
-def _triples_json(triples: tuple) -> str:
+def _triples_json(triples: tuple[DraftClaimCompactionTriple, ...]) -> str:
     return json.dumps(
         [triple.to_json_dict() for triple in triples],
         sort_keys=True,

@@ -15,6 +15,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionOutputClaim,
     DraftClaimCompactionTriple,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.enriched_draft_claim_compaction_output import (
+    EnrichedDraftClaimCompactionOutputClaim,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionNextWorkItem,
     DraftClaimCompactionNextWorkItemType,
@@ -24,6 +27,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionApplyPersistenceResult,
     DraftClaimCompactionReductionStatePersistenceResult,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadModel,
 )
 from src.contexts.knowledge_workbench.extraction.application.use_cases.apply_draft_claim_compaction_result import (
     ApplyDraftClaimCompactionResult,
@@ -67,7 +73,7 @@ class FakeReductionStateRepository:
         batch_ref: str,
         work_item_id: str,
         round_index: int,
-        compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...],
+        compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
         assert workflow_run_id == "workflow-1"
@@ -77,6 +83,9 @@ class FakeReductionStateRepository:
         assert round_index == 0
         assert created_at == _now()
         assert compacted_claims[0].source_claim_refs == ("claim-a", "claim-b")
+        assert compacted_claims[0].possible_questions == ("Q1", "Q2")
+        assert compacted_claims[0].exclusion_scope == "not X"
+        assert compacted_claims[0].evidence_block == "E1\n\nE2"
         self.applied = True
         return _persistence_result()
 
@@ -95,6 +104,19 @@ class FakeReductionStateRepository:
         del workflow_run_id, group_ref, batch_ref, work_item_id
         del round_index, source_node_refs, rewrite, created_at
         raise AssertionError("reduced rewrite must not be called")
+
+
+@dataclass(slots=True)
+class FakeDraftClaimObservationReadRepository:
+    async def list_by_observation_refs(
+        self,
+        *,
+        observation_refs: tuple[str, ...],
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        assert observation_refs == ("claim-a", "claim-b")
+        return tuple(
+            _raw_claim(observation_ref) for observation_ref in observation_refs
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +162,7 @@ async def test_apply_compacted_output_reloads_state_and_returns_next_decision() 
 
     outcome = await ApplyDraftClaimCompactionResult(
         reduction_state_repository=repository,
+        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
         reduction_planner_policy=FakePlannerPolicy(),
     ).execute(command)
 
@@ -152,6 +175,29 @@ async def test_apply_compacted_output_reloads_state_and_returns_next_decision() 
         ),
     )
     assert outcome.next_decision.work_type is DraftClaimCompactionNextWorkItemType.DONE
+
+
+def _raw_claim(observation_ref: str) -> DraftClaimObservationReadModel:
+    index = "1" if observation_ref == "claim-a" else "2"
+    return DraftClaimObservationReadModel(
+        observation_ref=observation_ref,
+        source_unit_ref="source-unit-1",
+        claim=f"Raw claim {observation_ref}",
+        granularity="atomic",
+        possible_questions=(f"Q{index}",),
+        exclusion_scope="not X",
+        evidence_block=f"E{index}",
+        workflow_run_id=None,
+        stage_run_id=None,
+        work_item_id=None,
+        work_item_attempt_id=None,
+        llm_task_id=None,
+        llm_attempt_id=None,
+        prompt_id=None,
+        prompt_version=None,
+        claim_index=None,
+        created_at=_now(),
+    )
 
 
 def _compacted_claim(

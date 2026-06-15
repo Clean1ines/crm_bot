@@ -64,8 +64,10 @@ def test_rejects_missing_compacted_claims() -> None:
     "field_name",
     [
         "questions",
+        "possible_questions",
         "exclusion_scope",
         "evidence",
+        "evidence_block",
         "mentions",
         "source_refs",
         "metrics",

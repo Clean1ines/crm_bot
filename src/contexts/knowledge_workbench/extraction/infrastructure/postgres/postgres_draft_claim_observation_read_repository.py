@@ -64,6 +64,29 @@ class PostgresDraftClaimObservationReadRepository(
         )
         return tuple(_read_model_from_row(row) for row in rows)
 
+    async def list_by_observation_refs(
+        self,
+        *,
+        observation_refs: tuple[str, ...],
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        _validate_observation_refs(observation_refs)
+        rows = await self._connection.fetch(
+            _DRAFT_CLAIM_OBSERVATION_SELECT
+            + """
+            WHERE dco.observation_ref = ANY($1::text[])
+            """
+            + _DRAFT_CLAIM_OBSERVATION_GROUP_ORDER,
+            list(observation_refs),
+        )
+        models = tuple(_read_model_from_row(row) for row in rows)
+        models_by_ref = {model.observation_ref: model for model in models}
+        return tuple(
+            model
+            for observation_ref in observation_refs
+            for model in (models_by_ref.get(observation_ref),)
+            if model is not None
+        )
+
 
 _DRAFT_CLAIM_OBSERVATION_SELECT = """
 SELECT
@@ -98,7 +121,7 @@ LEFT JOIN draft_claim_observation_provenance AS p
     ON p.observation_ref = dco.observation_ref
 """
 
-_DRAFT_CLAIM_OBSERVATION_GROUP_ORDER_PAGE = """
+_DRAFT_CLAIM_OBSERVATION_GROUP_ORDER = """
 GROUP BY
     dco.observation_ref,
     dco.source_unit_ref,
@@ -122,8 +145,25 @@ ORDER BY
     p.claim_index ASC NULLS LAST,
     dco.created_at ASC,
     dco.observation_ref ASC
+"""
+
+_DRAFT_CLAIM_OBSERVATION_GROUP_ORDER_PAGE = (
+    _DRAFT_CLAIM_OBSERVATION_GROUP_ORDER
+    + """
 LIMIT $2 OFFSET $3
 """
+)
+
+
+def _validate_observation_refs(observation_refs: tuple[str, ...]) -> None:
+    if not isinstance(observation_refs, tuple):
+        raise TypeError("observation_refs must be tuple")
+    if not observation_refs:
+        raise ValueError("observation_refs must be non-empty")
+    if len(set(observation_refs)) != len(observation_refs):
+        raise ValueError("observation_refs must be unique")
+    for observation_ref in observation_refs:
+        _require_non_empty_text(observation_ref, "observation_ref")
 
 
 def _validate_page(*, limit: int, offset: int) -> None:

@@ -40,6 +40,9 @@ def _node(
                 "qualifiers": [],
             }
         ],
+        "possible_questions": ["Q1", "Q2"],
+        "exclusion_scope": "not X",
+        "evidence_block": "E1",
     }
 
 
@@ -107,6 +110,9 @@ async def test_builds_preview_from_active_compacted_nodes() -> None:
     assert preview is not None
     assert [group.group_ref for group in preview.groups] == ["group-1", "group-2"]
     assert preview.groups[0].claims[0].key == "refund_support"
+    assert preview.groups[0].claims[0].possible_questions == ("Q1", "Q2")
+    assert preview.groups[0].claims[0].exclusion_scope == "not X"
+    assert preview.groups[0].claims[0].evidence_block == "E1"
 
 
 @pytest.mark.asyncio

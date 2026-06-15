@@ -106,6 +106,27 @@ async def test_list_by_source_unit_ref_returns_only_claims_for_that_source_unit(
 
 
 @pytest.mark.asyncio
+async def test_list_by_observation_refs_returns_claims_for_requested_refs() -> None:
+    connection = FakeConnection(
+        rows=[
+            _row(observation_ref="claim-b"),
+            _row(observation_ref="claim-a"),
+        ],
+    )
+
+    result = await PostgresDraftClaimObservationReadRepository(
+        connection,
+    ).list_by_observation_refs(
+        observation_refs=("claim-a", "claim-b"),
+    )
+
+    assert tuple(item.observation_ref for item in result) == ("claim-a", "claim-b")
+    query, args = connection.calls[0]
+    assert "dco.observation_ref = ANY($1::text[])" in query
+    assert args == (["claim-a", "claim-b"],)
+
+
+@pytest.mark.asyncio
 async def test_possible_questions_are_returned_ordered_by_query_ordinal() -> None:
     connection = FakeConnection(
         rows=[

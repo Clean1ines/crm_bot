@@ -74,6 +74,12 @@ class DraftClaimObservationReadRepositoryPort(Protocol):
         offset: int,
     ) -> tuple[DraftClaimObservationReadModel, ...]: ...
 
+    async def list_by_observation_refs(
+        self,
+        *,
+        observation_refs: tuple[str, ...],
+    ) -> tuple[DraftClaimObservationReadModel, ...]: ...
+
 
 def _require_non_empty_text(value: str, field_name: str) -> None:
     if not isinstance(value, str):

@@ -120,6 +120,21 @@ def _preview_claim_from_node(
             "triples",
             "compacted_triples",
         ),
+        possible_questions=_node_text_tuple_or_payload(
+            node,
+            payload,
+            "possible_questions",
+        ),
+        exclusion_scope=_node_text_allow_empty_or_payload(
+            node,
+            payload,
+            "exclusion_scope",
+        ),
+        evidence_block=_node_text_or_payload(
+            node,
+            payload,
+            "evidence_block",
+        ),
     )
 
 
@@ -144,6 +159,20 @@ def _node_payload(node: object) -> Mapping[str, object]:
             if isinstance(value, Mapping):
                 return value
     return {}
+
+
+def _node_text_allow_empty_or_payload(
+    node: object,
+    payload: Mapping[str, object],
+    key: str,
+) -> str:
+    value = _node_attr(node, key)
+    if isinstance(value, str):
+        return value
+    payload_value = payload.get(key)
+    if isinstance(payload_value, str):
+        return payload_value
+    return ""
 
 
 def _node_text_or_payload(

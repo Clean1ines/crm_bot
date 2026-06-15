@@ -94,6 +94,9 @@ class FakeReductionRepository:
                 "triples": [
                     {"subject": "Product", "predicate": "supports", "object": "refunds"}
                 ],
+                "possible_questions": ["Q1"],
+                "exclusion_scope": "not X",
+                "evidence_block": "E1",
             },
         )
 
@@ -263,6 +266,9 @@ async def test_build_cluster_preview_command_creates_preview_and_completes() -> 
     assert result.claim_count == 1
     assert result.group_count == 1
     assert len(preview_repository.saved) == 1
+    assert preview_repository.saved[0].groups[0].claims[0].possible_questions == ("Q1",)
+    assert preview_repository.saved[0].groups[0].claims[0].exclusion_scope == "not X"
+    assert preview_repository.saved[0].groups[0].claims[0].evidence_block == "E1"
     assert [event.event_type for event in workflow_uow.outbox.events] == [
         KnowledgeExtractionCanonicalEventType.CLUSTER_PREVIEW_READY.value
     ]

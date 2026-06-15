@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_apply_result import (
@@ -11,11 +12,20 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     ordered_pair,
     raw_claim_node_ref,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionOutputClaim,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_enricher import (
+    DraftClaimCompactionOutputEnricher,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_reduction_planner_policy import (
     DraftClaimCompactionReductionPlannerPolicy,
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadRepositoryPort,
 )
 
 
@@ -26,6 +36,12 @@ class DraftClaimCompactionApplyResultError(Exception):
 @dataclass(frozen=True, slots=True)
 class ApplyDraftClaimCompactionResult:
     reduction_state_repository: DraftClaimCompactionReductionStateRepositoryPort
+    draft_claim_observation_read_repository: (
+        DraftClaimObservationReadRepositoryPort | None
+    ) = None
+    draft_claim_compaction_output_enricher: DraftClaimCompactionOutputEnricher = (
+        DraftClaimCompactionOutputEnricher()
+    )
     reduction_planner_policy: DraftClaimCompactionReductionPlannerPolicy = (
         DraftClaimCompactionReductionPlannerPolicy()
     )
@@ -35,13 +51,18 @@ class ApplyDraftClaimCompactionResult:
         command: DraftClaimCompactionApplyResultCommand,
     ) -> DraftClaimCompactionApplyResultOutcome:
         if command.output_kind is DraftClaimCompactionApplyOutputKind.COMPACTED_CLAIMS:
+            source_claims = await self._load_source_claims(command.compacted_claims)
+            enriched_output = self.draft_claim_compaction_output_enricher.enrich(
+                output_claims=command.compacted_claims,
+                source_claims=source_claims,
+            )
             await self.reduction_state_repository.apply_compacted_claims_result(
                 workflow_run_id=command.workflow_run_id,
                 group_ref=command.group_ref,
                 batch_ref=command.batch_ref,
                 work_item_id=command.work_item_id,
                 round_index=command.round_index,
-                compacted_claims=command.compacted_claims,
+                compacted_claims=enriched_output.compacted_claims,
                 created_at=command.created_at,
             )
             created_node_refs = tuple(
@@ -127,6 +148,25 @@ class ApplyDraftClaimCompactionResult:
             next_decision=next_decision,
         )
 
+    async def _load_source_claims(
+        self,
+        compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...],
+    ):
+        if self.draft_claim_observation_read_repository is None:
+            raise DraftClaimCompactionApplyResultError(
+                "draft claim observation read repository is required",
+            )
+        source_claim_refs = _dedupe_preserving_order(
+            source_ref
+            for compacted_claim in compacted_claims
+            for source_ref in compacted_claim.source_claim_refs
+        )
+        return (
+            await self.draft_claim_observation_read_repository.list_by_observation_refs(
+                observation_refs=source_claim_refs,
+            )
+        )
+
 
 def _node_pairs(node_refs: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
     ordered = tuple(sorted(node_refs))
@@ -135,3 +175,16 @@ def _node_pairs(node_refs: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
         for right in ordered[index + 1 :]:
             pairs.append((left, right))
     return tuple(pairs)
+
+
+def _dedupe_preserving_order(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("source claim refs must contain non-empty strings")
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return tuple(result)

@@ -8,8 +8,10 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionProgressSummary,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
-    DraftClaimCompactionOutputClaim,
     DraftClaimReducedRewriteOutput,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.enriched_draft_claim_compaction_output import (
+    EnrichedDraftClaimCompactionOutputClaim,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionNode,
@@ -98,7 +100,7 @@ class DraftClaimCompactionReductionStateRepositoryPort(Protocol):
         batch_ref: str,
         work_item_id: str,
         round_index: int,
-        compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...],
+        compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult: ...
 
