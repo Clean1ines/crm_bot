@@ -12,6 +12,7 @@ from src.contexts.knowledge_workbench.curation.application.models.draft_claim_cu
 )
 from src.contexts.knowledge_workbench.curation.application.use_cases.open_draft_claim_curation_workspace import (
     DraftClaimCurationWorkspaceOpenError,
+    DraftClaimCurationWorkspaceProjectMismatchError,
     OpenDraftClaimCurationWorkspace,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
@@ -205,5 +206,35 @@ async def test_open_workspace_rejects_missing_compacted_payload() -> None:
             workflow_run_id=_workflow_run_id(),
             project_id="project-1",
             source_document_ref=None,
+            created_at=_now(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_existing_workspace_with_different_project_id_is_rejected() -> None:
+    repository = FakeCurationRepository()
+    existing = await OpenDraftClaimCurationWorkspace(
+        curation_workspace_repository=repository,
+        compaction_reduction_state_repository=FakeCompactionRepository(),
+    ).execute(
+        workflow_run_id=_workflow_run_id(),
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+        created_at=_now(),
+    )
+
+    assert existing.workspace.project_id == "project-1"
+
+    with pytest.raises(
+        DraftClaimCurationWorkspaceProjectMismatchError,
+        match="does not belong to project",
+    ):
+        await OpenDraftClaimCurationWorkspace(
+            curation_workspace_repository=repository,
+            compaction_reduction_state_repository=FakeCompactionRepository(nodes=()),
+        ).execute(
+            workflow_run_id=_workflow_run_id(),
+            project_id="project-2",
+            source_document_ref="source-document:project-2:abc",
             created_at=_now(),
         )

@@ -27,6 +27,10 @@ class DraftClaimCurationWorkspaceOpenError(RuntimeError):
     pass
 
 
+class DraftClaimCurationWorkspaceProjectMismatchError(PermissionError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class OpenDraftClaimCurationWorkspace:
     curation_workspace_repository: DraftClaimCurationWorkspaceRepositoryPort
@@ -48,6 +52,10 @@ class OpenDraftClaimCurationWorkspace:
             )
         )
         if existing is not None:
+            if existing.workspace.project_id != project_id:
+                raise DraftClaimCurationWorkspaceProjectMismatchError(
+                    "curation workspace does not belong to project"
+                )
             return existing
 
         active_raw_count = (

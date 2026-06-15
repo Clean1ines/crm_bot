@@ -1529,13 +1529,52 @@ class _FakeCurationSourceRepository(_FakeSourceManagementRepository):
         return self.units[0]
 
 
+@dataclass(slots=True)
+class _FakeKnowledgeExtractionSagaStateRepository:
+    project_id: ClassVar[str] = "project-1"
+    source_document_ref: ClassVar[str] = "source-document:project-1:abc"
+    workflow_exists: ClassVar[bool] = True
+
+    def __init__(self, pool: object) -> None:
+        del pool
+
+    async def load_workflow_state(self, workflow_run_id: str):
+        if not self.workflow_exists:
+            return None
+        from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
+            KnowledgeExtractionPhaseKey,
+            KnowledgeExtractionWorkflowState,
+            KnowledgeExtractionWorkflowStatus,
+        )
+
+        return KnowledgeExtractionWorkflowState(
+            workflow_run_id=workflow_run_id,
+            project_id=self.project_id,
+            source_document_ref=self.source_document_ref,
+            status=KnowledgeExtractionWorkflowStatus.RUNNING,
+            current_phase=KnowledgeExtractionPhaseKey.FINAL_KNOWLEDGE_PREPARED,
+            created_at=datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc),
+        )
+
+
 def _patch_curation_http_repositories(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeCurationWorkspaceRepository.snapshot = None
     _FakeCurationWorkspaceRepository.instances = []
+    _FakeKnowledgeExtractionSagaStateRepository.project_id = "project-1"
+    _FakeKnowledgeExtractionSagaStateRepository.source_document_ref = (
+        "source-document:project-1:abc"
+    )
+    _FakeKnowledgeExtractionSagaStateRepository.workflow_exists = True
     monkeypatch.setattr(
         knowledge,
         "PostgresDraftClaimCurationWorkspaceRepository",
         _FakeCurationWorkspaceRepository,
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresKnowledgeExtractionSagaStateRepository",
+        _FakeKnowledgeExtractionSagaStateRepository,
     )
     monkeypatch.setattr(
         knowledge,
@@ -1664,3 +1703,146 @@ async def test_exclude_and_include_curation_item(
     )
     assert included["item"]["excluded"] is False
     assert included["item"]["exclusion_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_open_curation_workspace_uses_workflow_state_source_document_ref(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    _patch_curation_http_repositories(monkeypatch)
+    _FakeKnowledgeExtractionSagaStateRepository.source_document_ref = (
+        "source-document:project-1:from-state"
+    )
+
+    response = await knowledge.open_draft_claim_curation_workspace(
+        project_id="project-1",
+        workflow_run_id="opaque-workflow-id",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+
+    assert response["workspace"]["source_document_ref"] == (
+        "source-document:project-1:from-state"
+    )
+
+
+@pytest.mark.asyncio
+async def test_open_curation_workspace_rejects_workflow_from_another_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    _patch_curation_http_repositories(monkeypatch)
+    _FakeKnowledgeExtractionSagaStateRepository.project_id = "project-2"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.open_draft_claim_curation_workspace(
+            project_id="project-1",
+            workflow_run_id="knowledge-extraction:source-document:project-2:abc",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Workflow not found"
+    assert _FakeCurationWorkspaceRepository.snapshot is None
+
+
+@pytest.mark.asyncio
+async def test_read_curation_workspace_rejects_workflow_from_another_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    _patch_curation_http_repositories(monkeypatch)
+    _FakeKnowledgeExtractionSagaStateRepository.project_id = "project-2"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.read_draft_claim_curation_workspace(
+            project_id="project-1",
+            workflow_run_id="knowledge-extraction:source-document:project-2:abc",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Workflow not found"
+
+
+@pytest.mark.asyncio
+async def test_mutating_curation_item_rejects_workflow_from_another_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    _patch_curation_http_repositories(monkeypatch)
+    _FakeKnowledgeExtractionSagaStateRepository.project_id = "project-2"
+
+    with pytest.raises(HTTPException) as update_exc:
+        await knowledge.update_draft_claim_curation_item(
+            project_id="project-1",
+            workflow_run_id="knowledge-extraction:source-document:project-2:abc",
+            item_ref="item-1",
+            updates={"claim": "Updated"},
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+    assert update_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException) as exclude_exc:
+        await knowledge.exclude_draft_claim_curation_item(
+            project_id="project-1",
+            workflow_run_id="knowledge-extraction:source-document:project-2:abc",
+            item_ref="item-1",
+            payload={"exclusion_reason": "duplicate"},
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+    assert exclude_exc.value.status_code == 404
+
+    with pytest.raises(HTTPException) as include_exc:
+        await knowledge.include_draft_claim_curation_item(
+            project_id="project-1",
+            workflow_run_id="knowledge-extraction:source-document:project-2:abc",
+            item_ref="item-1",
+            authorization="Bearer valid-token",
+            pool=object(),
+            project_repo=_FakeProjectRepo(),
+            user_repo=_user_repo(),
+        )
+    assert include_exc.value.status_code == 404
+
+
+def test_curation_open_does_not_parse_source_document_ref_from_workflow_run_id() -> (
+    None
+):
+    source = _source()
+    assert "_source_document_ref_from_workflow_run_id" not in source
+    curation_region = source.split(
+        "async def open_draft_claim_curation_workspace",
+        1,
+    )[1].split(
+        "async def read_draft_claim_curation_workspace",
+        1,
+    )[0]
+    assert "workflow_project.source_document_ref" in curation_region

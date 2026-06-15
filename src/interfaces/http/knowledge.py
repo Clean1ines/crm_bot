@@ -83,6 +83,9 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
 from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
     SourceManagementRepositoryPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_ports import (
+    KnowledgeExtractionSagaStateRepositoryPort,
+)
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     AsyncSourceManagementConnectionLike,
     PostgresSourceManagementRepository,
@@ -104,9 +107,19 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
     DraftClaimCompactionReductionStateConnectionLike,
     PostgresDraftClaimCompactionReductionStateRepository,
 )
+from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_knowledge_extraction_saga_state_repository import (
+    AsyncKnowledgeExtractionSagaConnectionLike,
+    PostgresKnowledgeExtractionSagaStateRepository,
+)
 from src.contexts.knowledge_workbench.curation.application.use_cases.open_draft_claim_curation_workspace import (
     DraftClaimCurationWorkspaceOpenError,
+    DraftClaimCurationWorkspaceProjectMismatchError,
     OpenDraftClaimCurationWorkspace,
+)
+from src.contexts.knowledge_workbench.curation.application.use_cases.ensure_draft_claim_curation_workflow_project import (
+    DraftClaimCurationWorkflowNotFoundError,
+    DraftClaimCurationWorkflowProjectMismatchError,
+    EnsureDraftClaimCurationWorkflowProject,
 )
 from src.contexts.knowledge_workbench.curation.application.use_cases.set_draft_claim_curation_item_excluded import (
     DraftClaimCurationItemExclusionError,
@@ -337,15 +350,6 @@ def _source_document_draft_claims_url(
     )
 
 
-def _source_document_ref_from_workflow_run_id(workflow_run_id: str) -> str | None:
-    prefix = "knowledge-extraction:"
-    if workflow_run_id.startswith(prefix):
-        source_document_ref = workflow_run_id[len(prefix) :]
-        if source_document_ref.strip():
-            return source_document_ref
-    return None
-
-
 def _curation_workspace_repositories(
     pool: object,
 ) -> tuple[
@@ -353,6 +357,7 @@ def _curation_workspace_repositories(
     DraftClaimCompactionReductionStateRepositoryPort,
     DraftClaimObservationReadRepositoryPort,
     SourceManagementRepositoryPort,
+    KnowledgeExtractionSagaStateRepositoryPort,
 ]:
     curation_repository: DraftClaimCurationWorkspaceRepositoryPort = (
         PostgresDraftClaimCurationWorkspaceRepository(
@@ -374,12 +379,38 @@ def _curation_workspace_repositories(
             cast(AsyncSourceManagementConnectionLike, pool)
         )
     )
+    saga_state_repository: KnowledgeExtractionSagaStateRepositoryPort = (
+        PostgresKnowledgeExtractionSagaStateRepository(
+            cast(AsyncKnowledgeExtractionSagaConnectionLike, pool)
+        )
+    )
     return (
         curation_repository,
         compaction_repository,
         draft_claim_repository,
         source_repository,
+        saga_state_repository,
     )
+
+
+async def _ensure_curation_workflow_project(
+    *,
+    workflow_run_id: str,
+    project_id: str,
+    saga_state_repository: KnowledgeExtractionSagaStateRepositoryPort,
+):
+    try:
+        return await EnsureDraftClaimCurationWorkflowProject(
+            state_repository=saga_state_repository,
+        ).execute(
+            workflow_run_id=workflow_run_id,
+            expected_project_id=project_id,
+        )
+    except (
+        DraftClaimCurationWorkflowNotFoundError,
+        DraftClaimCurationWorkflowProjectMismatchError,
+    ) as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
 
 
 async def _read_curation_workspace_response(
@@ -755,19 +786,25 @@ async def open_draft_claim_curation_workspace(
         compaction_repository,
         draft_claim_repository,
         source_repository,
+        saga_state_repository,
     ) = _curation_workspace_repositories(pool)
+    workflow_project = await _ensure_curation_workflow_project(
+        workflow_run_id=workflow_run_id,
+        project_id=project_id,
+        saga_state_repository=saga_state_repository,
+    )
     try:
         await OpenDraftClaimCurationWorkspace(
             curation_workspace_repository=curation_repository,
             compaction_reduction_state_repository=compaction_repository,
         ).execute(
             workflow_run_id=workflow_run_id,
-            project_id=project_id,
-            source_document_ref=_source_document_ref_from_workflow_run_id(
-                workflow_run_id
-            ),
+            project_id=workflow_project.project_id,
+            source_document_ref=workflow_project.source_document_ref,
             created_at=datetime.now(timezone.utc),
         )
+    except DraftClaimCurationWorkspaceProjectMismatchError as exc:
+        raise HTTPException(status_code=404, detail="Workflow not found") from exc
     except DraftClaimCurationWorkspaceOpenError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return await _read_curation_workspace_response(
@@ -799,7 +836,13 @@ async def read_draft_claim_curation_workspace(
         compaction_repository,
         draft_claim_repository,
         source_repository,
+        saga_state_repository,
     ) = _curation_workspace_repositories(pool)
+    await _ensure_curation_workflow_project(
+        workflow_run_id=workflow_run_id,
+        project_id=project_id,
+        saga_state_repository=saga_state_repository,
+    )
     return await _read_curation_workspace_response(
         workflow_run_id=workflow_run_id,
         curation_repository=curation_repository,
@@ -826,7 +869,18 @@ async def update_draft_claim_curation_item(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    curation_repository = PostgresDraftClaimCurationWorkspaceRepository(pool)
+    (
+        curation_repository,
+        _compaction_repository,
+        _draft_claim_repository,
+        _source_repository,
+        saga_state_repository,
+    ) = _curation_workspace_repositories(pool)
+    await _ensure_curation_workflow_project(
+        workflow_run_id=workflow_run_id,
+        project_id=project_id,
+        saga_state_repository=saga_state_repository,
+    )
     try:
         item = await UpdateDraftClaimCurationItem(
             curation_workspace_repository=curation_repository,
@@ -864,7 +918,18 @@ async def exclude_draft_claim_curation_item(
     reason = body.get("exclusion_reason")
     if reason is not None and not isinstance(reason, str):
         raise HTTPException(status_code=400, detail="exclusion_reason must be str")
-    curation_repository = PostgresDraftClaimCurationWorkspaceRepository(pool)
+    (
+        curation_repository,
+        _compaction_repository,
+        _draft_claim_repository,
+        _source_repository,
+        saga_state_repository,
+    ) = _curation_workspace_repositories(pool)
+    await _ensure_curation_workflow_project(
+        workflow_run_id=workflow_run_id,
+        project_id=project_id,
+        saga_state_repository=saga_state_repository,
+    )
     try:
         item = await SetDraftClaimCurationItemExcluded(
             curation_workspace_repository=curation_repository,
@@ -896,7 +961,18 @@ async def include_draft_claim_curation_item(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    curation_repository = PostgresDraftClaimCurationWorkspaceRepository(pool)
+    (
+        curation_repository,
+        _compaction_repository,
+        _draft_claim_repository,
+        _source_repository,
+        saga_state_repository,
+    ) = _curation_workspace_repositories(pool)
+    await _ensure_curation_workflow_project(
+        workflow_run_id=workflow_run_id,
+        project_id=project_id,
+        saga_state_repository=saga_state_repository,
+    )
     try:
         item = await SetDraftClaimCurationItemExcluded(
             curation_workspace_repository=curation_repository,
