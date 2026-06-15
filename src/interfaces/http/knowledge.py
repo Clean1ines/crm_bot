@@ -377,6 +377,156 @@ def _source_unit_read_model(unit: SourceUnit) -> dict[str, object]:
     }
 
 
+def _document_card_lifecycle_state(status: object) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"processing", "pending"}:
+        return "processing"
+    if normalized in {"cancelled", "canceled", "cancelled_by_user"}:
+        return "cancelled"
+    if normalized in {"error", "failed"}:
+        return "failed"
+    if normalized in {"processed", "completed", "done"}:
+        return "ready"
+    return "processing"
+
+
+def _workbench_document_card_view_fallback(
+    document: Mapping[str, object],
+) -> dict[str, object]:
+    document_id = str(document["document_id"])
+    project_id = str(document["project_id"])
+    file_name = str(document["file_name"])
+    status = str(document.get("status") or "processing")
+    lifecycle_state = _document_card_lifecycle_state(status)
+    raw_source_unit_count = document.get("source_unit_count")
+    source_unit_count = (
+        raw_source_unit_count
+        if isinstance(raw_source_unit_count, int)
+        and not isinstance(raw_source_unit_count, bool)
+        else 0
+    )
+    running = lifecycle_state == "processing"
+
+    return {
+        "document_id": document_id,
+        "project_id": project_id,
+        "file_name": file_name,
+        "source_type": "source_ingestion",
+        "lifecycle_state": lifecycle_state,
+        "retention_state": "retained",
+        "transient_purged": False,
+        "resume_available": False,
+        "status_i18n_key": f"knowledge.workbench.status.{lifecycle_state}",
+        "default_status_label": (
+            "Обрабатывается"
+            if running
+            else "Остановлено"
+            if lifecycle_state == "cancelled"
+            else "Ошибка"
+            if lifecycle_state == "failed"
+            else "Готово"
+        ),
+        "status_description_i18n_key": (
+            "knowledge.workbench.description.sourceIngestion"
+        ),
+        "default_status_description": (
+            "Документ принят в source-ingestion pipeline. Live-state показывает текущие стадии обработки."
+            if running
+            else "Обработка документа остановлена."
+            if lifecycle_state == "cancelled"
+            else "Обработка документа завершилась ошибкой."
+            if lifecycle_state == "failed"
+            else "Документ обработан."
+        ),
+        "timer": {
+            "mode": "running" if running else "stopped",
+            "active_elapsed_seconds": 0,
+            "wall_elapsed_seconds": 0,
+            "current_active_started_at": (
+                _optional_datetime_isoformat(document.get("updated_at"))
+                if running
+                else None
+            ),
+            "i18n_key": "knowledge.workbench.timer.processing",
+            "default_label": "Время",
+        },
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "llm_call_count": 0,
+            "i18n_key": "knowledge.workbench.usage.pending",
+        },
+        "sections": {
+            "total": source_unit_count,
+            "processed": 0,
+            "failed": 0,
+            "pending": source_unit_count,
+        },
+        "registry": {
+            "entry_count": 0,
+            "final_snapshot_id": None,
+            "retained": True,
+        },
+        "surfaces": {
+            "draft_count": 0,
+            "ready_count": 0,
+            "published_count": 0,
+            "rejected_count": 0,
+        },
+        "runtime": {
+            "publication_id": None,
+            "runtime_entry_count": 0,
+        },
+        "recovery": {
+            "mode": "none",
+            "scheduled_at": None,
+            "can_cancel_scheduled_resume": False,
+            "reason_code": "none",
+            "i18n_key": "knowledge.workbench.recovery.none",
+            "default_message": "Автовосстановление не запланировано",
+        },
+        "actions": [
+            {
+                "action_id": "cancel_processing",
+                "visible": running,
+                "enabled": running,
+                "tone": "danger",
+                "i18n_key": "knowledge.actions.stop",
+                "default_label": "Остановить",
+                "reason_code": None if running else "not_running",
+                "confirmation_i18n_key": None,
+                "default_confirmation": "Остановить обработку документа?",
+            },
+            {
+                "action_id": "delete_document",
+                "visible": True,
+                "enabled": True,
+                "tone": "danger",
+                "i18n_key": "knowledge.actions.delete",
+                "default_label": "Удалить",
+                "reason_code": None,
+                "confirmation_i18n_key": None,
+                "default_confirmation": "Удалить документ и связанные артефакты?",
+            },
+        ],
+        "messages": [],
+        "error": None,
+        "metadata": {
+            "workbench_phase": {
+                "source_unit_count": source_unit_count,
+                "prompt_a_completed_sections": 0,
+                "section_queue_ready_count": 0,
+                "section_queue_leased_count": 0,
+                "registry_application_ready_count": 0,
+                "registry_application_leased_count": 0,
+            },
+            "workbench_claim_preview_count": 0,
+            "workbench_claim_preview": [],
+        },
+    }
+
+
 async def _list_workbench_documents_fallback(
     *,
     pool: object,
@@ -395,7 +545,15 @@ async def _list_workbench_documents_fallback(
                 created_at,
                 updated_at,
                 current_processing_run_id,
-                file_size_bytes
+                file_size_bytes,
+                COALESCE(
+                    (
+                        SELECT COUNT(*)::int
+                        FROM source_units AS su
+                        WHERE su.document_ref = document_id
+                    ),
+                    0
+                ) AS source_unit_count
             FROM knowledge_workbench_documents
             WHERE project_id = $1
               AND deleted_at IS NULL
@@ -423,7 +581,7 @@ async def _list_workbench_documents_fallback(
                 "created_at": (_optional_datetime_isoformat(created_at)),
                 "updated_at": (_optional_datetime_isoformat(updated_at)),
                 "current_processing_run_id": document.get("current_processing_run_id"),
-                "card_view": None,
+                "card_view": _workbench_document_card_view_fallback(document),
             }
         )
 
