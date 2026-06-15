@@ -83,6 +83,7 @@ class FakeReductionStateRepository:
         assert round_index == 0
         assert created_at == _now()
         assert compacted_claims[0].source_claim_refs == ("claim-a", "claim-b")
+        assert compacted_claims[0].granularity.value == "composite"
         assert compacted_claims[0].possible_questions == ("Q1", "Q2")
         assert compacted_claims[0].exclusion_scope == "not X"
         assert compacted_claims[0].evidence_block == "E1\n\nE2"
@@ -183,7 +184,7 @@ def _raw_claim(observation_ref: str) -> DraftClaimObservationReadModel:
         observation_ref=observation_ref,
         source_unit_ref="source-unit-1",
         claim=f"Raw claim {observation_ref}",
-        granularity="atomic",
+        granularity="composite" if observation_ref == "claim-b" else "atomic",
         possible_questions=(f"Q{index}",),
         exclusion_scope="not X",
         evidence_block=f"E{index}",

@@ -109,8 +109,12 @@ def _preview_claim_from_node(
     return DraftClaimClusterPreviewClaim(
         key=_node_text_or_payload(node, payload, "key", "compacted_key"),
         claim=_node_text_or_payload(node, payload, "claim", "compacted_claim"),
-        claim_kind=_node_optional_text_or_payload(node, payload, "claim_kind"),
-        granularity=_node_optional_text_or_payload(node, payload, "granularity"),
+        claim_kind=_node_optional_text_or_payload(
+            node, payload, "claim_kind", "compacted_claim_kind"
+        ),
+        granularity=_node_optional_text_or_payload(
+            node, payload, "granularity", "compacted_granularity"
+        ),
         source_claim_refs=_node_text_tuple_or_payload(
             node, payload, "source_claim_refs"
         ),
@@ -140,6 +144,7 @@ def _preview_claim_from_node(
 
 def _node_payload(node: object) -> Mapping[str, object]:
     for attr_name in (
+        "compacted_payload",
         "preview_payload",
         "payload",
         "claim_payload",
@@ -150,6 +155,7 @@ def _node_payload(node: object) -> Mapping[str, object]:
             return value
     if isinstance(node, Mapping):
         for key in (
+            "compacted_payload",
             "preview_payload",
             "payload",
             "claim_payload",
@@ -166,12 +172,12 @@ def _node_text_allow_empty_or_payload(
     payload: Mapping[str, object],
     key: str,
 ) -> str:
-    value = _node_attr(node, key)
-    if isinstance(value, str):
-        return value
     payload_value = payload.get(key)
     if isinstance(payload_value, str):
         return payload_value
+    value = _node_attr(node, key)
+    if isinstance(value, str):
+        return value
     return ""
 
 
@@ -181,12 +187,12 @@ def _node_text_or_payload(
     *keys: str,
 ) -> str:
     for key in keys:
-        value = _node_attr(node, key)
-        if isinstance(value, str) and value.strip():
-            return value
         payload_value = payload.get(key)
         if isinstance(payload_value, str) and payload_value.strip():
             return payload_value
+        value = _node_attr(node, key)
+        if isinstance(value, str) and value.strip():
+            return value
     raise DraftClaimClusterPreviewBuildError(
         f"compacted node lacks required text field {keys[0]}"
     )
@@ -195,14 +201,15 @@ def _node_text_or_payload(
 def _node_optional_text_or_payload(
     node: object,
     payload: Mapping[str, object],
-    key: str,
+    *keys: str,
 ) -> str | None:
-    value = _node_attr(node, key)
-    if isinstance(value, str) and value.strip():
-        return value
-    payload_value = payload.get(key)
-    if isinstance(payload_value, str) and payload_value.strip():
-        return payload_value
+    for key in keys:
+        payload_value = payload.get(key)
+        if isinstance(payload_value, str) and payload_value.strip():
+            return payload_value
+        value = _node_attr(node, key)
+        if isinstance(value, str) and value.strip():
+            return value
     return None
 
 
@@ -211,16 +218,16 @@ def _node_text_tuple_or_payload(
     payload: Mapping[str, object],
     key: str,
 ) -> tuple[str, ...]:
-    value = _node_attr(node, key)
-    if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
-        return value
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        return tuple(value)
     payload_value = payload.get(key)
     if isinstance(payload_value, list) and all(
         isinstance(item, str) for item in payload_value
     ):
         return tuple(payload_value)
+    value = _node_attr(node, key)
+    if isinstance(value, tuple) and all(isinstance(item, str) for item in value):
+        return value
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return tuple(value)
     return ()
 
 
@@ -230,14 +237,14 @@ def _node_json_object_tuple_or_payload(
     *keys: str,
 ) -> tuple[JsonObject, ...]:
     for key in keys:
+        payload_value = payload.get(key)
+        if isinstance(payload_value, list):
+            return tuple(_json_object(item) for item in payload_value)
         value = _node_attr(node, key)
         if isinstance(value, tuple):
             return tuple(_json_object(item) for item in value)
         if isinstance(value, list):
             return tuple(_json_object(item) for item in value)
-        payload_value = payload.get(key)
-        if isinstance(payload_value, list):
-            return tuple(_json_object(item) for item in payload_value)
     return ()
 
 

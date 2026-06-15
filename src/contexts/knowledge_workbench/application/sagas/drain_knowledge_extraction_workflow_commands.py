@@ -58,6 +58,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
     PersistValidatedDraftClaimObservationsPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadRepositoryPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     PrepareLlmDispatchBatchPort,
 )
@@ -149,6 +152,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         draft_claim_observation_persistence: (
             PersistValidatedDraftClaimObservationsPort | None
         ) = None,
+        draft_claim_observation_read_repository: (
+            DraftClaimObservationReadRepositoryPort | None
+        ) = None,
         work_item_split_supersede_repository: (
             WorkItemSplitSupersedeRepositoryPort | None
         ) = None,
@@ -233,6 +239,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 ),
                 draft_claim_observation_persistence=(
                     draft_claim_observation_persistence
+                ),
+                draft_claim_observation_read_repository=(
+                    draft_claim_observation_read_repository
                 ),
                 work_item_split_supersede_repository=(
                     work_item_split_supersede_repository

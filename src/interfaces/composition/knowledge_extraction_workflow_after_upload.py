@@ -86,6 +86,10 @@ from src.contexts.knowledge_workbench.extraction.application.ports.validated_dra
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_validated_draft_claim_observation_persistence import (
     PostgresValidatedDraftClaimObservationPersistence,
 )
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_observation_read_repository import (
+    DraftClaimObservationReadConnectionLike,
+    PostgresDraftClaimObservationReadRepository,
+)
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhaseCommand,
     RunSourceIngestionFirstPhaseResult,
@@ -385,6 +389,11 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 cast(DraftClaimClusterPreviewConnectionLike, connection)
             )
         )
+        draft_claim_observation_read_repository = (
+            PostgresDraftClaimObservationReadRepository(
+                cast(DraftClaimObservationReadConnectionLike, connection)
+            )
+        )
 
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
@@ -433,6 +442,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                     or PostgresValidatedDraftClaimObservationPersistence(
                         cast(asyncpg.Connection, connection)
                     )
+                ),
+                draft_claim_observation_read_repository=(
+                    draft_claim_observation_read_repository
                 ),
                 draft_claim_embedding_read_repository=(
                     self._draft_claim_embedding_read_repository

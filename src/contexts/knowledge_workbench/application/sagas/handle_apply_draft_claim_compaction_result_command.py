@@ -38,6 +38,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadRepositoryPort,
+)
 from src.contexts.knowledge_workbench.extraction.application.use_cases.apply_draft_claim_compaction_result import (
     ApplyDraftClaimCompactionResult,
 )
@@ -112,6 +115,7 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
         compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort
         ),
+        draft_claim_observation_read_repository: DraftClaimObservationReadRepositoryPort,
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
     ) -> HandleApplyDraftClaimCompactionResult:
         workflow_command = command.workflow_command
@@ -132,6 +136,9 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
         if apply_result_use_case is None:
             apply_result_use_case = ApplyDraftClaimCompactionResult(
                 reduction_state_repository=compaction_reduction_state_repository,
+                draft_claim_observation_read_repository=(
+                    draft_claim_observation_read_repository
+                ),
             )
         outcome = await apply_result_use_case.execute(apply_command)
 

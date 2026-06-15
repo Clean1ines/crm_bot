@@ -34,6 +34,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
     DraftClaimCompactionApplyPersistenceResult,
     DraftClaimCompactionReductionStatePersistenceResult,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadModel,
+)
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_document import (
     SourceDocument,
 )
@@ -546,7 +549,24 @@ class FakeDraftClaimClusterPreviewRepository:
 
 
 @dataclass(slots=True)
+class FakeDraftClaimObservationReadRepository:
+    requested_refs: list[tuple[str, ...]] = field(default_factory=list)
+
+    async def list_by_observation_refs(
+        self,
+        *,
+        observation_refs: tuple[str, ...],
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        self.requested_refs.append(observation_refs)
+        return tuple(
+            _raw_claim(observation_ref) for observation_ref in observation_refs
+        )
+
+
+@dataclass(slots=True)
 class FakeDraftClaimCompactionReductionStateRepository:
+    applied_compacted_claims: list[object] = field(default_factory=list)
+
     async def summarize_compaction_progress(
         self,
         *,
@@ -594,7 +614,8 @@ class FakeDraftClaimCompactionReductionStateRepository:
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
         del workflow_run_id, group_ref, batch_ref, work_item_id
-        del round_index, compacted_claims, created_at
+        del round_index, created_at
+        self.applied_compacted_claims.append(compacted_claims)
         return _apply_persistence_result()
 
     async def apply_reduced_rewrite_result(
@@ -637,6 +658,28 @@ async def test_cluster_draft_claims_requires_reduction_state_repository() -> Non
     assert result.phase == operation.phase.value
 
 
+def _raw_claim(observation_ref: str) -> DraftClaimObservationReadModel:
+    return DraftClaimObservationReadModel(
+        observation_ref=observation_ref,
+        source_unit_ref="source-unit-1",
+        claim=f"Raw claim {observation_ref}",
+        granularity="atomic",
+        possible_questions=(f"Q {observation_ref}",),
+        exclusion_scope="not X",
+        evidence_block=f"Evidence {observation_ref}",
+        workflow_run_id=None,
+        stage_run_id=None,
+        work_item_id=None,
+        work_item_attempt_id=None,
+        llm_task_id=None,
+        llm_attempt_id=None,
+        prompt_id=None,
+        prompt_version=None,
+        claim_index=None,
+        created_at=_now(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_unknown_command_type_raises_value_error() -> None:
     with pytest.raises(ValueError, match="unknown knowledge extraction command type"):
@@ -671,7 +714,7 @@ async def test_apply_draft_claim_compaction_result_requires_reduction_state_repo
 
 
 @pytest.mark.asyncio
-async def test_apply_draft_claim_compaction_result_dispatches_when_dependencies_exist() -> (
+async def test_apply_draft_claim_compaction_result_requires_raw_claim_read_repository() -> (
     None
 ):
     result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
@@ -689,8 +732,36 @@ async def test_apply_draft_claim_compaction_result_dispatches_when_dependencies_
         ),
     )
 
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_apply_draft_claim_compaction_result_dispatches_when_dependencies_exist() -> (
+    None
+):
+    repository = FakeDraftClaimCompactionReductionStateRepository()
+    read_repository = FakeDraftClaimObservationReadRepository()
+
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT,
+                payload=_apply_result_payload(),
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        draft_claim_compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=read_repository,
+    )
+
     assert result.dispatched is True
     assert result.handler_name == "HandleApplyDraftClaimCompactionResultCommandHandler"
+    assert read_repository.requested_refs == [("claim-a", "claim-b")]
+    compacted_claim = repository.applied_compacted_claims[0][0]
+    assert compacted_claim.possible_questions == ("Q claim-a", "Q claim-b")
 
 
 def _apply_result_payload() -> dict[str, object]:

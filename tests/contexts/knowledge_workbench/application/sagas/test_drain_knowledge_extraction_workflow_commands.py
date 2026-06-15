@@ -18,6 +18,16 @@ from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extra
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
     DraftClaimCompactionOutputValidator,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionPlannerState,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
+    DraftClaimCompactionApplyPersistenceResult,
+    DraftClaimCompactionReductionStatePersistenceResult,
+)
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadModel,
+)
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
     WORKFLOW_MANUALLY_PAUSED,
     DrainKnowledgeExtractionWorkflowCommands,
@@ -446,6 +456,8 @@ async def _drain(
     pending_commands: tuple[WorkflowCommand, ...],
     max_commands: int = 10,
     workflow_state_repository: FakeWorkflowStateRepository | None = None,
+    draft_claim_observation_read_repository: object | None = None,
+    draft_claim_compaction_reduction_state_repository: object | None = None,
 ) -> tuple[object, FakeWorkItemSchedulingRepository, FakeWorkflowRuntimeUnitOfWork]:
     scheduling_repository = FakeWorkItemSchedulingRepository()
     workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork(
@@ -460,9 +472,114 @@ async def _drain(
         knowledge_unit_of_work=scheduling_repository,
         workflow_unit_of_work=workflow_unit_of_work,
         prepare_llm_dispatch_batch=FakePrepareLlmDispatchBatch(),
+        draft_claim_observation_read_repository=draft_claim_observation_read_repository,
+        draft_claim_compaction_reduction_state_repository=(
+            draft_claim_compaction_reduction_state_repository
+        ),
         workflow_state_repository=workflow_state_repository,
     )
     return result, scheduling_repository, workflow_unit_of_work
+
+
+@dataclass(slots=True)
+class FakeDraftClaimObservationReadRepository:
+    requested_refs: list[tuple[str, ...]] = field(default_factory=list)
+
+    async def list_by_observation_refs(
+        self,
+        *,
+        observation_refs: tuple[str, ...],
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        self.requested_refs.append(observation_refs)
+        return tuple(
+            _raw_claim(observation_ref) for observation_ref in observation_refs
+        )
+
+
+@dataclass(slots=True)
+class FakeDraftClaimCompactionReductionStateRepository:
+    applied_compacted_claims: list[object] = field(default_factory=list)
+
+    async def load_planner_state(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+    ) -> DraftClaimCompactionPlannerState | None:
+        del workflow_run_id
+        return DraftClaimCompactionPlannerState(cluster_ref=group_ref, nodes=())
+
+    async def seed_initial_planner_state(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        raw_nodes,
+        created_at: datetime,
+    ) -> DraftClaimCompactionReductionStatePersistenceResult:
+        del workflow_run_id, group_ref, raw_nodes, created_at
+        raise AssertionError("seed_initial_planner_state must not be called")
+
+    async def apply_compacted_claims_result(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        batch_ref: str,
+        work_item_id: str,
+        round_index: int,
+        compacted_claims,
+        created_at: datetime,
+    ) -> DraftClaimCompactionApplyPersistenceResult:
+        del workflow_run_id, group_ref, batch_ref, work_item_id
+        del round_index, created_at
+        self.applied_compacted_claims.append(compacted_claims)
+        return DraftClaimCompactionApplyPersistenceResult(
+            inserted_node_count=1,
+            updated_node_count=2,
+            inserted_source_count=2,
+            inserted_comparison_count=1,
+            superseded_node_count=2,
+            already_exists_count=0,
+        )
+
+    async def apply_reduced_rewrite_result(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        batch_ref: str,
+        work_item_id: str,
+        round_index: int,
+        source_node_refs,
+        rewrite,
+        created_at: datetime,
+    ) -> DraftClaimCompactionApplyPersistenceResult:
+        del workflow_run_id, group_ref, batch_ref, work_item_id
+        del round_index, source_node_refs, rewrite, created_at
+        raise AssertionError("apply_reduced_rewrite_result must not be called")
+
+
+def _raw_claim(observation_ref: str) -> DraftClaimObservationReadModel:
+    return DraftClaimObservationReadModel(
+        observation_ref=observation_ref,
+        source_unit_ref="source-unit-1",
+        claim=f"Raw claim {observation_ref}",
+        granularity="atomic",
+        possible_questions=(f"Q {observation_ref}",),
+        exclusion_scope="not X",
+        evidence_block=f"Evidence {observation_ref}",
+        workflow_run_id=None,
+        stage_run_id=None,
+        work_item_id=None,
+        work_item_attempt_id=None,
+        llm_task_id=None,
+        llm_attempt_id=None,
+        prompt_id=None,
+        prompt_version=None,
+        claim_index=None,
+        created_at=_now(),
+    )
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionGranularity,
     DraftClaimCompactionOutputClaim,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.enriched_draft_claim_compaction_output import (
@@ -50,7 +51,9 @@ class DraftClaimCompactionOutputEnricher:
                     key=output_claim.key,
                     claim=output_claim.claim,
                     claim_kind=output_claim.claim_kind,
-                    granularity=output_claim.granularity,
+                    granularity=_final_granularity_from_source_claims(
+                        selected_source_claims
+                    ),
                     source_claim_refs=output_claim.source_claim_refs,
                     triples=output_claim.triples,
                     merge_decision=output_claim.merge_decision,
@@ -77,6 +80,32 @@ def _source_claims_for_output(
             raise ValueError("source claim for compaction output is missing")
         result.append(source_claim)
     return tuple(result)
+
+
+def _final_granularity_from_source_claims(
+    source_claims: tuple[DraftClaimObservationReadModel, ...],
+) -> DraftClaimCompactionGranularity:
+    if not source_claims:
+        raise ValueError("source claims must be non-empty")
+
+    granularities: list[DraftClaimCompactionGranularity] = []
+    for source_claim in source_claims:
+        raw_granularity = source_claim.granularity
+        if not isinstance(raw_granularity, str) or not raw_granularity.strip():
+            raise ValueError("source claim granularity must be non-empty str")
+        try:
+            granularities.append(DraftClaimCompactionGranularity(raw_granularity))
+        except ValueError as exc:
+            raise ValueError(
+                "source claim granularity must be atomic or composite"
+            ) from exc
+
+    if all(
+        granularity is DraftClaimCompactionGranularity.ATOMIC
+        for granularity in granularities
+    ):
+        return DraftClaimCompactionGranularity.ATOMIC
+    return DraftClaimCompactionGranularity.COMPOSITE
 
 
 def _dedupe_stripped(values: Iterable[str]) -> tuple[str, ...]:

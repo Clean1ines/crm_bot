@@ -69,6 +69,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 from src.contexts.knowledge_workbench.extraction.application.ports.validated_draft_claim_observation_persistence_port import (
     PersistValidatedDraftClaimObservationsPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadRepositoryPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_draft_claim_compaction_progress_command import (
     HandleReconcileDraftClaimCompactionProgressCommand,
     HandleReconcileDraftClaimCompactionProgressCommandHandler,
@@ -174,6 +177,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         ) = None,
         draft_claim_observation_persistence: (
             PersistValidatedDraftClaimObservationsPort | None
+        ) = None,
+        draft_claim_observation_read_repository: (
+            DraftClaimObservationReadRepositoryPort | None
         ) = None,
         work_item_split_supersede_repository: (
             WorkItemSplitSupersedeRepositoryPort | None
@@ -552,6 +558,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     dispatched=False,
                     blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
                 )
+
             await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
                 HandleReconcileDraftClaimCompactionProgressCommand(
                     workflow_command=workflow_command,
@@ -575,7 +582,10 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             command_type
             is KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
         ):
-            if draft_claim_compaction_reduction_state_repository is None:
+            if (
+                draft_claim_compaction_reduction_state_repository is None
+                or draft_claim_observation_read_repository is None
+            ):
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
                     command_type=command_type.value,
@@ -585,6 +595,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     dispatched=False,
                     blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
                 )
+
             await HandleApplyDraftClaimCompactionResultCommandHandler().execute(
                 HandleApplyDraftClaimCompactionResultCommand(
                     workflow_command=workflow_command,
@@ -592,6 +603,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 workflow_unit_of_work=workflow_unit_of_work,
                 compaction_reduction_state_repository=(
                     draft_claim_compaction_reduction_state_repository
+                ),
+                draft_claim_observation_read_repository=(
+                    draft_claim_observation_read_repository
                 ),
                 work_item_scheduling_repository=knowledge_unit_of_work,
             )

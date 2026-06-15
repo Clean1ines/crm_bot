@@ -32,6 +32,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
     DraftClaimCompactionApplyPersistenceResult,
     DraftClaimCompactionReductionStatePersistenceResult,
 )
+from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
+    DraftClaimObservationReadModel,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
     WorkflowCommandStatus,
@@ -183,6 +186,10 @@ class FakeReductionStateRepository:
         assert round_index == 0
         assert created_at == _now()
         assert compacted_claims[0].source_claim_refs == ("claim-a", "claim-b")
+        assert compacted_claims[0].possible_questions == ("Q claim-a", "Q claim-b")
+        assert (
+            compacted_claims[0].evidence_block == "Evidence claim-a\n\nEvidence claim-b"
+        )
         self.applied_compacted += 1
         return _apply_persistence()
 
@@ -208,6 +215,43 @@ class FakeReductionStateRepository:
         assert created_at == _now()
         self.applied_reduced += 1
         return _apply_persistence()
+
+
+@dataclass(slots=True)
+class FakeDraftClaimObservationReadRepository:
+    requested_refs: list[tuple[str, ...]] = field(default_factory=list)
+
+    async def list_by_observation_refs(
+        self,
+        *,
+        observation_refs: tuple[str, ...],
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        self.requested_refs.append(observation_refs)
+        return tuple(
+            _raw_claim(observation_ref) for observation_ref in observation_refs
+        )
+
+
+def _raw_claim(observation_ref: str) -> DraftClaimObservationReadModel:
+    return DraftClaimObservationReadModel(
+        observation_ref=observation_ref,
+        source_unit_ref="source-unit-1",
+        claim=f"Raw claim {observation_ref}",
+        granularity="atomic",
+        possible_questions=(f"Q {observation_ref}",),
+        exclusion_scope="not X",
+        evidence_block=f"Evidence {observation_ref}",
+        workflow_run_id=None,
+        stage_run_id=None,
+        work_item_id=None,
+        work_item_attempt_id=None,
+        llm_task_id=None,
+        llm_attempt_id=None,
+        prompt_id=None,
+        prompt_version=None,
+        claim_index=None,
+        created_at=_now(),
+    )
 
 
 @dataclass(slots=True)
@@ -406,6 +450,7 @@ async def test_applies_result_events_progress_timeline_and_completes_command() -
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
         work_item_scheduling_repository=scheduling,
     )
 
@@ -438,6 +483,27 @@ async def test_applies_result_events_progress_timeline_and_completes_command() -
 
 
 @pytest.mark.asyncio
+async def test_constructed_apply_use_case_receives_raw_claim_read_repository() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    scheduling = FakeWorkItemSchedulingRepository()
+    repository = FakeReductionStateRepository(
+        _decision(DraftClaimCompactionNextWorkItemType.DONE)
+    )
+    read_repository = FakeDraftClaimObservationReadRepository()
+
+    await HandleApplyDraftClaimCompactionResultCommandHandler().execute(
+        HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=read_repository,
+        work_item_scheduling_repository=scheduling,
+    )
+
+    assert read_repository.requested_refs == [("claim-a", "claim-b")]
+    assert repository.applied_compacted == 1
+
+
+@pytest.mark.asyncio
 async def test_schedules_next_work_item_for_reduced_rewrite_decision() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     scheduling = FakeWorkItemSchedulingRepository()
@@ -461,6 +527,7 @@ async def test_schedules_next_work_item_for_reduced_rewrite_decision() -> None:
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
         work_item_scheduling_repository=scheduling,
     )
 
@@ -516,6 +583,7 @@ async def test_waiting_user_model_choice_appends_event_without_scheduling() -> N
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
         work_item_scheduling_repository=scheduling,
     )
 
@@ -542,6 +610,7 @@ async def test_rejects_wrong_command_type() -> None:
             compaction_reduction_state_repository=FakeReductionStateRepository(
                 _decision(DraftClaimCompactionNextWorkItemType.DONE)
             ),
+            draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
         )
 
@@ -557,6 +626,7 @@ async def test_rejects_non_pending_command() -> None:
             compaction_reduction_state_repository=FakeReductionStateRepository(
                 _decision(DraftClaimCompactionNextWorkItemType.DONE)
             ),
+            draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
         )
 
@@ -622,6 +692,7 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
         work_item_scheduling_repository=scheduling,
     )
 
@@ -684,6 +755,7 @@ async def test_appends_prepare_command_when_next_work_item_already_exists() -> N
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
         work_item_scheduling_repository=scheduling,
     )
 
@@ -732,12 +804,14 @@ async def test_repeated_apply_dispatch_does_not_duplicate_next_prepare_command()
         command,
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
         work_item_scheduling_repository=scheduling,
     )
     second = await handler.execute(
         command,
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
         work_item_scheduling_repository=scheduling,
     )
 

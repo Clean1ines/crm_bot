@@ -21,12 +21,13 @@ def _raw_claim(
     possible_questions: tuple[str, ...],
     exclusion_scope: str,
     evidence_block: str,
+    granularity: str = "atomic",
 ) -> DraftClaimObservationReadModel:
     return DraftClaimObservationReadModel(
         observation_ref=observation_ref,
         source_unit_ref="source-unit-1",
         claim=f"Raw claim {observation_ref}",
-        granularity="atomic",
+        granularity=granularity,
         possible_questions=possible_questions,
         exclusion_scope=exclusion_scope,
         evidence_block=evidence_block,
@@ -68,15 +69,45 @@ def test_enriches_compacted_claim_from_source_raw_claims_exactly() -> None:
                 possible_questions=("Q2", "Q3"),
                 exclusion_scope="not X",
                 evidence_block="E2",
+                granularity="composite",
             ),
         ),
     )
 
     claim = enriched.compacted_claims[0]
+    assert claim.granularity.value == "composite"
     assert claim.possible_questions == ("Q1", "Q2", "Q3")
     assert claim.exclusion_scope == "not X"
     assert claim.evidence_block == "E1\n\nE2"
     assert claim.to_json_dict()["possible_questions"] == ["Q1", "Q2", "Q3"]
+
+
+def test_rejects_unknown_source_granularity() -> None:
+    with pytest.raises(
+        ValueError, match="source claim granularity must be atomic or composite"
+    ):
+        DraftClaimCompactionOutputEnricher().enrich(
+            output_claims=(
+                DraftClaimCompactionOutputClaim(
+                    key="merged",
+                    claim="Merged claim.",
+                    claim_kind="definition",
+                    granularity="atomic",
+                    source_claim_refs=("claim-1",),
+                    triples=(),
+                    merge_decision="unmerged",
+                ),
+            ),
+            source_claims=(
+                _raw_claim(
+                    observation_ref="claim-1",
+                    possible_questions=("Q1",),
+                    exclusion_scope="",
+                    evidence_block="E1",
+                    granularity="paragraph",
+                ),
+            ),
+        )
 
 
 def test_raises_when_source_claim_ref_is_missing() -> None:
