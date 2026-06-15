@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, cast
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalPromotedQuestion,
+    WorkbenchRagEvalPromotionApplicationTarget,
+    WorkbenchRagEvalPromotionApplyResult,
     WorkbenchRagEvalPromotionCandidateDetails,
     WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestion,
@@ -120,8 +122,77 @@ ORDER BY created_at, promotion_id
 """
 
 
+WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_BY_ID_SQL = """
+SELECT
+    promotion_id,
+    run_id,
+    question_id,
+    project_id::text AS project_id,
+    target_runtime_entry_id,
+    target_fact_id,
+    question,
+    status,
+    created_at,
+    applied_at
+FROM knowledge_workbench_rag_eval_promoted_questions
+WHERE project_id = $1::uuid
+  AND promotion_id = $2
+"""
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL = """
+SELECT
+    promotion.promotion_id,
+    promotion.run_id,
+    promotion.question_id,
+    promotion.project_id::text AS project_id,
+    promotion.target_runtime_entry_id,
+    promotion.target_fact_id,
+    promotion.question,
+    promotion.status,
+    promotion.created_at,
+    promotion.applied_at,
+    entry.claim,
+    entry.possible_questions AS runtime_possible_questions,
+    entry.embedding_text AS existing_embedding_text,
+    fact.possible_questions AS fact_possible_questions,
+    fact.exclusion_scope
+FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
+JOIN knowledge_workbench_runtime_retrieval_entries AS entry
+  ON entry.runtime_entry_id = promotion.target_runtime_entry_id
+ AND entry.project_id = promotion.project_id
+JOIN knowledge_workbench_canonical_facts AS fact
+  ON fact.fact_id = promotion.target_fact_id
+ AND fact.project_id = promotion.project_id
+WHERE promotion.project_id = $1::uuid
+  AND promotion.promotion_id = $2
+  AND entry.visibility = 'published'
+  AND entry.status = 'active'
+  AND fact.status = 'published'
+"""
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL = (
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL
+    + " FOR UPDATE OF promotion, entry, fact"
+)
+
+
+class WorkbenchRagEvalTransactionLike(Protocol):
+    async def __aenter__(self) -> object: ...
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> bool | None: ...
+
+
 class WorkbenchRagEvalConnectionLike(Protocol):
     async def execute(self, query: str, *args: object) -> object: ...
+
+    def transaction(self) -> WorkbenchRagEvalTransactionLike: ...
 
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]: ...
 
@@ -416,6 +487,154 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
             )
         return tuple(_promotion_candidate_from_row(row) for row in rows)
 
+    async def get_promotion_candidate(
+        self,
+        *,
+        project_id: str,
+        promotion_id: str,
+    ) -> WorkbenchRagEvalPromotionCandidateDetails | None:
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_BY_ID_SQL,
+                project_id,
+                promotion_id,
+            )
+        return _promotion_candidate_from_row(row) if row is not None else None
+
+    async def get_promotion_application_target(
+        self,
+        *,
+        project_id: str,
+        promotion_id: str,
+    ) -> WorkbenchRagEvalPromotionApplicationTarget | None:
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL,
+                project_id,
+                promotion_id,
+            )
+        return _promotion_application_target_from_row(row) if row is not None else None
+
+    async def apply_promotion_candidate(
+        self,
+        *,
+        project_id: str,
+        promotion_id: str,
+        embedding_model_id: str,
+        dimensions: int,
+        embedding: Sequence[float],
+        embedding_text: str,
+        embedding_text_hash: str,
+        applied_at: datetime,
+    ) -> WorkbenchRagEvalPromotionApplyResult:
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL,
+                    project_id,
+                    promotion_id,
+                )
+                if row is None:
+                    raise LookupError("Promotion candidate not found")
+                target = _promotion_application_target_from_row(row)
+                if target.status is WorkbenchRagEvalPromotionStatus.APPLIED:
+                    raise RuntimeError("Promotion candidate is already applied")
+                if target.status not in (
+                    WorkbenchRagEvalPromotionStatus.CANDIDATE,
+                    WorkbenchRagEvalPromotionStatus.ACCEPTED,
+                ):
+                    raise RuntimeError(
+                        "Promotion candidate status cannot be applied: "
+                        f"{target.status.value}"
+                    )
+
+                runtime_questions = _append_text_once(
+                    target.runtime_possible_questions,
+                    target.question,
+                )
+                fact_questions = _append_text_once(
+                    target.fact_possible_questions,
+                    target.question,
+                )
+
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_canonical_facts
+                    SET possible_questions = $3::jsonb,
+                        updated_at = $4
+                    WHERE project_id = $1::uuid
+                      AND fact_id = $2
+                    """,
+                    project_id,
+                    target.target_fact_id,
+                    _json_text_list(fact_questions),
+                    applied_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_runtime_retrieval_entries
+                    SET possible_questions = $3::jsonb,
+                        embedding_text = $4
+                    WHERE project_id = $1::uuid
+                      AND runtime_entry_id = $2
+                    """,
+                    project_id,
+                    target.target_runtime_entry_id,
+                    _json_text_list(runtime_questions),
+                    embedding_text,
+                )
+                await connection.execute(
+                    """
+                    DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings
+                    WHERE runtime_entry_id = $1
+                      AND embedding_model_id = $2
+                    """,
+                    target.target_runtime_entry_id,
+                    embedding_model_id,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings (
+                        runtime_entry_id, embedding_model_id, dimensions,
+                        embedding, embedding_text_hash, created_at
+                    )
+                    VALUES ($1, $2, $3, $4::vector, $5, $6)
+                    """,
+                    target.target_runtime_entry_id,
+                    embedding_model_id,
+                    dimensions,
+                    _pg_vector_text(tuple(float(value) for value in embedding)),
+                    embedding_text_hash,
+                    applied_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_promoted_questions
+                    SET status = 'applied',
+                        applied_at = $3
+                    WHERE project_id = $1::uuid
+                      AND promotion_id = $2
+                    """,
+                    project_id,
+                    promotion_id,
+                    applied_at,
+                )
+
+        return WorkbenchRagEvalPromotionApplyResult(
+            promotion_id=target.promotion_id,
+            run_id=target.run_id,
+            question_id=target.question_id,
+            project_id=target.project_id,
+            target_runtime_entry_id=target.target_runtime_entry_id,
+            target_fact_id=target.target_fact_id,
+            question=target.question,
+            status=WorkbenchRagEvalPromotionStatus.APPLIED,
+            possible_question_count=len(runtime_questions),
+            embedding_model_id=embedding_model_id,
+            embedding_count=1,
+            applied_at=applied_at,
+        )
+
 
 class _DirectConnectionContext:
     def __init__(self, connection: WorkbenchRagEvalConnectionLike) -> None:
@@ -528,6 +747,26 @@ def _result_details_from_row(
     )
 
 
+def _promotion_application_target_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalPromotionApplicationTarget:
+    return WorkbenchRagEvalPromotionApplicationTarget(
+        promotion_id=_text_from_row(row, "promotion_id"),
+        run_id=_text_from_row(row, "run_id"),
+        question_id=_text_from_row(row, "question_id"),
+        project_id=_text_from_row(row, "project_id"),
+        target_runtime_entry_id=_text_from_row(row, "target_runtime_entry_id"),
+        target_fact_id=_text_from_row(row, "target_fact_id"),
+        question=_text_from_row(row, "question"),
+        status=WorkbenchRagEvalPromotionStatus(_text_from_row(row, "status")),
+        claim=_text_from_row(row, "claim"),
+        runtime_possible_questions=_text_tuple(row.get("runtime_possible_questions")),
+        fact_possible_questions=_text_tuple(row.get("fact_possible_questions")),
+        exclusion_scope=_optional_text_from_row(row, "exclusion_scope"),
+        existing_embedding_text=_text_from_row(row, "existing_embedding_text"),
+    )
+
+
 def _promotion_candidate_from_row(
     row: Mapping[str, object],
 ) -> WorkbenchRagEvalPromotionCandidateDetails:
@@ -609,6 +848,34 @@ def _optional_text_from_row(row: Mapping[str, object], key: str) -> str | None:
         raise TypeError(f"{key} must be text or None")
     stripped = value.strip()
     return stripped or None
+
+
+def _append_text_once(
+    values: tuple[str, ...],
+    value: str,
+) -> tuple[str, ...]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in (*values, value):
+        stripped = item.strip()
+        if not stripped:
+            continue
+        normalized = " ".join(stripped.casefold().split())
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(stripped)
+    return tuple(result)
+
+
+def _json_text_list(values: tuple[str, ...]) -> str:
+    import json
+
+    return json.dumps(list(values), ensure_ascii=False)
+
+
+def _pg_vector_text(vector: tuple[float, ...]) -> str:
+    return "[" + ",".join(str(float(value)) for value in vector) + "]"
 
 
 def _text_tuple(value: object) -> tuple[str, ...]:

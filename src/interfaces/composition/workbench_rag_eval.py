@@ -6,6 +6,12 @@ from src.contexts.embedding_runtime.infrastructure.composition.embedding_generat
 from src.contexts.embedding_runtime.infrastructure.config.embedding_runtime_settings import (
     load_embedding_runtime_settings,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_question_runtime_embedding_text_builder import (
+    PromotedQuestionRuntimeEmbeddingTextBuilder,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
+    ApplyWorkbenchRagEvalPromotion,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.run_workbench_rag_eval import (
     RunWorkbenchRagEval,
 )
@@ -51,4 +57,18 @@ def make_run_workbench_rag_eval(
         ),
         question_generation_prompt_version=WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION,
         question_generation_model=question_generator.generation_model,
+    )
+
+
+def make_apply_workbench_rag_eval_promotion(
+    *,
+    pool: object,
+) -> ApplyWorkbenchRagEvalPromotion:
+    embedding_settings = load_embedding_runtime_settings()
+    return ApplyWorkbenchRagEvalPromotion(
+        rag_eval_repository=PostgresWorkbenchRagEvalRepository(pool),
+        embedding_generation_port=make_embedding_generation_port(embedding_settings),
+        embedding_model_id=embedding_settings.local_model,
+        embedding_dimensions=embedding_settings.vector_dimensions,
+        embedding_text_builder=PromotedQuestionRuntimeEmbeddingTextBuilder(),
     )

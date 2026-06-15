@@ -147,6 +147,11 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WorkbenchRagEvalQuestionGenerationError,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
+    WorkbenchRagEvalPromotionConflictError,
+    WorkbenchRagEvalPromotionEmbeddingError,
+    WorkbenchRagEvalPromotionNotFoundError,
+)
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
 from src.interfaces.http.dependencies import (
@@ -1288,6 +1293,44 @@ async def get_workbench_rag_eval_run(
     if summary is None:
         raise HTTPException(status_code=404, detail="Workbench RAG Eval run not found")
     return {"run": summary.to_json_dict()}
+
+
+@router.post("/rag-eval/workbench/promotion-candidates/{promotion_id}/apply")
+async def apply_workbench_rag_eval_promotion_candidate(
+    project_id: str,
+    promotion_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    try:
+        from src.interfaces.composition.workbench_rag_eval import (
+            make_apply_workbench_rag_eval_promotion,
+        )
+
+        result = await make_apply_workbench_rag_eval_promotion(pool=pool).execute(
+            project_id=project_id,
+            promotion_id=promotion_id,
+            applied_at=datetime.now(timezone.utc),
+        )
+    except WorkbenchRagEvalPromotionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WorkbenchRagEvalPromotionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WorkbenchRagEvalPromotionEmbeddingError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"result": result.to_json_dict()}
 
 
 @router.get("/rag-eval/workbench/runs/{run_id}/questions")

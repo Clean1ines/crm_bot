@@ -193,7 +193,9 @@ const CandidatesPanel: React.FC<{
   candidates: WorkbenchRagEvalPromotionCandidateDetails[];
   loading: boolean;
   error: unknown;
-}> = ({ candidates, loading, error }) => (
+  applyingPromotionId: string | null;
+  onApply: (candidate: WorkbenchRagEvalPromotionCandidateDetails) => void;
+}> = ({ candidates, loading, error, applyingPromotionId, onApply }) => (
   <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
     <h2 className="text-lg font-semibold text-[var(--text-primary)]">
       Promotion candidates
@@ -231,6 +233,7 @@ const CandidatesPanel: React.FC<{
               <th className="px-2 py-2">Target fact</th>
               <th className="px-2 py-2">Status</th>
               <th className="px-2 py-2">Created</th>
+              <th className="px-2 py-2">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -241,6 +244,19 @@ const CandidatesPanel: React.FC<{
                 <td className="px-2 py-2 font-mono">{candidate.target_fact_id}</td>
                 <td className="px-2 py-2">{candidate.status}</td>
                 <td className="px-2 py-2">{formatDateTime(candidate.created_at)}</td>
+                <td className="px-2 py-2">
+                  <button
+                    type="button"
+                    disabled={
+                      applyingPromotionId === candidate.promotion_id ||
+                      !(candidate.status === 'candidate' || candidate.status === 'accepted')
+                    }
+                    onClick={() => onApply(candidate)}
+                    className="rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {applyingPromotionId === candidate.promotion_id ? 'Applying…' : 'Apply'}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -442,6 +458,26 @@ export const RagEvalPage: React.FC = () => {
     return null;
   }, [topK, maxEntries]);
 
+  const applyPromotionMutation = useMutation({
+    mutationFn: async (candidate: WorkbenchRagEvalPromotionCandidateDetails) => {
+      if (!projectId) throw new Error('project_id не найден в маршруте');
+      return ragEvalApi.applyWorkbenchPromotionCandidate(projectId, candidate.promotion_id);
+    },
+    onSuccess: async (result) => {
+      toast.success(
+        `Question added, embeddings recalculated: ${result.result.possible_question_count} possible questions`,
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-promotion-candidates', projectId, visibleRun?.run_id] }),
+        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-questions', projectId, visibleRun?.run_id] }),
+        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-latest', projectId] }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, 'Promotion candidate не применился'));
+    },
+  });
+
   const runMutation = useMutation({
     mutationFn: async () => {
       if (!projectId) throw new Error('project_id не найден в маршруте');
@@ -597,6 +633,12 @@ export const RagEvalPage: React.FC = () => {
             candidates={candidatesQuery.data?.candidates ?? []}
             loading={candidatesQuery.isLoading}
             error={candidatesQuery.error}
+            applyingPromotionId={
+              applyPromotionMutation.isPending
+                ? applyPromotionMutation.variables?.promotion_id ?? null
+                : null
+            }
+            onApply={(candidate) => applyPromotionMutation.mutate(candidate)}
           />
         </>
       )}

@@ -336,6 +336,88 @@ class WorkbenchRagEvalPromotionCandidateDetails:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalPromotionApplicationTarget:
+    promotion_id: str
+    run_id: str
+    question_id: str
+    project_id: str
+    target_runtime_entry_id: str
+    target_fact_id: str
+    question: str
+    status: WorkbenchRagEvalPromotionStatus
+    claim: str
+    runtime_possible_questions: tuple[str, ...]
+    fact_possible_questions: tuple[str, ...]
+    exclusion_scope: str | None
+    existing_embedding_text: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.promotion_id, "promotion_id")
+        _require_text(self.run_id, "run_id")
+        _require_text(self.question_id, "question_id")
+        _require_text(self.project_id, "project_id")
+        _require_text(self.target_runtime_entry_id, "target_runtime_entry_id")
+        _require_text(self.target_fact_id, "target_fact_id")
+        _require_text(self.question, "question")
+        _require_enum(self.status, WorkbenchRagEvalPromotionStatus, "status")
+        _require_text(self.claim, "claim")
+        if not isinstance(self.runtime_possible_questions, tuple):
+            raise TypeError("runtime_possible_questions must be tuple")
+        if not isinstance(self.fact_possible_questions, tuple):
+            raise TypeError("fact_possible_questions must be tuple")
+        _require_optional_text(self.exclusion_scope, "exclusion_scope")
+        _require_text(self.existing_embedding_text, "existing_embedding_text")
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalPromotionApplyResult:
+    promotion_id: str
+    run_id: str
+    question_id: str
+    project_id: str
+    target_runtime_entry_id: str
+    target_fact_id: str
+    question: str
+    status: WorkbenchRagEvalPromotionStatus
+    possible_question_count: int
+    embedding_model_id: str
+    embedding_count: int
+    applied_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_text(self.promotion_id, "promotion_id")
+        _require_text(self.run_id, "run_id")
+        _require_text(self.question_id, "question_id")
+        _require_text(self.project_id, "project_id")
+        _require_text(self.target_runtime_entry_id, "target_runtime_entry_id")
+        _require_text(self.target_fact_id, "target_fact_id")
+        _require_text(self.question, "question")
+        _require_enum(self.status, WorkbenchRagEvalPromotionStatus, "status")
+        _require_non_negative_int(
+            self.possible_question_count, "possible_question_count"
+        )
+        _require_text(self.embedding_model_id, "embedding_model_id")
+        _require_non_negative_int(self.embedding_count, "embedding_count")
+        _require_datetime(self.applied_at, "applied_at")
+
+    def to_json_dict(self) -> JsonObject:
+        return {
+            "promotion_id": self.promotion_id,
+            "run_id": self.run_id,
+            "question_id": self.question_id,
+            "project_id": self.project_id,
+            "target_runtime_entry_id": self.target_runtime_entry_id,
+            "target_fact_id": self.target_fact_id,
+            "question": self.question,
+            "status": self.status.value,
+            "possible_question_count": self.possible_question_count,
+            "embedding_model_id": self.embedding_model_id,
+            "embedding_count": self.embedding_count,
+            "applied_at": self.applied_at.isoformat(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalSummary:
     run_id: str
     project_id: str

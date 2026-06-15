@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalPromotionApplyResult,
     WorkbenchRagEvalPromotionCandidateDetails,
     WorkbenchRagEvalPromotionStatus,
     WorkbenchRagEvalQuestionDetails,
@@ -307,3 +308,54 @@ def test_workbench_rag_eval_details_endpoints_return_404_for_missing_run(
 
     assert questions.status_code == 404
     assert candidates.status_code == 404
+
+
+class FakeApplyPromotionUseCase:
+    async def execute(self, *, project_id: str, promotion_id: str, applied_at):
+        del applied_at
+        return WorkbenchRagEvalPromotionApplyResult(
+            promotion_id=promotion_id,
+            run_id="run-1",
+            question_id="question-1",
+            project_id=project_id,
+            target_runtime_entry_id="entry-1",
+            target_fact_id="fact-1",
+            question="Как спросить иначе?",
+            status=WorkbenchRagEvalPromotionStatus.APPLIED,
+            possible_question_count=3,
+            embedding_model_id="test-model",
+            embedding_count=1,
+            applied_at=_summary().completed_at or _summary().created_at,
+        )
+
+
+def test_workbench_rag_eval_apply_candidate_endpoint(monkeypatch) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    def fake_factory(**kwargs):
+        assert "pool" in kwargs
+        return FakeApplyPromotionUseCase()
+
+    composition_module = ModuleType("src.interfaces.composition.workbench_rag_eval")
+    setattr(composition_module, "make_apply_workbench_rag_eval_promotion", fake_factory)
+    monkeypatch.setitem(
+        sys.modules,
+        "src.interfaces.composition.workbench_rag_eval",
+        composition_module,
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access", allow_access
+    )
+
+    response = _client().post(
+        "/api/projects/11111111-1111-1111-1111-111111111111/knowledge/rag-eval/workbench/promotion-candidates/promotion-1/apply",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["result"]["promotion_id"] == "promotion-1"
+    assert payload["result"]["status"] == "applied"
+    assert payload["result"]["embedding_count"] == 1
+    assert "answer_text" not in str(payload)

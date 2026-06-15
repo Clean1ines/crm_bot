@@ -54,3 +54,20 @@ def test_workbench_rag_eval_question_generator_uses_llm_dispatch_boundary_only()
     assert "OpenAI" not in source
     assert "openai" not in source
     assert "answer_text" not in source
+
+
+def test_workbench_rag_eval_apply_does_not_mutate_draft_or_legacy_tables() -> None:
+    root = Path("src/contexts/knowledge_workbench/rag_eval")
+    sources = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
+
+    forbidden = (
+        "draft_claim_curation_items",
+        "editable_payload",
+        "original_payload",
+        "preview_payload",
+        "answer_text",
+        "knowledge_retrieval_surface",
+        "knowledge_workbench_surfaces",
+    )
+    for marker in forbidden:
+        assert marker not in sources

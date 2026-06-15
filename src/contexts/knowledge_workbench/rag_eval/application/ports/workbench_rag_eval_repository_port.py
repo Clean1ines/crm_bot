@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalPromotedQuestion,
+    WorkbenchRagEvalPromotionApplicationTarget,
+    WorkbenchRagEvalPromotionApplyResult,
     WorkbenchRagEvalPromotionCandidateDetails,
     WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestion,
@@ -78,3 +82,30 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         project_id: str,
         run_id: str,
     ) -> tuple[WorkbenchRagEvalPromotionCandidateDetails, ...]: ...
+
+    async def get_promotion_candidate(
+        self,
+        *,
+        project_id: str,
+        promotion_id: str,
+    ) -> WorkbenchRagEvalPromotionCandidateDetails | None: ...
+
+    async def get_promotion_application_target(
+        self,
+        *,
+        project_id: str,
+        promotion_id: str,
+    ) -> WorkbenchRagEvalPromotionApplicationTarget | None: ...
+
+    async def apply_promotion_candidate(
+        self,
+        *,
+        project_id: str,
+        promotion_id: str,
+        embedding_model_id: str,
+        dimensions: int,
+        embedding: Sequence[float],
+        embedding_text: str,
+        embedding_text_hash: str,
+        applied_at: datetime,
+    ) -> WorkbenchRagEvalPromotionApplyResult: ...

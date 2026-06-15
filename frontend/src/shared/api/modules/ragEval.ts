@@ -90,6 +90,25 @@ export type WorkbenchRagEvalPromotionCandidatesResponse = {
   candidates: WorkbenchRagEvalPromotionCandidateDetails[];
 };
 
+export type WorkbenchRagEvalPromotionApplyResult = {
+  promotion_id: string;
+  run_id: string;
+  question_id: string;
+  project_id: string;
+  target_runtime_entry_id: string;
+  target_fact_id: string;
+  question: string;
+  status: string;
+  possible_question_count: number;
+  embedding_model_id: string;
+  embedding_count: number;
+  applied_at: string;
+};
+
+export type WorkbenchRagEvalPromotionApplyResponse = {
+  result: WorkbenchRagEvalPromotionApplyResult;
+};
+
 export interface RagEvalFullRunAcceptedResponse {
   ok: boolean;
   queued: boolean;
@@ -483,6 +502,18 @@ export const ragEvalApi = {
       authedJsonRequest<WorkbenchRagEvalPromotionCandidatesResponse>(
         `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}/promotion-candidates`,
         { method: 'GET' },
+      ),
+    );
+  },
+
+  async applyWorkbenchPromotionCandidate(
+    projectId: string,
+    promotionId: string,
+  ): Promise<WorkbenchRagEvalPromotionApplyResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalPromotionApplyResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/promotion-candidates/${encode(promotionId)}/apply`,
+        { method: 'POST' },
       ),
     );
   },
