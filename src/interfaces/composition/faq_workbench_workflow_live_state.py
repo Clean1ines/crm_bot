@@ -132,25 +132,25 @@ class WorkbenchWorkflowLiveStateQuery:
                 d.current_processing_run_id,
                 wf.workflow_run_id,
                 wf.source_document_ref,
-                COALESCE(ps.workflow_status, wf.status) AS workflow_status,
+                wf.status AS workflow_status,
                 COALESCE(ps.current_phase, wf.current_phase) AS current_phase,
                 wf.completed_at AS workflow_completed_at,
                 wf.cancelled_at AS workflow_cancelled_at,
                 ps.started_at AS started_at,
                 ps.completed_at AS completed_at,
                 CASE
-                  WHEN COALESCE(ps.workflow_status, wf.status) IN ('RUNNING', 'ACTIVE', 'PROCESSING')
+                  WHEN wf.status IN ('RUNNING', 'ACTIVE', 'PROCESSING')
                     AND ps.started_at IS NOT NULL
                   THEN ps.started_at
                   ELSE NULL
                 END AS current_active_started_at,
                 CASE
                   WHEN ps.started_at IS NULL THEN 0
-                  WHEN COALESCE(ps.workflow_status, wf.status) IN ('RUNNING', 'ACTIVE', 'PROCESSING')
+                  WHEN wf.status IN ('RUNNING', 'ACTIVE', 'PROCESSING')
                   THEN GREATEST(0, EXTRACT(EPOCH FROM (NOW() - ps.started_at))::int)
                   WHEN ps.completed_at IS NOT NULL
                   THEN GREATEST(0, EXTRACT(EPOCH FROM (ps.completed_at - ps.started_at))::int)
-                  ELSE 0
+                  ELSE GREATEST(0, EXTRACT(EPOCH FROM (NOW() - ps.started_at))::int)
                 END AS active_elapsed_seconds,
                 CASE
                   WHEN ps.started_at IS NULL THEN 0
