@@ -29,6 +29,12 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_a
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
     PostgresWorkItemLeaseRepository,
 )
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservation,
+)
+from src.contexts.capacity_runtime.infrastructure.postgres.postgres_llm_attempt_capacity_observation_repository import (
+    PostgresLlmAttemptCapacityObservationRepository,
+)
 from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
     ClaimBuilderDispatchPreparationBuilder,
 )
@@ -251,6 +257,9 @@ class PrepareLlmDispatchBatch:
                 attempt_repository = PostgresWorkItemAttemptDispatchRepository(
                     asyncpg_connection,
                 )
+                capacity_observation_repository = (
+                    PostgresLlmAttemptCapacityObservationRepository(asyncpg_connection)
+                )
 
                 due_records = await lease_repository.peek_due_work_items(
                     work_kind=command.work_kind,
@@ -291,7 +300,7 @@ class PrepareLlmDispatchBatch:
                         lease_repository=lease_repository,
                     )
 
-                account_capacities = _preparation_account_capacities(
+                account_capacities = await _preparation_account_capacities(
                     command=command,
                     due_records=due_records,
                     builder=self.dispatch_preparation_builder,
@@ -300,6 +309,8 @@ class PrepareLlmDispatchBatch:
                         self.provider_account_refs,
                     ),
                     model_profiles=_resolved_model_profiles(self.model_profiles),
+                    capacity_observation_repository=capacity_observation_repository,
+                    now=command.now,
                 )
 
                 lease_result = await LeaseLlmAdmittedWorkItems(
@@ -405,7 +416,7 @@ def _preparation_profile(
     return command.profile
 
 
-def _preparation_account_capacities(
+async def _preparation_account_capacities(
     *,
     command: PrepareLlmDispatchBatchCommand,
     due_records: tuple[DueWorkItemRecord, ...],
@@ -413,16 +424,89 @@ def _preparation_account_capacities(
     active_model_ref: str,
     provider_account_refs: tuple[str, ...],
     model_profiles: tuple[ModelProfile, ...],
+    capacity_observation_repository: PostgresLlmAttemptCapacityObservationRepository,
+    now: datetime,
 ) -> tuple[LlmProviderAccountCapacity, ...]:
-    if due_records:
-        return builder.build_account_capacities(
-            active_model_ref=active_model_ref,
-            provider_account_refs=provider_account_refs,
-            model_profiles=model_profiles,
+    if not due_records:
+        if not command.account_capacities:
+            raise ValueError("PrepareLlmDispatchBatch requires account capacities")
+        return command.account_capacities
+
+    seed_capacities = builder.build_account_capacities(
+        active_model_ref=active_model_ref,
+        provider_account_refs=provider_account_refs,
+        model_profiles=model_profiles,
+    )
+    observations = (
+        await capacity_observation_repository.latest_observations_for_accounts(
+            provider="groq",
+            account_refs=provider_account_refs,
+            model_ref=active_model_ref,
         )
-    if not command.account_capacities:
-        raise ValueError("PrepareLlmDispatchBatch requires account capacities")
-    return command.account_capacities
+    )
+    observations_by_account_ref = {
+        observation.account_ref: observation for observation in observations
+    }
+
+    return tuple(
+        _capacity_from_latest_observation(
+            seed_capacity=seed_capacity,
+            observation=observations_by_account_ref.get(seed_capacity.account_ref),
+            now=now,
+        )
+        for seed_capacity in seed_capacities
+    )
+
+
+def _capacity_from_latest_observation(
+    *,
+    seed_capacity: LlmProviderAccountCapacity,
+    observation: LlmAttemptCapacityObservation | None,
+    now: datetime,
+) -> LlmProviderAccountCapacity:
+    if observation is None:
+        return seed_capacity
+
+    remaining_minute_requests = _observed_or_seed(
+        observation.remaining_minute_requests,
+        seed_capacity.remaining_minute_requests,
+    )
+    remaining_minute_tokens = _observed_or_seed(
+        observation.remaining_minute_tokens,
+        seed_capacity.remaining_minute_tokens,
+    )
+    remaining_daily_requests = _observed_or_seed(
+        observation.remaining_daily_requests,
+        seed_capacity.remaining_daily_requests,
+    )
+    remaining_daily_tokens = _observed_or_seed(
+        observation.remaining_daily_tokens,
+        seed_capacity.remaining_daily_tokens,
+    )
+
+    if observation.minute_reset_at is not None and observation.minute_reset_at <= now:
+        remaining_minute_requests = seed_capacity.remaining_minute_requests
+        remaining_minute_tokens = seed_capacity.remaining_minute_tokens
+
+    if observation.daily_reset_at is not None and observation.daily_reset_at <= now:
+        remaining_daily_requests = seed_capacity.remaining_daily_requests
+        remaining_daily_tokens = seed_capacity.remaining_daily_tokens
+
+    return LlmProviderAccountCapacity(
+        provider=seed_capacity.provider,
+        account_ref=seed_capacity.account_ref,
+        model_ref=seed_capacity.model_ref,
+        remaining_minute_requests=remaining_minute_requests,
+        remaining_minute_tokens=remaining_minute_tokens,
+        remaining_daily_requests=remaining_daily_requests,
+        remaining_daily_tokens=remaining_daily_tokens,
+    )
+
+
+def _observed_or_seed(observed: int | None, seed: int) -> int:
+    if observed is None:
+        return seed
+    return observed
 
 
 def _resolved_provider_account_refs(
