@@ -201,7 +201,7 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
                 order=0,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=32768,
+                    input_token_limit=6_000,
                     output_token_limit=8192,
                 ),
             ),
@@ -211,7 +211,7 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
                 order=1,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=131072,
+                    input_token_limit=8_000,
                     output_token_limit=16384,
                 ),
             ),
@@ -221,7 +221,7 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
                 order=2,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=32768,
+                    input_token_limit=12_000,
                     output_token_limit=8192,
                 ),
             ),
@@ -231,7 +231,7 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
                 order=3,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=131072,
+                    input_token_limit=8_000,
                     output_token_limit=8192,
                 ),
             ),
@@ -241,7 +241,7 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
                 order=4,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=8192,
+                    input_token_limit=6_000,
                     output_token_limit=4096,
                 ),
             ),

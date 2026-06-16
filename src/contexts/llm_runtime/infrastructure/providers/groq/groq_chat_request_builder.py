@@ -88,10 +88,10 @@ class GroqChatRequestBuilder:
             raise ValueError("messages must not be empty")
 
         options = options or GroqChatRequestOptions()
-        max_completion_tokens = (
-            options.max_completion_tokens or model_profile.max_output_tokens
-        )
-        if max_completion_tokens > model_profile.max_output_tokens:
+        if (
+            options.max_completion_tokens is not None
+            and options.max_completion_tokens > model_profile.max_output_tokens
+        ):
             raise ValueError(
                 "max_completion_tokens must not exceed model max_output_tokens"
             )
@@ -105,8 +105,9 @@ class GroqChatRequestBuilder:
                 }
                 for message in messages
             ],
-            "max_completion_tokens": max_completion_tokens,
         }
+        if options.max_completion_tokens is not None:
+            payload["max_completion_tokens"] = options.max_completion_tokens
 
         if options.temperature is not None:
             payload["temperature"] = options.temperature
