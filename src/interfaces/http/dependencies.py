@@ -39,6 +39,12 @@ from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import 
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_dispatch_executor import (
     GroqDispatchExecutor,
 )
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_http_transport import (
+    GroqHttpTransport,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_httpx_client import (
+    GroqHttpxClient,
+)
 from src.interfaces.composition.project_repositories import (
     build_project_member_repository,
     build_project_repository,
@@ -155,8 +161,21 @@ def get_llm_dispatch_executor() -> LlmDispatchExecutorPort:
         ) from exc
 
     groq_components = provider_components.groq
+    groq_env_config = runtime_settings.to_groq_env_config()
+    http_client = GroqHttpxClient()
+    transports_by_account_ref = {
+        account.account_seed.account_ref: GroqHttpTransport(
+            http_client=http_client,
+            api_key=account.api_key,
+            base_url=runtime_settings.groq_base_url,
+            timeout_seconds=runtime_settings.groq_timeout_seconds,
+        )
+        for account in groq_env_config.accounts
+    }
+    primary_account_ref = groq_env_config.accounts[0].account_seed.account_ref
     return GroqDispatchExecutor(
-        transport=groq_components.provider.transport,
+        transport=transports_by_account_ref[primary_account_ref],
+        transports_by_account_ref=transports_by_account_ref,
         model_profiles=groq_components.model_profiles,
     )
 

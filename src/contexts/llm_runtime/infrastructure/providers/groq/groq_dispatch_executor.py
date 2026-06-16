@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import cast
 
@@ -43,6 +43,9 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_transport_port 
 class GroqDispatchExecutor(LlmDispatchExecutorPort):
     transport: GroqTransportPort
     model_profiles: tuple[ModelProfile, ...]
+    transports_by_account_ref: Mapping[str, GroqTransportPort] = field(
+        default_factory=dict,
+    )
     request_builder: GroqChatRequestBuilder = GroqChatRequestBuilder()
     response_mapper: GroqProviderResponseMapper = GroqProviderResponseMapper()
 
@@ -68,7 +71,12 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
         except (TypeError, ValueError):
             return _terminal_invalid_dispatch_payload(finished_at=observed_at)
 
-        transport_response = self.transport.post_chat_completions(
+        transport = _transport_for_account(
+            fallback_transport=self.transport,
+            transports_by_account_ref=self.transports_by_account_ref,
+            account_ref=parsed.account_ref,
+        )
+        transport_response = transport.post_chat_completions(
             payload=dict(request.payload),
         )
         mapped = self.response_mapper.map_response(
@@ -145,6 +153,19 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             ):
                 return profile
         raise ValueError("No ModelProfile found for route")
+
+
+def _transport_for_account(
+    *,
+    fallback_transport: GroqTransportPort,
+    transports_by_account_ref: Mapping[str, GroqTransportPort],
+    account_ref: str,
+) -> GroqTransportPort:
+    _require_non_empty_text(account_ref, field_name="account_ref")
+    transport = transports_by_account_ref.get(account_ref)
+    if transport is None:
+        return fallback_transport
+    return transport
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +331,12 @@ def _require_text(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str):
         raise ValueError(f"{key} must be str")
-    if not value.strip():
-        raise ValueError(f"{key} must be non-empty")
+    _require_non_empty_text(value, field_name=key)
     return value
+
+
+def _require_non_empty_text(value: str, *, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
+    if not value.strip():
+        raise ValueError(f"{field_name} must be non-empty")
