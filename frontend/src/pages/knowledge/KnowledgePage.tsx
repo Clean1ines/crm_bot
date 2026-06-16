@@ -293,8 +293,6 @@ const isDocumentProcessing = (doc: Document): boolean => {
       [
         "processing",
         "auto_recovery_scheduled",
-        "paused_provider",
-        "paused_quota",
       ].includes(lifecycleState)
     ) {
       return true;

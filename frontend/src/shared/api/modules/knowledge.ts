@@ -837,19 +837,19 @@ export const knowledgeApi = {
 
   deleteDocument: (projectId: string, documentId: string) =>
     authedJsonRequest<KnowledgeDocumentDeleteResponse>(
-      `/api/projects/${projectId}/knowledge/${documentId}`,
+      `/api/projects/${projectId}/knowledge/source-documents/${encodeURIComponent(documentId)}`,
       {
         method: 'DELETE',
       },
     ),
 
   cancel: (projectId: string, documentId: string) =>
-    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/cancel`, {
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/source-documents/${encodeURIComponent(documentId)}/stop`, {
       method: 'POST',
     }),
 
   resumeProcessing: (projectId: string, documentId: string) =>
-    authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/resume-processing`, {
+    authedJsonRequest(`/api/projects/${projectId}/knowledge/source-documents/${encodeURIComponent(documentId)}/restore`, {
       method: 'POST',
     }),
 

@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Protocol, cast
+from uuid import UUID
 from fastapi import (
     APIRouter,
     Body,
@@ -44,6 +45,13 @@ from src.contexts.knowledge_workbench.application.sagas.resume_knowledge_extract
     KnowledgeExtractionWorkflowResumeStateNotFoundError,
     KnowledgeExtractionWorkflowResumeTerminalStateError,
     ResumeKnowledgeExtractionWorkflowCommand,
+)
+from src.contexts.knowledge_workbench.application.sagas.delete_knowledge_extraction_document_run import (
+    DeleteKnowledgeExtractionDocumentRun,
+    DeleteKnowledgeExtractionDocumentRunCommand,
+)
+from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_workbench_document_run_cleanup_repository import (
+    PostgresWorkbenchDocumentRunCleanupRepository,
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
@@ -2154,16 +2162,46 @@ async def retry_knowledge_failed_batches(document_id: str):
     )
 
 
-@router.post("/{document_id}/resume-processing")
-async def resume_knowledge_processing(
+async def _latest_workflow_run_id_for_source_document(
+    *,
+    pool,
     project_id: str,
-    document_id: str,
+    source_document_ref: str,
+) -> str | None:
+    async with pool.acquire() as connection:
+        row = await connection.fetchrow(
+            """
+            SELECT workflow_run_id
+            FROM knowledge_extraction_workflow_runs
+            WHERE project_id = $1
+              AND source_document_ref = $2
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            project_id,
+            source_document_ref,
+        )
+
+    if row is None:
+        return None
+
+    value = dict(row).get("workflow_run_id")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value
+
+
+@router.post("/source-documents/{source_document_ref}/stop")
+async def stop_knowledge_source_document_processing(
+    project_id: str,
+    source_document_ref: str,
     authorization: str | None = Header(default=None),
+    reason: str = Body(default="manual_stop"),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Resume the current knowledge-extraction workflow command drain."""
+    """Pause active Workbench processing for a source document without deleting artifacts."""
 
     await _require_project_access(
         project_id=project_id,
@@ -2172,30 +2210,89 @@ async def resume_knowledge_processing(
         user_repo=user_repo,
     )
 
-    resume_runner = make_knowledge_extraction_workflow_resume(pool=pool)
-    try:
-        result = await resume_runner.execute(
-            RunKnowledgeExtractionWorkflowResumeCommand(
-                project_id=project_id,
-                document_id=document_id,
-                max_drain_commands=10,
-            )
-        )
-    except KnowledgeExtractionWorkflowResumeNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail="Knowledge extraction workflow not found",
-        ) from exc
+    workflow_run_id = await _latest_workflow_run_id_for_source_document(
+        pool=pool,
+        project_id=project_id,
+        source_document_ref=source_document_ref,
+    )
+    if workflow_run_id is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
 
-    return {
-        "status": "knowledge_extraction_workflow_resume_requested",
-        "workflow_run_id": result.workflow_run_id,
-        "source_document_ref": result.source_document_ref,
-        "drained_inspected_count": result.drained_inspected_count,
-        "drained_dispatched_count": result.drained_dispatched_count,
-        "blocked_command_type": result.blocked_command_type,
-        "blocked_reason": result.blocked_reason,
-    }
+    return await pause_knowledge_extraction_workflow(
+        project_id=project_id,
+        workflow_run_id=workflow_run_id,
+        authorization=authorization,
+        reason=reason,
+        pool=pool,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+
+@router.post("/source-documents/{source_document_ref}/restore")
+@router.post("/source-documents/{source_document_ref}/resume")
+async def restore_knowledge_source_document_processing(
+    project_id: str,
+    source_document_ref: str,
+    authorization: str | None = Header(default=None),
+    max_drain_commands: int = Query(10, ge=1, le=100),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+    llm_executor: LlmDispatchExecutorPort = Depends(get_llm_dispatch_executor),
+):
+    """Resume paused Workbench processing for a source document."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    workflow_run_id = await _latest_workflow_run_id_for_source_document(
+        pool=pool,
+        project_id=project_id,
+        source_document_ref=source_document_ref,
+    )
+    if workflow_run_id is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    return await resume_knowledge_extraction_workflow(
+        project_id=project_id,
+        workflow_run_id=workflow_run_id,
+        authorization=authorization,
+        max_drain_commands=max_drain_commands,
+        pool=pool,
+        project_repo=project_repo,
+        user_repo=user_repo,
+        llm_executor=llm_executor,
+    )
+
+
+@router.post("/{document_id}/resume-processing")
+async def resume_knowledge_processing(
+    project_id: str,
+    document_id: str,
+    authorization: str | None = Header(default=None),
+    max_drain_commands: int = Query(10, ge=1, le=100),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+    llm_executor: LlmDispatchExecutorPort = Depends(get_llm_dispatch_executor),
+):
+    """Compatibility alias for the old document-level resume route."""
+
+    return await restore_knowledge_source_document_processing(
+        project_id=project_id,
+        source_document_ref=document_id,
+        authorization=authorization,
+        max_drain_commands=max_drain_commands,
+        pool=pool,
+        project_repo=project_repo,
+        user_repo=user_repo,
+        llm_executor=llm_executor,
+    )
 
 
 @router.post("/{document_id}/cancel")
@@ -2239,8 +2336,70 @@ async def cancel_knowledge_processing(
         ) from exc
 
 
-@router.delete("/{document_id}")
-@router.delete("/{document_id}")
+async def _delete_knowledge_document_by_source_ref(
+    *,
+    project_id: str,
+    source_document_ref: str,
+    authorization: str | None,
+    pool,
+    project_repo,
+    user_repo: UserRepository,
+) -> dict[str, object]:
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.interfaces.http.dependencies import get_current_user_id
+
+    actor_user_id = await get_current_user_id(authorization)
+    cleanup_repository = PostgresWorkbenchDocumentRunCleanupRepository(pool)
+    use_case = DeleteKnowledgeExtractionDocumentRun(cleanup_repository)
+
+    result = await use_case.execute(
+        DeleteKnowledgeExtractionDocumentRunCommand(
+            project_id=UUID(project_id),
+            source_document_ref=source_document_ref,
+            actor_user_id=UUID(str(actor_user_id)),
+            occurred_at=datetime.now(timezone.utc),
+        )
+    )
+    if not result.deleted:
+        raise HTTPException(status_code=404, detail="Knowledge document not found")
+
+    return {
+        "deleted": result.deleted,
+        "source_document_ref": result.source_document_ref,
+        "document_id": result.source_document_ref,
+        "workflow_run_ids": list(result.workflow_run_ids),
+        "workflow_run_count": len(result.workflow_run_ids),
+        "deleted_counts": result.deleted_counts.to_dict(),
+    }
+
+
+@router.delete("/source-documents/{source_document_ref}")
+async def delete_knowledge_source_document(
+    project_id: str,
+    source_document_ref: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Hard-delete one Workbench source document and every upload/workflow trace."""
+
+    return await _delete_knowledge_document_by_source_ref(
+        project_id=project_id,
+        source_document_ref=source_document_ref,
+        authorization=authorization,
+        pool=pool,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+
 @router.delete("/{document_id}")
 async def delete_knowledge_document(
     project_id: str,
@@ -2250,235 +2409,50 @@ async def delete_knowledge_document(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Hard-delete one knowledge document and all existing document-scoped artifacts."""
+    """Compatibility alias for the old document-level delete route."""
 
-    await _require_project_access(
+    return await _delete_knowledge_document_by_source_ref(
         project_id=project_id,
+        source_document_ref=document_id,
         authorization=authorization,
+        pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
     )
 
+
+async def _list_project_source_document_refs(
+    *,
+    pool,
+    project_id: str,
+) -> tuple[str, ...]:
     async with pool.acquire() as connection:
-        async with connection.transaction():
-            column_rows = await connection.fetch(
-                """
-                SELECT table_name, column_name
-                FROM information_schema.columns
-                WHERE table_schema = 'public'
-                """
-            )
-            columns_by_table: dict[str, set[str]] = {}
-            for column_row in column_rows:
-                column_data = dict(column_row)
-                table_name = column_data.get("table_name")
-                column_name = column_data.get("column_name")
-                if isinstance(table_name, str) and isinstance(column_name, str):
-                    columns_by_table.setdefault(table_name, set()).add(column_name)
-
-            def table_has(table_name: str, *column_names: str) -> bool:
-                table_columns = columns_by_table.get(table_name)
-                if table_columns is None:
-                    return False
-                return all(column_name in table_columns for column_name in column_names)
-
-            def quote_identifier(identifier: str) -> str:
-                return '"' + identifier.replace('"', '""') + '"'
-
-            if not table_has(
-                "knowledge_workbench_documents", "project_id", "document_id"
-            ):
-                raise HTTPException(
-                    status_code=500,
-                    detail="Knowledge document table is not available",
-                )
-
-            document_row = await connection.fetchrow(
-                """
-                SELECT document_id
+        rows = await connection.fetch(
+            """
+            SELECT document_ref
+            FROM (
+                SELECT document_id AS document_ref
                 FROM knowledge_workbench_documents
                 WHERE project_id = $1::uuid
-                  AND document_id = $2
-                """,
-                project_id,
-                document_id,
-            )
-            if document_row is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Knowledge document not found",
-                )
 
-            workflow_run_ids: list[str] = []
-            if table_has(
-                "knowledge_extraction_workflow_runs",
-                "project_id",
-                "source_document_ref",
-                "workflow_run_id",
-            ):
-                workflow_rows = await connection.fetch(
-                    """
-                    SELECT workflow_run_id
-                    FROM knowledge_extraction_workflow_runs
-                    WHERE project_id = $1
-                      AND source_document_ref = $2
-                    """,
-                    project_id,
-                    document_id,
-                )
-                for workflow_row in workflow_rows:
-                    workflow_data = dict(workflow_row)
-                    workflow_run_id = workflow_data.get("workflow_run_id")
-                    if isinstance(workflow_run_id, str) and workflow_run_id.strip():
-                        workflow_run_ids.append(workflow_run_id)
+                UNION
 
-            if table_has("draft_claim_curation_items", "workspace_ref") and table_has(
-                "draft_claim_curation_workspaces",
-                "workspace_ref",
-                "workflow_run_id",
-            ):
-                await connection.execute(
-                    """
-                    DELETE FROM draft_claim_curation_items
-                    WHERE workspace_ref IN (
-                        SELECT workspace_ref
-                        FROM draft_claim_curation_workspaces
-                        WHERE workflow_run_id = ANY($1::text[])
-                    )
-                    """,
-                    workflow_run_ids,
-                )
+                SELECT document_ref
+                FROM source_documents
+                WHERE project_id = $1
+            ) AS refs
+            WHERE document_ref IS NOT NULL
+            ORDER BY document_ref ASC
+            """,
+            project_id,
+        )
 
-            if table_has("draft_claim_curation_workspaces", "workflow_run_id"):
-                await connection.execute(
-                    """
-                    DELETE FROM draft_claim_curation_workspaces
-                    WHERE workflow_run_id = ANY($1::text[])
-                    """,
-                    workflow_run_ids,
-                )
-
-            for table_name in (
-                "draft_claim_cluster_previews",
-                "draft_claim_compaction_comparisons",
-            ):
-                if table_has(table_name, "workflow_run_id"):
-                    await connection.execute(
-                        f"""
-                        DELETE FROM {quote_identifier(table_name)}
-                        WHERE workflow_run_id = ANY($1::text[])
-                        """,
-                        workflow_run_ids,
-                    )
-
-            for table_name in (
-                "draft_claim_compaction_candidate_edges",
-                "draft_claim_compaction_groups",
-                "draft_claim_embeddings",
-            ):
-                if table_has(table_name, "source_document_ref"):
-                    await connection.execute(
-                        f"""
-                        DELETE FROM {quote_identifier(table_name)}
-                        WHERE source_document_ref = $1
-                        """,
-                        document_id,
-                    )
-                if table_has(table_name, "workflow_run_id"):
-                    await connection.execute(
-                        f"""
-                        DELETE FROM {quote_identifier(table_name)}
-                        WHERE workflow_run_id = ANY($1::text[])
-                        """,
-                        workflow_run_ids,
-                    )
-
-            if table_has("draft_claim_observations", "source_unit_ref") and table_has(
-                "source_units",
-                "unit_ref",
-                "document_ref",
-            ):
-                await connection.execute(
-                    """
-                    DELETE FROM draft_claim_observations
-                    WHERE source_unit_ref IN (
-                        SELECT unit_ref
-                        FROM source_units
-                        WHERE document_ref = $1
-                    )
-                    """,
-                    document_id,
-                )
-
-            if table_has("source_units", "document_ref"):
-                await connection.execute(
-                    """
-                    DELETE FROM source_units
-                    WHERE document_ref = $1
-                    """,
-                    document_id,
-                )
-
-            if table_has("source_documents", "document_ref"):
-                await connection.execute(
-                    """
-                    DELETE FROM source_documents
-                    WHERE document_ref = $1
-                    """,
-                    document_id,
-                )
-
-            if table_has(
-                "knowledge_extraction_workflow_runs",
-                "project_id",
-                "source_document_ref",
-            ):
-                await connection.execute(
-                    """
-                    DELETE FROM knowledge_extraction_workflow_runs
-                    WHERE project_id = $1
-                      AND source_document_ref = $2
-                    """,
-                    project_id,
-                    document_id,
-                )
-
-            workbench_child_tables: list[str] = []
-            for table_name, table_columns in columns_by_table.items():
-                if (
-                    table_name.startswith("knowledge_workbench_")
-                    and table_name != "knowledge_workbench_documents"
-                    and "project_id" in table_columns
-                    and "document_id" in table_columns
-                ):
-                    workbench_child_tables.append(table_name)
-
-            for table_name in sorted(workbench_child_tables):
-                await connection.execute(
-                    f"""
-                    DELETE FROM {quote_identifier(table_name)}
-                    WHERE project_id = $1::uuid
-                      AND document_id = $2
-                    """,
-                    project_id,
-                    document_id,
-                )
-
-            await connection.execute(
-                """
-                DELETE FROM knowledge_workbench_documents
-                WHERE project_id = $1::uuid
-                  AND document_id = $2
-                """,
-                project_id,
-                document_id,
-            )
-
-    return {
-        "document_id": document_id,
-        "deleted": True,
-        "workflow_run_count": len(workflow_run_ids),
-    }
+    result: list[str] = []
+    for row in rows:
+        value = dict(row).get("document_ref")
+        if isinstance(value, str) and value.strip():
+            result.append(value)
+    return tuple(dict.fromkeys(result))
 
 
 @router.delete("")
@@ -2489,7 +2463,7 @@ async def clear_knowledge(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Clears all Workbench knowledge for a project."""
+    """Hard-clear all Workbench documents and every related upload/workflow trace."""
 
     await _require_project_access(
         project_id=project_id,
@@ -2497,21 +2471,53 @@ async def clear_knowledge(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_clear import (
-        WorkbenchProjectClearRejectedError,
-        clear_workbench_project,
+
+    from src.interfaces.http.dependencies import get_current_user_id
+
+    actor_user_id = await get_current_user_id(authorization)
+    cleanup_repository = PostgresWorkbenchDocumentRunCleanupRepository(pool)
+    use_case = DeleteKnowledgeExtractionDocumentRun(cleanup_repository)
+    source_document_refs = await _list_project_source_document_refs(
+        pool=pool,
+        project_id=project_id,
     )
 
-    try:
-        return await clear_workbench_project(
-            pool=pool,
-            project_id=project_id,
+    deleted_results: list[dict[str, object]] = []
+    total_counts: dict[str, int] = {}
+
+    for source_document_ref in source_document_refs:
+        result = await use_case.execute(
+            DeleteKnowledgeExtractionDocumentRunCommand(
+                project_id=UUID(project_id),
+                source_document_ref=source_document_ref,
+                actor_user_id=UUID(str(actor_user_id)),
+                occurred_at=datetime.now(timezone.utc),
+            )
         )
-    except WorkbenchProjectClearRejectedError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=str(exc),
-        ) from exc
+        counts = result.deleted_counts.to_dict()
+        for key, value in counts.items():
+            total_counts[key] = total_counts.get(key, 0) + value
+
+        deleted_results.append(
+            {
+                "source_document_ref": result.source_document_ref,
+                "document_id": result.source_document_ref,
+                "deleted": result.deleted,
+                "workflow_run_ids": list(result.workflow_run_ids),
+                "deleted_counts": counts,
+            }
+        )
+
+    return {
+        "deleted": True,
+        "project_id": project_id,
+        "deleted_document_count": sum(
+            1 for item in deleted_results if item["deleted"] is True
+        ),
+        "source_document_refs": list(source_document_refs),
+        "documents": deleted_results,
+        "deleted_counts": total_counts,
+    }
 
 
 @router.post("/workflows/{workflow_run_id}/pause")

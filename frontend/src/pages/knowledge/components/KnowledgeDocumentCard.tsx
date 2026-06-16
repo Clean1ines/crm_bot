@@ -168,6 +168,16 @@ const liveActionLabel = (action: WorkbenchWorkflowActionLiveState): string => {
 const canRunLiveAction = (action: WorkbenchWorkflowActionLiveState): boolean =>
   action.enabled && action.action_id !== 'pause_processing';
 
+const isRecoverableStoppedLiveState = (
+  workflowLiveState: WorkbenchWorkflowLiveStateResponse | null | undefined,
+): boolean => {
+  const workflowStatus = workflowLiveState?.workflow?.workflow_status?.toLowerCase() || '';
+  const timerMode = workflowLiveState?.workflow?.timer?.mode || '';
+  return ['paused', 'stopped', 'cancelled', 'failed_recoverable', 'blocked_recoverable'].includes(
+    workflowStatus,
+  ) || ['paused', 'stopped'].includes(timerMode);
+};
+
 const liveActionClassName = (action: WorkbenchWorkflowActionLiveState): string => {
   const base =
     'rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
@@ -291,8 +301,13 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     return null;
   }
 
-  const cardPrimaryActions = primaryActions(cardView);
-  const cardSecondaryActions = visibleSecondaryActions(cardView);
+  const recoverableStopped = isRecoverableStoppedLiveState(workflowLiveState);
+  const cardPrimaryActions = primaryActions(cardView).filter(
+    (action) => !(recoverableStopped && action.action_id === 'cancel_processing'),
+  );
+  const cardSecondaryActions = visibleSecondaryActions(cardView).filter(
+    (action) => !(recoverableStopped && action.action_id === 'cancel_processing'),
+  );
   const deleteAction = cardView.actions.find(
     (action) => action.action_id === 'delete_document',
   );
