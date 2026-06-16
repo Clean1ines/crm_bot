@@ -5,6 +5,7 @@ import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnit,
   type KnowledgeSourceUnitsResponse,
+  type KnowledgeAnswerDraftsResponse,
   type WorkbenchWorkflowActionLiveState,
   type WorkbenchWorkflowLiveStateResponse,
   type WorkbenchWorkflowStageLiveState,
@@ -30,6 +31,7 @@ type KnowledgeDocumentCardProps = {
   workflowLiveStateLoading?: boolean;
   workflowLiveStateError?: string | null;
   sourceUnitsResponse?: KnowledgeSourceUnitsResponse | null;
+  answerDraftsResponse?: KnowledgeAnswerDraftsResponse | null;
   onStopProcessing: () => void;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
@@ -289,6 +291,114 @@ const sectionDisplayNumber = (index: number): string => formatNumber(index + 1);
 const technicalId = (value: string | null | undefined): string =>
   value && value.trim() ? value : '—';
 
+
+type DraftClaimRecord = Record<string, unknown>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const firstTextField = (
+  record: DraftClaimRecord,
+  keys: readonly string[],
+): string | null => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+};
+
+const firstStringArrayField = (
+  record: DraftClaimRecord,
+  keys: readonly string[],
+): string[] => {
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) {
+      return value.filter(
+        (item): item is string => typeof item === 'string' && item.trim().length > 0,
+      );
+    }
+  }
+  return [];
+};
+
+const collectDraftClaims = (
+  response: KnowledgeAnswerDraftsResponse | null,
+): DraftClaimRecord[] => {
+  if (!response) return [];
+
+  const payload = response as unknown;
+  if (Array.isArray(payload)) {
+    return payload.filter(isRecord);
+  }
+
+  if (!isRecord(payload)) return [];
+
+  const containers = [
+    payload.draft_claims,
+    payload.claims,
+    payload.items,
+    payload.fragments,
+    payload.drafts,
+    payload.answers,
+  ];
+
+  for (const container of containers) {
+    if (Array.isArray(container)) {
+      return container.filter(isRecord);
+    }
+  }
+
+  return [];
+};
+
+const draftClaimSourceRef = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, [
+    'source_unit_ref',
+    'source_unit_id',
+    'section_id',
+    'source_ref',
+    'sourceUnitRef',
+    'sourceUnitId',
+  ]);
+
+const draftClaimTitle = (claim: DraftClaimRecord, index: number): string =>
+  firstTextField(claim, ['title', 'claim_title', 'question', 'canonical_question']) ||
+  `Утверждение ${formatNumber(index + 1)}`;
+
+const draftClaimText = (claim: DraftClaimRecord): string =>
+  firstTextField(claim, [
+    'claim',
+    'claim_text',
+    'canonical_claim',
+    'answer',
+    'content',
+    'text',
+    'body',
+  ]) || 'Текст утверждения недоступен';
+
+const draftClaimEvidence = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, [
+    'evidence_block',
+    'source_excerpt',
+    'evidence',
+    'quote',
+    'source_quote',
+  ]);
+
+const draftClaimQuestions = (claim: DraftClaimRecord): string[] =>
+  firstStringArrayField(claim, [
+    'possible_questions',
+    'questions',
+    'similar_questions',
+    'queries',
+  ]);
+
+const draftClaimKey = (claim: DraftClaimRecord, index: number): string =>
+  firstTextField(claim, ['observation_ref', 'id', 'claim_id', 'ref']) ||
+  `draft-claim-${index}`;
+
 export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   doc,
   isDeletePending,
@@ -300,6 +410,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   workflowLiveStateLoading = false,
   workflowLiveStateError = null,
   sourceUnitsResponse = null,
+  answerDraftsResponse = null,
   formatSize,
   knowledgeProcessingModeLabel,
 }) => {
@@ -330,6 +441,11 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const actions = workflow?.actions ?? [];
   const usage = workflow?.usage ?? null;
   const sourceUnits = sourceUnitsResponse?.source_units ?? [];
+  const draftClaims = useMemo(
+    () => collectDraftClaims(answerDraftsResponse),
+    [answerDraftsResponse],
+  );
+
 
   const sourceUnitByIndex = useMemo(() => {
     const map = new Map<number, KnowledgeSourceUnit>();
@@ -343,12 +459,48 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     return map;
   }, [sourceUnits]);
 
+  const draftClaimsBySourceRef = useMemo(() => {
+    const map = new Map<string, DraftClaimRecord[]>();
+    draftClaims.forEach((claim) => {
+      const sourceRef = draftClaimSourceRef(claim);
+      if (!sourceRef) return;
+      const existing = map.get(sourceRef) ?? [];
+      existing.push(claim);
+      map.set(sourceRef, existing);
+    });
+    return map;
+  }, [draftClaims]);
+
   const sourceUnitForSection = (
     item: WorkbenchSectionQueueItemLiveState,
   ): KnowledgeSourceUnit | null =>
     sourceUnitById.get(item.section_id) ??
     sourceUnitByIndex.get(item.section_index) ??
     null;
+
+  const draftClaimsForSection = (
+    sourceUnit: KnowledgeSourceUnit | null,
+    sectionId: string,
+  ): DraftClaimRecord[] => {
+    const candidates = [
+      sourceUnit?.id,
+      sectionId,
+      sourceUnit ? (sourceUnit as unknown as Record<string, unknown>).unit_ref : null,
+      sourceUnit ? (sourceUnit as unknown as Record<string, unknown>).source_unit_ref : null,
+    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    const claims: DraftClaimRecord[] = [];
+    const seen = new Set<string>();
+    candidates.forEach((candidate) => {
+      (draftClaimsBySourceRef.get(candidate) ?? []).forEach((claim, index) => {
+        const key = draftClaimKey(claim, index);
+        if (seen.has(key)) return;
+        seen.add(key);
+        claims.push(claim);
+      });
+    });
+    return claims;
+  };
 
   const sourceStage = stages.find((stage) => stage.id === 'source_ingestion') ?? null;
   const claimStage =
@@ -398,12 +550,38 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     activeElapsedSeconds > 0 || isLiveTimer ? formatDuration(activeElapsedSeconds) : '—';
 
   const fileSizeText = doc.file_size > 0 ? formatSize(doc.file_size) : 'размер недоступен';
-  const totalTokens = usage?.total_tokens ?? 0;
-  const totalLlmCalls = usage?.total_llm_calls ?? 0;
+  const attemptPromptTokens = attempts.reduce(
+    (total, attempt) => total + Math.max(0, attempt.prompt_tokens || 0),
+    0,
+  );
+  const attemptCompletionTokens = attempts.reduce(
+    (total, attempt) => total + Math.max(0, attempt.completion_tokens || 0),
+    0,
+  );
+  const attemptTotalTokens = attempts.reduce(
+    (total, attempt) => total + Math.max(0, attempt.total_tokens || 0),
+    0,
+  );
+  const totalLlmCalls = Math.max(usage?.total_llm_calls ?? 0, attempts.length);
+  const totalPromptTokens = Math.max(
+    usage?.total_prompt_tokens ?? 0,
+    attemptPromptTokens,
+  );
+  const totalCompletionTokens = Math.max(
+    usage?.total_completion_tokens ?? 0,
+    attemptCompletionTokens,
+  );
+  const totalTokens = Math.max(
+    usage?.total_tokens ?? 0,
+    attemptTotalTokens,
+    totalPromptTokens + totalCompletionTokens,
+  );
   const llmUsageText =
-    totalTokens > 0 || totalLlmCalls > 0
-      ? `${formatNumber(totalLlmCalls)} выз. · ${formatNumber(totalTokens)} токенов`
-      : 'ещё не было принятых вызовов';
+    totalTokens > 0
+      ? `${formatNumber(totalTokens)} токенов · ${formatNumber(totalLlmCalls)} выз.`
+      : totalLlmCalls > 0
+        ? `${formatNumber(totalLlmCalls)} выз. · токены пока не записаны`
+        : 'вызовов ещё не было';
 
   const headline = workflow
     ? workflowStatusLabel(workflowStatus)
@@ -592,13 +770,14 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               </section>
 
               {sectionItems.length > 0 && (
-                <section>
-                  <div className="mb-1 font-medium text-[var(--text-primary)]">
-                    Разделы документа
-                  </div>
-                  <div className="space-y-1">
+                <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
+                  <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                    Разделы документа: {formatNumber(sectionItems.length)}
+                  </summary>
+                  <div className="mt-2 space-y-1">
                     {sectionItems.map((item) => {
                       const sourceUnit = sourceUnitForSection(item);
+                      const sectionClaims = draftClaimsForSection(sourceUnit, item.section_id);
                       return (
                         <details
                           key={item.queue_item_id}
@@ -639,18 +818,65 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                                 Текст раздела ещё не загружен.
                               </div>
                             )}
+                            {sectionClaims.length > 0 && (
+                              <details className="rounded bg-[var(--control-bg)] p-2">
+                                <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                                  Извлечённые утверждения: {formatNumber(sectionClaims.length)}
+                                </summary>
+                                <div className="mt-2 space-y-2">
+                                  {sectionClaims.map((claim, claimIndex) => (
+                                    <details
+                                      key={draftClaimKey(claim, claimIndex)}
+                                      className="rounded bg-[var(--surface-elevated)] p-2"
+                                    >
+                                      <summary className="cursor-pointer text-[var(--text-primary)]">
+                                        {draftClaimTitle(claim, claimIndex)}
+                                      </summary>
+                                      <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
+                                        <div>{draftClaimText(claim)}</div>
+                                        {draftClaimQuestions(claim).length > 0 && (
+                                          <div>
+                                            <div className="font-medium text-[var(--text-primary)]">
+                                              Возможные вопросы
+                                            </div>
+                                            <ul className="mt-1 list-disc pl-5">
+                                              {draftClaimQuestions(claim).map((question) => (
+                                                <li key={question}>{question}</li>
+                                              ))}
+                                            </ul>
+                                          </div>
+                                        )}
+                                        {draftClaimEvidence(claim) && (
+                                          <div>
+                                            <div className="font-medium text-[var(--text-primary)]">
+                                              Дословное доказательство
+                                            </div>
+                                            <blockquote className="mt-1 rounded border-l-2 border-[var(--accent-primary)] bg-[var(--control-bg)] p-2">
+                                              {draftClaimEvidence(claim)}
+                                            </blockquote>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </details>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
                           </div>
                         </details>
                       );
                     })}
                   </div>
-                </section>
+                </details>
               )}
 
               {attempts.length > 0 && (
                 <section>
-                  <div className="mb-1 font-medium text-[var(--text-primary)]">Работа ИИ</div>
-                  <div className="space-y-1">
+                  <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
+                    <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                      Попытки обработки ИИ: {formatNumber(attempts.length)}
+                    </summary>
+                    <div className="mt-2 space-y-1">
                     {attempts.map((attempt) => {
                       const sectionIndex = attemptSectionIndex(attempt);
                       return (
@@ -665,7 +891,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                                 : 'Раздел не определён'}
                             </span>
                             <span className="ml-2 text-[var(--text-muted)]">
-                              {attempt.model_name || 'модель ИИ'} · {attemptStatusLabel(attempt.status)}
+                              {attempt.model_name || attempt.model_provider || 'модель не определена'} · {attemptStatusLabel(attempt.status)}
                             </span>
                           </summary>
                           <div className="mt-1 text-[var(--text-muted)]">
@@ -682,7 +908,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                         </details>
                       );
                     })}
-                  </div>
+                    </div>
+                  </details>
                 </section>
               )}
 

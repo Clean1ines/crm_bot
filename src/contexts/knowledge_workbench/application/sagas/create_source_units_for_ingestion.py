@@ -228,10 +228,19 @@ def build_source_units_from_text(
     effective_budget = (
         segmentation_budget or default_source_ingestion_segmentation_budget()
     )
-    segments = _segment_document_text(
+    heading_first_segments = _markdown_heading_first_segments(
         document=document,
         raw_text=raw_text,
         segmentation_budget=effective_budget,
+    )
+    segments = (
+        heading_first_segments
+        if heading_first_segments
+        else _segment_document_text(
+            document=document,
+            raw_text=raw_text,
+            segmentation_budget=effective_budget,
+        )
     )
 
     return build_source_units_from_segments(
@@ -259,6 +268,111 @@ def build_source_units_from_segments(
         )
         for segment in segments
     )
+
+
+def _markdown_heading_first_segments(
+    *,
+    document: SourceDocument,
+    raw_text: str,
+    segmentation_budget: DocumentSegmentationBudget,
+) -> tuple[DocumentSegment, ...]:
+    if document.source_format is not SourceFormat.MARKDOWN:
+        return ()
+
+    sections = _split_markdown_by_atx_headings(raw_text)
+    if not sections:
+        return ()
+
+    segments: list[DocumentSegment] = []
+    ordinal = 0
+
+    for heading_path, section_text in sections:
+        estimated_tokens = max(1, (len(section_text) + 3) // 4)
+        if estimated_tokens <= segmentation_budget.max_source_segment_tokens:
+            text_hash = sha256(section_text.encode("utf-8")).hexdigest()
+            segments.append(
+                DocumentSegment(
+                    segment_key=(
+                        f"segment:{document.document_ref.value}:{ordinal}:"
+                        f"{DocumentSegmentKind.SECTION.value}:{text_hash}"
+                    ),
+                    kind=DocumentSegmentKind.SECTION,
+                    text=section_text,
+                    heading_path=heading_path,
+                    ordinal=ordinal,
+                    estimated_tokens=estimated_tokens,
+                )
+            )
+            ordinal += 1
+            continue
+
+        nested_segments = MarkdownSegmentationPolicy().segment(
+            MarkdownSegmentationCommand(
+                document_key=f"{document.document_ref.value}:{ordinal}",
+                markdown_text=section_text,
+                budget=segmentation_budget,
+            )
+        )
+        for nested in nested_segments:
+            segments.append(
+                DocumentSegment(
+                    segment_key=nested.segment_key,
+                    kind=DocumentSegmentKind.SPLIT_FRAGMENT,
+                    text=nested.text,
+                    heading_path=heading_path,
+                    ordinal=ordinal,
+                    estimated_tokens=nested.estimated_tokens,
+                )
+            )
+            ordinal += 1
+
+    return tuple(segments)
+
+
+def _split_markdown_by_atx_headings(
+    raw_text: str,
+) -> tuple[tuple[tuple[str, ...], str], ...]:
+    normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = normalized.split("\n")
+
+    heading_indexes: list[int] = []
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped.startswith("#"):
+            continue
+        marker = stripped.split(" ", 1)[0]
+        if marker and set(marker) == {"#"} and 1 <= len(marker) <= 6:
+            heading_indexes.append(index)
+
+    if not heading_indexes:
+        return ()
+
+    sections: list[tuple[tuple[str, ...], str]] = []
+    heading_stack: list[str] = []
+
+    if heading_indexes[0] > 0:
+        preamble = "\n".join(lines[: heading_indexes[0]]).strip()
+        if preamble:
+            sections.append(((), preamble))
+
+    for position, heading_index in enumerate(heading_indexes):
+        next_index = (
+            heading_indexes[position + 1]
+            if position + 1 < len(heading_indexes)
+            else len(lines)
+        )
+        heading_line = lines[heading_index].strip()
+        heading_level = len(heading_line.split(" ", 1)[0])
+        heading_title = heading_line[heading_level:].strip() or heading_line
+
+        heading_stack = heading_stack[: heading_level - 1]
+        heading_stack.append(heading_title)
+
+        section_text = "\n".join(lines[heading_index:next_index]).strip()
+        if section_text:
+            sections.append((tuple(heading_stack), section_text))
+
+    return tuple(sections)
 
 
 def _segment_document_text(

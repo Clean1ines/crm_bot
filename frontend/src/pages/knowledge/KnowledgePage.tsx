@@ -759,28 +759,28 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
   const importQualityReports = importQualityReportsQuery.data || {};
-  const draftPreviewDocumentIds = (
-    draftsDocumentId
-      ? [draftsDocumentId]
-      : hasProcessingDocuments
-        ? []
-        : Object.values(processingReports)
-            .filter((report) => {
-              const document = documents.find(
-                (doc) => doc.id === report.document_id,
-              );
-              const draftCount =
-                metricNumber(report.metrics, "raw_draft_count") ??
-                metricNumber(report.metrics, "draft_answer_count") ??
-                0;
-              const publishedCount =
-                metricNumber(report.metrics, "published_answer_count") ?? 0;
-              return (
-                Boolean(document && isDocumentProcessing(document)) ||
-                draftCount > publishedCount
-              );
-            })
-            .map((report) => report.document_id)
+  const draftPreviewDocumentIds = Array.from(
+    new Set([
+      ...(draftsDocumentId ? [draftsDocumentId] : []),
+      ...workflowLiveStateDocumentIds,
+      ...Object.values(processingReports)
+        .filter((report) => {
+          const document = documents.find(
+            (doc) => doc.id === report.document_id,
+          );
+          const draftCount =
+            metricNumber(report.metrics, "raw_draft_count") ??
+            metricNumber(report.metrics, "draft_answer_count") ??
+            0;
+          const publishedCount =
+            metricNumber(report.metrics, "published_answer_count") ?? 0;
+          return (
+            Boolean(document && isDocumentProcessing(document)) ||
+            draftCount > publishedCount
+          );
+        })
+        .map((report) => report.document_id),
+    ]),
   ).sort();
   const answerDraftsQuery = useQuery({
     queryKey: [
@@ -1849,6 +1849,7 @@ export const KnowledgePage: React.FC = () => {
                       : null
                   }
                   sourceUnitsResponse={sourceUnits[doc.id] ?? null}
+                  answerDraftsResponse={answerDrafts[doc.id] ?? null}
                   onCardAction={(actionId) => {
                     if (
                       actionId === "cancel_processing" ||

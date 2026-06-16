@@ -260,11 +260,24 @@ class WorkbenchWorkflowLiveStateQuery:
                   WHEN a.finished_at IS NULL THEN NULL
                   ELSE GREATEST(0, EXTRACT(EPOCH FROM (a.finished_at - a.started_at))::int * 1000)
                 END AS duration_ms,
-                d.llm_allocation_payload->>'provider' AS model_provider,
-                d.llm_allocation_payload->>'model' AS model_name,
-                0 AS prompt_tokens,
-                0 AS completion_tokens,
-                0 AS total_tokens,
+                COALESCE(
+                    d.llm_allocation_payload->>'provider',
+                    d.dispatch_payload #>> '{llm_allocation,provider}'
+                ) AS model_provider,
+                COALESCE(
+                    d.llm_allocation_payload->>'model_ref',
+                    d.llm_allocation_payload->>'model',
+                    d.dispatch_payload #>> '{llm_allocation,model_ref}',
+                    d.dispatch_payload #>> '{llm_allocation,model}'
+                ) AS model_name,
+                COALESCE(obs.actual_prompt_tokens, 0)::int AS prompt_tokens,
+                COALESCE(obs.actual_completion_tokens, 0)::int AS completion_tokens,
+                COALESCE(
+                    obs.actual_total_tokens,
+                    COALESCE(obs.actual_prompt_tokens, 0)
+                    + COALESCE(obs.actual_completion_tokens, 0),
+                    0
+                )::int AS total_tokens,
                 a.error_kind,
                 wi.last_error_kind AS error_message_user
             FROM execution_work_item_attempts AS a
@@ -274,6 +287,8 @@ class WorkbenchWorkflowLiveStateQuery:
               ON s.work_item_id = wi.work_item_id
             LEFT JOIN execution_work_item_attempt_dispatches AS d
               ON d.attempt_id = a.attempt_id
+            LEFT JOIN llm_attempt_capacity_observations AS obs
+              ON obs.dispatch_attempt_id = a.attempt_id
             WHERE s.payload->>'source_document_ref' = $1
               AND s.payload->>'workflow_run_id' = $2
             ORDER BY a.started_at DESC, a.created_at DESC
