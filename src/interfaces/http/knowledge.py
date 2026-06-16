@@ -7,6 +7,7 @@ vertical. Queue-based FAQ Workbench document upload is retired.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from typing import Protocol, cast
 from uuid import UUID
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Body,
     Depends,
     File,
@@ -71,6 +73,7 @@ from src.interfaces.composition.knowledge_extraction_after_upload_composition im
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
     RunKnowledgeExtractionWorkflowAfterUploadCommand,
 )
+from src.interfaces.composition.prepare_llm_dispatch_batch import AsyncPool
 from src.interfaces.composition.knowledge_extraction_workflow_pause_resume import (
     make_pause_knowledge_extraction_workflow,
     make_resume_knowledge_extraction_workflow_transition,
@@ -173,6 +176,9 @@ from src.interfaces.http.dependencies import (
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
+
+_live_state_drain_running_workflows: set[str] = set()
+_live_state_drain_guard = asyncio.Lock()
 UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
 _SOURCE_UNIT_TEXT_PREVIEW_LIMIT = 500
 
@@ -1667,10 +1673,12 @@ async def list_workbench_rag_eval_promotion_candidates(
 async def knowledge_workflow_live_state(
     project_id: str,
     document_id: str,
+    background_tasks: BackgroundTasks,
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
+    llm_executor: LlmDispatchExecutorPort = Depends(get_llm_dispatch_executor),
 ):
     """Returns frontend-facing Workbench workflow live state for one document."""
 
@@ -1679,6 +1687,14 @@ async def knowledge_workflow_live_state(
         authorization=authorization,
         project_repo=project_repo,
         user_repo=user_repo,
+    )
+
+    background_tasks.add_task(
+        _drain_workflow_from_live_state_poll,
+        pool=pool,
+        project_id=project_id,
+        document_id=document_id,
+        llm_executor=llm_executor,
     )
 
     try:
@@ -1692,6 +1708,52 @@ async def knowledge_workflow_live_state(
             status_code=404,
             detail="Knowledge document not found",
         ) from exc
+
+
+async def _drain_workflow_from_live_state_poll(
+    *,
+    pool: AsyncPool,
+    project_id: str,
+    document_id: str,
+    llm_executor: LlmDispatchExecutorPort,
+) -> None:
+    workflow_run_id = await _latest_workflow_run_id_for_source_document(
+        pool=pool,
+        project_id=project_id,
+        source_document_ref=document_id,
+    )
+    if workflow_run_id is None:
+        return
+
+    async with _live_state_drain_guard:
+        if workflow_run_id in _live_state_drain_running_workflows:
+            return
+        _live_state_drain_running_workflows.add(workflow_run_id)
+
+    try:
+        workflow_runner = make_knowledge_extraction_workflow_resume(
+            pool=pool,
+            llm_executor=llm_executor,
+        )
+        await workflow_runner.execute(
+            RunKnowledgeExtractionWorkflowResumeCommand(
+                project_id=project_id,
+                document_id=workflow_run_id,
+                max_drain_commands=25,
+            )
+        )
+    except Exception:
+        logger.exception(
+            "Background workflow drain from live-state polling failed",
+            extra={
+                "project_id": project_id,
+                "document_id": document_id,
+                "workflow_run_id": workflow_run_id,
+            },
+        )
+    finally:
+        async with _live_state_drain_guard:
+            _live_state_drain_running_workflows.discard(workflow_run_id)
 
 
 @router.get("/{document_id}/progress")

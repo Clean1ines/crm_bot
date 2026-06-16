@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 from src.interfaces.http import dependencies, knowledge
 from tests.api.test_knowledge import _FakeProjectRepo, _user_repo
@@ -37,10 +37,12 @@ async def test_workflow_live_state_endpoint_requires_project_access(
         await knowledge.knowledge_workflow_live_state(
             project_id="project-1",
             document_id="document-1",
+            background_tasks=BackgroundTasks(),
             authorization="Bearer valid-token",
             pool=object(),
             project_repo=_FakeProjectRepo(has_role=False),
             user_repo=_user_repo(platform_admin=False),
+            llm_executor=object(),
         )
 
     assert exc_info.value.status_code == 403
@@ -125,15 +127,20 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
         fake_fetch_workbench_workflow_live_state,
     )
 
+    background_tasks = BackgroundTasks()
+
     response = await knowledge.knowledge_workflow_live_state(
         project_id="project-1",
         document_id="source-document:project-1:abc",
+        background_tasks=background_tasks,
         authorization="Bearer valid-token",
         pool=object(),
         project_repo=_FakeProjectRepo(has_role=True),
         user_repo=_user_repo(),
+        llm_executor=object(),
     )
 
+    assert len(background_tasks.tasks) == 1
     assert response["workflow"]["workflow_run_id"] == "workflow-1"
     assert response["workflow"]["curation"]["available"] is True
     assert response["workflow"]["timer"]["active_elapsed_seconds"] == 10
@@ -171,10 +178,12 @@ async def test_workflow_live_state_endpoint_maps_missing_document_to_404(
         await knowledge.knowledge_workflow_live_state(
             project_id="project-1",
             document_id="missing-document",
+            background_tasks=BackgroundTasks(),
             authorization="Bearer valid-token",
             pool=object(),
             project_repo=_FakeProjectRepo(has_role=True),
             user_repo=_user_repo(),
+            llm_executor=object(),
         )
 
     assert exc_info.value.status_code == 404
