@@ -6,10 +6,16 @@ PAGE = Path("frontend/src/pages/knowledge/KnowledgePage.tsx")
 API = Path("frontend/src/shared/api/modules/knowledge.ts")
 
 
-def test_document_card_is_current_workbench_card_without_legacy_dependencies() -> None:
+def test_document_card_is_runtime_only_without_retired_frontend_contracts() -> None:
     source = CARD.read_text()
 
     for forbidden in (
+        "WorkbenchDocumentCardView",
+        "WorkbenchDocumentCardActionView",
+        "WorkbenchDocumentCardUserMessage",
+        "cardView",
+        "card_view",
+        "legacy",
         "ImportQualitySummary",
         "PriceFactsSummary",
         "CommercialTruthReviewSummary",
@@ -23,17 +29,14 @@ def test_document_card_is_current_workbench_card_without_legacy_dependencies() -
         "statusNode",
         "retighten",
         "retry_failed_batches",
-        "Legacy",
         "старый прогресс",
         "Диагностика импорта",
-        "unknown",
+        "liveTimerObservedAtMsRef",
     ):
         assert forbidden not in source
 
 
-def test_knowledge_page_calls_document_card_with_current_workbench_contract_only() -> (
-    None
-):
+def test_knowledge_page_calls_document_card_with_runtime_contract_only() -> None:
     source = PAGE.read_text()
     start = source.index("<KnowledgeDocumentCard")
     end = source.index("                />", start)
@@ -46,6 +49,9 @@ def test_knowledge_page_calls_document_card_with_current_workbench_contract_only
         "onStopProcessing={",
         "onOpenCuration={",
         "onCardAction={",
+        "workflowLiveState={",
+        "workflowLiveStateLoading={",
+        "workflowLiveStateError={",
         "formatSize={formatSize}",
         "knowledgeProcessingModeLabel={knowledgeProcessingModeLabel}",
     ):
@@ -62,25 +68,29 @@ def test_knowledge_page_calls_document_card_with_current_workbench_contract_only
         "actionsNode=",
         "hasDrafts=",
         "hasSourceUnits=",
-        "unknown",
     ):
         assert forbidden not in call
 
 
-def test_document_card_uses_backend_card_view_actions_for_lifecycle() -> None:
+def test_document_card_uses_workflow_live_state_for_runtime_lifecycle() -> None:
     source = CARD.read_text()
 
-    assert "cardView.actions" in source
-    assert "primaryActions(cardView)" in source
-    assert "visibleSecondaryActions(cardView)" in source
-    assert "handleCardAction(action)" in source
-    assert "action.action_id === 'cancel_processing'" in source
-    assert "action.action_id === 'open_curation'" in source
-    assert "action.action_id === 'open_published_surfaces'" in source
-    assert "action.action_id === 'delete_document'" in source
+    for marker in (
+        "workflowLiveState",
+        "workflow?.actions",
+        "handleLiveAction(action)",
+        "action.action_id === 'cancel_processing'",
+        "action.action_id === 'open_curation'",
+        "onRequestDelete",
+        "workflow?.timeline",
+        "liveTimelineEventLabel",
+        "Последние события",
+        "runtime-card-v1",
+    ):
+        assert marker in source
 
 
-def test_document_card_keeps_current_design_and_user_visible_metrics() -> None:
+def test_document_card_keeps_runtime_user_visible_metrics() -> None:
     source = CARD.read_text()
 
     for marker in (
@@ -88,20 +98,18 @@ def test_document_card_keeps_current_design_and_user_visible_metrics() -> None:
         "Что происходит с документом",
         "active_elapsed_seconds",
         "total_tokens",
-        "llm_call_count",
+        "total_llm_calls",
         "sectionProgressPercent",
-        "runtime_entry_count",
-        "registry.entry_count",
-        "Промежуточные данные очищены",
-        "Извлечённые знания",
-        "liveActiveElapsedSeconds",
+        "Подробности live-процесса",
+        "Потоки секций",
+        "LLM attempts",
+        "Последние события",
     ):
         assert marker in source
 
     assert "wall_elapsed_seconds" not in source
     assert "liveWallElapsedSeconds" not in source
     assert " · всего " not in source
-
     assert "Подробности обработки" not in source
 
 
@@ -121,31 +129,6 @@ def test_frontend_action_mapping_uses_current_workbench_action_ids() -> None:
         assert action_id in page
 
 
-def test_document_card_uses_workflow_live_state_as_primary_progress_source() -> None:
-    source = CARD.read_text()
-
-    for marker in (
-        "livePrimaryProgressStage",
-        "hasLiveProgress",
-        "liveProgressQueueText",
-        "liveResultSummaryText",
-        "resultSummaryText",
-        "Подробности live-процесса",
-    ):
-        assert marker in source
-
-    assert source.index("const livePromptAStage") < source.index(
-        "const sectionProgressText"
-    )
-    assert source.index("const liveUsage") < source.index("const llmUsageText")
-    assert source.index("const liveResultSummaryText") < source.index(
-        "{resultSummaryText}"
-    )
-    assert "fallbackResultSummaryText" in source
-    assert "cardView.registry.entry_count" in source
-    assert "cardView.runtime.runtime_entry_count" in source
-
-
 def test_knowledge_page_fetches_live_state_for_active_workbench_documents_without_card_artifacts() -> (
     None
 ):
@@ -156,4 +139,5 @@ def test_knowledge_page_fetches_live_state_for_active_workbench_documents_withou
     assert 'doc.status === "processing"' in source
     assert 'doc.status === "error"' in source
     assert '"auto_recovery_scheduled"' in source
-    assert 'className="grid grid-cols-1 gap-4 xl:grid-cols-2 lg:gap-6"' in source
+    assert 'className="grid grid-cols-1 gap-6"' in source
+    assert "!shouldFetchWorkflowLiveStateForDocument(doc)" in source

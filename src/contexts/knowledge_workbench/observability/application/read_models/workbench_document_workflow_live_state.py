@@ -98,6 +98,32 @@ class WorkbenchWorkflowStageLiveView:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchWorkflowTimelineEntryLiveView:
+    timeline_entry_id: str
+    event_type: str
+    phase: str
+    severity: str
+    message: str
+    occurred_at: datetime
+    source_ref: str | None
+    work_item_id: str | None
+    attempt_id: str | None
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "timeline_entry_id": self.timeline_entry_id,
+            "event_type": self.event_type,
+            "phase": self.phase,
+            "severity": self.severity,
+            "message": self.message,
+            "occurred_at": _dt(self.occurred_at),
+            "source_ref": self.source_ref,
+            "work_item_id": self.work_item_id,
+            "attempt_id": self.attempt_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchRetryTimerLiveView:
     retry_available_at: datetime | None
     seconds_until_retry: int | None
@@ -252,6 +278,7 @@ class WorkbenchWorkflowLiveState:
     stages: tuple[WorkbenchWorkflowStageLiveView, ...]
     section_lanes: tuple[WorkbenchSectionLaneLiveView, ...]
     llm_attempts: tuple[WorkbenchLlmAttemptLiveView, ...]
+    timeline: tuple[WorkbenchWorkflowTimelineEntryLiveView, ...]
     curation: WorkbenchCurationAvailabilityView
     actions: tuple[WorkbenchWorkflowActionView, ...]
 
@@ -266,6 +293,7 @@ class WorkbenchWorkflowLiveState:
             "stages": [stage.to_dict() for stage in self.stages],
             "section_lanes": [lane.to_dict() for lane in self.section_lanes],
             "llm_attempts": [attempt.to_dict() for attempt in self.llm_attempts],
+            "timeline": [entry.to_dict() for entry in self.timeline],
             "curation": self.curation.to_dict(),
             "actions": [action.to_dict() for action in self.actions],
         }

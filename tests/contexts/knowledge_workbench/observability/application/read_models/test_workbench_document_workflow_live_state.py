@@ -14,6 +14,7 @@ from src.contexts.knowledge_workbench.observability.application.read_models.work
     WorkbenchWorkflowModelUsageLiveView,
     WorkbenchWorkflowStageLiveView,
     WorkbenchWorkflowTimerLiveView,
+    WorkbenchWorkflowTimelineEntryLiveView,
     WorkbenchWorkflowUsageLiveView,
 )
 
@@ -119,6 +120,19 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                     error_message_user=None,
                 ),
             ),
+            timeline=(
+                WorkbenchWorkflowTimelineEntryLiveView(
+                    timeline_entry_id="timeline-1",
+                    event_type="SourceUnitsCreated",
+                    phase="SOURCE_INGESTION",
+                    severity="info",
+                    message="Source units created",
+                    occurred_at=_now(),
+                    source_ref="source-document:project-1:abc",
+                    work_item_id=None,
+                    attempt_id=None,
+                ),
+            ),
             curation=WorkbenchCurationAvailabilityView(
                 available=True,
                 reason_code="ready_to_open",
@@ -154,4 +168,5 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
         == 60
     )
     assert payload["workflow"]["llm_attempts"][0]["duration_ms"] == 1234
+    assert payload["workflow"]["timeline"][0]["event_type"] == "SourceUnitsCreated"
     assert payload["workflow"]["curation"]["available"] is True

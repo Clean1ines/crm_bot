@@ -678,10 +678,11 @@ export const KnowledgePage: React.FC = () => {
 
   const reportableDocuments = documents.filter(
     (doc) =>
-      isDocumentProcessing(doc) ||
-      isDocumentFailed(doc) ||
-      isDocumentCancelled(doc) ||
-      hasWorkbenchCardArtifacts(doc),
+      !shouldFetchWorkflowLiveStateForDocument(doc) &&
+      (isDocumentProcessing(doc) ||
+        isDocumentFailed(doc) ||
+        isDocumentCancelled(doc) ||
+        hasWorkbenchCardArtifacts(doc)),
   );
   const reportableDocumentIds = reportableDocuments.map((doc) => doc.id).sort();
   const processingReportsQuery = useQuery({

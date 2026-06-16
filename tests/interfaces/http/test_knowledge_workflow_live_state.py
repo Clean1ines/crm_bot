@@ -92,6 +92,19 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
                 "stages": [],
                 "section_lanes": [],
                 "llm_attempts": [],
+                "timeline": [
+                    {
+                        "timeline_entry_id": "timeline-1",
+                        "event_type": "SourceUnitsCreated",
+                        "phase": "SOURCE_INGESTION",
+                        "severity": "info",
+                        "message": "Source units created",
+                        "occurred_at": "2026-06-15T12:00:00+00:00",
+                        "source_ref": document_id,
+                        "work_item_id": None,
+                        "attempt_id": None,
+                    }
+                ],
                 "curation": {
                     "available": True,
                     "reason_code": "ready_to_open",
@@ -124,6 +137,7 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
     assert response["workflow"]["workflow_run_id"] == "workflow-1"
     assert response["workflow"]["curation"]["available"] is True
     assert response["workflow"]["timer"]["active_elapsed_seconds"] == 10
+    assert response["workflow"]["timeline"][0]["event_type"] == "SourceUnitsCreated"
 
 
 @pytest.mark.asyncio

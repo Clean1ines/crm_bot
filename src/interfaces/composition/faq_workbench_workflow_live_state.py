@@ -17,6 +17,7 @@ from src.contexts.knowledge_workbench.observability.application.read_models.work
     WorkbenchWorkflowLiveState,
     WorkbenchWorkflowModelUsageLiveView,
     WorkbenchWorkflowStageLiveView,
+    WorkbenchWorkflowTimelineEntryLiveView,
     WorkbenchWorkflowTimerLiveView,
     WorkbenchWorkflowUsageLiveView,
 )
@@ -53,25 +54,21 @@ class WorkbenchWorkflowLiveStateQuery:
         processing_run_id = _optional_str(document_row, "current_processing_run_id")
 
         lanes = await self._section_lanes(
-            project_id=project_id,
-            document_id=document_id,
-            processing_run_id=processing_run_id,
-        )
-        attempts = await self._llm_attempts(
-            project_id=project_id,
-            document_id=document_id,
-            processing_run_id=processing_run_id,
-        )
-        model_summaries = await self._model_summaries(
-            project_id=project_id,
-            document_id=document_id,
-            processing_run_id=processing_run_id,
-        )
-        counts = await self._counts(
-            project_id=project_id,
             document_id=document_id,
             workflow_run_id=workflow_run_id,
         )
+        attempts = await self._llm_attempts(
+            document_id=document_id,
+            workflow_run_id=workflow_run_id,
+        )
+        model_summaries = await self._model_summaries(
+            workflow_run_id=workflow_run_id,
+        )
+        counts = await self._counts(
+            document_id=document_id,
+            workflow_run_id=workflow_run_id,
+        )
+        timeline = await self._timeline(workflow_run_id=workflow_run_id)
         curation = await self._curation(
             workflow_run_id=workflow_run_id,
             preview_ready=_int(counts, "preview_count") > 0,
@@ -106,6 +103,7 @@ class WorkbenchWorkflowLiveStateQuery:
             ),
             section_lanes=lanes,
             llm_attempts=attempts,
+            timeline=timeline,
             curation=curation,
             actions=_actions(workflow_status=workflow_status, curation=curation),
         )
@@ -132,27 +130,39 @@ class WorkbenchWorkflowLiveStateQuery:
                 d.file_name,
                 d.status AS document_status,
                 d.current_processing_run_id,
-                pr.status AS processing_status,
-                pr.started_at,
-                pr.completed_at,
-                COALESCE(pr.active_elapsed_seconds, 0) AS active_elapsed_seconds,
-                COALESCE(pr.wall_elapsed_seconds, 0) AS wall_elapsed_seconds,
-                pr.current_active_started_at,
-                COALESCE(pr.total_prompt_tokens, 0) AS total_prompt_tokens,
-                COALESCE(pr.total_completion_tokens, 0) AS total_completion_tokens,
-                COALESCE(pr.total_tokens, 0) AS total_tokens,
-                COALESCE(pr.total_llm_calls, 0) AS total_llm_calls,
                 wf.workflow_run_id,
                 wf.source_document_ref,
-                wf.status AS workflow_status,
-                wf.current_phase,
+                COALESCE(ps.workflow_status, wf.status) AS workflow_status,
+                COALESCE(ps.current_phase, wf.current_phase) AS current_phase,
                 wf.completed_at AS workflow_completed_at,
-                wf.cancelled_at AS workflow_cancelled_at
+                wf.cancelled_at AS workflow_cancelled_at,
+                ps.started_at AS started_at,
+                ps.completed_at AS completed_at,
+                CASE
+                  WHEN COALESCE(ps.workflow_status, wf.status) IN ('RUNNING', 'ACTIVE', 'PROCESSING')
+                    AND ps.started_at IS NOT NULL
+                  THEN ps.started_at
+                  ELSE NULL
+                END AS current_active_started_at,
+                CASE
+                  WHEN ps.started_at IS NULL THEN 0
+                  WHEN COALESCE(ps.workflow_status, wf.status) IN ('RUNNING', 'ACTIVE', 'PROCESSING')
+                  THEN GREATEST(0, EXTRACT(EPOCH FROM (NOW() - ps.started_at))::int)
+                  WHEN ps.completed_at IS NOT NULL
+                  THEN GREATEST(0, EXTRACT(EPOCH FROM (ps.completed_at - ps.started_at))::int)
+                  ELSE 0
+                END AS active_elapsed_seconds,
+                CASE
+                  WHEN ps.started_at IS NULL THEN 0
+                  WHEN ps.completed_at IS NOT NULL
+                  THEN GREATEST(0, EXTRACT(EPOCH FROM (ps.completed_at - ps.started_at))::int)
+                  ELSE GREATEST(0, EXTRACT(EPOCH FROM (NOW() - ps.started_at))::int)
+                END AS wall_elapsed_seconds,
+                COALESCE(ru.input_tokens, 0)::int AS total_prompt_tokens,
+                COALESCE(ru.output_tokens, 0)::int AS total_completion_tokens,
+                COALESCE(ru.total_tokens, 0)::int AS total_tokens,
+                COALESCE(ru.request_count, 0)::int AS total_llm_calls
             FROM knowledge_workbench_documents AS d
-            LEFT JOIN knowledge_workbench_processing_runs AS pr
-              ON pr.project_id = d.project_id
-             AND pr.document_id = d.document_id
-             AND pr.processing_run_id = d.current_processing_run_id
             LEFT JOIN LATERAL (
                 SELECT w.*
                 FROM knowledge_extraction_workflow_runs AS w
@@ -161,6 +171,10 @@ class WorkbenchWorkflowLiveStateQuery:
                 ORDER BY w.updated_at DESC, w.created_at DESC
                 LIMIT 1
             ) AS wf ON TRUE
+            LEFT JOIN workflow_runtime_progress_snapshots AS ps
+              ON ps.workflow_run_id = wf.workflow_run_id
+            LEFT JOIN workflow_runtime_resource_usage_snapshots AS ru
+              ON ru.workflow_run_id = wf.workflow_run_id
             WHERE d.project_id = $1
               AND d.document_id = $2
               AND d.deleted_at IS NULL
@@ -173,34 +187,39 @@ class WorkbenchWorkflowLiveStateQuery:
     async def _section_lanes(
         self,
         *,
-        project_id: str,
         document_id: str,
-        processing_run_id: str | None,
+        workflow_run_id: str | None,
     ) -> tuple[WorkbenchSectionLaneLiveView, ...]:
+        if workflow_run_id is None:
+            return ()
+
         rows = await self._connection.fetch(
             """
             SELECT
-                queue_item_id,
-                section_id,
-                section_index,
-                section_key,
-                lane_id,
-                lane_index,
-                status,
-                claimed_by_worker_id,
-                lease_expires_at,
-                error_kind,
-                COALESCE(attempt_count, 0) AS attempt_count
-            FROM knowledge_workbench_section_batch_queue_items
-            WHERE project_id = $1
-              AND document_id = $2
-              AND ($3::text IS NULL OR processing_run_id = $3)
-            ORDER BY lane_index ASC, section_index ASC, queue_item_id ASC
+                wi.work_item_id AS queue_item_id,
+                COALESCE(s.payload->>'source_unit_ref', wi.work_item_id) AS section_id,
+                COALESCE((s.payload->>'source_unit_ordinal')::int, 0) AS section_index,
+                COALESCE(s.payload->>'source_unit_ref', wi.work_item_id) AS section_key,
+                'execution-runtime' AS lane_id,
+                0 AS lane_index,
+                wi.status,
+                wi.leased_by AS claimed_by_worker_id,
+                wi.lease_expires_at,
+                wi.last_error_kind AS error_kind,
+                COALESCE(wi.attempt_count, 0) AS attempt_count
+            FROM execution_work_items AS wi
+            JOIN execution_work_item_schedules AS s
+              ON s.work_item_id = wi.work_item_id
+            WHERE s.payload->>'source_document_ref' = $1
+              AND s.payload->>'workflow_run_id' = $2
+              AND s.payload->>'phase' = 'claim_builder_section_extraction'
+            ORDER BY
+                COALESCE((s.payload->>'source_unit_ordinal')::int, 0) ASC,
+                wi.work_item_id ASC
             LIMIT 500
             """,
-            project_id,
             document_id,
-            processing_run_id,
+            workflow_run_id,
         )
 
         by_lane: dict[tuple[int, str], list[WorkbenchSectionQueueItemLiveView]] = {}
@@ -220,69 +239,74 @@ class WorkbenchWorkflowLiveStateQuery:
     async def _llm_attempts(
         self,
         *,
-        project_id: str,
         document_id: str,
-        processing_run_id: str | None,
+        workflow_run_id: str | None,
     ) -> tuple[WorkbenchLlmAttemptLiveView, ...]:
+        if workflow_run_id is None:
+            return ()
+
         rows = await self._connection.fetch(
             """
             SELECT
-                node_run_id,
-                section_id,
-                node_name,
-                node_kind,
-                status,
-                started_at,
-                completed_at,
-                duration_ms,
-                model_provider,
-                model_name,
-                COALESCE(prompt_tokens, 0) AS prompt_tokens,
-                COALESCE(completion_tokens, 0) AS completion_tokens,
-                COALESCE(total_tokens, 0) AS total_tokens,
-                error_kind,
-                error_message_user
-            FROM knowledge_workbench_processing_node_runs
-            WHERE project_id = $1
-              AND document_id = $2
-              AND ($3::text IS NULL OR processing_run_id = $3)
-            ORDER BY started_at DESC NULLS LAST, created_at DESC
+                a.attempt_id AS node_run_id,
+                s.payload->>'source_unit_ref' AS section_id,
+                wi.work_kind AS node_name,
+                'execution_work_item' AS node_kind,
+                COALESCE(a.outcome_status, wi.status) AS status,
+                a.started_at,
+                a.finished_at AS completed_at,
+                CASE
+                  WHEN a.finished_at IS NULL THEN NULL
+                  ELSE GREATEST(0, EXTRACT(EPOCH FROM (a.finished_at - a.started_at))::int * 1000)
+                END AS duration_ms,
+                d.llm_allocation_payload->>'provider' AS model_provider,
+                d.llm_allocation_payload->>'model' AS model_name,
+                0 AS prompt_tokens,
+                0 AS completion_tokens,
+                0 AS total_tokens,
+                a.error_kind,
+                wi.last_error_kind AS error_message_user
+            FROM execution_work_item_attempts AS a
+            JOIN execution_work_items AS wi
+              ON wi.work_item_id = a.work_item_id
+            JOIN execution_work_item_schedules AS s
+              ON s.work_item_id = wi.work_item_id
+            LEFT JOIN execution_work_item_attempt_dispatches AS d
+              ON d.attempt_id = a.attempt_id
+            WHERE s.payload->>'source_document_ref' = $1
+              AND s.payload->>'workflow_run_id' = $2
+            ORDER BY a.started_at DESC, a.created_at DESC
             LIMIT 100
             """,
-            project_id,
             document_id,
-            processing_run_id,
+            workflow_run_id,
         )
         return tuple(_attempt(dict(row)) for row in rows)
 
     async def _model_summaries(
         self,
         *,
-        project_id: str,
-        document_id: str,
-        processing_run_id: str | None,
+        workflow_run_id: str | None,
     ) -> tuple[WorkbenchWorkflowModelUsageLiveView, ...]:
+        if workflow_run_id is None:
+            return ()
+
         rows = await self._connection.fetch(
             """
             SELECT
-                model_provider,
-                model_name,
-                COUNT(*)::int AS call_count,
-                COALESCE(SUM(prompt_tokens), 0)::int AS prompt_tokens,
-                COALESCE(SUM(completion_tokens), 0)::int AS completion_tokens,
-                COALESCE(SUM(total_tokens), 0)::int AS total_tokens,
-                COALESCE(SUM(duration_ms), 0)::int AS duration_ms_total
-            FROM knowledge_workbench_processing_node_runs
-            WHERE project_id = $1
-              AND document_id = $2
-              AND ($3::text IS NULL OR processing_run_id = $3)
-              AND (model_provider IS NOT NULL OR model_name IS NOT NULL)
-            GROUP BY model_provider, model_name
-            ORDER BY call_count DESC, total_tokens DESC
+                provider.key AS model_provider,
+                NULL::text AS model_name,
+                0::int AS call_count,
+                0::int AS prompt_tokens,
+                0::int AS completion_tokens,
+                0::int AS total_tokens,
+                0::int AS duration_ms_total
+            FROM workflow_runtime_resource_usage_snapshots AS ru
+            CROSS JOIN LATERAL jsonb_each(ru.provider_breakdown) AS provider(key, value)
+            WHERE ru.workflow_run_id = $1
+            ORDER BY provider.key ASC
             """,
-            project_id,
-            document_id,
-            processing_run_id,
+            workflow_run_id,
         )
         return tuple(
             WorkbenchWorkflowModelUsageLiveView(
@@ -300,7 +324,6 @@ class WorkbenchWorkflowLiveStateQuery:
     async def _counts(
         self,
         *,
-        project_id: str,
         document_id: str,
         workflow_run_id: str | None,
     ) -> Mapping[str, object]:
@@ -309,46 +332,73 @@ class WorkbenchWorkflowLiveStateQuery:
             SELECT
                 (
                     SELECT COUNT(*)::int
-                    FROM knowledge_workbench_document_sections AS s
-                    WHERE s.project_id = $1
-                      AND s.document_id = $2
+                    FROM source_units AS u
+                    WHERE u.document_ref = $1
                 ) AS source_section_count,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_observations AS o
                     JOIN source_units AS u
                       ON u.unit_ref = o.source_unit_ref
-                    WHERE u.document_ref = $2
+                    WHERE u.document_ref = $1
                 ) AS draft_claim_count,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_embeddings AS e
-                    WHERE e.workflow_run_id = $3
+                    WHERE e.workflow_run_id = $2
                 ) AS draft_claim_embedding_count,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_compaction_nodes AS n
-                    WHERE n.workflow_run_id = $3
+                    WHERE n.workflow_run_id = $2
                       AND n.node_kind = 'compacted'
                       AND n.active IS TRUE
                 ) AS active_compacted_nodes,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_compaction_comparisons AS c
-                    WHERE c.workflow_run_id = $3
+                    WHERE c.workflow_run_id = $2
                       AND c.status IN ('pending', 'waiting_user_model_choice')
                 ) AS pending_compaction_comparisons,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_cluster_previews AS p
-                    WHERE p.workflow_run_id = $3
+                    WHERE p.workflow_run_id = $2
                 ) AS preview_count
             """,
-            project_id,
             document_id,
             workflow_run_id,
         )
         return dict(row) if row is not None else {}
+
+    async def _timeline(
+        self,
+        *,
+        workflow_run_id: str | None,
+    ) -> tuple[WorkbenchWorkflowTimelineEntryLiveView, ...]:
+        if workflow_run_id is None:
+            return ()
+
+        rows = await self._connection.fetch(
+            """
+            SELECT
+                timeline_entry_id,
+                event_type,
+                phase,
+                severity,
+                message,
+                occurred_at,
+                source_ref,
+                work_item_id,
+                attempt_id
+            FROM workflow_runtime_timeline_entries
+            WHERE workflow_run_id = $1
+            ORDER BY occurred_at DESC
+            LIMIT 20
+            """,
+            workflow_run_id,
+        )
+        return tuple(_timeline_entry(dict(row)) for row in rows)
 
     async def _curation(
         self,
@@ -422,19 +472,17 @@ async def fetch_workbench_workflow_live_state(
 
 def _timer(row: Mapping[str, object]) -> WorkbenchWorkflowTimerLiveView:
     workflow_status = (_optional_str(row, "workflow_status") or "").upper()
-    processing_status = (_optional_str(row, "processing_status") or "").lower()
     current_active_started_at = _optional_datetime(row, "current_active_started_at")
-    running = (
-        current_active_started_at is not None
-        and workflow_status not in {"PAUSED", "FAILED", "CANCELLED", "COMPLETED"}
-        and processing_status
-        not in {"paused", "failed", "cancelled", "cancelled_by_user", "completed"}
-    )
+    running = current_active_started_at is not None and workflow_status in {
+        "RUNNING",
+        "ACTIVE",
+        "PROCESSING",
+    }
     if running:
         mode = "running"
-    elif workflow_status == "PAUSED" or processing_status == "paused":
+    elif workflow_status == "PAUSED":
         mode = "paused"
-    elif workflow_status == "COMPLETED" or processing_status == "completed":
+    elif workflow_status in {"COMPLETED", "DONE"}:
         mode = "completed"
     else:
         mode = "stopped"
@@ -644,8 +692,13 @@ def _lane(
         ready_count=sum(1 for item in items if item.status == "ready"),
         leased_count=sum(1 for item in items if item.status == "leased"),
         done_count=sum(1 for item in items if item.status in _DONE_QUEUE_STATUSES),
-        failed_count=sum(1 for item in items if item.status == "failed"),
-        waiting_count=sum(1 for item in items if item.status.startswith("waiting")),
+        failed_count=sum(1 for item in items if item.status in _FAILED_QUEUE_STATUSES),
+        waiting_count=sum(
+            1
+            for item in items
+            if item.status.startswith("waiting")
+            or item.status in _WAITING_QUEUE_STATUSES
+        ),
         total_attempt_count=sum(item.attempt_count for item in items),
         max_attempt_count=max((item.attempt_count for item in items), default=0),
         items=items,
@@ -654,12 +707,45 @@ def _lane(
 
 _DONE_QUEUE_STATUSES = frozenset(
     {
+        "completed",
         "claim_observations_persisted",
         "registry_application_queued",
         "registry_application_applied",
         "waiting_for_fresh_registry",
     }
 )
+
+_FAILED_QUEUE_STATUSES = frozenset(
+    {
+        "failed",
+        "retryable_failed",
+        "terminal_failed",
+    }
+)
+
+_WAITING_QUEUE_STATUSES = frozenset(
+    {
+        "deferred",
+        "user_action_required",
+    }
+)
+
+
+def _timeline_entry(
+    row: Mapping[str, object],
+) -> WorkbenchWorkflowTimelineEntryLiveView:
+    return WorkbenchWorkflowTimelineEntryLiveView(
+        timeline_entry_id=_str(row, "timeline_entry_id"),
+        event_type=_str(row, "event_type"),
+        phase=_str(row, "phase"),
+        severity=_str(row, "severity"),
+        message=_str(row, "message"),
+        occurred_at=_optional_datetime(row, "occurred_at")
+        or datetime.now(timezone.utc),
+        source_ref=_optional_str(row, "source_ref"),
+        work_item_id=_optional_str(row, "work_item_id"),
+        attempt_id=_optional_str(row, "attempt_id"),
+    )
 
 
 def _attempt(row: Mapping[str, object]) -> WorkbenchLlmAttemptLiveView:

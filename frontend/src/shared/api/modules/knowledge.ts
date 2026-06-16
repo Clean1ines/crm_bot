@@ -262,6 +262,18 @@ export type WorkbenchWorkflowStageLiveState = {
   completed_at?: string | null;
 };
 
+export type WorkbenchWorkflowTimelineEntryLiveState = {
+  timeline_entry_id: string;
+  event_type: string;
+  phase: string;
+  severity: string;
+  message: string;
+  occurred_at: string;
+  source_ref?: string | null;
+  work_item_id?: string | null;
+  attempt_id?: string | null;
+};
+
 export type WorkbenchRetryTimerLiveState = {
   retry_available_at?: string | null;
   seconds_until_retry?: number | null;
@@ -343,6 +355,7 @@ export type WorkbenchWorkflowLiveState = {
   stages: WorkbenchWorkflowStageLiveState[];
   section_lanes: WorkbenchSectionLaneLiveState[];
   llm_attempts: WorkbenchLlmAttemptLiveState[];
+  timeline: WorkbenchWorkflowTimelineEntryLiveState[];
   curation: WorkbenchCurationLiveState;
   actions: WorkbenchWorkflowActionLiveState[];
 };
