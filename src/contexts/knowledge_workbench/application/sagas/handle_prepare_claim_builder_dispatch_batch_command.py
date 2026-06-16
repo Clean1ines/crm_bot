@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Protocol, cast
 
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
@@ -105,7 +105,7 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         if workflow_run_id != workflow_command.workflow_run_id:
             raise ValueError("payload workflow_run_id must match workflow command")
 
-        occurred_at = workflow_command.updated_at
+        occurred_at = _execution_occurred_at(workflow_command)
         prepare_result = await prepare_llm_dispatch_batch.execute(
             _prepare_llm_dispatch_batch_command(
                 workflow_command=workflow_command,
@@ -195,8 +195,9 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             and scheduled_work_item_count > 0
             and not _source_split_required(preflight_metadata)
         ):
-            capacity_retry_at = _capacity_retry_at_from_prepare_result(
-                typed_prepare_result,
+            capacity_retry_at = _future_capacity_retry_at(
+                _capacity_retry_at_from_prepare_result(typed_prepare_result),
+                occurred_at=occurred_at,
             )
             if capacity_retry_at is not None:
                 await workflow_unit_of_work.timeline.append_entry(
@@ -277,6 +278,29 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             appended_next_command_count=appended_next_command_count,
             completed_command_id=workflow_command.command_id,
         )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _execution_occurred_at(workflow_command: WorkflowCommand) -> datetime:
+    execution_now = _utc_now()
+    if workflow_command.updated_at > execution_now:
+        return workflow_command.updated_at
+    return execution_now
+
+
+def _future_capacity_retry_at(
+    capacity_retry_at: datetime | None,
+    *,
+    occurred_at: datetime,
+) -> datetime | None:
+    if capacity_retry_at is None:
+        return None
+    if capacity_retry_at > occurred_at:
+        return capacity_retry_at
+    return occurred_at + timedelta(seconds=60)
 
 
 def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:

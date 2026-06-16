@@ -451,6 +451,11 @@ async def test_calls_existing_prepare_llm_dispatch_batch_for_claim_builder_work_
     assert prepare.calls[0].profile is not None
     assert prepare.calls[0].profile.profile_id == "faq_claim_observations"
     assert len(prepare.calls[0].account_capacities) == 1
+    assert prepare.calls[0].now > _workflow_command().updated_at
+    assert prepare.calls[0].started_at == prepare.calls[0].now
+    assert prepare.calls[0].lease_expires_at == (
+        prepare.calls[0].now + timedelta(seconds=90)
+    )
 
 
 @pytest.mark.asyncio
@@ -522,7 +527,7 @@ async def test_marks_prepare_failed_when_scheduled_work_prepares_zero_attempts()
 
 @pytest.mark.asyncio
 async def test_reschedules_prepare_when_zero_attempts_are_capacity_throttled() -> None:
-    retry_at = _now() + timedelta(seconds=60)
+    retry_at = datetime.now(timezone.utc) + timedelta(seconds=60)
 
     result, _, workflow_unit_of_work = await _execute(
         started_attempts=(),
@@ -539,6 +544,22 @@ async def test_reschedules_prepare_when_zero_attempts_are_capacity_throttled() -
     assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
         "Claim builder dispatch capacity temporarily unavailable",
     )
+
+
+@pytest.mark.asyncio
+async def test_capacity_retry_at_in_past_is_clamped_to_future() -> None:
+    stale_retry_at = _now() + timedelta(seconds=60)
+
+    result, _, workflow_unit_of_work = await _execute(
+        started_attempts=(),
+        capacity_retry_at=stale_retry_at,
+    )
+
+    assert result.prepared_dispatch_count == 0
+    assert workflow_unit_of_work.command_log.rescheduled_commands
+    _, run_after = workflow_unit_of_work.command_log.rescheduled_commands[0]
+    assert run_after > datetime.now(timezone.utc)
+    assert run_after != stale_retry_at
 
 
 @pytest.mark.asyncio
