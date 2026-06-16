@@ -543,6 +543,36 @@ async def _work_item_ids(
                 column_name="work_item_id",
             )
         )
+
+    if _has(columns, "execution_work_item_schedules", "work_item_id", "payload"):
+        schedule_clauses: list[str] = ["payload->>'source_document_ref' = $1"]
+        schedule_args: list[object] = [source_document_ref]
+
+        if workflow_run_ids:
+            schedule_clauses.append(
+                f"payload->>'workflow_run_id' = ANY(${len(schedule_args) + 1}::text[])"
+            )
+            schedule_args.append(workflow_run_ids)
+
+        if source_unit_refs:
+            schedule_clauses.append(
+                f"payload->>'source_unit_ref' = ANY(${len(schedule_args) + 1}::text[])"
+            )
+            schedule_args.append(source_unit_refs)
+
+        values.extend(
+            await _fetch_text_column(
+                connection,
+                f"""
+                SELECT work_item_id
+                FROM execution_work_item_schedules
+                WHERE {" OR ".join(schedule_clauses)}
+                """,
+                *schedule_args,
+                column_name="work_item_id",
+            )
+        )
+
     return _unique(values)
 
 

@@ -200,6 +200,43 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             ):
                 await workflow_unit_of_work.timeline.append_entry(timeline_entry)
 
+        scheduled_work_item_count = _payload_positive_int(
+            workflow_command.payload,
+            "scheduled_work_item_count",
+        )
+        if (
+            prepared_dispatch_count == 0
+            and scheduled_work_item_count > 0
+            and not _source_split_required(preflight_metadata)
+        ):
+            await workflow_unit_of_work.timeline.append_entry(
+                _zero_dispatch_after_scheduling_timeline_entry(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    scheduled_work_item_count=scheduled_work_item_count,
+                    preflight_metadata=preflight_metadata,
+                    occurred_at=occurred_at,
+                )
+            )
+            await _save_progress_snapshot(
+                workflow_unit_of_work=workflow_unit_of_work,
+                workflow_run_id=workflow_run_id,
+                prepared_dispatch_count=prepared_dispatch_count,
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.command_log.mark_command_failed(
+                command_id=workflow_command.command_id,
+                failed_at=occurred_at,
+            )
+            return HandlePrepareClaimBuilderDispatchBatchResult(
+                workflow_run_id=workflow_run_id,
+                prepared_dispatch_count=prepared_dispatch_count,
+                appended_event_count=appended_event_count,
+                appended_next_command_count=appended_next_command_count,
+                completed_command_id=workflow_command.command_id,
+            )
+
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
             workflow_run_id=workflow_run_id,
@@ -582,6 +619,54 @@ def _source_split_required_timeline_entry(
         payload_summary=payload_summary,
         occurred_at=occurred_at,
         source_ref=CLAIM_BUILDER_SECTION_WORK_KIND.value,
+    )
+
+
+def _zero_dispatch_after_scheduling_timeline_entry(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    scheduled_work_item_count: int,
+    preflight_metadata: Mapping[str, object],
+    occurred_at: datetime,
+) -> WorkflowTimelineEntry:
+    payload_summary = {
+        "workflow_run_id": workflow_run_id,
+        "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+        "scheduled_work_item_count": scheduled_work_item_count,
+        "prepared_dispatch_count": 0,
+        "input_size_preflight_decision": preflight_metadata[
+            "input_size_preflight_decision"
+        ],
+        "input_size_preflight_reason": preflight_metadata[
+            "input_size_preflight_reason"
+        ],
+        "input_size_preflight_active_model_ref": preflight_metadata[
+            "input_size_preflight_active_model_ref"
+        ],
+        "source_split_required": preflight_metadata["source_split_required"],
+    }
+    source_document_ref = workflow_command.payload.get("source_document_ref")
+    source_ref = (
+        source_document_ref
+        if isinstance(source_document_ref, str)
+        else CLAIM_BUILDER_SECTION_WORK_KIND.value
+    )
+    return WorkflowTimelineEntry(
+        timeline_entry_id=(
+            f"workflow-timeline:{workflow_run_id}:ClaimBuilderDispatchBatchPreparedZero"
+        ),
+        workflow_run_id=workflow_run_id,
+        event_type="ClaimBuilderDispatchBatchPreparedZero",
+        phase="CLAIM_BUILDER_SECTION_EXTRACTION",
+        severity=WorkflowTimelineSeverity.ERROR,
+        message=(
+            "Claim builder dispatch batch prepared zero attempts after "
+            "scheduled work items"
+        ),
+        payload_summary=payload_summary,
+        occurred_at=occurred_at,
+        source_ref=source_ref,
     )
 
 

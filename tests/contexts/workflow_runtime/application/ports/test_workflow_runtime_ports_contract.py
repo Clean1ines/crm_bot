@@ -117,6 +117,27 @@ class FakeCommandLogRepository:
             attempt_count=self.command.attempt_count,
         )
 
+    async def mark_command_failed(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        failed_at: datetime,
+    ) -> WorkflowCommand:
+        if self.command is None:
+            raise AssertionError("command was not appended")
+        return WorkflowCommand(
+            command_id=command_id,
+            command_type=self.command.command_type,
+            workflow_run_id=self.command.workflow_run_id,
+            idempotency_key=self.command.idempotency_key,
+            payload=self.command.payload,
+            status=WorkflowCommandStatus.FAILED,
+            run_after=self.command.run_after,
+            created_at=self.command.created_at,
+            updated_at=failed_at,
+            attempt_count=self.command.attempt_count,
+        )
+
     async def list_pending_commands(
         self,
         *,

@@ -215,6 +215,7 @@ class FakePrepareLlmDispatchBatch:
 class FakeCommandLogRepository:
     pending_commands: list[WorkflowCommand] = field(default_factory=list)
     completed_command_ids: list[WorkflowCommandId] = field(default_factory=list)
+    failed_command_ids: list[WorkflowCommandId] = field(default_factory=list)
 
     async def append_pending_command(
         self,
@@ -232,6 +233,16 @@ class FakeCommandLogRepository:
         del completed_at
         self.completed_command_ids.append(command_id)
         return _workflow_command(status=WorkflowCommandStatus.COMPLETED)
+
+    async def mark_command_failed(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        failed_at: datetime,
+    ) -> WorkflowCommand:
+        del failed_at
+        self.failed_command_ids.append(command_id)
+        return _workflow_command(status=WorkflowCommandStatus.FAILED)
 
     async def list_pending_commands(
         self,
@@ -479,7 +490,7 @@ async def test_appends_execute_claim_builder_section_per_prepared_attempt() -> N
 
 
 @pytest.mark.asyncio
-async def test_does_not_append_execute_claim_builder_section_when_no_attempts_prepared() -> (
+async def test_marks_prepare_failed_when_scheduled_work_prepares_zero_attempts() -> (
     None
 ):
     result, _, workflow_unit_of_work = await _execute(started_attempts=())
@@ -489,6 +500,19 @@ async def test_does_not_append_execute_claim_builder_section_when_no_attempts_pr
     assert result.appended_next_command_count == 0
     assert workflow_unit_of_work.outbox.events == []
     assert workflow_unit_of_work.command_log.pending_commands == []
+    assert workflow_unit_of_work.command_log.completed_command_ids == []
+    assert workflow_unit_of_work.command_log.failed_command_ids == [
+        _workflow_command().command_id,
+    ]
+
+    assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
+        "Claim builder dispatch batch prepared zero attempts after scheduled work items",
+    )
+    entry = workflow_unit_of_work.timeline.entries[0]
+    assert entry.event_type == "ClaimBuilderDispatchBatchPreparedZero"
+    assert entry.severity.value == "ERROR"
+    assert entry.payload_summary["scheduled_work_item_count"] == 2
+    assert entry.payload_summary["prepared_dispatch_count"] == 0
 
 
 @pytest.mark.asyncio

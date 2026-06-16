@@ -122,6 +122,40 @@ class PostgresCommandLogRepository(CommandLogRepositoryPort):
             raise KeyError(command_id.value)
         return _hydrate_command(row)
 
+    async def mark_command_failed(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        failed_at: datetime,
+    ) -> WorkflowCommand:
+        row = await self._connection.fetchrow(
+            """
+            UPDATE workflow_runtime_command_log
+            SET status = $2,
+                updated_at = $3
+            WHERE command_id = $1
+            RETURNING
+                command_id,
+                command_type,
+                workflow_run_id,
+                idempotency_key,
+                payload,
+                status,
+                run_after,
+                created_at,
+                updated_at,
+                causation_event_id,
+                correlation_id,
+                attempt_count
+            """,
+            command_id.value,
+            WorkflowCommandStatus.FAILED.value,
+            failed_at,
+        )
+        if row is None:
+            raise KeyError(command_id.value)
+        return _hydrate_command(row)
+
     async def list_pending_commands(
         self,
         *,

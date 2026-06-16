@@ -84,3 +84,20 @@ def test_clear_deletes_orphan_workflow_runtime_tails_by_project_workflow_prefix(
     assert "workflow_runtime_progress_snapshots" in content
     assert "workflow_runtime_resource_usage_snapshots" in content
     assert "orphan_runtime_tail_counts" in content
+
+
+def test_document_run_cleanup_collects_execution_work_items_from_schedule_payload() -> (
+    None
+):
+    content = (
+        ROOT / "src/contexts/knowledge_workbench/infrastructure/postgres/"
+        "postgres_workbench_document_run_cleanup_repository.py"
+    ).read_text(encoding="utf-8")
+    start = content.index("async def _work_item_ids(")
+    end = content.index("async def _attempt_ids(", start)
+    block = content[start:end]
+
+    assert "execution_work_item_schedules" in block
+    assert "payload->>'source_document_ref'" in block
+    assert "payload->>'workflow_run_id'" in block
+    assert "payload->>'source_unit_ref'" in block

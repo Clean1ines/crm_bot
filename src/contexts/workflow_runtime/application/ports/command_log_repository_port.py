@@ -25,6 +25,13 @@ class CommandLogRepositoryPort(Protocol):
         completed_at: datetime,
     ) -> WorkflowCommand: ...
 
+    async def mark_command_failed(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        failed_at: datetime,
+    ) -> WorkflowCommand: ...
+
     async def list_pending_commands(
         self,
         *,
