@@ -95,6 +95,7 @@ interface Document {
   created_at: string;
   updated_at?: string | null;
   preprocessing_mode?: KnowledgePreprocessingMode | string | null;
+  current_processing_run_id?: string | null;
   card_view?: WorkbenchDocumentCardView | null;
 }
 
@@ -354,6 +355,24 @@ const processingProgressPercent = (doc: Document): number | null => {
 };
 
 const shouldFetchWorkflowLiveStateForDocument = (doc: Document): boolean => {
+  if (doc.current_processing_run_id) return true;
+  if (doc.status === "pending" || doc.status === "processing" || doc.status === "error") {
+    return true;
+  }
+
+  const lifecycleState = doc.card_view?.lifecycle_state ?? "";
+  if (
+    [
+      "processing",
+      "auto_recovery_scheduled",
+      "failed",
+      "cancelled",
+      "paused_manual",
+    ].includes(lifecycleState)
+  ) {
+    return true;
+  }
+
   if (isDocumentProcessing(doc)) return true;
   const actions = doc.card_view?.actions ?? [];
   return actions.some(
@@ -364,6 +383,7 @@ const shouldFetchWorkflowLiveStateForDocument = (doc: Document): boolean => {
         action.action_id === "cancel_processing"),
   );
 };
+
 
 const processingProgressLabel = (doc: Document): string => {
   const total = doc.card_view?.sections.total ?? 0;
@@ -1758,7 +1778,7 @@ export const KnowledgePage: React.FC = () => {
           <div
             ref={documentsGridRef}
             id="knowledge-documents-grid"
-            className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3 lg:gap-6"
+            className="grid grid-cols-1 gap-4 xl:grid-cols-2 lg:gap-6"
           >
             {filteredDocuments.map((doc) => {
               const statusBadge = getStatusBadge(doc);

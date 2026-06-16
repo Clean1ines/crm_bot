@@ -119,3 +119,41 @@ def test_frontend_action_mapping_uses_current_workbench_action_ids() -> None:
     ):
         assert action_id in api
         assert action_id in page
+
+
+def test_document_card_uses_workflow_live_state_as_primary_progress_source() -> None:
+    source = CARD.read_text()
+
+    for marker in (
+        "livePrimaryProgressStage",
+        "hasLiveProgress",
+        "liveProgressQueueText",
+        "liveResultSummaryText",
+        "resultSummaryText",
+        "Подробности live-процесса",
+    ):
+        assert marker in source
+
+    assert source.index("const livePromptAStage") < source.index(
+        "const sectionProgressText"
+    )
+    assert source.index("const liveUsage") < source.index("const llmUsageText")
+    assert source.index("const liveResultSummaryText") < source.index(
+        "{resultSummaryText}"
+    )
+    assert "fallbackResultSummaryText" in source
+    assert "cardView.registry.entry_count" in source
+    assert "cardView.runtime.runtime_entry_count" in source
+
+
+def test_knowledge_page_fetches_live_state_for_active_workbench_documents_without_card_artifacts() -> (
+    None
+):
+    source = PAGE.read_text()
+
+    assert "current_processing_run_id?: string | null;" in source
+    assert "if (doc.current_processing_run_id) return true;" in source
+    assert 'doc.status === "processing"' in source
+    assert 'doc.status === "error"' in source
+    assert '"auto_recovery_scheduled"' in source
+    assert 'className="grid grid-cols-1 gap-4 xl:grid-cols-2 lg:gap-6"' in source
