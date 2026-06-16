@@ -71,6 +71,7 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 
 WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
 DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
+DRAFT_CLAIM_COMPACTION_RESERVED_OUTPUT_TOKENS = 4000
 DRAFT_CLAIM_COMPACTION_WORKER_REF = (
     "knowledge-workbench-draft-claim-compaction-dispatch"
 )
@@ -265,22 +266,8 @@ def _prepare_dispatch_batch_command(
             "workflow_run_id": workflow_run_id,
             "work_kind": WORK_KIND.value,
             "scheduled_work_item_count": scheduled_work_item_count,
-            "llm_dispatch_preparation": {
-                "profile": {
-                    "profile_id": "draft_claim_compaction",
-                    "estimated_prompt_tokens": 90000,
-                    "estimated_completion_tokens": 4000,
-                    "estimated_requests": 1,
-                },
-                "account_capacities": (),
-                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-                "requested_items": scheduled_work_item_count,
-                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-                "lease_token_prefix": (
-                    f"draft-claim-compaction-dispatch:{workflow_run_id}"
-                ),
-                "lease_ttl_seconds": 300,
-            },
+            "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+            "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=occurred_at,
@@ -351,8 +338,22 @@ def _plan(workflow_run_id: str, batch) -> WorkItemSchedulePlan:
             "prompt_variant": batch.prompt_variant,
             "model_id": batch.model_id,
             "source_claim_refs": list(batch.member_observation_refs),
+            "llm_capacity_estimate": _batch_capacity_estimate(batch),
         },
     )
+
+
+def _batch_capacity_estimate(batch) -> dict[str, object]:
+    estimated_input_tokens = max(1, batch.estimated_input_tokens)
+    reserved_output_tokens = DRAFT_CLAIM_COMPACTION_RESERVED_OUTPUT_TOKENS
+    return {
+        "estimator": "draft_claim_compaction_batch_budget_policy",
+        "estimated_input_tokens": estimated_input_tokens,
+        "reserved_output_tokens": reserved_output_tokens,
+        "estimated_total_tokens": estimated_input_tokens + reserved_output_tokens,
+        "prompt_variant": batch.prompt_variant,
+        "model_id": batch.model_id,
+    }
 
 
 async def _save_progress_snapshot(

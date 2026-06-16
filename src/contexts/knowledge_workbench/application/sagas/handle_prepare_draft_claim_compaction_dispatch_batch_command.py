@@ -12,12 +12,6 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
 )
-from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
-    LlmProviderAccountCapacity,
-)
-from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
-    LlmTaskCapacityProfile,
-)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -41,6 +35,7 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import
 )
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
+    PrepareLlmDispatchBatchResult,
 )
 
 
@@ -119,15 +114,57 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
         preflight_metadata = _empty_preflight_metadata(
             _active_model_ref_from_payload(workflow_command.payload)
         )
+        typed_prepare_result: PrepareLlmDispatchBatchResult | None = None
         if prepare_command is not None:
-            prepare_result = await prepare_llm_dispatch_batch.execute(prepare_command)
-            started_attempts = _started_attempts(prepare_result)
+            typed_prepare_result = _typed_prepare_result(
+                await prepare_llm_dispatch_batch.execute(prepare_command)
+            )
+            started_attempts = typed_prepare_result.attempt_result.started_attempts
             prepared_dispatch_count = len(started_attempts)
             preflight_metadata = _preflight_metadata_from_prepare_result(
-                prepare_result,
+                typed_prepare_result,
             )
 
         appended_event_count = 0
+        if (
+            prepared_dispatch_count == 0
+            and typed_prepare_result is not None
+            and typed_prepare_result.capacity_retry_at is not None
+        ):
+            capacity_retry_at = typed_prepare_result.capacity_retry_at
+            await workflow_unit_of_work.timeline.append_entry(
+                _capacity_throttled_timeline_entry(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    scheduled_work_item_count=_payload_positive_int(
+                        workflow_command.payload,
+                        "scheduled_work_item_count",
+                    ),
+                    capacity_retry_at=capacity_retry_at,
+                    preflight_metadata=preflight_metadata,
+                    occurred_at=occurred_at,
+                )
+            )
+            await _save_progress_snapshot(
+                workflow_unit_of_work=workflow_unit_of_work,
+                workflow_run_id=workflow_run_id,
+                prepared_dispatch_count=prepared_dispatch_count,
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.command_log.reschedule_pending_command(
+                command_id=workflow_command.command_id,
+                run_after=capacity_retry_at,
+                rescheduled_at=occurred_at,
+            )
+            return HandlePrepareDraftClaimCompactionDispatchBatchResult(
+                workflow_run_id=workflow_run_id,
+                prepared_dispatch_count=prepared_dispatch_count,
+                appended_event_count=appended_event_count,
+                appended_next_command_count=0,
+                completed_command_id=workflow_command.command_id,
+            )
+
         if prepared_dispatch_count > 0:
             prepared_event = _dispatch_batch_prepared_event(
                 workflow_command=workflow_command,
@@ -182,12 +219,8 @@ def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
 
 
 def _active_model_ref_from_payload(payload: Mapping[str, object]) -> str:
-    dispatch_payload = _payload_mapping(
-        payload,
-        "llm_dispatch_preparation",
-    )
     return _payload_text(
-        dispatch_payload,
+        payload,
         "active_model_ref",
         fallback=DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
     )
@@ -199,52 +232,24 @@ def _prepare_llm_dispatch_batch_command(
     workflow_run_id: str,
     occurred_at: datetime,
 ) -> PrepareLlmDispatchBatchCommand | None:
-    dispatch_payload = _payload_mapping(
-        workflow_command.payload,
-        "llm_dispatch_preparation",
-    )
     requested_items = _payload_positive_int(
-        dispatch_payload,
-        "requested_items",
-        fallback=_payload_positive_int(
-            workflow_command.payload,
-            "scheduled_work_item_count",
-        ),
+        workflow_command.payload,
+        "scheduled_work_item_count",
     )
-    account_capacities = _account_capacities_from_payload(dispatch_payload)
-    if not account_capacities:
-        return None
 
     return PrepareLlmDispatchBatchCommand(
         work_kind=DRAFT_CLAIM_COMPACTION_WORK_KIND,
-        profile=_profile_from_payload(_payload_mapping(dispatch_payload, "profile")),
-        account_capacities=account_capacities,
-        active_model_ref=_payload_text(
-            dispatch_payload,
-            "active_model_ref",
-            fallback=DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-        ),
+        active_model_ref=_active_model_ref_from_payload(workflow_command.payload),
         requested_items=requested_items,
         worker=WorkerRef(
             _payload_text(
-                dispatch_payload,
+                workflow_command.payload,
                 "worker_ref",
                 fallback=DRAFT_CLAIM_COMPACTION_WORKER_REF,
             ),
         ),
-        lease_token_prefix=_payload_text(
-            dispatch_payload,
-            "lease_token_prefix",
-            fallback=f"draft-claim-compaction-dispatch:{workflow_run_id}",
-        ),
-        lease_expires_at=occurred_at
-        + timedelta(
-            seconds=_payload_positive_int(
-                dispatch_payload,
-                "lease_ttl_seconds",
-                fallback=300,
-            ),
-        ),
+        lease_token_prefix=f"draft-claim-compaction-dispatch:{workflow_run_id}",
+        lease_expires_at=occurred_at + timedelta(seconds=90),
         now=occurred_at,
         started_at=occurred_at,
         dispatch_preparation_strategy=_dispatch_preparation_strategy(
@@ -268,55 +273,6 @@ def _dispatch_preparation_strategy(
             raise ValueError(f"workflow command payload {key} must be non-empty text")
         return value
     return None
-
-
-def _profile_from_payload(payload: Mapping[str, object]) -> LlmTaskCapacityProfile:
-    return LlmTaskCapacityProfile(
-        profile_id=_payload_text(payload, "profile_id"),
-        estimated_prompt_tokens=_payload_positive_int(
-            payload,
-            "estimated_prompt_tokens",
-        ),
-        estimated_completion_tokens=_payload_non_negative_int(
-            payload,
-            "estimated_completion_tokens",
-        ),
-        estimated_requests=_payload_positive_int(
-            payload,
-            "estimated_requests",
-            fallback=1,
-        ),
-    )
-
-
-def _account_capacities_from_payload(
-    payload: Mapping[str, object],
-) -> tuple[LlmProviderAccountCapacity, ...]:
-    account_payloads = _payload_mapping_sequence(payload, "account_capacities")
-    return tuple(
-        LlmProviderAccountCapacity(
-            provider=_payload_text(account_payload, "provider"),
-            account_ref=_payload_text(account_payload, "account_ref"),
-            model_ref=_payload_text(account_payload, "model_ref"),
-            remaining_minute_requests=_payload_non_negative_int(
-                account_payload,
-                "remaining_minute_requests",
-            ),
-            remaining_minute_tokens=_payload_non_negative_int(
-                account_payload,
-                "remaining_minute_tokens",
-            ),
-            remaining_daily_requests=_payload_non_negative_int(
-                account_payload,
-                "remaining_daily_requests",
-            ),
-            remaining_daily_tokens=_payload_non_negative_int(
-                account_payload,
-                "remaining_daily_tokens",
-            ),
-        )
-        for account_payload in account_payloads
-    )
 
 
 def _dispatch_batch_prepared_event(
@@ -445,6 +401,43 @@ def _timeline_entry(
     )
 
 
+def _capacity_throttled_timeline_entry(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    scheduled_work_item_count: int,
+    capacity_retry_at: datetime,
+    preflight_metadata: Mapping[str, object],
+    occurred_at: datetime,
+) -> WorkflowTimelineEntry:
+    payload_summary = {
+        "workflow_run_id": workflow_run_id,
+        "scheduled_work_item_count": scheduled_work_item_count,
+        "capacity_retry_at": capacity_retry_at.isoformat(),
+        "input_size_preflight_decision": preflight_metadata[
+            "input_size_preflight_decision"
+        ],
+        "input_size_preflight_reason": preflight_metadata[
+            "input_size_preflight_reason"
+        ],
+    }
+    return WorkflowTimelineEntry(
+        timeline_entry_id=(
+            f"workflow-timeline:{workflow_command.workflow_run_id}:"
+            "PrepareDraftClaimCompactionDispatchBatch:capacity-throttled:"
+            f"{occurred_at.isoformat()}"
+        ),
+        workflow_run_id=workflow_run_id,
+        event_type=workflow_command.command_type,
+        phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
+        severity=WorkflowTimelineSeverity.INFO,
+        message="Draft claim compaction dispatch capacity temporarily unavailable",
+        payload_summary=payload_summary,
+        occurred_at=occurred_at,
+        source_ref=DRAFT_CLAIM_COMPACTION_WORK_KIND.value,
+    )
+
+
 def _empty_preflight_metadata(active_model_ref: str) -> dict[str, object]:
     return {
         "input_size_preflight_decision": "NO_CAPACITY_AVAILABLE",
@@ -456,8 +449,16 @@ def _empty_preflight_metadata(active_model_ref: str) -> dict[str, object]:
     }
 
 
-def _preflight_metadata_from_prepare_result(
+def _typed_prepare_result(
     prepare_result: object,
+) -> PrepareLlmDispatchBatchResult:
+    if not isinstance(prepare_result, PrepareLlmDispatchBatchResult):
+        raise TypeError("prepare_result must be PrepareLlmDispatchBatchResult")
+    return prepare_result
+
+
+def _preflight_metadata_from_prepare_result(
+    prepare_result: PrepareLlmDispatchBatchResult,
 ) -> dict[str, object]:
     active_model_ref = _optional_result_text(
         prepare_result,
