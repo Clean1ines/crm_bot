@@ -335,44 +335,88 @@ def _split_markdown_by_atx_headings(
     normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
     lines = normalized.split("\n")
 
-    heading_indexes: list[int] = []
+    headings: list[tuple[int, int, str]] = []
     for index, line in enumerate(lines):
         stripped = line.lstrip()
         if not stripped.startswith("#"):
             continue
+
         marker = stripped.split(" ", 1)[0]
         if marker and set(marker) == {"#"} and 1 <= len(marker) <= 6:
-            heading_indexes.append(index)
+            heading_level = len(marker)
+            heading_title = stripped[heading_level:].strip() or stripped
+            headings.append((index, heading_level, heading_title))
 
-    if not heading_indexes:
+    if not headings:
+        return ()
+
+    split_level = _markdown_primary_split_level(headings)
+    split_headings = [
+        (index, level, title)
+        for index, level, title in headings
+        if level == split_level
+    ]
+    if not split_headings:
         return ()
 
     sections: list[tuple[tuple[str, ...], str]] = []
-    heading_stack: list[str] = []
 
-    if heading_indexes[0] > 0:
-        preamble = "\n".join(lines[: heading_indexes[0]]).strip()
-        if preamble:
-            sections.append(((), preamble))
+    preamble = "\n".join(lines[: split_headings[0][0]]).strip()
+    parent_heading_path = _heading_path_before_index(
+        headings=headings,
+        heading_index=split_headings[0][0],
+        split_level=split_level,
+    )
 
-    for position, heading_index in enumerate(heading_indexes):
+    for position, (heading_index, _level, heading_title) in enumerate(split_headings):
         next_index = (
-            heading_indexes[position + 1]
-            if position + 1 < len(heading_indexes)
+            split_headings[position + 1][0]
+            if position + 1 < len(split_headings)
             else len(lines)
         )
-        heading_line = lines[heading_index].strip()
-        heading_level = len(heading_line.split(" ", 1)[0])
-        heading_title = heading_line[heading_level:].strip() or heading_line
 
-        heading_stack = heading_stack[: heading_level - 1]
-        heading_stack.append(heading_title)
+        section_lines = lines[heading_index:next_index]
+        if position == 0 and preamble:
+            section_lines = [preamble, "", *section_lines]
 
-        section_text = "\n".join(lines[heading_index:next_index]).strip()
+        section_text = "\n".join(section_lines).strip()
         if section_text:
-            sections.append((tuple(heading_stack), section_text))
+            sections.append(((*parent_heading_path, heading_title), section_text))
 
     return tuple(sections)
+
+
+def _markdown_primary_split_level(
+    headings: list[tuple[int, int, str]],
+) -> int:
+    levels = {level for _index, level, _title in headings}
+
+    # Most product docs use one H1 title and H2 chapters.
+    # Splitting by every H3/H4 creates unusable tiny sections.
+    if 2 in levels:
+        return 2
+
+    return min(levels)
+
+
+def _heading_path_before_index(
+    *,
+    headings: list[tuple[int, int, str]],
+    heading_index: int,
+    split_level: int,
+) -> tuple[str, ...]:
+    stack: list[str] = []
+
+    for index, level, title in headings:
+        if index >= heading_index:
+            break
+        if level >= split_level:
+            continue
+
+        stack = stack[: level - 1]
+        stack.append(title)
+
+    return tuple(stack)
 
 
 def _segment_document_text(

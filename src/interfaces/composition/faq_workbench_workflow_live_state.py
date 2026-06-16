@@ -287,8 +287,33 @@ class WorkbenchWorkflowLiveStateQuery:
               ON s.work_item_id = wi.work_item_id
             LEFT JOIN execution_work_item_attempt_dispatches AS d
               ON d.attempt_id = a.attempt_id
-            LEFT JOIN llm_attempt_capacity_observations AS obs
-              ON obs.dispatch_attempt_id = a.attempt_id
+            LEFT JOIN LATERAL (
+                SELECT
+                    capacity_obs.actual_prompt_tokens,
+                    capacity_obs.actual_completion_tokens,
+                    capacity_obs.actual_total_tokens
+                FROM llm_attempt_capacity_observations AS capacity_obs
+                WHERE capacity_obs.provider = COALESCE(
+                    d.llm_allocation_payload->>'provider',
+                    d.dispatch_payload #>> '{llm_allocation,provider}'
+                )
+                  AND capacity_obs.account_ref = COALESCE(
+                    d.llm_allocation_payload->>'account_ref',
+                    d.dispatch_payload #>> '{llm_allocation,account_ref}'
+                  )
+                  AND capacity_obs.model_ref = COALESCE(
+                    d.llm_allocation_payload->>'model_ref',
+                    d.llm_allocation_payload->>'model',
+                    d.dispatch_payload #>> '{llm_allocation,model_ref}',
+                    d.dispatch_payload #>> '{llm_allocation,model}'
+                  )
+                  AND a.finished_at IS NOT NULL
+                  AND capacity_obs.observed_at BETWEEN
+                    a.finished_at - INTERVAL '30 seconds'
+                    AND a.finished_at + INTERVAL '30 seconds'
+                ORDER BY ABS(EXTRACT(EPOCH FROM (capacity_obs.observed_at - a.finished_at))) ASC
+                LIMIT 1
+            ) AS obs ON TRUE
             WHERE s.payload->>'source_document_ref' = $1
               AND s.payload->>'workflow_run_id' = $2
             ORDER BY a.started_at DESC, a.created_at DESC
