@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from datetime import datetime
 
 import asyncpg
 
+from src.contexts.execution_runtime.infrastructure.postgres.jsonb_payload_hydration import (
+    hydrate_jsonb_object_payload,
+)
 from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
     DueWorkItemRecord,
     LeasedWorkItemRecord,
@@ -202,19 +204,7 @@ def _hydrate_work_item(row: Mapping[str, object]) -> WorkItem:
 
 
 def _hydrate_schedule_payload(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
-        return dict(value)
-
-    if isinstance(value, str):
-        decoded = json.loads(value)
-        if not isinstance(decoded, Mapping):
-            raise TypeError("payload JSON must decode to Mapping")
-        return dict(decoded)
-
-    if isinstance(value, (bytes, bytearray)):
-        decoded = json.loads(bytes(value).decode("utf-8"))
-        if not isinstance(decoded, Mapping):
-            raise TypeError("payload JSON must decode to Mapping")
-        return dict(decoded)
-
-    raise TypeError("payload must be Mapping")
+    return hydrate_jsonb_object_payload(
+        value,
+        field_name="execution_work_item_schedules.payload",
+    )

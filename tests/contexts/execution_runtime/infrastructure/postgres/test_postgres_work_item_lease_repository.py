@@ -380,7 +380,13 @@ def test_hydrate_schedule_payload_accepts_json_bytes_object() -> None:
 
 
 def test_hydrate_schedule_payload_rejects_json_array() -> None:
-    with pytest.raises(TypeError, match="payload JSON must decode to Mapping"):
+    with pytest.raises(
+        TypeError,
+        match=(
+            "execution_work_item_schedules.payload must be JSON object Mapping; "
+            "got str that decoded to list"
+        ),
+    ):
         _hydrate_schedule_payload('["unit-1"]')
 
 

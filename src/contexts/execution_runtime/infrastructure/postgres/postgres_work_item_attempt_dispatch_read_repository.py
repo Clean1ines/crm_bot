@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import datetime
-from typing import cast
 
 import asyncpg
 
+from src.contexts.execution_runtime.infrastructure.postgres.jsonb_payload_hydration import (
+    hydrate_jsonb_object_payload,
+)
 from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_read_repository_port import (
     WorkItemAttemptDispatchForExecution,
     WorkItemAttemptDispatchReadRepositoryPort,
@@ -87,7 +89,7 @@ def _require_mapping(
     row: Mapping[str, object],
     key: str,
 ) -> Mapping[str, object]:
-    value = row[key]
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{key} must be Mapping")
-    return cast(Mapping[str, object], value)
+    return hydrate_jsonb_object_payload(
+        row[key],
+        field_name=f"execution_work_item_attempt_dispatches.{key}",
+    )
