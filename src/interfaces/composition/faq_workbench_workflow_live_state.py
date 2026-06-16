@@ -69,13 +69,14 @@ class WorkbenchWorkflowLiveStateQuery:
             workflow_run_id=workflow_run_id,
         )
         timeline = await self._timeline(workflow_run_id=workflow_run_id)
+        timer_events = await self._timer_events(workflow_run_id=workflow_run_id)
         curation = await self._curation(
             workflow_run_id=workflow_run_id,
             preview_ready=_int(counts, "preview_count") > 0,
             compacted_done=_int(counts, "active_compacted_nodes") > 0,
         )
 
-        timer = _timer(document_row)
+        timer = _timer(document_row, timer_events=timer_events)
         usage = WorkbenchWorkflowUsageLiveView(
             total_prompt_tokens=_int(document_row, "total_prompt_tokens"),
             total_completion_tokens=_int(document_row, "total_completion_tokens"),
@@ -400,6 +401,28 @@ class WorkbenchWorkflowLiveStateQuery:
         )
         return tuple(_timeline_entry(dict(row)) for row in rows)
 
+    async def _timer_events(
+        self,
+        *,
+        workflow_run_id: str | None,
+    ) -> tuple[Mapping[str, object], ...]:
+        if workflow_run_id is None:
+            return ()
+
+        rows = await self._connection.fetch(
+            """
+            SELECT
+                event_type,
+                occurred_at
+            FROM workflow_runtime_timeline_entries
+            WHERE workflow_run_id = $1
+              AND event_type IN ('WorkflowManuallyPaused', 'WorkflowManuallyResumed')
+            ORDER BY occurred_at ASC
+            """,
+            workflow_run_id,
+        )
+        return tuple(dict(row) for row in rows)
+
     async def _curation(
         self,
         *,
@@ -470,15 +493,19 @@ async def fetch_workbench_workflow_live_state(
         ).to_dict()
 
 
-def _timer(row: Mapping[str, object]) -> WorkbenchWorkflowTimerLiveView:
+def _timer(
+    row: Mapping[str, object],
+    *,
+    timer_events: tuple[Mapping[str, object], ...],
+) -> WorkbenchWorkflowTimerLiveView:
     workflow_status = (_optional_str(row, "workflow_status") or "").upper()
-    current_active_started_at = _optional_datetime(row, "current_active_started_at")
-    running = current_active_started_at is not None and workflow_status in {
-        "RUNNING",
-        "ACTIVE",
-        "PROCESSING",
-    }
-    if running:
+    started_at = _optional_datetime(row, "started_at")
+    completed_at = _optional_datetime(
+        row, "workflow_completed_at"
+    ) or _optional_datetime(row, "completed_at")
+    now = datetime.now(timezone.utc)
+
+    if workflow_status in {"RUNNING", "ACTIVE", "PROCESSING"}:
         mode = "running"
     elif workflow_status == "PAUSED":
         mode = "paused"
@@ -487,18 +514,73 @@ def _timer(row: Mapping[str, object]) -> WorkbenchWorkflowTimerLiveView:
     else:
         mode = "stopped"
 
+    timer_end = completed_at if completed_at is not None else now
+    active_elapsed_seconds, current_active_started_at = _active_timer_state(
+        started_at=started_at,
+        timer_end=timer_end,
+        workflow_status=workflow_status,
+        timer_events=timer_events,
+    )
+
+    wall_elapsed_seconds = 0
+    if started_at is not None:
+        wall_elapsed_seconds = max(0, int((timer_end - started_at).total_seconds()))
+
     return WorkbenchWorkflowTimerLiveView(
         mode=mode,
-        active_elapsed_seconds=_int(row, "active_elapsed_seconds"),
-        wall_elapsed_seconds=_int(row, "wall_elapsed_seconds"),
+        active_elapsed_seconds=active_elapsed_seconds,
+        wall_elapsed_seconds=wall_elapsed_seconds,
         current_active_started_at=current_active_started_at,
-        started_at=_optional_datetime(row, "started_at"),
-        completed_at=(
-            _optional_datetime(row, "workflow_completed_at")
-            or _optional_datetime(row, "completed_at")
-        ),
-        is_live=running,
+        started_at=started_at,
+        completed_at=completed_at,
+        is_live=mode == "running" and current_active_started_at is not None,
     )
+
+
+def _active_timer_state(
+    *,
+    started_at: datetime | None,
+    timer_end: datetime,
+    workflow_status: str,
+    timer_events: tuple[Mapping[str, object], ...],
+) -> tuple[int, datetime | None]:
+    if started_at is None:
+        return 0, None
+
+    active_seconds = 0
+    active_segment_started_at: datetime | None = started_at
+    paused = False
+
+    for event in timer_events:
+        event_type = _optional_str(event, "event_type")
+        occurred_at = _optional_datetime(event, "occurred_at")
+        if occurred_at is None or occurred_at < started_at or occurred_at > timer_end:
+            continue
+
+        if event_type == "WorkflowManuallyPaused" and not paused:
+            if active_segment_started_at is not None:
+                active_seconds += max(
+                    0,
+                    int((occurred_at - active_segment_started_at).total_seconds()),
+                )
+            active_segment_started_at = None
+            paused = True
+            continue
+
+        if event_type == "WorkflowManuallyResumed" and paused:
+            active_segment_started_at = occurred_at
+            paused = False
+
+    if workflow_status in {"RUNNING", "ACTIVE", "PROCESSING"} and not paused:
+        return active_seconds, active_segment_started_at
+
+    if active_segment_started_at is not None and not paused:
+        active_seconds += max(
+            0,
+            int((timer_end - active_segment_started_at).total_seconds()),
+        )
+
+    return active_seconds, None
 
 
 def _stages(

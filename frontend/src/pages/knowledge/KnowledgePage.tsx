@@ -818,26 +818,26 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
   const answerDrafts = answerDraftsQuery.data || {};
-  const sourceUnitDocumentIds = (
-    sourceUnitsDocumentId
-      ? [sourceUnitsDocumentId]
-      : hasProcessingDocuments
-        ? []
-        : Object.values(processingReports)
-            .filter((report) => {
-              const document = documents.find(
-                (doc) => doc.id === report.document_id,
-              );
-              const sourceCount =
-                metricNumber(report.metrics, "raw_source_unit_count") ??
-                metricNumber(report.metrics, "source_unit_count") ??
-                (document?.card_view?.sections.total ?? 0);
-              return (
-                Boolean(document && isDocumentProcessing(document)) ||
-                sourceCount > 0
-              );
-            })
-            .map((report) => report.document_id)
+  const sourceUnitDocumentIds = Array.from(
+    new Set([
+      ...(sourceUnitsDocumentId ? [sourceUnitsDocumentId] : []),
+      ...workflowLiveStateDocumentIds,
+      ...Object.values(processingReports)
+        .filter((report) => {
+          const document = documents.find(
+            (doc) => doc.id === report.document_id,
+          );
+          const sourceCount =
+            metricNumber(report.metrics, "raw_source_unit_count") ??
+            metricNumber(report.metrics, "source_unit_count") ??
+            (document?.card_view?.sections.total ?? 0);
+          return (
+            Boolean(document && isDocumentProcessing(document)) ||
+            sourceCount > 0
+          );
+        })
+        .map((report) => report.document_id),
+    ]),
   ).sort();
   const sourceUnitsQuery = useQuery({
     queryKey: [
@@ -1844,12 +1844,16 @@ export const KnowledgePage: React.FC = () => {
                     workflowLiveStateQuery.error
                       ? getErrorMessage(
                           workflowLiveStateQuery.error,
-                          "Не удалось загрузить live-state обработки",
+                          "Не удалось загрузить состояние обработки",
                         )
                       : null
                   }
+                  sourceUnitsResponse={sourceUnits[doc.id] ?? null}
                   onCardAction={(actionId) => {
-                    if (actionId === "cancel_processing") {
+                    if (
+                      actionId === "cancel_processing" ||
+                      actionId === "pause_processing"
+                    ) {
                       cancelProcessingMutation.mutate(doc.id);
                       return;
                     }
