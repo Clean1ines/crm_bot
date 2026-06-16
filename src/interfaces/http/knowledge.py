@@ -2240,6 +2240,7 @@ async def cancel_knowledge_processing(
 
 
 @router.delete("/{document_id}")
+@router.delete("/{document_id}")
 async def delete_knowledge_document(
     project_id: str,
     document_id: str,
@@ -2248,7 +2249,7 @@ async def delete_knowledge_document(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Hard-deletes a knowledge document and all document-scoped processing artifacts."""
+    """Hard-delete one knowledge document and all document-scoped artifacts."""
 
     await _require_project_access(
         project_id=project_id,
