@@ -227,6 +227,23 @@ def _schedule_command() -> WorkflowCommand:
     )
 
 
+def _schedule_command_without_dispatch_preparation() -> WorkflowCommand:
+    command = _schedule_command()
+    payload = dict(command.payload)
+    payload.pop("llm_dispatch_preparation", None)
+    return WorkflowCommand(
+        command_id=command.command_id,
+        command_type=command.command_type,
+        workflow_run_id=command.workflow_run_id,
+        idempotency_key=command.idempotency_key,
+        payload=payload,
+        status=command.status,
+        run_after=command.run_after,
+        created_at=command.created_at,
+        updated_at=command.updated_at,
+    )
+
+
 def _valid_claim_builder_output_text() -> str:
     return json.dumps(
         {
@@ -1462,3 +1479,37 @@ async def test_resume_workflow_drains_existing_workflow_without_source_ingestion
     assert drain_workflow_run_ids == [_workflow_run_id()]
     assert pool.acquire_count == 1
     assert pool.release_count == 1
+
+
+@pytest.mark.asyncio
+async def test_after_upload_drain_builds_dispatch_preparation_when_schedule_payload_has_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_drain_dependencies(monkeypatch)
+    connection = FakeConnection()
+    connection.command_log.commands = [_schedule_command_without_dispatch_preparation()]
+    prepare_port = FakePrepareLlmDispatchBatch()
+
+    runner = RunKnowledgeExtractionWorkflowAfterUpload(
+        source_ingestion_runner=FakeSourceIngestionRunner(completed=True),
+        pool=FakePool(connection),
+        prepare_llm_dispatch_batch=prepare_port,
+    )
+
+    result = await runner.execute(
+        RunKnowledgeExtractionWorkflowAfterUploadCommand(
+            source_ingestion_command=_source_ingestion_command(),
+            max_drain_commands=10,
+        )
+    )
+
+    assert result.source_ingestion_completed is True
+    assert result.blocked_reason != (
+        "workflow command payload must include mapping llm_dispatch_preparation"
+    )
+    assert len(prepare_port.calls) == 1
+    assert prepare_port.calls[0].active_model_ref == "qwen/qwen3-32b"
+    assert prepare_port.calls[0].requested_items == 1
+    assert prepare_port.calls[0].lease_token_prefix == (
+        f"claim-builder-dispatch:{_workflow_run_id()}"
+    )

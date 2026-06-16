@@ -449,7 +449,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   return (
     <div
       id={`knowledge-doc-card-${doc.id}`}
-      className="group rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5"
+      className="group w-full min-w-0 rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5"
     >
       <div className="mb-4 flex items-start justify-between gap-2">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
@@ -535,8 +535,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       </div>
 
       <div className="mb-4 space-y-3">
-        <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+        <div className="grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
+          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
               <Clock3 className="h-3.5 w-3.5" />
               {cardText(cardView.timer.i18n_key, cardView.timer.default_label)}
@@ -547,7 +547,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
               <Zap className="h-3.5 w-3.5" />
               ИИ
@@ -555,7 +555,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             <div className="text-[var(--text-muted)]">{llmUsageText}</div>
           </div>
 
-          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 font-medium text-[var(--text-primary)]">
               Прогресс
             </div>
@@ -571,7 +571,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             </div>
           </div>
 
-          <div className="rounded-xl bg-[var(--surface-secondary)] p-3">
+          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 font-medium text-[var(--text-primary)]">
               Итог
             </div>
@@ -634,7 +634,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                 </span>
               )}
               {liveWorkflow?.workflow_run_id && (
-                <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+                <span
+                  className="max-w-full truncate rounded-full bg-[var(--control-bg)] px-2 py-0.5 font-mono sm:max-w-[28rem]"
+                  title={liveWorkflow.workflow_run_id}
+                >
                   workflow: {liveWorkflow.workflow_run_id}
                 </span>
               )}
@@ -648,7 +651,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
             {liveWorkflow && (
               <div className="space-y-3">
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
                   <div className="rounded-lg bg-[var(--surface-elevated)] p-2">
                     <div className="font-medium text-[var(--text-primary)]">
                       Стадия
@@ -684,14 +687,14 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                   <div className="mb-1 font-medium text-[var(--text-primary)]">
                     Этапы
                   </div>
-                  <div className="grid grid-cols-1 gap-1 md:grid-cols-2">
+                  <div className="grid gap-1 [grid-template-columns:repeat(auto-fit,minmax(180px,1fr))]">
                     {liveWorkflow.stages.map((stage) => (
                       <div
                         key={stage.id}
-                        className="flex items-center justify-between gap-2 rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
+                        className="flex min-w-0 items-center justify-between gap-2 rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
                       >
-                        <span>{liveStageLabel(stage)}</span>
-                        <span className="text-[var(--text-muted)]">
+                        <span className="min-w-0 truncate">{liveStageLabel(stage)}</span>
+                        <span className="shrink-0 text-[var(--text-muted)]">
                           {liveStageStatusLabel(stage.status)}
                           {stage.total > 0
                             ? ` · ${formatNumber(stage.current)} / ${formatNumber(stage.total)}`
