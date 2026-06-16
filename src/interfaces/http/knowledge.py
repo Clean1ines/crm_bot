@@ -2439,11 +2439,12 @@ async def _list_project_source_document_refs(
 
                 SELECT document_ref
                 FROM source_documents
-                WHERE project_id = $1
+                WHERE project_id = $2::text
             ) AS refs
             WHERE document_ref IS NOT NULL
             ORDER BY document_ref ASC
             """,
+            project_id,
             project_id,
         )
 
@@ -2453,6 +2454,127 @@ async def _list_project_source_document_refs(
         if isinstance(value, str) and value.strip():
             result.append(value)
     return tuple(dict.fromkeys(result))
+
+
+def _deleted_row_count(status: object) -> int:
+    if not isinstance(status, str):
+        return 0
+    parts = status.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        return 0
+    return int(parts[1])
+
+
+async def _delete_project_orphan_knowledge_runtime_tails(
+    *,
+    pool,
+    project_id: str,
+) -> dict[str, int]:
+    """Delete old workflow-runtime tails left by earlier partial document deletes.
+
+    These rows are not protected by source_documents/knowledge_workbench_documents
+    FK cascades, but the current workflow_run_id format embeds project_id:
+    knowledge-extraction:source-document:{project_id}:...
+    """
+
+    workflow_prefix = f"knowledge-extraction:source-document:{project_id}:%"
+
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            rows = await connection.fetch(
+                """
+                SELECT DISTINCT workflow_run_id
+                FROM (
+                    SELECT workflow_run_id
+                    FROM workflow_runtime_timeline_entries
+                    WHERE workflow_run_id LIKE $1
+
+                    UNION
+
+                    SELECT workflow_run_id
+                    FROM workflow_runtime_command_log
+                    WHERE workflow_run_id LIKE $1
+
+                    UNION
+
+                    SELECT workflow_run_id
+                    FROM workflow_runtime_outbox_events
+                    WHERE workflow_run_id LIKE $1
+
+                    UNION
+
+                    SELECT workflow_run_id
+                    FROM workflow_runtime_progress_snapshots
+                    WHERE workflow_run_id LIKE $1
+
+                    UNION
+
+                    SELECT workflow_run_id
+                    FROM workflow_runtime_resource_usage_snapshots
+                    WHERE workflow_run_id LIKE $1
+                ) AS runtime_refs
+                ORDER BY workflow_run_id ASC
+                """,
+                workflow_prefix,
+            )
+            workflow_run_ids = tuple(
+                str(dict(row)["workflow_run_id"])
+                for row in rows
+                if dict(row).get("workflow_run_id") is not None
+            )
+
+            if not workflow_run_ids:
+                return {
+                    "workflow_commands": 0,
+                    "workflow_outbox_events": 0,
+                    "workflow_progress_snapshots": 0,
+                    "timeline_entries": 0,
+                    "resource_usage_snapshots": 0,
+                }
+
+            outbox_status = await connection.execute(
+                """
+                DELETE FROM workflow_runtime_outbox_events
+                WHERE workflow_run_id = ANY($1::text[])
+                """,
+                workflow_run_ids,
+            )
+            command_status = await connection.execute(
+                """
+                DELETE FROM workflow_runtime_command_log
+                WHERE workflow_run_id = ANY($1::text[])
+                """,
+                workflow_run_ids,
+            )
+            progress_status = await connection.execute(
+                """
+                DELETE FROM workflow_runtime_progress_snapshots
+                WHERE workflow_run_id = ANY($1::text[])
+                """,
+                workflow_run_ids,
+            )
+            timeline_status = await connection.execute(
+                """
+                DELETE FROM workflow_runtime_timeline_entries
+                WHERE workflow_run_id = ANY($1::text[])
+                """,
+                workflow_run_ids,
+            )
+            usage_status = await connection.execute(
+                """
+                DELETE FROM workflow_runtime_resource_usage_snapshots
+                WHERE workflow_run_id = ANY($1::text[])
+                """,
+                workflow_run_ids,
+            )
+
+    return {
+        "workflow_commands": _deleted_row_count(command_status),
+        "workflow_outbox_events": _deleted_row_count(outbox_status),
+        "workflow_progress_snapshots": _deleted_row_count(progress_status),
+        "timeline_entries": _deleted_row_count(timeline_status),
+        "resource_usage_snapshots": _deleted_row_count(usage_status),
+    }
 
 
 @router.delete("")
@@ -2508,6 +2630,13 @@ async def clear_knowledge(
             }
         )
 
+    orphan_runtime_tail_counts = await _delete_project_orphan_knowledge_runtime_tails(
+        pool=pool,
+        project_id=project_id,
+    )
+    for key, value in orphan_runtime_tail_counts.items():
+        total_counts[key] = total_counts.get(key, 0) + value
+
     return {
         "deleted": True,
         "project_id": project_id,
@@ -2516,6 +2645,7 @@ async def clear_knowledge(
         ),
         "source_document_refs": list(source_document_refs),
         "documents": deleted_results,
+        "orphan_runtime_tail_counts": orphan_runtime_tail_counts,
         "deleted_counts": total_counts,
     }
 
