@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import pytest
 
@@ -115,23 +115,6 @@ def _workflow_command(
     )
 
 
-def _legacy_workflow_command_without_dispatch_preparation() -> WorkflowCommand:
-    command = _workflow_command()
-    payload = dict(command.payload)
-    payload.pop("llm_dispatch_preparation", None)
-    return WorkflowCommand(
-        command_id=command.command_id,
-        command_type=command.command_type,
-        workflow_run_id=command.workflow_run_id,
-        idempotency_key=command.idempotency_key,
-        payload=payload,
-        status=command.status,
-        run_after=command.run_after,
-        created_at=command.created_at,
-        updated_at=command.updated_at,
-    )
-
-
 def _workflow_command_with_malformed_dispatch_preparation() -> WorkflowCommand:
     command = _workflow_command()
     payload = dict(command.payload)
@@ -177,6 +160,7 @@ class FakePrepareResult:
     )
     input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
     source_split_required: bool = False
+    capacity_retry_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -192,6 +176,7 @@ class FakePrepareLlmDispatchBatch:
     )
     input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
     source_split_required: bool = False
+    capacity_retry_at: datetime | None = None
     calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
 
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
@@ -208,6 +193,7 @@ class FakePrepareLlmDispatchBatch:
                 self.input_size_preflight_active_model_ref
             ),
             source_split_required=self.source_split_required,
+            capacity_retry_at=self.capacity_retry_at,
         )
 
 
@@ -216,6 +202,9 @@ class FakeCommandLogRepository:
     pending_commands: list[WorkflowCommand] = field(default_factory=list)
     completed_command_ids: list[WorkflowCommandId] = field(default_factory=list)
     failed_command_ids: list[WorkflowCommandId] = field(default_factory=list)
+    rescheduled_commands: list[tuple[WorkflowCommandId, datetime]] = field(
+        default_factory=list,
+    )
 
     async def append_pending_command(
         self,
@@ -243,6 +232,17 @@ class FakeCommandLogRepository:
         del failed_at
         self.failed_command_ids.append(command_id)
         return _workflow_command(status=WorkflowCommandStatus.FAILED)
+
+    async def reschedule_pending_command(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        run_after: datetime,
+        rescheduled_at: datetime,
+    ) -> WorkflowCommand:
+        del rescheduled_at
+        self.rescheduled_commands.append((command_id, run_after))
+        return _workflow_command()
 
     async def list_pending_commands(
         self,
@@ -388,6 +388,7 @@ async def _execute(
     ),
     input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b",
     source_split_required: bool = False,
+    capacity_retry_at: datetime | None = None,
 ) -> tuple[
     HandlePrepareClaimBuilderDispatchBatchResult,
     FakePrepareLlmDispatchBatch,
@@ -403,6 +404,7 @@ async def _execute(
         input_size_preflight_reason=input_size_preflight_reason,
         input_size_preflight_active_model_ref=input_size_preflight_active_model_ref,
         source_split_required=source_split_required,
+        capacity_retry_at=capacity_retry_at,
     )
     workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
     result = await HandlePrepareClaimBuilderDispatchBatchCommandHandler().execute(
@@ -446,6 +448,9 @@ async def test_calls_existing_prepare_llm_dispatch_batch_for_claim_builder_work_
     assert prepare.calls[0].work_kind == CLAIM_BUILDER_SECTION_WORK_KIND
     assert prepare.calls[0].active_model_ref == "qwen/qwen3-32b"
     assert prepare.calls[0].requested_items == 2
+    assert prepare.calls[0].profile is not None
+    assert prepare.calls[0].profile.profile_id == "faq_claim_observations"
+    assert len(prepare.calls[0].account_capacities) == 1
 
 
 @pytest.mark.asyncio
@@ -513,6 +518,27 @@ async def test_marks_prepare_failed_when_scheduled_work_prepares_zero_attempts()
     assert entry.severity.value == "ERROR"
     assert entry.payload_summary["scheduled_work_item_count"] == 2
     assert entry.payload_summary["prepared_dispatch_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_reschedules_prepare_when_zero_attempts_are_capacity_throttled() -> None:
+    retry_at = _now() + timedelta(seconds=60)
+
+    result, _, workflow_unit_of_work = await _execute(
+        started_attempts=(),
+        capacity_retry_at=retry_at,
+    )
+
+    assert result.prepared_dispatch_count == 0
+    assert result.appended_next_command_count == 0
+    assert workflow_unit_of_work.command_log.failed_command_ids == []
+    assert workflow_unit_of_work.command_log.completed_command_ids == []
+    assert workflow_unit_of_work.command_log.rescheduled_commands == [
+        (_workflow_command().command_id, retry_at),
+    ]
+    assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
+        "Claim builder dispatch capacity temporarily unavailable",
+    )
 
 
 @pytest.mark.asyncio
@@ -773,35 +799,6 @@ async def test_source_split_required_raises_when_prepare_result_has_no_source_un
             source_unit_refs=(),
             source_split_required=True,
         )
-
-
-@pytest.mark.asyncio
-async def test_accepts_legacy_prepare_command_without_llm_dispatch_preparation() -> (
-    None
-):
-    result, prepare, workflow_unit_of_work = await _execute(
-        _legacy_workflow_command_without_dispatch_preparation(),
-    )
-
-    assert result.prepared_dispatch_count == 2
-    assert len(prepare.calls) == 1
-    command = prepare.calls[0]
-    assert command.active_model_ref == "qwen/qwen3-32b"
-    assert command.requested_items == 2
-    assert command.profile.profile_id == "faq_claim_observations"
-    assert command.profile.estimated_prompt_tokens == 3000
-    assert command.profile.estimated_completion_tokens == 500
-    assert command.worker.value == "knowledge-workbench-claim-builder-dispatch"
-    assert command.lease_token_prefix == (
-        f"claim-builder-dispatch:{_workflow_run_id()}"
-    )
-    assert command.account_capacities
-    assert command.account_capacities[0].provider == "groq"
-    assert command.account_capacities[0].account_ref == "groq_org_primary"
-    assert command.account_capacities[0].model_ref == "qwen/qwen3-32b"
-
-    next_command = workflow_unit_of_work.command_log.pending_commands[0]
-    assert isinstance(next_command.payload["llm_dispatch_preparation"], dict)
 
 
 @pytest.mark.asyncio

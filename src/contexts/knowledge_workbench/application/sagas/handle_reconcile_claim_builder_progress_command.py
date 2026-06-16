@@ -251,6 +251,10 @@ def _next_command(
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
     selected_retry_strategy = _selected_retry_strategy(retry_action_summary)
+    prepare_suffix_scope = _prepare_command_suffix_scope(
+        selected_retry_strategy=selected_retry_strategy,
+        scheduled_work_item_count=summary.total_count,
+    )
 
     if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW:
         return _prepare_dispatch_batch_command(
@@ -261,7 +265,7 @@ def _next_command(
             selected_retry_strategy=selected_retry_strategy,
             run_after=occurred_at,
             occurred_at=occurred_at,
-            suffix="now",
+            suffix=f"now:{prepare_suffix_scope}",
         )
 
     if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER:
@@ -276,7 +280,7 @@ def _next_command(
             selected_retry_strategy=selected_retry_strategy,
             run_after=next_due_at,
             occurred_at=occurred_at,
-            suffix=f"later:{next_due_at.isoformat()}",
+            suffix=f"later:{prepare_suffix_scope}:{next_due_at.isoformat()}",
         )
 
     if decision is ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SPLIT_REQUIRED:
@@ -296,6 +300,15 @@ def _next_command(
     return None
 
 
+def _prepare_command_suffix_scope(
+    *,
+    selected_retry_strategy: str | None,
+    scheduled_work_item_count: int,
+) -> str:
+    strategy_scope = selected_retry_strategy or "default"
+    return f"{strategy_scope}:scheduled:{scheduled_work_item_count}"
+
+
 def _prepare_dispatch_batch_command(
     *,
     workflow_command: WorkflowCommand,
@@ -311,12 +324,10 @@ def _prepare_dispatch_batch_command(
     command_payload: dict[str, object] = {
         "workflow_run_id": workflow_run_id,
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
-        "scheduled_work_item_count": summary.due_waiting_count,
-        "summary": summary.to_payload(),
-        "retry_action_summary": retry_action_summary.to_payload(),
-        "selected_retry_strategy": selected_retry_strategy,
+        "scheduled_work_item_count": summary.total_count,
     }
     if selected_retry_strategy is not None:
+        command_payload["selected_retry_strategy"] = selected_retry_strategy
         command_payload["claim_builder_next_model_strategy"] = selected_retry_strategy
         command_payload["llm_dispatch_preparation_strategy"] = selected_retry_strategy
     dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")

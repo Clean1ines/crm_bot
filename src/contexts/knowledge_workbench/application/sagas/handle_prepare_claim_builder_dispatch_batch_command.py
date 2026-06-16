@@ -13,6 +13,12 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
 )
+from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
+    LlmProviderAccountCapacity,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
+    LlmTaskCapacityProfile,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -180,23 +186,6 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             ):
                 await workflow_unit_of_work.timeline.append_entry(timeline_entry)
 
-            capacity_retry_at = _capacity_retry_at_from_prepare_result(
-                typed_prepare_result,
-            )
-            if capacity_retry_at is not None:
-                next_prepare_command = (
-                    _next_prepare_claim_builder_dispatch_batch_command(
-                        workflow_command=workflow_command,
-                        workflow_run_id=workflow_run_id,
-                        capacity_retry_at=capacity_retry_at,
-                        occurred_at=occurred_at,
-                    )
-                )
-                await workflow_unit_of_work.command_log.append_pending_command(
-                    next_prepare_command,
-                )
-                appended_next_command_count += 1
-
         scheduled_work_item_count = _payload_positive_int(
             workflow_command.payload,
             "scheduled_work_item_count",
@@ -315,21 +304,119 @@ def _prepare_llm_dispatch_batch_command(
 
     return PrepareLlmDispatchBatchCommand(
         work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
-        active_model_ref=_payload_text(
-            workflow_command.payload,
-            "active_model_ref",
-            fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
-        ),
+        active_model_ref=_active_model_ref_from_payload(workflow_command.payload),
         requested_items=requested_items,
         worker=WorkerRef("knowledge-workbench-claim-builder-dispatch"),
         lease_token_prefix=f"claim-builder-dispatch:{workflow_run_id}",
         lease_expires_at=occurred_at + timedelta(seconds=90),
         now=occurred_at,
         started_at=occurred_at,
+        profile=_profile_from_dispatch_preparation(workflow_command.payload),
+        account_capacities=_account_capacities_from_dispatch_preparation(
+            workflow_command.payload,
+        ),
         dispatch_preparation_strategy=_dispatch_preparation_strategy(
             workflow_command.payload,
         ),
     )
+
+
+def _active_model_ref_from_payload(payload: Mapping[str, object]) -> str:
+    dispatch_preparation = _optional_payload_mapping(
+        payload,
+        "llm_dispatch_preparation",
+    )
+    if dispatch_preparation is not None:
+        return _payload_text(
+            dispatch_preparation,
+            "active_model_ref",
+            fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
+        )
+    return _payload_text(
+        payload,
+        "active_model_ref",
+        fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
+    )
+
+
+def _profile_from_dispatch_preparation(
+    payload: Mapping[str, object],
+) -> LlmTaskCapacityProfile | None:
+    dispatch_preparation = _optional_payload_mapping(
+        payload,
+        "llm_dispatch_preparation",
+    )
+    if dispatch_preparation is None:
+        return None
+
+    profile_payload = _payload_mapping(dispatch_preparation, "profile")
+    return LlmTaskCapacityProfile(
+        profile_id=_payload_text(profile_payload, "profile_id"),
+        estimated_prompt_tokens=_payload_positive_int(
+            profile_payload,
+            "estimated_prompt_tokens",
+        ),
+        estimated_completion_tokens=_payload_non_negative_int(
+            profile_payload,
+            "estimated_completion_tokens",
+        ),
+        estimated_requests=_payload_positive_int(
+            profile_payload,
+            "estimated_requests",
+        ),
+    )
+
+
+def _account_capacities_from_dispatch_preparation(
+    payload: Mapping[str, object],
+) -> tuple[LlmProviderAccountCapacity, ...]:
+    dispatch_preparation = _optional_payload_mapping(
+        payload,
+        "llm_dispatch_preparation",
+    )
+    if dispatch_preparation is None:
+        return ()
+
+    account_payloads = _payload_mapping_sequence(
+        dispatch_preparation,
+        "account_capacities",
+    )
+    return tuple(
+        LlmProviderAccountCapacity(
+            provider=_payload_text(account_payload, "provider"),
+            account_ref=_payload_text(account_payload, "account_ref"),
+            model_ref=_payload_text(account_payload, "model_ref"),
+            remaining_minute_requests=_payload_non_negative_int(
+                account_payload,
+                "remaining_minute_requests",
+            ),
+            remaining_minute_tokens=_payload_non_negative_int(
+                account_payload,
+                "remaining_minute_tokens",
+            ),
+            remaining_daily_requests=_payload_non_negative_int(
+                account_payload,
+                "remaining_daily_requests",
+            ),
+            remaining_daily_tokens=_payload_non_negative_int(
+                account_payload,
+                "remaining_daily_tokens",
+            ),
+        )
+        for account_payload in account_payloads
+    )
+
+
+def _optional_payload_mapping(
+    payload: Mapping[str, object],
+    key: str,
+) -> Mapping[str, object] | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise ValueError(f"workflow command payload {key} must be mapping")
+    return value
 
 
 def _dispatch_preparation_strategy(

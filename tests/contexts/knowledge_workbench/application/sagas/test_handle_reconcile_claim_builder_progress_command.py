@@ -428,6 +428,30 @@ async def test_ready_work_appends_prepare_dispatch_batch_now() -> None:
     )
     assert next_command.run_after == _now()
     assert "llm_dispatch_preparation" in next_command.payload
+    assert next_command.payload["scheduled_work_item_count"] == 3
+    assert "summary" not in next_command.payload
+    assert "retry_action_summary" not in next_command.payload
+
+
+@pytest.mark.asyncio
+async def test_repeated_reconcile_keeps_prepare_payload_stable_when_live_counts_change() -> (
+    None
+):
+    _, _, _, first_uow = await _execute(
+        summary=_summary(ready_count=2, completed_count=1),
+    )
+    _, _, _, second_uow = await _execute(
+        summary=_summary(ready_count=1, completed_count=2),
+    )
+
+    first_command = first_uow.command_log.pending_commands[0]
+    second_command = second_uow.command_log.pending_commands[0]
+
+    assert first_command.idempotency_key == second_command.idempotency_key
+    assert dict(first_command.payload) == dict(second_command.payload)
+    assert first_command.payload["scheduled_work_item_count"] == 3
+    assert "summary" not in first_command.payload
+    assert "retry_action_summary" not in first_command.payload
 
 
 @pytest.mark.asyncio
@@ -532,9 +556,8 @@ async def test_retry_fallback_model_count_appends_prepare_with_fallback_strategy
     assert next_command.payload["selected_retry_strategy"] == (
         "FALLBACK_MODEL_REQUIRED"
     )
-    assert (
-        next_command.payload["retry_action_summary"]["retry_fallback_model_count"] == 1
-    )
+    assert "summary" not in next_command.payload
+    assert "retry_action_summary" not in next_command.payload
 
 
 @pytest.mark.asyncio
