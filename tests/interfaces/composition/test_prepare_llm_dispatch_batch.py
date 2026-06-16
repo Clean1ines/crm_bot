@@ -140,6 +140,25 @@ class FakeConnection:
         return candidates[:limit]
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        if "wi.work_item_id = $2" in query:
+            work_kind = str(args[0])
+            work_item_id = str(args[1])
+            now = _as_datetime(args[2])
+            row = self.work_items.get(work_item_id)
+            if row is None:
+                return None
+            if row["work_kind"] != work_kind:
+                return None
+            if row["status"] not in {"ready", "deferred", "retryable_failed"}:
+                return None
+            next_attempt_at = row["next_attempt_at"]
+            if next_attempt_at is not None and _as_datetime(next_attempt_at) > now:
+                return None
+            payload = self.schedules.get(work_item_id)
+            if payload is None:
+                return None
+            return {**row, "payload": payload}
+
         work_kind = str(args[0])
         now = _as_datetime(args[1])
         candidates: list[dict[str, object]] = []
@@ -465,7 +484,7 @@ async def test_no_due_work_items_creates_no_attempts() -> None:
     result = await _runner(pool).execute(_command())
 
     assert connection.transactions[0].committed is True
-    assert result.lease_result.llm_capacity_projection.max_projected_items == 2
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 0
     assert result.lease_result.leased == ()
     assert result.attempt_result.started_attempts == ()
     assert connection.attempts == {}
@@ -865,7 +884,60 @@ def test_groq_missing_minute_reset_uses_local_sixty_second_timer() -> None:
         now=observed_at + timedelta(seconds=61),
     )
     assert recovered_capacity.remaining_minute_requests == 60
-    assert (
-        recovered_capacity.remaining_minute_tokens >= _profile().estimated_prompt_tokens
+    assert recovered_capacity.remaining_minute_tokens == 0
+    assert recovered_capacity.max_items_for(_profile()) == 0
+
+
+@pytest.mark.asyncio
+async def test_prepare_skips_expensive_due_item_and_leases_later_item_that_fits_tpm() -> (
+    None
+):
+    expensive_profile = LlmTaskCapacityProfile(
+        profile_id="expensive-section",
+        estimated_prompt_tokens=5000,
+        estimated_completion_tokens=0,
     )
-    assert recovered_capacity.max_items_for(_profile()) >= 1
+    cheap_profile = LlmTaskCapacityProfile(
+        profile_id="cheap-section",
+        estimated_prompt_tokens=1000,
+        estimated_completion_tokens=0,
+    )
+    connection = _connection_with_due_items(3)
+    connection.schedules["work-1"] = _schedule_payload(
+        source_unit_ref="unit-1",
+        profile=expensive_profile,
+    )
+    connection.schedules["work-2"] = _schedule_payload(
+        source_unit_ref="unit-2",
+        profile=cheap_profile,
+    )
+    connection.schedules["work-3"] = _schedule_payload(
+        source_unit_ref="unit-3",
+        profile=expensive_profile,
+    )
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="qwen_1",
+                    minute_requests=1,
+                    minute_tokens=1000,
+                    model_ref="qwen/qwen3-32b",
+                    daily_requests=10,
+                    daily_tokens=1000,
+                ),
+            ),
+            active_model_ref="qwen/qwen3-32b",
+            requested_items=3,
+        ),
+    )
+
+    assert len(result.attempt_result.started_attempts) == 1
+    assert result.lease_result.leased[0].leased.work_item.work_item_id == "work-2"
+    assert connection.work_items["work-1"]["status"] == "ready"
+    assert connection.work_items["work-2"]["status"] == "leased"
+    assert connection.work_items["work-3"]["status"] == "ready"
+    dispatch = next(iter(connection.dispatches.values()))
+    assert dispatch["schedule_payload"]["source_unit_ref"] == "unit-2"

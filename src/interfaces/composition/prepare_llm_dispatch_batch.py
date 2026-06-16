@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from types import TracebackType
@@ -10,9 +11,12 @@ import asyncpg
 import structlog
 
 from src.contexts.capacity_runtime.domain.capacity_decision import (
+    CapacityAvailability,
     CapacityDecision,
     CapacityDecisionStatus,
+    CapacityNeed,
     CapacityResourceKind,
+    CapacitySnapshot,
     CapacityWorkClass,
 )
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
@@ -20,6 +24,7 @@ from src.contexts.execution_runtime.application.ports.work_item_lease_repository
     DueWorkItemRecord,
     WorkItemLeaseRepositoryPort,
 )
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.execution_runtime.application.use_cases.lease_admitted_work_items import (
@@ -41,6 +46,8 @@ from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_p
     ClaimBuilderDispatchPreparationBuilder,
 )
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
+    LlmCapacityAllocationSlot,
+    LlmCapacityProjectionResult,
     zero_llm_capacity_projection,
 )
 from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
@@ -74,8 +81,7 @@ from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
 )
 from src.interfaces.composition.lease_llm_admitted_work_items import (
-    LeaseLlmAdmittedWorkItems,
-    LeaseLlmAdmittedWorkItemsCommand,
+    LlmAdmittedLeasedWorkItem,
     LeaseLlmAdmittedWorkItemsResult,
 )
 from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
@@ -372,23 +378,17 @@ class PrepareLlmDispatchBatch:
                     now=command.now,
                 )
 
-                lease_result = await LeaseLlmAdmittedWorkItems(
+                lease_result = await _lease_input_admitted_work_items(
                     lease_repository=lease_repository,
-                    capacity_policy=self.capacity_policy,
-                    active_model_capacity_selector=self.active_model_capacity_selector,
+                    due_records=due_records,
+                    account_capacities=account_capacities,
+                    active_model_ref=resolved_active_model_ref,
+                    requested_items=command.requested_items,
+                    worker=command.worker,
+                    lease_token_prefix=command.lease_token_prefix,
+                    lease_expires_at=command.lease_expires_at,
+                    now=command.now,
                     route_catalog=self.route_catalog,
-                ).execute(
-                    LeaseLlmAdmittedWorkItemsCommand(
-                        work_kind=command.work_kind,
-                        profile=preparation_profile,
-                        account_capacities=account_capacities,
-                        active_model_ref=resolved_active_model_ref,
-                        requested_items=command.requested_items,
-                        worker=command.worker,
-                        lease_token_prefix=command.lease_token_prefix,
-                        lease_expires_at=command.lease_expires_at,
-                        now=command.now,
-                    ),
                 )
 
                 LOGGER.info(
@@ -445,6 +445,226 @@ class PrepareLlmDispatchBatch:
                 )
         finally:
             await self.pool.release(connection)
+
+
+@dataclass(frozen=True, slots=True)
+class _InputAdmittedCandidate:
+    record: DueWorkItemRecord
+    provider: str
+    account_ref: str
+    model_ref: str
+    estimated_input_tokens: int
+
+
+@dataclass(slots=True)
+class _MutableInputCapacity:
+    provider: str
+    account_ref: str
+    model_ref: str
+    remaining_minute_requests: int
+    remaining_minute_tokens: int
+    remaining_daily_requests: int
+    remaining_daily_tokens: int
+
+    @classmethod
+    def from_capacity(
+        cls,
+        capacity: LlmProviderAccountCapacity,
+    ) -> _MutableInputCapacity:
+        return cls(
+            provider=capacity.provider,
+            account_ref=capacity.account_ref,
+            model_ref=capacity.model_ref,
+            remaining_minute_requests=capacity.remaining_minute_requests,
+            remaining_minute_tokens=capacity.remaining_minute_tokens,
+            remaining_daily_requests=capacity.remaining_daily_requests,
+            remaining_daily_tokens=capacity.remaining_daily_tokens,
+        )
+
+    def can_admit(self, *, estimated_input_tokens: int) -> bool:
+        return (
+            self.remaining_minute_requests > 0
+            and self.remaining_daily_requests > 0
+            and self.remaining_minute_tokens >= estimated_input_tokens
+            and self.remaining_daily_tokens >= estimated_input_tokens
+        )
+
+    def consume(self, *, estimated_input_tokens: int) -> None:
+        if not self.can_admit(estimated_input_tokens=estimated_input_tokens):
+            raise ValueError("input capacity cannot admit work item")
+        self.remaining_minute_requests -= 1
+        self.remaining_daily_requests -= 1
+        self.remaining_minute_tokens -= estimated_input_tokens
+        self.remaining_daily_tokens -= estimated_input_tokens
+
+
+async def _lease_input_admitted_work_items(
+    *,
+    lease_repository: PostgresWorkItemLeaseRepository,
+    due_records: tuple[DueWorkItemRecord, ...],
+    account_capacities: tuple[LlmProviderAccountCapacity, ...],
+    active_model_ref: str,
+    requested_items: int,
+    worker: WorkerRef,
+    lease_token_prefix: str,
+    lease_expires_at: datetime,
+    now: datetime,
+    route_catalog: LlmModelRouteCatalog,
+) -> LeaseLlmAdmittedWorkItemsResult:
+    active_accounts = tuple(
+        account
+        for account in account_capacities
+        if account.model_ref == active_model_ref
+    )
+    mutable_accounts = [
+        _MutableInputCapacity.from_capacity(account) for account in active_accounts
+    ]
+    candidates = _input_admitted_candidates(
+        due_records=due_records,
+        mutable_accounts=mutable_accounts,
+        requested_items=requested_items,
+    )
+
+    execution_settings = route_catalog.execution_settings_for_model_ref(
+        active_model_ref,
+    )
+    leased_items: list[LlmAdmittedLeasedWorkItem] = []
+    allocations: list[LlmCapacityAllocationSlot] = []
+
+    for candidate in candidates:
+        leased_record = await lease_repository.lease_due_work_item_by_id(
+            work_kind=candidate.record.work_item.work_kind,
+            work_item_id=candidate.record.work_item.work_item_id,
+            worker=worker,
+            lease_token=LeaseToken(f"{lease_token_prefix}:{len(leased_items)}"),
+            lease_expires_at=lease_expires_at,
+            now=now,
+        )
+        if leased_record is None:
+            continue
+
+        allocation = LlmCapacityAllocationSlot(
+            provider=candidate.provider,
+            account_ref=candidate.account_ref,
+            model_ref=candidate.model_ref,
+            slot_index=len(allocations),
+        )
+        allocations.append(allocation)
+        leased_items.append(
+            LlmAdmittedLeasedWorkItem(
+                leased=leased_record,
+                allocation=allocation,
+                execution_settings=execution_settings,
+            ),
+        )
+
+    projection = _input_admitted_projection(
+        requested_items=requested_items,
+        allocations=tuple(allocations),
+    )
+    decision = _input_admitted_capacity_decision(projected_items=len(leased_items))
+
+    return LeaseLlmAdmittedWorkItemsResult(
+        active_model_capacity_selection=SelectActiveLlmModelCapacityResult(
+            active_model_ref=active_model_ref,
+            selected_accounts=active_accounts,
+            projection=projection,
+        ),
+        lease_result=LeaseAdmittedWorkItemsResult(
+            capacity_decision=decision,
+            leased=tuple(item.leased for item in leased_items),
+        ),
+        leased=tuple(leased_items),
+    )
+
+
+def _input_admitted_candidates(
+    *,
+    due_records: tuple[DueWorkItemRecord, ...],
+    mutable_accounts: list[_MutableInputCapacity],
+    requested_items: int,
+) -> tuple[_InputAdmittedCandidate, ...]:
+    candidates: list[_InputAdmittedCandidate] = []
+    for record in due_records:
+        if len(candidates) >= requested_items:
+            break
+
+        estimated_input_tokens = _estimated_input_tokens_from_due_record(record)
+        for account in mutable_accounts:
+            if not account.can_admit(estimated_input_tokens=estimated_input_tokens):
+                continue
+
+            account.consume(estimated_input_tokens=estimated_input_tokens)
+            candidates.append(
+                _InputAdmittedCandidate(
+                    record=record,
+                    provider=account.provider,
+                    account_ref=account.account_ref,
+                    model_ref=account.model_ref,
+                    estimated_input_tokens=estimated_input_tokens,
+                ),
+            )
+            break
+
+    return tuple(candidates)
+
+
+def _estimated_input_tokens_from_due_record(record: DueWorkItemRecord) -> int:
+    estimate_payload = record.schedule_payload.get("llm_capacity_estimate")
+    if not isinstance(estimate_payload, Mapping):
+        raise ValueError("schedule_payload.llm_capacity_estimate is required")
+
+    value = estimate_payload.get("estimated_input_tokens")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("llm_capacity_estimate.estimated_input_tokens must be int")
+    if value <= 0:
+        raise ValueError("llm_capacity_estimate.estimated_input_tokens must be > 0")
+    return value
+
+
+def _input_admitted_projection(
+    *,
+    requested_items: int,
+    allocations: tuple[LlmCapacityAllocationSlot, ...],
+) -> LlmCapacityProjectionResult:
+    projected_items = len(allocations)
+    return LlmCapacityProjectionResult(
+        capacity_needs=(
+            CapacityNeed(
+                resource_kind=CapacityResourceKind.EXTERNAL_IO,
+                amount=1,
+            ),
+        ),
+        capacity_snapshot=CapacitySnapshot(
+            availability=(
+                CapacityAvailability(
+                    resource_kind=CapacityResourceKind.EXTERNAL_IO,
+                    available_amount=projected_items,
+                ),
+            ),
+        ),
+        requested_items=requested_items,
+        max_projected_items=projected_items,
+        allocations=allocations,
+    )
+
+
+def _input_admitted_capacity_decision(*, projected_items: int) -> CapacityDecision:
+    if projected_items > 0:
+        return CapacityDecision(
+            status=CapacityDecisionStatus.ALLOW,
+            work_class=CapacityWorkClass.LLM_BOUND,
+            max_admissible_items=projected_items,
+            reason="input token capacity available",
+        )
+
+    return CapacityDecision(
+        status=CapacityDecisionStatus.REJECT,
+        work_class=CapacityWorkClass.LLM_BOUND,
+        max_admissible_items=0,
+        blocking_resources=(CapacityResourceKind.EXTERNAL_IO,),
+        reason="input token capacity unavailable",
+    )
 
 
 async def _source_split_required_result(
@@ -616,22 +836,8 @@ def _capacity_with_token_floor(
     seed_capacity: LlmProviderAccountCapacity,
     profile: LlmTaskCapacityProfile,
 ) -> LlmProviderAccountCapacity:
-    token_floor = profile.estimated_prompt_tokens
-    return LlmProviderAccountCapacity(
-        provider=seed_capacity.provider,
-        account_ref=seed_capacity.account_ref,
-        model_ref=seed_capacity.model_ref,
-        remaining_minute_requests=seed_capacity.remaining_minute_requests,
-        remaining_minute_tokens=max(
-            seed_capacity.remaining_minute_tokens,
-            token_floor,
-        ),
-        remaining_daily_requests=seed_capacity.remaining_daily_requests,
-        remaining_daily_tokens=max(
-            seed_capacity.remaining_daily_tokens,
-            token_floor,
-        ),
-    )
+    _ = profile
+    return seed_capacity
 
 
 def _observed_or_seed(observed: int | None, seed: int) -> int:

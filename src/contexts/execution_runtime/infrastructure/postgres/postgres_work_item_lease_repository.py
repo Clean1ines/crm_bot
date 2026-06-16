@@ -170,6 +170,93 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
             schedule_payload=payload,
         )
 
+    async def lease_due_work_item_by_id(
+        self,
+        *,
+        work_kind: WorkKind,
+        work_item_id: str,
+        worker: WorkerRef,
+        lease_token: LeaseToken,
+        lease_expires_at: datetime,
+        now: datetime,
+    ) -> LeasedWorkItemRecord | None:
+        if not isinstance(work_item_id, str):
+            raise TypeError("work_item_id must be str")
+        if not work_item_id.strip():
+            raise ValueError("work_item_id must be non-empty")
+
+        row = await self._connection.fetchrow(
+            """
+            SELECT
+                wi.work_item_id,
+                wi.work_kind,
+                wi.status,
+                wi.attempt_count,
+                wi.leased_by,
+                wi.lease_token,
+                wi.lease_expires_at,
+                wi.next_attempt_at,
+                wi.last_error_kind,
+                wi.created_at,
+                wi.updated_at,
+                wis.payload
+            FROM execution_work_items wi
+            JOIN execution_work_item_schedules wis
+              ON wis.work_item_id = wi.work_item_id
+            WHERE wi.work_kind = $1
+              AND wi.work_item_id = $2
+              AND wi.status IN ('ready', 'deferred', 'retryable_failed')
+              AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $3)
+            FOR UPDATE SKIP LOCKED
+            LIMIT 1
+            """,
+            work_kind.value,
+            work_item_id,
+            now,
+        )
+        if row is None:
+            return None
+
+        item = _hydrate_work_item(row)
+        payload = _hydrate_schedule_payload(row["payload"])
+        leased_item = WorkItemStateMachine.lease_ready(
+            item,
+            worker=worker,
+            lease_token=lease_token,
+            lease_expires_at=lease_expires_at,
+            now=now,
+        )
+
+        await self._connection.execute(
+            """
+            UPDATE execution_work_items
+            SET
+                status = $2,
+                attempt_count = $3,
+                leased_by = $4,
+                lease_token = $5,
+                lease_expires_at = $6,
+                next_attempt_at = NULL,
+                last_error_kind = NULL,
+                updated_at = GREATEST($7, created_at)
+            WHERE work_item_id = $1
+            """,
+            leased_item.work_item_id,
+            leased_item.status.value,
+            leased_item.attempt_count,
+            leased_item.leased_by.value if leased_item.leased_by is not None else None,
+            leased_item.lease_token.value
+            if leased_item.lease_token is not None
+            else None,
+            leased_item.lease_expires_at,
+            now,
+        )
+
+        return LeasedWorkItemRecord(
+            work_item=leased_item,
+            schedule_payload=payload,
+        )
+
 
 def _hydrate_work_item(row: Mapping[str, object]) -> WorkItem:
     attempt_count = row["attempt_count"]
