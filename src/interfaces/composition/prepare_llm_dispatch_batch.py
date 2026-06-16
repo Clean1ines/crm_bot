@@ -7,6 +7,8 @@ from typing import Protocol, cast
 
 import asyncpg
 
+import structlog
+
 from src.contexts.capacity_runtime.domain.capacity_decision import (
     CapacityDecision,
     CapacityDecisionStatus,
@@ -81,6 +83,9 @@ from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
     StartLlmAdmittedWorkItemAttemptsCommand,
     StartLlmAdmittedWorkItemAttemptsResult,
 )
+
+
+LOGGER = structlog.get_logger(__name__)
 
 
 class AsyncTransaction(Protocol):
@@ -272,6 +277,13 @@ class PrepareLlmDispatchBatch:
                     requested_items=command.requested_items,
                     now=command.now,
                 )
+                LOGGER.info(
+                    "knowledge_llm_prepare_due_records",
+                    work_kind=command.work_kind.value,
+                    requested_items=command.requested_items,
+                    due_record_count=len(due_records),
+                    now=command.now.isoformat(),
+                )
                 preparation_profile = _preparation_profile(
                     command=command,
                     due_records=due_records,
@@ -294,6 +306,20 @@ class PrepareLlmDispatchBatch:
                         profile=preparation_profile,
                         route_catalog=self.route_catalog,
                     )
+                )
+                LOGGER.info(
+                    "knowledge_llm_prepare_preflight",
+                    work_kind=command.work_kind.value,
+                    profile_id=preparation_profile.profile_id,
+                    estimated_prompt_tokens=preparation_profile.estimated_prompt_tokens,
+                    estimated_completion_tokens=preparation_profile.estimated_completion_tokens,
+                    estimated_total_tokens=preparation_profile.estimated_total_tokens,
+                    estimated_requests=preparation_profile.estimated_requests,
+                    initial_model_ref=initial_model_ref,
+                    strategy_active_model_ref=strategy_result.active_model_ref,
+                    preflight_decision=preflight_result.decision.value,
+                    preflight_reason=preflight_result.reason,
+                    preflight_active_model_ref=preflight_result.active_model_ref,
                 )
                 resolved_active_model_ref = preflight_result.active_model_ref
                 if (
@@ -319,6 +345,24 @@ class PrepareLlmDispatchBatch:
                     capacity_observation_repository=capacity_observation_repository,
                     profile=preparation_profile,
                     now=command.now,
+                )
+                LOGGER.info(
+                    "knowledge_llm_prepare_account_capacities",
+                    work_kind=command.work_kind.value,
+                    active_model_ref=resolved_active_model_ref,
+                    provider_account_refs=provider_account_refs,
+                    account_capacities=[
+                        {
+                            "provider": capacity.provider,
+                            "account_ref": capacity.account_ref,
+                            "model_ref": capacity.model_ref,
+                            "remaining_minute_requests": capacity.remaining_minute_requests,
+                            "remaining_minute_tokens": capacity.remaining_minute_tokens,
+                            "remaining_daily_requests": capacity.remaining_daily_requests,
+                            "remaining_daily_tokens": capacity.remaining_daily_tokens,
+                        }
+                        for capacity in account_capacities
+                    ],
                 )
                 capacity_retry_at = await _next_capacity_retry_at(
                     capacity_observation_repository=capacity_observation_repository,
@@ -346,6 +390,28 @@ class PrepareLlmDispatchBatch:
                     ),
                 )
 
+                LOGGER.info(
+                    "knowledge_llm_prepare_lease_result",
+                    work_kind=command.work_kind.value,
+                    active_model_ref=resolved_active_model_ref,
+                    capacity_decision_status=lease_result.lease_result.capacity_decision.status.value,
+                    capacity_decision_reason=lease_result.lease_result.capacity_decision.reason,
+                    max_admissible_items=lease_result.lease_result.capacity_decision.max_admissible_items,
+                    leased_count=len(lease_result.leased),
+                    selected_accounts=[
+                        {
+                            "provider": account.provider,
+                            "account_ref": account.account_ref,
+                            "model_ref": account.model_ref,
+                            "slot_index": getattr(account, "slot_index", None),
+                        }
+                        for account in lease_result.active_model_capacity_selection.selected_accounts
+                    ],
+                    capacity_retry_at=capacity_retry_at.isoformat()
+                    if capacity_retry_at is not None
+                    else None,
+                )
+
                 attempt_result = await StartLlmAdmittedWorkItemAttempts(
                     repository=attempt_repository,
                 ).execute(
@@ -353,6 +419,16 @@ class PrepareLlmDispatchBatch:
                         leased_items=lease_result.leased,
                         started_at=command.started_at,
                     ),
+                )
+
+                LOGGER.info(
+                    "knowledge_llm_prepare_attempts_started",
+                    work_kind=command.work_kind.value,
+                    started_attempt_count=len(attempt_result.started_attempts),
+                    started_attempt_ids=[
+                        attempt.attempt_id
+                        for attempt in attempt_result.started_attempts
+                    ],
                 )
 
                 return PrepareLlmDispatchBatchResult(

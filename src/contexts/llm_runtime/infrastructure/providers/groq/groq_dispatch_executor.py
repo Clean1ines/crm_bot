@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import cast
 
+import structlog
+
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutionInput,
     LlmDispatchExecutionResult,
@@ -39,6 +41,9 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_transport_port 
 )
 
 
+LOGGER = structlog.get_logger(__name__)
+
+
 @dataclass(frozen=True, slots=True)
 class GroqDispatchExecutor(LlmDispatchExecutorPort):
     transport: GroqTransportPort
@@ -68,7 +73,32 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                     execution_settings=parsed.execution_settings,
                 ),
             )
-        except (TypeError, ValueError):
+            LOGGER.info(
+                "knowledge_llm_groq_request_prepared",
+                attempt_id=execution_input.attempt_id,
+                work_item_id=execution_input.work_item_id,
+                attempt_number=execution_input.attempt_number,
+                provider=parsed.provider,
+                account_ref=parsed.account_ref,
+                model_ref=parsed.model_ref,
+                message_count=len(parsed.messages),
+                message_char_count=sum(
+                    len(message.content) for message in parsed.messages
+                ),
+                payload_keys=sorted(request.payload.keys()),
+                has_max_completion_tokens="max_completion_tokens" in request.payload,
+                response_format=request.payload.get("response_format"),
+                temperature=request.payload.get("temperature"),
+                reasoning_effort=request.payload.get("reasoning_effort"),
+            )
+        except (TypeError, ValueError) as exc:
+            LOGGER.warning(
+                "knowledge_llm_groq_invalid_dispatch_payload",
+                attempt_id=execution_input.attempt_id,
+                work_item_id=execution_input.work_item_id,
+                attempt_number=execution_input.attempt_number,
+                error=str(exc),
+            )
             return _terminal_invalid_dispatch_payload(finished_at=observed_at)
 
         transport = _transport_for_account(
@@ -76,8 +106,39 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             transports_by_account_ref=self.transports_by_account_ref,
             account_ref=parsed.account_ref,
         )
-        transport_response = transport.post_chat_completions(
-            payload=dict(request.payload),
+        LOGGER.info(
+            "knowledge_llm_groq_transport_start",
+            attempt_id=execution_input.attempt_id,
+            work_item_id=execution_input.work_item_id,
+            provider=parsed.provider,
+            account_ref=parsed.account_ref,
+            model_ref=parsed.model_ref,
+        )
+        try:
+            transport_response = transport.post_chat_completions(
+                payload=dict(request.payload),
+            )
+        except Exception:
+            LOGGER.exception(
+                "knowledge_llm_groq_transport_exception",
+                attempt_id=execution_input.attempt_id,
+                work_item_id=execution_input.work_item_id,
+                provider=parsed.provider,
+                account_ref=parsed.account_ref,
+                model_ref=parsed.model_ref,
+            )
+            raise
+
+        LOGGER.info(
+            "knowledge_llm_groq_transport_response",
+            attempt_id=execution_input.attempt_id,
+            work_item_id=execution_input.work_item_id,
+            provider=parsed.provider,
+            account_ref=parsed.account_ref,
+            model_ref=parsed.model_ref,
+            status_code=transport_response.status_code,
+            response_header_keys=sorted(transport_response.headers.keys()),
+            response_body_char_count=len(transport_response.body),
         )
         mapped = self.response_mapper.map_response(
             response=GroqProviderHttpResponse(
@@ -89,6 +150,22 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
         )
 
         provider_result = mapped.provider_result
+        LOGGER.info(
+            "knowledge_llm_groq_mapped_response",
+            attempt_id=execution_input.attempt_id,
+            work_item_id=execution_input.work_item_id,
+            provider=parsed.provider,
+            account_ref=parsed.account_ref,
+            model_ref=parsed.model_ref,
+            provider_result_type=type(provider_result).__name__,
+            quota_remaining_minute_requests=mapped.quota_snapshot.remaining_requests_minute,
+            quota_remaining_minute_tokens=mapped.quota_snapshot.remaining_tokens_minute,
+            quota_remaining_daily_requests=mapped.quota_snapshot.remaining_requests_day,
+            quota_remaining_daily_tokens=mapped.quota_snapshot.remaining_tokens_day,
+            quota_unavailable_until=mapped.quota_snapshot.unavailable_until.isoformat()
+            if mapped.quota_snapshot.unavailable_until is not None
+            else None,
+        )
         raw_text = getattr(provider_result, "raw_text", None)
         if isinstance(raw_text, str):
             output_payload: dict[str, object] = {
@@ -105,6 +182,24 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                     "output_tokens": token_usage.output_tokens,
                     "total_tokens": token_usage.total_tokens,
                 }
+            LOGGER.info(
+                "knowledge_llm_groq_execution_succeeded",
+                attempt_id=execution_input.attempt_id,
+                work_item_id=execution_input.work_item_id,
+                provider=parsed.provider,
+                account_ref=parsed.account_ref,
+                model_ref=parsed.model_ref,
+                raw_text_char_count=len(raw_text),
+                input_tokens=token_usage.input_tokens
+                if token_usage is not None
+                else None,
+                output_tokens=token_usage.output_tokens
+                if token_usage is not None
+                else None,
+                total_tokens=token_usage.total_tokens
+                if token_usage is not None
+                else None,
+            )
             return LlmDispatchExecutionResult(
                 status=LlmDispatchExecutionStatus.SUCCEEDED,
                 finished_at=observed_at,
@@ -131,6 +226,19 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             wait_until if status is LlmDispatchExecutionStatus.DEFERRED else None
         )
 
+        LOGGER.warning(
+            "knowledge_llm_groq_execution_failed",
+            attempt_id=execution_input.attempt_id,
+            work_item_id=execution_input.work_item_id,
+            provider=parsed.provider,
+            account_ref=parsed.account_ref,
+            model_ref=parsed.model_ref,
+            error_kind=error_kind.value,
+            mapped_status=status.value,
+            next_attempt_at=next_attempt_at.isoformat()
+            if next_attempt_at is not None
+            else None,
+        )
         return LlmDispatchExecutionResult(
             status=status,
             finished_at=observed_at,

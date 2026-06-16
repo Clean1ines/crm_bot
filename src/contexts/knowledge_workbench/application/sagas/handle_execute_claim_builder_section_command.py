@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from typing import TypeGuard
 from typing import Protocol, cast
 
+import structlog
+
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservation,
     LlmAttemptCapacityObservationRepositoryPort,
@@ -74,6 +76,9 @@ from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttemptResult,
     LlmDispatchOutputValidationResult,
 )
+
+
+LOGGER = structlog.get_logger(__name__)
 
 
 class ExecutePreparedLlmDispatchAttemptPort(Protocol):
@@ -214,6 +219,13 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             "dispatch_attempt_id",
         )
         work_item_id = _payload_text(workflow_command.payload, "work_item_id")
+        LOGGER.info(
+            "knowledge_claim_builder_execute_command_start",
+            workflow_run_id=workflow_run_id,
+            command_id=workflow_command.command_id.value,
+            dispatch_attempt_id=dispatch_attempt_id,
+            work_item_id=work_item_id,
+        )
 
         execution_result = cast(
             ExecutePreparedLlmDispatchAttemptResult,
@@ -233,6 +245,19 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
 
         finished_at = execution_result.llm_result.finished_at
         outcome_status = execution_result.llm_result.status.value
+        LOGGER.info(
+            "knowledge_claim_builder_execute_llm_result",
+            workflow_run_id=workflow_run_id,
+            dispatch_attempt_id=dispatch_attempt_id,
+            work_item_id=work_item_id,
+            outcome_status=outcome_status,
+            error_kind=execution_result.llm_result.error_kind,
+            next_attempt_at=execution_result.llm_result.next_attempt_at.isoformat()
+            if execution_result.llm_result.next_attempt_at is not None
+            else None,
+            has_output_payload=execution_result.llm_result.output_payload is not None,
+            validation_metadata=execution_result.validation_metadata,
+        )
 
         capacity_observation = _capacity_observation_from_result(execution_result)
         appended_event_count = 0
@@ -240,6 +265,23 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         if capacity_observation is not None:
             await capacity_observation_repository.record_observation(
                 capacity_observation,
+            )
+            LOGGER.info(
+                "knowledge_claim_builder_capacity_observation_record",
+                workflow_run_id=workflow_run_id,
+                dispatch_attempt_id=dispatch_attempt_id,
+                work_item_id=work_item_id,
+                provider=capacity_observation.provider,
+                account_ref=capacity_observation.account_ref,
+                model_ref=capacity_observation.model_ref,
+                remaining_minute_requests=capacity_observation.remaining_minute_requests,
+                remaining_minute_tokens=capacity_observation.remaining_minute_tokens,
+                remaining_daily_requests=capacity_observation.remaining_daily_requests,
+                remaining_daily_tokens=capacity_observation.remaining_daily_tokens,
+                minute_reset_at=capacity_observation.minute_reset_at.isoformat()
+                if capacity_observation.minute_reset_at is not None
+                else None,
+                outcome_class=capacity_observation.outcome_class,
             )
             await workflow_unit_of_work.outbox.append_event(
                 _capacity_observed_event(
@@ -259,6 +301,13 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             workflow_run_id=workflow_run_id,
             dispatch_attempt_id=dispatch_attempt_id,
             work_item_id=work_item_id,
+        )
+        LOGGER.info(
+            "knowledge_claim_builder_draft_claims_persisted",
+            workflow_run_id=workflow_run_id,
+            dispatch_attempt_id=dispatch_attempt_id,
+            work_item_id=work_item_id,
+            persisted_draft_claim_count=persisted_draft_claim_count,
         )
 
         outcome_event = _claim_builder_attempt_outcome_event(
@@ -309,6 +358,17 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         await workflow_unit_of_work.command_log.mark_command_completed(
             command_id=workflow_command.command_id,
             completed_at=finished_at,
+        )
+
+        LOGGER.info(
+            "knowledge_claim_builder_execute_command_completed",
+            workflow_run_id=workflow_run_id,
+            command_id=workflow_command.command_id.value,
+            dispatch_attempt_id=dispatch_attempt_id,
+            work_item_id=work_item_id,
+            outcome_status=outcome_status,
+            appended_event_count=appended_event_count,
+            appended_next_command_count=1,
         )
 
         return HandleExecuteClaimBuilderSectionResult(

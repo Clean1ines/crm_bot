@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+import structlog
+
 from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_read_repository_port import (
     WorkItemAttemptDispatchForExecution,
     WorkItemAttemptDispatchReadRepositoryPort,
@@ -25,6 +27,9 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
     LlmDispatchExecutionStatus,
     LlmDispatchExecutorPort,
 )
+
+
+LOGGER = structlog.get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +122,21 @@ class ExecutePreparedLlmDispatchAttempt:
             attempt_id=command.attempt_id,
         )
         if dispatch is None:
+            LOGGER.warning(
+                "knowledge_llm_execute_dispatch_missing",
+                attempt_id=command.attempt_id,
+            )
             raise ValueError("dispatch attempt not found")
+
+        LOGGER.info(
+            "knowledge_llm_execute_dispatch_loaded",
+            attempt_id=dispatch.attempt_id,
+            work_item_id=dispatch.work_item_id,
+            attempt_number=dispatch.attempt_number,
+            started_at=dispatch.started_at.isoformat(),
+            dispatch_payload_keys=sorted(dispatch.dispatch_payload.keys()),
+            has_output_validator=command.output_validator is not None,
+        )
 
         if self.recorded_outcome_reader is not None:
             recorded_outcome = (
@@ -146,6 +165,20 @@ class ExecutePreparedLlmDispatchAttempt:
                 started_at=dispatch.started_at,
             ),
         )
+        LOGGER.info(
+            "knowledge_llm_execute_provider_result",
+            attempt_id=dispatch.attempt_id,
+            work_item_id=dispatch.work_item_id,
+            attempt_number=dispatch.attempt_number,
+            provider_status=provider_llm_result.status.value,
+            provider_error_kind=provider_llm_result.error_kind,
+            provider_next_attempt_at=provider_llm_result.next_attempt_at.isoformat()
+            if provider_llm_result.next_attempt_at is not None
+            else None,
+            has_output_payload=provider_llm_result.output_payload is not None,
+            has_capacity_observation=provider_llm_result.capacity_observation
+            is not None,
+        )
 
         validation_result = _validate_output_if_requested(
             output_validator=command.output_validator,
@@ -155,6 +188,26 @@ class ExecutePreparedLlmDispatchAttempt:
         llm_result = _effective_llm_result(
             provider_llm_result=provider_llm_result,
             validation_result=validation_result,
+        )
+        LOGGER.info(
+            "knowledge_llm_execute_effective_result",
+            attempt_id=dispatch.attempt_id,
+            work_item_id=dispatch.work_item_id,
+            attempt_number=dispatch.attempt_number,
+            effective_status=llm_result.status.value,
+            effective_error_kind=llm_result.error_kind,
+            effective_next_attempt_at=llm_result.next_attempt_at.isoformat()
+            if llm_result.next_attempt_at is not None
+            else None,
+            validation_status=validation_result.status.value
+            if validation_result is not None
+            else None,
+            validation_error_kind=validation_result.error_kind
+            if validation_result is not None
+            else None,
+            validation_metadata=dict(validation_result.metadata)
+            if validation_result is not None
+            else None,
         )
 
         outcome_result = await self.outcome_recorder.execute(
@@ -168,6 +221,14 @@ class ExecutePreparedLlmDispatchAttempt:
                 error_kind=llm_result.error_kind,
                 next_attempt_at=llm_result.next_attempt_at,
             ),
+        )
+        LOGGER.info(
+            "knowledge_llm_execute_outcome_recorded",
+            attempt_id=dispatch.attempt_id,
+            work_item_id=dispatch.work_item_id,
+            attempt_number=dispatch.attempt_number,
+            effective_status=llm_result.status.value,
+            effective_error_kind=llm_result.error_kind,
         )
 
         return ExecutePreparedLlmDispatchAttemptResult(
