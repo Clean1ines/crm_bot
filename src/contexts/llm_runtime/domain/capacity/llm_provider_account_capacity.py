@@ -35,11 +35,13 @@ class LlmProviderAccountCapacity:
     def max_items_for(self, profile: LlmTaskCapacityProfile) -> int:
         if not isinstance(profile, LlmTaskCapacityProfile):
             raise TypeError("profile must be LlmTaskCapacityProfile")
+
+        estimated_input_tokens = profile.estimated_prompt_tokens
         return min(
             self.remaining_minute_requests // profile.estimated_requests,
-            self.remaining_minute_tokens // profile.estimated_total_tokens,
+            self.remaining_minute_tokens // estimated_input_tokens,
             self.remaining_daily_requests // profile.estimated_requests,
-            self.remaining_daily_tokens // profile.estimated_total_tokens,
+            self.remaining_daily_tokens // estimated_input_tokens,
         )
 
 

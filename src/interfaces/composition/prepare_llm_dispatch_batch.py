@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import TracebackType
 from typing import Protocol, cast
 
@@ -314,6 +314,7 @@ class PrepareLlmDispatchBatch:
                     estimated_prompt_tokens=preparation_profile.estimated_prompt_tokens,
                     estimated_completion_tokens=preparation_profile.estimated_completion_tokens,
                     estimated_total_tokens=preparation_profile.estimated_total_tokens,
+                    estimated_tpm_input_tokens=preparation_profile.estimated_prompt_tokens,
                     estimated_requests=preparation_profile.estimated_requests,
                     initial_model_ref=initial_model_ref,
                     strategy_active_model_ref=strategy_result.active_model_ref,
@@ -524,10 +525,14 @@ async def _preparation_account_capacities(
             raise ValueError("PrepareLlmDispatchBatch requires account capacities")
         return command.account_capacities
 
-    seed_capacities = builder.build_account_capacities(
-        active_model_ref=active_model_ref,
-        provider_account_refs=provider_account_refs,
-        model_profiles=model_profiles,
+    seed_capacities = (
+        command.account_capacities
+        if command.account_capacities
+        else builder.build_account_capacities(
+            active_model_ref=active_model_ref,
+            provider_account_refs=provider_account_refs,
+            model_profiles=model_profiles,
+        )
     )
     observations = (
         await capacity_observation_repository.latest_observations_for_accounts(
@@ -586,7 +591,8 @@ def _capacity_from_latest_observation(
         profile=profile,
     )
 
-    if observation.minute_reset_at is not None and observation.minute_reset_at <= now:
+    minute_reset_at = _minute_reset_at_from_observation(observation)
+    if minute_reset_at is not None and minute_reset_at <= now:
         remaining_minute_requests = seed_after_reset.remaining_minute_requests
         remaining_minute_tokens = seed_after_reset.remaining_minute_tokens
 
@@ -610,7 +616,7 @@ def _capacity_with_token_floor(
     seed_capacity: LlmProviderAccountCapacity,
     profile: LlmTaskCapacityProfile,
 ) -> LlmProviderAccountCapacity:
-    token_floor = profile.estimated_total_tokens
+    token_floor = profile.estimated_prompt_tokens
     return LlmProviderAccountCapacity(
         provider=seed_capacity.provider,
         account_ref=seed_capacity.account_ref,
@@ -632,6 +638,22 @@ def _observed_or_seed(observed: int | None, seed: int) -> int:
     if observed is None:
         return seed
     return observed
+
+
+def _minute_reset_at_from_observation(
+    observation: LlmAttemptCapacityObservation,
+) -> datetime | None:
+    if observation.minute_reset_at is not None:
+        return observation.minute_reset_at
+
+    if (
+        observation.remaining_minute_requests == 0
+        or observation.remaining_minute_tokens == 0
+        or observation.actual_prompt_tokens is not None
+    ):
+        return observation.observed_at + timedelta(seconds=60)
+
+    return None
 
 
 async def _next_capacity_retry_at(
@@ -666,15 +688,9 @@ def _observation_retry_at(
 ) -> datetime | None:
     retry_candidates: list[datetime] = []
 
-    if (
-        observation.minute_reset_at is not None
-        and observation.minute_reset_at > now
-        and (
-            observation.remaining_minute_requests == 0
-            or observation.remaining_minute_tokens == 0
-        )
-    ):
-        retry_candidates.append(observation.minute_reset_at)
+    minute_reset_at = _minute_reset_at_from_observation(observation)
+    if minute_reset_at is not None and minute_reset_at > now:
+        retry_candidates.append(minute_reset_at)
 
     if (
         observation.daily_reset_at is not None

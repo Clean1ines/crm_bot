@@ -3,12 +3,15 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import TracebackType
 from typing import Self
 
 import pytest
 
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservation,
+)
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
@@ -33,6 +36,8 @@ from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatch,
     PrepareLlmDispatchBatchCommand,
+    _capacity_from_latest_observation,
+    _observation_retry_at,
 )
 
 
@@ -87,11 +92,24 @@ class FakeConnection:
     dispatches: dict[str, dict[str, object]] = field(default_factory=dict)
     transactions: list[FakeTransaction] = field(default_factory=list)
     fail_dispatch_insert: bool = False
+    capacity_observations: list[dict[str, object]] = field(default_factory=list)
 
     def transaction(self) -> FakeTransaction:
         return FakeTransaction(connection=self)
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        if "llm_attempt_capacity_observations" in query:
+            provider = str(args[0])
+            account_refs = tuple(str(item) for item in args[1])
+            model_ref = str(args[2])
+            return [
+                row
+                for row in self.capacity_observations
+                if row.get("provider") == provider
+                and row.get("account_ref") in account_refs
+                and row.get("model_ref") == model_ref
+            ]
+
         work_kind = str(args[0])
         now = _as_datetime(args[1])
         limit = int(args[2])
@@ -279,7 +297,26 @@ def _work_item_row(work_item_id: str, *, ordinal: int) -> dict[str, object]:
     }
 
 
-def _connection_with_due_items(count: int) -> FakeConnection:
+def _schedule_payload(
+    *,
+    source_unit_ref: str,
+    profile: LlmTaskCapacityProfile | None = None,
+) -> dict[str, object]:
+    capacity_profile = profile or _profile()
+    return {
+        "source_unit_ref": source_unit_ref,
+        "llm_capacity_estimate": {
+            "estimated_input_tokens": capacity_profile.estimated_prompt_tokens,
+            "reserved_output_tokens": capacity_profile.estimated_completion_tokens,
+        },
+    }
+
+
+def _connection_with_due_items(
+    count: int,
+    *,
+    profile: LlmTaskCapacityProfile | None = None,
+) -> FakeConnection:
     connection = FakeConnection()
     for index in range(count):
         work_item_id = f"work-{index + 1}"
@@ -287,7 +324,10 @@ def _connection_with_due_items(count: int) -> FakeConnection:
             work_item_id,
             ordinal=index + 1,
         )
-        connection.schedules[work_item_id] = {"source_unit_ref": f"unit-{index + 1}"}
+        connection.schedules[work_item_id] = _schedule_payload(
+            source_unit_ref=f"unit-{index + 1}",
+            profile=profile,
+        )
     return connection
 
 
@@ -636,12 +676,13 @@ async def test_prepare_uses_input_preflight_model_ref_before_leasing() -> None:
     fallback_model_ref = catalog.automatic_fallback_model_refs_with_larger_input_limit(
         catalog.primary_model_ref(),
     )[0]
-    connection = _connection_with_due_items(2)
+    large_profile = _large_input_profile(7000)
+    connection = _connection_with_due_items(2, profile=large_profile)
     pool = FakePool(connection=connection)
 
     result = await _runner(pool).execute(
         _command(
-            profile=_large_input_profile(40000),
+            profile=large_profile,
             account_capacities=(
                 _account(
                     account_ref="primary",
@@ -675,12 +716,13 @@ async def test_prepare_uses_input_preflight_model_ref_before_leasing() -> None:
 @pytest.mark.asyncio
 async def test_source_split_required_does_not_lease_normal_llm_work_item() -> None:
     catalog = default_groq_llm_model_route_catalog()
-    connection = _connection_with_due_items(2)
+    large_profile = _large_input_profile(200000)
+    connection = _connection_with_due_items(2, profile=large_profile)
     pool = FakePool(connection=connection)
 
     result = await _runner(pool).execute(
         _command(
-            profile=_large_input_profile(200000),
+            profile=large_profile,
             account_capacities=(
                 _account(
                     account_ref="primary",
@@ -719,14 +761,21 @@ async def test_source_split_required_raises_when_due_payload_has_no_source_unit_
     None
 ):
     catalog = default_groq_llm_model_route_catalog()
-    connection = _connection_with_due_items(1)
-    connection.schedules["work-1"] = {"not_source_unit_ref": "missing"}
+    large_profile = _large_input_profile(200000)
+    connection = _connection_with_due_items(1, profile=large_profile)
+    connection.schedules["work-1"] = {
+        "not_source_unit_ref": "missing",
+        "llm_capacity_estimate": {
+            "estimated_input_tokens": large_profile.estimated_prompt_tokens,
+            "reserved_output_tokens": large_profile.estimated_completion_tokens,
+        },
+    }
     pool = FakePool(connection=connection)
 
     with pytest.raises(ValueError, match="source_unit_ref"):
         await _runner(pool).execute(
             _command(
-                profile=_large_input_profile(200000),
+                profile=large_profile,
                 account_capacities=(
                     _account(
                         account_ref="primary",
@@ -747,3 +796,76 @@ async def test_source_split_required_raises_when_due_payload_has_no_source_unit_
                 requested_items=1,
             ),
         )
+
+
+def test_tpm_admission_uses_prompt_tokens_not_reserved_output_tokens() -> None:
+    profile = LlmTaskCapacityProfile(
+        profile_id="prompt-a",
+        estimated_prompt_tokens=3000,
+        estimated_completion_tokens=9000,
+    )
+    capacity = _account(
+        minute_requests=1,
+        minute_tokens=3000,
+        daily_requests=1,
+        daily_tokens=3000,
+    )
+
+    assert capacity.max_items_for(profile) == 1
+
+
+def test_groq_missing_minute_reset_uses_local_sixty_second_timer() -> None:
+    observed_at = _now()
+    observation = LlmAttemptCapacityObservation(
+        provider="groq",
+        account_ref="org-1",
+        model_ref="qwen/qwen3-32b",
+        remaining_minute_requests=60,
+        remaining_minute_tokens=0,
+        remaining_daily_requests=999,
+        remaining_daily_tokens=50000,
+        minute_reset_at=None,
+        daily_reset_at=None,
+        actual_prompt_tokens=3000,
+        actual_completion_tokens=500,
+        actual_total_tokens=3500,
+        outcome_class="succeeded",
+        observed_at=observed_at,
+    )
+
+    assert _observation_retry_at(
+        observation=observation,
+        now=observed_at + timedelta(seconds=30),
+    ) == observed_at + timedelta(seconds=60)
+
+    blocked_capacity = _capacity_from_latest_observation(
+        seed_capacity=_account(
+            account_ref="org-1",
+            minute_requests=60,
+            minute_tokens=0,
+            daily_requests=999,
+            daily_tokens=50000,
+        ),
+        observation=observation,
+        profile=_profile(),
+        now=observed_at + timedelta(seconds=30),
+    )
+    assert blocked_capacity.max_items_for(_profile()) == 0
+
+    recovered_capacity = _capacity_from_latest_observation(
+        seed_capacity=_account(
+            account_ref="org-1",
+            minute_requests=60,
+            minute_tokens=0,
+            daily_requests=999,
+            daily_tokens=50000,
+        ),
+        observation=observation,
+        profile=_profile(),
+        now=observed_at + timedelta(seconds=61),
+    )
+    assert recovered_capacity.remaining_minute_requests == 60
+    assert (
+        recovered_capacity.remaining_minute_tokens >= _profile().estimated_prompt_tokens
+    )
+    assert recovered_capacity.max_items_for(_profile()) >= 1
