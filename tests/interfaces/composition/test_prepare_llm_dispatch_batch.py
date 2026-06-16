@@ -941,3 +941,37 @@ async def test_prepare_skips_expensive_due_item_and_leases_later_item_that_fits_
     assert connection.work_items["work-3"]["status"] == "ready"
     dispatch = next(iter(connection.dispatches.values()))
     assert dispatch["schedule_payload"]["source_unit_ref"] == "unit-2"
+
+
+@pytest.mark.asyncio
+async def test_prepare_rearms_next_batch_after_started_attempts() -> None:
+    connection = _connection_with_due_items(2)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(_command())
+
+    assert len(result.attempt_result.started_attempts) == 2
+    assert result.capacity_retry_at == _now() + timedelta(seconds=60)
+
+
+@pytest.mark.asyncio
+async def test_prepare_does_not_rearm_next_batch_without_started_attempts() -> None:
+    connection = _connection_with_due_items(2)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    minute_requests=0,
+                    minute_tokens=0,
+                    daily_requests=0,
+                    daily_tokens=0,
+                ),
+            ),
+            requested_items=2,
+        ),
+    )
+
+    assert result.attempt_result.started_attempts == ()
+    assert result.capacity_retry_at is None

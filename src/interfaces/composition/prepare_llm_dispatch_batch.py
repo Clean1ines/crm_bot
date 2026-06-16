@@ -432,6 +432,10 @@ class PrepareLlmDispatchBatch:
                     ],
                 )
 
+                next_capacity_retry_at = capacity_retry_at
+                if attempt_result.started_attempts and next_capacity_retry_at is None:
+                    next_capacity_retry_at = command.now + timedelta(seconds=60)
+
                 return PrepareLlmDispatchBatchResult(
                     lease_result=lease_result,
                     attempt_result=attempt_result,
@@ -441,7 +445,7 @@ class PrepareLlmDispatchBatch:
                         preflight_result.active_model_ref
                     ),
                     source_split_required=False,
-                    capacity_retry_at=capacity_retry_at,
+                    capacity_retry_at=next_capacity_retry_at,
                 )
         finally:
             await self.pool.release(connection)
