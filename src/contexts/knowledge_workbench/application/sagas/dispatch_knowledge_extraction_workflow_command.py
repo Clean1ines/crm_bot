@@ -97,6 +97,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_split_claim_build
     HandleSplitClaimBuilderSourceUnitCommand,
     HandleSplitClaimBuilderSourceUnitCommandHandler,
 )
+from src.contexts.knowledge_workbench.application.sagas.repair_knowledge_extraction_command_payload import (
+    repair_knowledge_extraction_command_payload,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_command_handler_map import (
     implemented_handler_name_for,
     is_command_implemented,
@@ -220,6 +223,11 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 dispatched=False,
                 blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
             )
+
+        workflow_command = repair_knowledge_extraction_command_payload(
+            workflow_command=workflow_command,
+            command_type=command_type,
+        )
 
         if (
             command_type

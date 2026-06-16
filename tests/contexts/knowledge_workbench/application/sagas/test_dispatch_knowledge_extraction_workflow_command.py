@@ -1059,3 +1059,69 @@ async def test_build_cluster_preview_requires_preview_repository() -> None:
 
     assert result.dispatched is False
     assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
+async def test_dispatch_repairs_claim_builder_prepare_command_without_dispatch_preparation() -> (
+    None
+):
+    prepare = FakePrepareLlmDispatchBatch()
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH,
+                payload={
+                    "workflow_run_id": _workflow_run_id(),
+                    "source_document_ref": _document_ref().value,
+                    "scheduled_work_item_count": 2,
+                },
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=workflow_unit_of_work,
+        prepare_llm_dispatch_batch=prepare,
+    )
+
+    assert result.dispatched is True
+    assert result.blocked_reason is None
+    assert len(prepare.calls) == 1
+    assert prepare.calls[0].active_model_ref == "qwen/qwen3-32b"
+    assert prepare.calls[0].requested_items == 2
+    assert prepare.calls[0].worker.value == (
+        "knowledge-workbench-claim-builder-dispatch"
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_repairs_compaction_prepare_command_without_dispatch_preparation() -> (
+    None
+):
+    prepare = FakePrepareLlmDispatchBatch()
+
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+                payload={
+                    "workflow_run_id": _workflow_run_id(),
+                    "scheduled_work_item_count": 2,
+                },
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        prepare_llm_dispatch_batch=prepare,
+    )
+
+    assert result.dispatched is True
+    assert result.blocked_reason is None
+    assert len(prepare.calls) == 1
+    assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
+    assert prepare.calls[0].requested_items == 2
+    assert prepare.calls[0].worker.value == (
+        "knowledge-workbench-draft-claim-compaction-dispatch"
+    )
