@@ -71,7 +71,9 @@ class FakeConnection:
         row["lease_expires_at"] = args[5]
         row["next_attempt_at"] = None
         row["last_error_kind"] = None
-        row["updated_at"] = args[6]
+        requested_updated_at = _as_datetime(args[6])
+        created_at = _as_datetime(row["created_at"])
+        row["updated_at"] = max(requested_updated_at, created_at)
         return "UPDATE 1"
 
 
@@ -193,6 +195,36 @@ async def test_increments_attempt_count_and_writes_lease_fields() -> None:
     assert row["leased_by"] == "worker-1"
     assert row["lease_token"] == "lease-token-1"
     assert row["lease_expires_at"] == _lease_expires_at()
+
+
+@pytest.mark.asyncio
+async def test_lease_update_never_writes_updated_at_before_created_at() -> None:
+    created_at = datetime(2026, 6, 10, 12, 1, tzinfo=timezone.utc)
+    stale_now = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
+    connection = _connection_with(
+        {
+            **_row(work_item_id="work-1"),
+            "created_at": created_at,
+            "updated_at": stale_now,
+        },
+    )
+
+    leased = await _repository(connection).lease_due_work_item(
+        work_kind=_work_kind(),
+        worker=_worker(),
+        lease_token=_lease_token(),
+        lease_expires_at=datetime(2026, 6, 10, 12, 5, tzinfo=timezone.utc),
+        now=stale_now,
+    )
+
+    assert leased is not None
+    assert connection.work_items["work-1"]["updated_at"] == created_at
+
+    source = Path(
+        "src/contexts/execution_runtime/infrastructure/postgres/"
+        "postgres_work_item_lease_repository.py",
+    ).read_text(encoding="utf-8")
+    assert "updated_at = GREATEST($7, created_at)" in source
 
 
 @pytest.mark.asyncio

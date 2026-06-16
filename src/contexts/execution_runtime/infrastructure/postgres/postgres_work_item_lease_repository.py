@@ -151,7 +151,7 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
                 lease_expires_at = $6,
                 next_attempt_at = NULL,
                 last_error_kind = NULL,
-                updated_at = $7
+                updated_at = GREATEST($7, created_at)
             WHERE work_item_id = $1
             """,
             leased_item.work_item_id,
