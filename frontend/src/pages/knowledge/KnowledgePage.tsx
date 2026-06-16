@@ -1778,7 +1778,7 @@ export const KnowledgePage: React.FC = () => {
           <div
             ref={documentsGridRef}
             id="knowledge-documents-grid"
-            className="grid grid-cols-1 gap-4 xl:grid-cols-2 lg:gap-6"
+            className="grid grid-cols-1 gap-6"
           >
             {filteredDocuments.map((doc) => {
               const statusBadge = getStatusBadge(doc);

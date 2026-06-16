@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, FileText, Trash2, Zap } from 'lucide-react';
 
 import { t } from '@shared/i18n';
@@ -277,17 +277,30 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     liveTimer?.current_active_started_at ||
     cardView?.timer.current_active_started_at ||
     null;
+  const liveWorkflowStatus = liveWorkflow?.workflow_status?.toLowerCase() || '';
   const isLiveTimer =
     liveTimer !== null
-      ? liveTimer.is_live && Boolean(timerStartedAt)
-      : cardView?.timer.mode === 'running' && Boolean(timerStartedAt);
+      ? Boolean(
+          liveTimer.is_live ||
+            liveTimer.mode === 'running' ||
+            ['running', 'active', 'processing'].includes(liveWorkflowStatus),
+        )
+      : cardView?.timer.mode === 'running';
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const liveTimerObservedAtMsRef = useRef<number | null>(null);
   const [expandedClaimIds, setExpandedClaimIds] = useState<Set<string>>(
     () => new Set(),
   );
 
   useEffect(() => {
-    if (!isLiveTimer) return undefined;
+    if (!isLiveTimer) {
+      liveTimerObservedAtMsRef.current = null;
+      return undefined;
+    }
+
+    if (liveTimerObservedAtMsRef.current === null) {
+      liveTimerObservedAtMsRef.current = Date.now();
+    }
 
     setNowMs(Date.now());
     const intervalId = window.setInterval(() => {
@@ -295,7 +308,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     }, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [isLiveTimer, timerStartedAt]);
+  }, [isLiveTimer, timerStartedAt, liveWorkflow?.workflow_run_id]);
 
   if (!cardView) {
     return null;
@@ -468,10 +481,15 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const timerStartedAtMs = timerStartedAt ? Date.parse(timerStartedAt) : Number.NaN;
   const baseActiveElapsedSeconds =
     liveTimer?.active_elapsed_seconds ?? cardView.timer.active_elapsed_seconds;
+  const liveTimerObservedAtMs = liveTimerObservedAtMsRef.current;
   const liveActiveElapsedSeconds =
-    isLiveTimer && Number.isFinite(timerStartedAtMs)
+    isLiveTimer
       ? baseActiveElapsedSeconds +
-        Math.max(0, Math.floor((nowMs - timerStartedAtMs) / 1000))
+        (Number.isFinite(timerStartedAtMs)
+          ? Math.max(0, Math.floor((nowMs - timerStartedAtMs) / 1000))
+          : liveTimerObservedAtMs !== null
+            ? Math.max(0, Math.floor((nowMs - liveTimerObservedAtMs) / 1000))
+            : 0)
       : baseActiveElapsedSeconds;
   const elapsedText =
     liveActiveElapsedSeconds > 0 || isLiveTimer
@@ -551,7 +569,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   return (
     <div
       id={`knowledge-doc-card-${doc.id}`}
-      className="group w-full min-w-0 rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5"
+      className="group w-full min-w-0 overflow-hidden rounded-2xl bg-[var(--surface-elevated)] p-4 break-words transition-all hover:shadow-lg sm:p-5"
     >
       <div className="mb-4 flex min-w-0 items-start justify-between gap-2">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
@@ -620,6 +638,9 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           </div>
           <span className="max-w-[45%] shrink-0 truncate rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]" title={cardText(cardView.status_i18n_key, cardView.default_status_label)}>
             {cardText(cardView.status_i18n_key, cardView.default_status_label)}
+          </span>
+          <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+            live-state-card-v4
           </span>
         </div>
 
@@ -729,7 +750,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
         {(workflowLiveStateLoading || workflowLiveStateError || liveWorkflow) && (
           <details
-            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)]"
+            className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3 text-xs text-[var(--text-secondary)] break-words [overflow-wrap:anywhere]"
             open={Boolean(workflowLiveStateError)}
           >
             <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2">
@@ -744,7 +765,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                 )}
                 {liveWorkflowStatusText && (
                   <span
-                    className="max-w-full truncate rounded-full bg-[var(--control-bg)] px-2 py-0.5 font-mono"
+                    className="max-w-full rounded-full bg-[var(--control-bg)] px-2 py-0.5 font-mono break-all"
                     title={liveWorkflow?.workflow_run_id || liveWorkflowStatusText}
                   >
                     {liveWorkflowStatusText}
@@ -815,7 +836,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                           key={stage.id}
                           className="flex min-w-0 items-center justify-between gap-2 rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
                         >
-                          <span className="min-w-0 truncate">{liveStageLabel(stage)}</span>
+                          <span className="min-w-0 break-words">{liveStageLabel(stage)}</span>
                           <span className="shrink-0 text-[var(--text-muted)]">
                             {liveStageStatusLabel(stage.status)}
                             {stage.total > 0
