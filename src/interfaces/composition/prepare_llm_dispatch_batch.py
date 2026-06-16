@@ -317,6 +317,7 @@ class PrepareLlmDispatchBatch:
                     provider_account_refs=provider_account_refs,
                     model_profiles=_resolved_model_profiles(self.model_profiles),
                     capacity_observation_repository=capacity_observation_repository,
+                    profile=preparation_profile,
                     now=command.now,
                 )
                 capacity_retry_at = await _next_capacity_retry_at(
@@ -439,6 +440,7 @@ async def _preparation_account_capacities(
     provider_account_refs: tuple[str, ...],
     model_profiles: tuple[ModelProfile, ...],
     capacity_observation_repository: PostgresLlmAttemptCapacityObservationRepository,
+    profile: LlmTaskCapacityProfile,
     now: datetime,
 ) -> tuple[LlmProviderAccountCapacity, ...]:
     if not due_records:
@@ -466,6 +468,7 @@ async def _preparation_account_capacities(
         _capacity_from_latest_observation(
             seed_capacity=seed_capacity,
             observation=observations_by_account_ref.get(seed_capacity.account_ref),
+            profile=profile,
             now=now,
         )
         for seed_capacity in seed_capacities
@@ -476,10 +479,14 @@ def _capacity_from_latest_observation(
     *,
     seed_capacity: LlmProviderAccountCapacity,
     observation: LlmAttemptCapacityObservation | None,
+    profile: LlmTaskCapacityProfile,
     now: datetime,
 ) -> LlmProviderAccountCapacity:
     if observation is None:
-        return seed_capacity
+        return _capacity_with_token_floor(
+            seed_capacity=seed_capacity,
+            profile=profile,
+        )
 
     remaining_minute_requests = _observed_or_seed(
         observation.remaining_minute_requests,
@@ -498,13 +505,18 @@ def _capacity_from_latest_observation(
         seed_capacity.remaining_daily_tokens,
     )
 
+    seed_after_reset = _capacity_with_token_floor(
+        seed_capacity=seed_capacity,
+        profile=profile,
+    )
+
     if observation.minute_reset_at is not None and observation.minute_reset_at <= now:
-        remaining_minute_requests = seed_capacity.remaining_minute_requests
-        remaining_minute_tokens = seed_capacity.remaining_minute_tokens
+        remaining_minute_requests = seed_after_reset.remaining_minute_requests
+        remaining_minute_tokens = seed_after_reset.remaining_minute_tokens
 
     if observation.daily_reset_at is not None and observation.daily_reset_at <= now:
-        remaining_daily_requests = seed_capacity.remaining_daily_requests
-        remaining_daily_tokens = seed_capacity.remaining_daily_tokens
+        remaining_daily_requests = seed_after_reset.remaining_daily_requests
+        remaining_daily_tokens = seed_after_reset.remaining_daily_tokens
 
     return LlmProviderAccountCapacity(
         provider=seed_capacity.provider,
@@ -514,6 +526,29 @@ def _capacity_from_latest_observation(
         remaining_minute_tokens=remaining_minute_tokens,
         remaining_daily_requests=remaining_daily_requests,
         remaining_daily_tokens=remaining_daily_tokens,
+    )
+
+
+def _capacity_with_token_floor(
+    *,
+    seed_capacity: LlmProviderAccountCapacity,
+    profile: LlmTaskCapacityProfile,
+) -> LlmProviderAccountCapacity:
+    token_floor = profile.estimated_total_tokens
+    return LlmProviderAccountCapacity(
+        provider=seed_capacity.provider,
+        account_ref=seed_capacity.account_ref,
+        model_ref=seed_capacity.model_ref,
+        remaining_minute_requests=seed_capacity.remaining_minute_requests,
+        remaining_minute_tokens=max(
+            seed_capacity.remaining_minute_tokens,
+            token_floor,
+        ),
+        remaining_daily_requests=seed_capacity.remaining_daily_requests,
+        remaining_daily_tokens=max(
+            seed_capacity.remaining_daily_tokens,
+            token_floor,
+        ),
     )
 
 
