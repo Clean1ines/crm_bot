@@ -2354,36 +2354,6 @@ async def delete_knowledge_document(
             )
             await connection.execute(
                 """
-                DELETE FROM draft_claim_possible_questions
-                WHERE observation_ref IN (
-                    SELECT observation_ref
-                    FROM draft_claim_observations
-                    WHERE source_unit_ref IN (
-                        SELECT unit_ref
-                        FROM source_units
-                        WHERE document_ref = $1
-                    )
-                )
-                """,
-                document_id,
-            )
-            await connection.execute(
-                """
-                DELETE FROM draft_claim_observation_provenance
-                WHERE observation_ref IN (
-                    SELECT observation_ref
-                    FROM draft_claim_observations
-                    WHERE source_unit_ref IN (
-                        SELECT unit_ref
-                        FROM source_units
-                        WHERE document_ref = $1
-                    )
-                )
-                """,
-                document_id,
-            )
-            await connection.execute(
-                """
                 DELETE FROM draft_claim_observations
                 WHERE source_unit_ref IN (
                     SELECT unit_ref
