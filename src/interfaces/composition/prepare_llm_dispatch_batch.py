@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from types import TracebackType
 from typing import Protocol, cast
@@ -29,6 +29,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_a
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
     PostgresWorkItemLeaseRepository,
 )
+from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
+    ClaimBuilderDispatchPreparationBuilder,
+)
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     zero_llm_capacity_projection,
 )
@@ -48,6 +51,13 @@ from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_input_si
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelRouteCatalog,
+)
+from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
+from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
+    LlmRuntimeSettings,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
@@ -91,29 +101,47 @@ class AsyncPool(Protocol):
 @dataclass(frozen=True, slots=True)
 class PrepareLlmDispatchBatchCommand:
     work_kind: WorkKind
-    profile: LlmTaskCapacityProfile
-    account_capacities: tuple[LlmProviderAccountCapacity, ...]
-    active_model_ref: str
     requested_items: int
     worker: WorkerRef
     lease_token_prefix: str
     lease_expires_at: datetime
     now: datetime
     started_at: datetime
+    profile: LlmTaskCapacityProfile | None = None
+    account_capacities: tuple[LlmProviderAccountCapacity, ...] = ()
+    active_model_ref: str | None = None
     dispatch_preparation_strategy: str | None = None
 
     def __post_init__(self) -> None:
-        LeaseLlmAdmittedWorkItemsCommand(
-            work_kind=self.work_kind,
-            profile=self.profile,
-            account_capacities=self.account_capacities,
-            active_model_ref=self.active_model_ref,
-            requested_items=self.requested_items,
-            worker=self.worker,
-            lease_token_prefix=self.lease_token_prefix,
-            lease_expires_at=self.lease_expires_at,
-            now=self.now,
+        if not isinstance(self.work_kind, WorkKind):
+            raise TypeError("work_kind must be WorkKind")
+        _require_positive_int(self.requested_items, field_name="requested_items")
+        if not isinstance(self.worker, WorkerRef):
+            raise TypeError("worker must be WorkerRef")
+        _require_non_empty_text(
+            self.lease_token_prefix, field_name="lease_token_prefix"
         )
+        _require_timezone_aware(self.lease_expires_at, field_name="lease_expires_at")
+        _require_timezone_aware(self.now, field_name="now")
+        if self.lease_expires_at <= self.now:
+            raise ValueError("lease_expires_at must be > now")
+        if self.profile is not None and not isinstance(
+            self.profile,
+            LlmTaskCapacityProfile,
+        ):
+            raise TypeError("profile must be LlmTaskCapacityProfile when provided")
+        if not isinstance(self.account_capacities, tuple):
+            raise TypeError("account_capacities must be tuple")
+        for account_capacity in self.account_capacities:
+            if not isinstance(account_capacity, LlmProviderAccountCapacity):
+                raise TypeError(
+                    "account_capacities must contain LlmProviderAccountCapacity",
+                )
+        if self.active_model_ref is not None:
+            _require_non_empty_text(
+                self.active_model_ref,
+                field_name="active_model_ref",
+            )
         _require_timezone_aware(self.started_at, field_name="started_at")
         if self.dispatch_preparation_strategy is not None:
             _require_non_empty_text(
@@ -193,10 +221,23 @@ class PrepareLlmDispatchBatch:
     capacity_policy: CapacityAdmissionPolicy
     active_model_capacity_selector: SelectActiveLlmModelCapacity
     route_catalog: LlmModelRouteCatalog
+    provider_account_refs: tuple[str, ...] = ()
+    model_profiles: tuple[ModelProfile, ...] = ()
+    dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder = field(
+        default_factory=ClaimBuilderDispatchPreparationBuilder,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.route_catalog, LlmModelRouteCatalog):
             raise TypeError("route_catalog must be LlmModelRouteCatalog")
+        if not isinstance(
+            self.dispatch_preparation_builder,
+            ClaimBuilderDispatchPreparationBuilder,
+        ):
+            raise TypeError(
+                "dispatch_preparation_builder must be "
+                "ClaimBuilderDispatchPreparationBuilder",
+            )
 
     async def execute(
         self,
@@ -211,9 +252,23 @@ class PrepareLlmDispatchBatch:
                     asyncpg_connection,
                 )
 
+                due_records = await lease_repository.peek_due_work_items(
+                    work_kind=command.work_kind,
+                    requested_items=command.requested_items,
+                    now=command.now,
+                )
+                preparation_profile = _preparation_profile(
+                    command=command,
+                    due_records=due_records,
+                    builder=self.dispatch_preparation_builder,
+                )
+                initial_model_ref = command.active_model_ref
+                if initial_model_ref is None:
+                    initial_model_ref = self.route_catalog.primary_model_ref()
+
                 strategy_result = ResolveLlmDispatchPreparationStrategy().execute(
                     ResolveLlmDispatchPreparationStrategyCommand(
-                        current_active_model_ref=command.active_model_ref,
+                        current_active_model_ref=initial_model_ref,
                         strategy=command.dispatch_preparation_strategy,
                         route_catalog=self.route_catalog,
                     )
@@ -221,7 +276,7 @@ class PrepareLlmDispatchBatch:
                 preflight_result = ResolveLlmDispatchInputSizePreflight().execute(
                     ResolveLlmDispatchInputSizePreflightCommand(
                         active_model_ref=strategy_result.active_model_ref,
-                        profile=command.profile,
+                        profile=preparation_profile,
                         route_catalog=self.route_catalog,
                     )
                 )
@@ -236,6 +291,17 @@ class PrepareLlmDispatchBatch:
                         lease_repository=lease_repository,
                     )
 
+                account_capacities = _preparation_account_capacities(
+                    command=command,
+                    due_records=due_records,
+                    builder=self.dispatch_preparation_builder,
+                    active_model_ref=resolved_active_model_ref,
+                    provider_account_refs=_resolved_provider_account_refs(
+                        self.provider_account_refs,
+                    ),
+                    model_profiles=_resolved_model_profiles(self.model_profiles),
+                )
+
                 lease_result = await LeaseLlmAdmittedWorkItems(
                     lease_repository=lease_repository,
                     capacity_policy=self.capacity_policy,
@@ -244,8 +310,8 @@ class PrepareLlmDispatchBatch:
                 ).execute(
                     LeaseLlmAdmittedWorkItemsCommand(
                         work_kind=command.work_kind,
-                        profile=command.profile,
-                        account_capacities=command.account_capacities,
+                        profile=preparation_profile,
+                        account_capacities=account_capacities,
                         active_model_ref=resolved_active_model_ref,
                         requested_items=command.requested_items,
                         worker=command.worker,
@@ -324,6 +390,65 @@ async def _source_split_required_result(
         affected_work_item_refs=affected_work_item_refs,
         source_unit_refs=source_unit_refs,
     )
+
+
+def _preparation_profile(
+    *,
+    command: PrepareLlmDispatchBatchCommand,
+    due_records: tuple[DueWorkItemRecord, ...],
+    builder: ClaimBuilderDispatchPreparationBuilder,
+) -> LlmTaskCapacityProfile:
+    if due_records:
+        return builder.build_profile_from_due_work_items(due_records)
+    if command.profile is None:
+        raise ValueError("PrepareLlmDispatchBatch requires due work item estimates")
+    return command.profile
+
+
+def _preparation_account_capacities(
+    *,
+    command: PrepareLlmDispatchBatchCommand,
+    due_records: tuple[DueWorkItemRecord, ...],
+    builder: ClaimBuilderDispatchPreparationBuilder,
+    active_model_ref: str,
+    provider_account_refs: tuple[str, ...],
+    model_profiles: tuple[ModelProfile, ...],
+) -> tuple[LlmProviderAccountCapacity, ...]:
+    if due_records:
+        return builder.build_account_capacities(
+            active_model_ref=active_model_ref,
+            provider_account_refs=provider_account_refs,
+            model_profiles=model_profiles,
+        )
+    if not command.account_capacities:
+        raise ValueError("PrepareLlmDispatchBatch requires account capacities")
+    return command.account_capacities
+
+
+def _resolved_provider_account_refs(
+    configured: tuple[str, ...],
+) -> tuple[str, ...]:
+    if configured:
+        return configured
+    env_config = LlmRuntimeSettings.from_env_mapping(
+        __import__("os").environ
+    ).to_groq_env_config()
+    return tuple(account.account_seed.account_ref for account in env_config.accounts)
+
+
+def _resolved_model_profiles(
+    configured: tuple[ModelProfile, ...],
+) -> tuple[ModelProfile, ...]:
+    if configured:
+        return configured
+    return build_groq_free_plan_model_profiles()
+
+
+def _require_positive_int(value: int, *, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")
+    if value <= 0:
+        raise ValueError(f"{field_name} must be > 0")
 
 
 def _affected_work_item_refs(

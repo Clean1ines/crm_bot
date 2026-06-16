@@ -3,9 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
-    ClaimBuilderDispatchPreparationBuilder,
-)
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_draft_claim_compaction_dispatch_batch_command import (
     DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
     DRAFT_CLAIM_COMPACTION_WORKER_REF,
@@ -28,15 +25,9 @@ DRAFT_CLAIM_COMPACTION_LEASE_TTL_SECONDS = 300
 
 @dataclass(frozen=True, slots=True)
 class KnowledgeExtractionCommandPayloadRepairPolicy:
-    claim_builder_dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder
-
     @classmethod
     def with_defaults(cls) -> "KnowledgeExtractionCommandPayloadRepairPolicy":
-        return cls(
-            claim_builder_dispatch_preparation_builder=(
-                ClaimBuilderDispatchPreparationBuilder()
-            ),
-        )
+        return cls()
 
     def repair(
         self,
@@ -58,17 +49,7 @@ class KnowledgeExtractionCommandPayloadRepairPolicy:
             command_type
             is KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
         ):
-            return _copy_command_with_payload_value(
-                workflow_command=workflow_command,
-                key="llm_dispatch_preparation",
-                value=self.claim_builder_dispatch_preparation_builder.build_payload(
-                    workflow_run_id=workflow_command.workflow_run_id,
-                    scheduled_work_item_count=_payload_positive_int(
-                        workflow_command.payload,
-                        "scheduled_work_item_count",
-                    ),
-                ),
-            )
+            return workflow_command
 
         if (
             command_type

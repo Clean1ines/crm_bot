@@ -1,26 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Protocol, cast
 
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
-from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
-    ClaimBuilderDispatchPreparationBuilder,
-)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
 )
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
-)
-from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
-    LlmProviderAccountCapacity,
-)
-from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
-    LlmTaskCapacityProfile,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -87,10 +78,6 @@ class HandlePrepareClaimBuilderDispatchBatchResult:
 
 @dataclass(frozen=True, slots=True)
 class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
-    dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder = field(
-        default_factory=ClaimBuilderDispatchPreparationBuilder,
-    )
-
     async def execute(
         self,
         command: HandlePrepareClaimBuilderDispatchBatchCommand,
@@ -108,16 +95,6 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         )
         if workflow_run_id != workflow_command.workflow_run_id:
             raise ValueError("payload workflow_run_id must match workflow command")
-
-        dispatch_payload = _dispatch_preparation_payload(
-            workflow_command=workflow_command,
-            workflow_run_id=workflow_run_id,
-            dispatch_preparation_builder=self.dispatch_preparation_builder,
-        )
-        workflow_command = _workflow_command_with_dispatch_preparation(
-            workflow_command=workflow_command,
-            dispatch_payload=dispatch_payload,
-        )
 
         occurred_at = workflow_command.updated_at
         prepare_result = await prepare_llm_dispatch_batch.execute(
@@ -259,49 +236,6 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         )
 
 
-def _dispatch_preparation_payload(
-    *,
-    workflow_command: WorkflowCommand,
-    workflow_run_id: str,
-    dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder,
-) -> Mapping[str, object]:
-    dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
-    if dispatch_preparation is not None:
-        return _payload_mapping(
-            workflow_command.payload,
-            "llm_dispatch_preparation",
-        )
-
-    scheduled_work_item_count = _payload_positive_int(
-        workflow_command.payload,
-        "scheduled_work_item_count",
-    )
-    return dispatch_preparation_builder.build_payload(
-        workflow_run_id=workflow_run_id,
-        scheduled_work_item_count=scheduled_work_item_count,
-    )
-
-
-def _workflow_command_with_dispatch_preparation(
-    *,
-    workflow_command: WorkflowCommand,
-    dispatch_payload: Mapping[str, object],
-) -> WorkflowCommand:
-    payload = dict(workflow_command.payload)
-    payload["llm_dispatch_preparation"] = dict(dispatch_payload)
-    return WorkflowCommand(
-        command_id=workflow_command.command_id,
-        command_type=workflow_command.command_type,
-        workflow_run_id=workflow_command.workflow_run_id,
-        idempotency_key=workflow_command.idempotency_key,
-        payload=payload,
-        status=workflow_command.status,
-        run_after=workflow_command.run_after,
-        created_at=workflow_command.created_at,
-        updated_at=workflow_command.updated_at,
-    )
-
-
 def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
     if (
         workflow_command.command_type
@@ -320,45 +254,17 @@ def _prepare_llm_dispatch_batch_command(
     workflow_run_id: str,
     occurred_at: datetime,
 ) -> PrepareLlmDispatchBatchCommand:
-    dispatch_payload = _payload_mapping(
-        workflow_command.payload,
-        "llm_dispatch_preparation",
-    )
     requested_items = _payload_positive_int(
-        dispatch_payload,
-        "requested_items",
-        fallback=_payload_positive_int(
-            workflow_command.payload,
-            "scheduled_work_item_count",
-        ),
+        workflow_command.payload,
+        "scheduled_work_item_count",
     )
 
     return PrepareLlmDispatchBatchCommand(
         work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
-        profile=_profile_from_payload(_payload_mapping(dispatch_payload, "profile")),
-        account_capacities=_account_capacities_from_payload(dispatch_payload),
-        active_model_ref=_payload_text(dispatch_payload, "active_model_ref"),
         requested_items=requested_items,
-        worker=WorkerRef(
-            _payload_text(
-                dispatch_payload,
-                "worker_ref",
-                fallback="knowledge-workbench-claim-builder-dispatch",
-            ),
-        ),
-        lease_token_prefix=_payload_text(
-            dispatch_payload,
-            "lease_token_prefix",
-            fallback=f"claim-builder-dispatch:{workflow_run_id}",
-        ),
-        lease_expires_at=occurred_at
-        + timedelta(
-            seconds=_payload_positive_int(
-                dispatch_payload,
-                "lease_ttl_seconds",
-                fallback=300,
-            ),
-        ),
+        worker=WorkerRef("knowledge-workbench-claim-builder-dispatch"),
+        lease_token_prefix=f"claim-builder-dispatch:{workflow_run_id}",
+        lease_expires_at=occurred_at + timedelta(seconds=90),
         now=occurred_at,
         started_at=occurred_at,
         dispatch_preparation_strategy=_dispatch_preparation_strategy(
@@ -404,60 +310,6 @@ def _preflight_metadata_from_prepare_result(
 
 def _source_split_required(metadata: Mapping[str, object]) -> bool:
     return metadata.get("source_split_required") is True
-
-
-def _profile_from_payload(payload: Mapping[str, object]) -> LlmTaskCapacityProfile:
-    return LlmTaskCapacityProfile(
-        profile_id=_payload_text(payload, "profile_id"),
-        estimated_prompt_tokens=_payload_positive_int(
-            payload,
-            "estimated_prompt_tokens",
-        ),
-        estimated_completion_tokens=_payload_non_negative_int(
-            payload,
-            "estimated_completion_tokens",
-        ),
-        estimated_requests=_payload_positive_int(
-            payload,
-            "estimated_requests",
-            fallback=1,
-        ),
-    )
-
-
-def _account_capacities_from_payload(
-    payload: Mapping[str, object],
-) -> tuple[LlmProviderAccountCapacity, ...]:
-    account_payloads = _payload_mapping_sequence(payload, "account_capacities")
-    if not account_payloads:
-        raise ValueError(
-            "llm_dispatch_preparation account_capacities must be non-empty"
-        )
-
-    return tuple(
-        LlmProviderAccountCapacity(
-            provider=_payload_text(account_payload, "provider"),
-            account_ref=_payload_text(account_payload, "account_ref"),
-            model_ref=_payload_text(account_payload, "model_ref"),
-            remaining_minute_requests=_payload_non_negative_int(
-                account_payload,
-                "remaining_minute_requests",
-            ),
-            remaining_minute_tokens=_payload_non_negative_int(
-                account_payload,
-                "remaining_minute_tokens",
-            ),
-            remaining_daily_requests=_payload_non_negative_int(
-                account_payload,
-                "remaining_daily_requests",
-            ),
-            remaining_daily_tokens=_payload_non_negative_int(
-                account_payload,
-                "remaining_daily_tokens",
-            ),
-        )
-        for account_payload in account_payloads
-    )
 
 
 def _claim_builder_source_unit_split_required_event(

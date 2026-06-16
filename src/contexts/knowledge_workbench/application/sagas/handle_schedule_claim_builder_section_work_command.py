@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
-)
-from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
-    ClaimBuilderDispatchPreparationBuilder,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -81,10 +78,6 @@ class HandleScheduleClaimBuilderSectionWorkResult:
 
 @dataclass(frozen=True, slots=True)
 class HandleScheduleClaimBuilderSectionWorkCommandHandler:
-    dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder = field(
-        default_factory=ClaimBuilderDispatchPreparationBuilder,
-    )
-
     async def execute(
         self,
         command: HandleScheduleClaimBuilderSectionWorkCommand,
@@ -136,19 +129,11 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
         )
         await workflow_unit_of_work.outbox.append_event(scheduled_event)
 
-        dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
-        if dispatch_preparation is None:
-            dispatch_preparation = self.dispatch_preparation_builder.build_payload(
-                workflow_run_id=workflow_run_id,
-                scheduled_work_item_count=scheduled_work_item_count,
-            )
-
         next_command = _prepare_dispatch_batch_command(
             workflow_run_id=workflow_run_id,
             source_document_ref=source_document_ref,
             scheduled_work_item_count=scheduled_work_item_count,
             occurred_at=occurred_at,
-            dispatch_preparation=dispatch_preparation,
         )
         await workflow_unit_of_work.command_log.append_pending_command(next_command)
 
@@ -228,7 +213,6 @@ def _prepare_dispatch_batch_command(
     source_document_ref: SourceDocumentRef,
     scheduled_work_item_count: int,
     occurred_at: datetime,
-    dispatch_preparation: object | None = None,
 ) -> WorkflowCommand:
     idempotency_key = f"prepare-claim-builder-dispatch-batch:{workflow_run_id}"
     command_payload: dict[str, object] = {
@@ -236,11 +220,6 @@ def _prepare_dispatch_batch_command(
         "source_document_ref": source_document_ref.value,
         "scheduled_work_item_count": scheduled_work_item_count,
     }
-    if dispatch_preparation is not None:
-        if not isinstance(dispatch_preparation, Mapping):
-            raise ValueError("llm_dispatch_preparation must be mapping")
-        command_payload["llm_dispatch_preparation"] = dict(dispatch_preparation)
-
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
         command_type=(
