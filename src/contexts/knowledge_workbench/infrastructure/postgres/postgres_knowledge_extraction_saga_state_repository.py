@@ -385,9 +385,26 @@ def _optional_datetime(row: Mapping[str, object], key: str) -> datetime | None:
 
 def _required_mapping(row: Mapping[str, object], key: str) -> Mapping[str, object]:
     value = _value(row, key)
-    if not isinstance(value, Mapping):
-        raise TypeError(f"{key} must be mapping")
-    return value
+    if isinstance(value, Mapping):
+        return value
+
+    if isinstance(value, str):
+        try:
+            decoded: object = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise TypeError(f"{key} must be mapping or JSON object string") from exc
+
+        if not isinstance(decoded, Mapping):
+            raise TypeError(f"{key} must decode to mapping")
+
+        normalized: dict[str, object] = {}
+        for raw_key, raw_value in decoded.items():
+            if not isinstance(raw_key, str):
+                raise TypeError(f"{key} JSON object keys must be strings")
+            normalized[raw_key] = raw_value
+        return normalized
+
+    raise TypeError(f"{key} must be mapping or JSON object string")
 
 
 def _bool_value(value: object, query_name: str) -> bool:
