@@ -632,7 +632,6 @@ export const KnowledgePage: React.FC = () => {
   const documents = baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
   const workflowLiveStateDocumentIds = documents
-    .filter(shouldFetchWorkflowLiveStateForDocument)
     .slice(0, 6)
     .map((doc) => doc.id)
     .sort();
