@@ -170,6 +170,7 @@ class PrepareLlmDispatchBatchResult:
     source_split_required: bool = False
     affected_work_item_refs: tuple[str, ...] = ()
     source_unit_refs: tuple[str, ...] = ()
+    capacity_retry_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.lease_result, LeaseLlmAdmittedWorkItemsResult):
@@ -198,6 +199,11 @@ class PrepareLlmDispatchBatchResult:
             )
         if not isinstance(self.source_split_required, bool):
             raise TypeError("source_split_required must be bool")
+        if self.capacity_retry_at is not None:
+            _require_timezone_aware(
+                self.capacity_retry_at,
+                field_name="capacity_retry_at",
+            )
         _require_non_empty_text_tuple(
             self.affected_work_item_refs,
             field_name="affected_work_item_refs",
@@ -300,16 +306,23 @@ class PrepareLlmDispatchBatch:
                         lease_repository=lease_repository,
                     )
 
+                provider_account_refs = _resolved_provider_account_refs(
+                    self.provider_account_refs,
+                )
                 account_capacities = await _preparation_account_capacities(
                     command=command,
                     due_records=due_records,
                     builder=self.dispatch_preparation_builder,
                     active_model_ref=resolved_active_model_ref,
-                    provider_account_refs=_resolved_provider_account_refs(
-                        self.provider_account_refs,
-                    ),
+                    provider_account_refs=provider_account_refs,
                     model_profiles=_resolved_model_profiles(self.model_profiles),
                     capacity_observation_repository=capacity_observation_repository,
+                    now=command.now,
+                )
+                capacity_retry_at = await _next_capacity_retry_at(
+                    capacity_observation_repository=capacity_observation_repository,
+                    provider_account_refs=provider_account_refs,
+                    model_ref=resolved_active_model_ref,
                     now=command.now,
                 )
 
@@ -350,6 +363,7 @@ class PrepareLlmDispatchBatch:
                         preflight_result.active_model_ref
                     ),
                     source_split_required=False,
+                    capacity_retry_at=capacity_retry_at,
                 )
         finally:
             await self.pool.release(connection)
@@ -507,6 +521,63 @@ def _observed_or_seed(observed: int | None, seed: int) -> int:
     if observed is None:
         return seed
     return observed
+
+
+async def _next_capacity_retry_at(
+    *,
+    capacity_observation_repository: PostgresLlmAttemptCapacityObservationRepository,
+    provider_account_refs: tuple[str, ...],
+    model_ref: str,
+    now: datetime,
+) -> datetime | None:
+    observations = (
+        await capacity_observation_repository.latest_observations_for_accounts(
+            provider="groq",
+            account_refs=provider_account_refs,
+            model_ref=model_ref,
+        )
+    )
+    retry_candidates = tuple(
+        retry_at
+        for observation in observations
+        for retry_at in (_observation_retry_at(observation=observation, now=now),)
+        if retry_at is not None
+    )
+    if not retry_candidates:
+        return None
+    return min(retry_candidates)
+
+
+def _observation_retry_at(
+    *,
+    observation: LlmAttemptCapacityObservation,
+    now: datetime,
+) -> datetime | None:
+    retry_candidates: list[datetime] = []
+
+    if (
+        observation.minute_reset_at is not None
+        and observation.minute_reset_at > now
+        and (
+            observation.remaining_minute_requests == 0
+            or observation.remaining_minute_tokens == 0
+        )
+    ):
+        retry_candidates.append(observation.minute_reset_at)
+
+    if (
+        observation.daily_reset_at is not None
+        and observation.daily_reset_at > now
+        and (
+            observation.remaining_daily_requests == 0
+            or observation.remaining_daily_tokens == 0
+        )
+    ):
+        retry_candidates.append(observation.daily_reset_at)
+
+    if not retry_candidates:
+        return None
+    return min(retry_candidates)
 
 
 def _resolved_provider_account_refs(

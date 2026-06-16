@@ -186,6 +186,40 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             and scheduled_work_item_count > 0
             and not _source_split_required(preflight_metadata)
         ):
+            capacity_retry_at = _capacity_retry_at_from_prepare_result(
+                typed_prepare_result,
+            )
+            if capacity_retry_at is not None:
+                await workflow_unit_of_work.timeline.append_entry(
+                    _capacity_throttled_timeline_entry(
+                        workflow_command=workflow_command,
+                        workflow_run_id=workflow_run_id,
+                        scheduled_work_item_count=scheduled_work_item_count,
+                        capacity_retry_at=capacity_retry_at,
+                        preflight_metadata=preflight_metadata,
+                        occurred_at=occurred_at,
+                    )
+                )
+                await _save_progress_snapshot(
+                    workflow_unit_of_work=workflow_unit_of_work,
+                    workflow_run_id=workflow_run_id,
+                    prepared_dispatch_count=prepared_dispatch_count,
+                    preflight_metadata=preflight_metadata,
+                    occurred_at=occurred_at,
+                )
+                await workflow_unit_of_work.command_log.reschedule_pending_command(
+                    command_id=workflow_command.command_id,
+                    run_after=capacity_retry_at,
+                    rescheduled_at=occurred_at,
+                )
+                return HandlePrepareClaimBuilderDispatchBatchResult(
+                    workflow_run_id=workflow_run_id,
+                    prepared_dispatch_count=prepared_dispatch_count,
+                    appended_event_count=appended_event_count,
+                    appended_next_command_count=appended_next_command_count,
+                    completed_command_id=workflow_command.command_id,
+                )
+
             await workflow_unit_of_work.timeline.append_entry(
                 _zero_dispatch_after_scheduling_timeline_entry(
                     workflow_command=workflow_command,
@@ -310,6 +344,12 @@ def _preflight_metadata_from_prepare_result(
 
 def _source_split_required(metadata: Mapping[str, object]) -> bool:
     return metadata.get("source_split_required") is True
+
+
+def _capacity_retry_at_from_prepare_result(
+    prepare_result: PrepareLlmDispatchBatchResult,
+) -> datetime | None:
+    return prepare_result.capacity_retry_at
 
 
 def _claim_builder_source_unit_split_required_event(
@@ -686,6 +726,42 @@ async def _save_progress_snapshot(
             updated_at=occurred_at,
             completed_at=existing.completed_at if existing is not None else None,
         ),
+    )
+
+
+def _capacity_throttled_timeline_entry(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    scheduled_work_item_count: int,
+    capacity_retry_at: datetime,
+    preflight_metadata: Mapping[str, object],
+    occurred_at: datetime,
+) -> WorkflowTimelineEntry:
+    payload_summary = {
+        "workflow_run_id": workflow_run_id,
+        "scheduled_work_item_count": scheduled_work_item_count,
+        "capacity_retry_at": capacity_retry_at.isoformat(),
+        "input_size_preflight_decision": preflight_metadata[
+            "input_size_preflight_decision"
+        ],
+        "input_size_preflight_reason": preflight_metadata[
+            "input_size_preflight_reason"
+        ],
+    }
+    return WorkflowTimelineEntry(
+        timeline_entry_id=(
+            f"workflow-timeline:{workflow_command.workflow_run_id}:"
+            "PrepareClaimBuilderDispatchBatch:capacity-throttled:"
+            f"{occurred_at.isoformat()}"
+        ),
+        workflow_run_id=workflow_run_id,
+        event_type=workflow_command.command_type,
+        phase="CLAIM_BUILDER_SECTION_EXTRACTION",
+        severity=WorkflowTimelineSeverity.INFO,
+        message="Claim builder dispatch capacity temporarily unavailable",
+        payload_summary=payload_summary,
+        occurred_at=occurred_at,
     )
 
 

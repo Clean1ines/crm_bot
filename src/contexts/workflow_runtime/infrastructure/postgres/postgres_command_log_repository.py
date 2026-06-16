@@ -156,6 +156,43 @@ class PostgresCommandLogRepository(CommandLogRepositoryPort):
             raise KeyError(command_id.value)
         return _hydrate_command(row)
 
+    async def reschedule_pending_command(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        run_after: datetime,
+        rescheduled_at: datetime,
+    ) -> WorkflowCommand:
+        row = await self._connection.fetchrow(
+            """
+            UPDATE workflow_runtime_command_log
+            SET status = $2,
+                run_after = $3,
+                updated_at = $4
+            WHERE command_id = $1
+            RETURNING
+                command_id,
+                command_type,
+                workflow_run_id,
+                idempotency_key,
+                payload,
+                status,
+                run_after,
+                created_at,
+                updated_at,
+                causation_event_id,
+                correlation_id,
+                attempt_count
+            """,
+            command_id.value,
+            WorkflowCommandStatus.PENDING.value,
+            run_after,
+            rescheduled_at,
+        )
+        if row is None:
+            raise KeyError(command_id.value)
+        return _hydrate_command(row)
+
     async def list_pending_commands(
         self,
         *,

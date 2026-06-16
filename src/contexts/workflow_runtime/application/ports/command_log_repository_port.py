@@ -32,6 +32,14 @@ class CommandLogRepositoryPort(Protocol):
         failed_at: datetime,
     ) -> WorkflowCommand: ...
 
+    async def reschedule_pending_command(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        run_after: datetime,
+        rescheduled_at: datetime,
+    ) -> WorkflowCommand: ...
+
     async def list_pending_commands(
         self,
         *,
