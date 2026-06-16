@@ -83,13 +83,14 @@ class PostgresSourceManagementRepository(SourceManagementRepositoryPort):
                 created_at,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, 0, 'processing', NULL, 'source_ingestion', $7, TRUE, 'active_processing', $8, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'processing', NULL, 'source_ingestion', $8, TRUE, 'active_processing', $9, $9)
             ON CONFLICT (document_id) DO UPDATE SET
                 project_id = EXCLUDED.project_id,
                 file_name = EXCLUDED.file_name,
                 source_type = EXCLUDED.source_type,
                 content_hash = EXCLUDED.content_hash,
                 upload_id = EXCLUDED.upload_id,
+                file_size_bytes = EXCLUDED.file_size_bytes,
                 status = CASE
                     WHEN knowledge_workbench_documents.status IN ('processed', 'published')
                     THEN knowledge_workbench_documents.status
@@ -108,6 +109,7 @@ class PostgresSourceManagementRepository(SourceManagementRepositoryPort):
             document.source_format.value,
             document.content_hash,
             document.document_ref.value,
+            document.file_size_bytes,
             "source_ingestion",
             document.created_at,
         )

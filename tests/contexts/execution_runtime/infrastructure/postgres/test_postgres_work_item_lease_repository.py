@@ -1,22 +1,26 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import cast
+from datetime import datetime, timedelta, timezone
 
-import asyncpg
 import pytest
 
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
-    WorkItemStatus,
-)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
     PostgresWorkItemLeaseRepository,
+    _hydrate_schedule_payload,
+)
+
+from collections.abc import Mapping
+from pathlib import Path
+from typing import cast
+
+import asyncpg
+
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
 )
 
 
@@ -351,3 +355,79 @@ def test_source_guard_forbids_workbench_capacity_llm_or_artifact_imports() -> No
     )
     for marker in forbidden:
         assert marker not in source
+
+
+def _json_payload_hydration_now() -> datetime:
+    return datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
+
+
+def test_hydrate_schedule_payload_accepts_mapping() -> None:
+    payload = _hydrate_schedule_payload({"source_unit_ref": "unit-1"})
+
+    assert dict(payload) == {"source_unit_ref": "unit-1"}
+
+
+def test_hydrate_schedule_payload_accepts_json_string_object() -> None:
+    payload = _hydrate_schedule_payload('{"source_unit_ref":"unit-1"}')
+
+    assert dict(payload) == {"source_unit_ref": "unit-1"}
+
+
+def test_hydrate_schedule_payload_accepts_json_bytes_object() -> None:
+    payload = _hydrate_schedule_payload(b'{"source_unit_ref":"unit-1"}')
+
+    assert dict(payload) == {"source_unit_ref": "unit-1"}
+
+
+def test_hydrate_schedule_payload_rejects_json_array() -> None:
+    with pytest.raises(TypeError, match="payload JSON must decode to Mapping"):
+        _hydrate_schedule_payload('["unit-1"]')
+
+
+@dataclass(slots=True)
+class FakeLeaseConnection:
+    row: dict[str, object] | None
+    executed: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        del query, args
+        return self.row
+
+    async def execute(self, query: str, *args: object) -> str:
+        self.executed.append((query, args))
+        return "UPDATE 1"
+
+
+@pytest.mark.asyncio
+async def test_lease_due_work_item_accepts_json_string_schedule_payload() -> None:
+    now = _json_payload_hydration_now()
+    connection = FakeLeaseConnection(
+        row={
+            "work_item_id": "work-1",
+            "work_kind": "claim_builder_section_work",
+            "status": "ready",
+            "attempt_count": 0,
+            "leased_by": None,
+            "lease_token": None,
+            "lease_expires_at": None,
+            "next_attempt_at": None,
+            "last_error_kind": None,
+            "created_at": now,
+            "updated_at": now,
+            "payload": '{"source_unit_ref":"unit-1"}',
+        },
+    )
+    repository = PostgresWorkItemLeaseRepository(connection)
+
+    leased = await repository.lease_due_work_item(
+        work_kind=WorkKind("claim_builder_section_work"),
+        worker=WorkerRef("worker-1"),
+        lease_token=LeaseToken("lease-token-1"),
+        lease_expires_at=now + timedelta(minutes=5),
+        now=now,
+    )
+
+    assert leased is not None
+    assert dict(leased.schedule_payload) == {"source_unit_ref": "unit-1"}
+    assert leased.work_item.status.value == "leased"
+    assert connection.executed

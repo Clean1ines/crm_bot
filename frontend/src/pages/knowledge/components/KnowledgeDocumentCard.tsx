@@ -395,14 +395,19 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       ? baseActiveElapsedSeconds +
         Math.max(0, Math.floor((nowMs - timerStartedAtMs) / 1000))
       : baseActiveElapsedSeconds;
-  const elapsedText = formatDuration(liveActiveElapsedSeconds);
+  const elapsedText =
+    liveActiveElapsedSeconds > 0 || isLiveTimer
+      ? formatDuration(liveActiveElapsedSeconds)
+      : '—';
+  const fileSizeText = doc.file_size > 0 ? formatSize(doc.file_size) : 'размер недоступен';
 
   const liveUsage = liveWorkflow?.usage ?? null;
-  const llmUsageText = `${formatNumber(
-    liveUsage?.total_tokens ?? cardView.usage.total_tokens,
-  )} токенов · ${formatNumber(
-    liveUsage?.total_llm_calls ?? cardView.usage.llm_call_count,
-  )} LLM-выз.`;
+  const totalTokens = liveUsage?.total_tokens ?? cardView.usage.total_tokens;
+  const totalLlmCalls = liveUsage?.total_llm_calls ?? cardView.usage.llm_call_count;
+  const llmUsageText =
+    totalTokens > 0 || totalLlmCalls > 0
+      ? `${formatNumber(totalTokens)} токенов · ${formatNumber(totalLlmCalls)} LLM-выз.`
+      : '—';
 
   const handleLiveAction = (action: WorkbenchWorkflowActionLiveState): void => {
     if (!canRunLiveAction(action)) return;
@@ -451,12 +456,12 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       id={`knowledge-doc-card-${doc.id}`}
       className="group w-full min-w-0 rounded-2xl bg-[var(--surface-elevated)] p-4 transition-all hover:shadow-lg sm:p-5"
     >
-      <div className="mb-4 flex items-start justify-between gap-2">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
+      <div className="mb-4 flex min-w-0 items-start justify-between gap-2">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
           <FileText className="h-5 w-5" />
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {cardPrimaryActions.length > 0 ? (
             cardPrimaryActions.map((action) => (
               <button
@@ -506,17 +511,17 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       </div>
 
       <div className="mb-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="line-clamp-2 font-semibold text-[var(--text-primary)]">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
               {doc.file_name}
             </h3>
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {formatSize(doc.file_size)} ·{' '}
+              {fileSizeText} ·{' '}
               {knowledgeProcessingModeLabel(doc.preprocessing_mode || 'faq')}
             </p>
           </div>
-          <span className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]">
+          <span className="max-w-[45%] shrink-0 truncate rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]" title={cardText(cardView.status_i18n_key, cardView.default_status_label)}>
             {cardText(cardView.status_i18n_key, cardView.default_status_label)}
           </span>
         </div>
@@ -543,7 +548,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             </div>
             <div className="text-[var(--text-muted)]">
               {elapsedText}
-              {cardView.timer.mode === 'running' ? ' · live' : ''}
             </div>
           </div>
 
@@ -635,7 +639,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               )}
               {liveWorkflow?.workflow_run_id && (
                 <span
-                  className="max-w-full truncate rounded-full bg-[var(--control-bg)] px-2 py-0.5 font-mono sm:max-w-[28rem]"
+                  className="inline-block max-w-full truncate rounded-full bg-[var(--control-bg)] px-2 py-0.5 font-mono sm:max-w-[28rem]"
                   title={liveWorkflow.workflow_run_id}
                 >
                   workflow: {liveWorkflow.workflow_run_id}
@@ -770,7 +774,11 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
                 <div className="flex flex-wrap gap-2">
                   {liveWorkflow.actions
-                    .filter((action) => action.visible)
+                    .filter(
+                      (action) =>
+                        action.visible &&
+                        !(recoverableStopped && action.action_id === 'cancel_processing'),
+                    )
                     .map((action) => (
                       <button
                         key={action.action_id}

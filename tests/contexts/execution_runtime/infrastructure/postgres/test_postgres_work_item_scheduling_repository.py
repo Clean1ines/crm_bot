@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import cast
 import asyncpg
 import pytest
@@ -267,3 +268,26 @@ def test_postgres_scheduling_repository_has_no_transaction_methods() -> None:
     assert "async def commit" not in source
     assert "async def rollback" not in source
     assert "transaction()" not in source
+
+
+ROOT = Path(__file__).resolve().parents[5]
+
+
+def test_scheduling_repository_persists_payload_as_jsonb_from_json_dump() -> None:
+    content = (
+        ROOT / "src/contexts/execution_runtime/infrastructure/postgres/"
+        "postgres_work_item_scheduling_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "json.dumps(payload" in content
+    assert "$4::jsonb" in content
+
+
+def test_lease_repository_hydrates_scheduled_jsonb_payload_from_string() -> None:
+    content = (
+        ROOT / "src/contexts/execution_runtime/infrastructure/postgres/"
+        "postgres_work_item_lease_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "json.loads(value)" in content
+    assert "payload JSON must decode to Mapping" in content

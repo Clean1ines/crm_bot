@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol, cast
 
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
+    ClaimBuilderDispatchPreparationBuilder,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -82,7 +85,12 @@ class HandlePrepareClaimBuilderDispatchBatchResult:
             raise TypeError("completed_command_id must be WorkflowCommandId")
 
 
+@dataclass(frozen=True, slots=True)
 class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
+    dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder = field(
+        default_factory=ClaimBuilderDispatchPreparationBuilder,
+    )
+
     async def execute(
         self,
         command: HandlePrepareClaimBuilderDispatchBatchCommand,
@@ -100,6 +108,16 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         )
         if workflow_run_id != workflow_command.workflow_run_id:
             raise ValueError("payload workflow_run_id must match workflow command")
+
+        dispatch_payload = _dispatch_preparation_payload(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            dispatch_preparation_builder=self.dispatch_preparation_builder,
+        )
+        workflow_command = _workflow_command_with_dispatch_preparation(
+            workflow_command=workflow_command,
+            dispatch_payload=dispatch_payload,
+        )
 
         occurred_at = workflow_command.updated_at
         prepare_result = await prepare_llm_dispatch_batch.execute(
@@ -202,6 +220,49 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             appended_next_command_count=appended_next_command_count,
             completed_command_id=workflow_command.command_id,
         )
+
+
+def _dispatch_preparation_payload(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder,
+) -> Mapping[str, object]:
+    dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
+    if dispatch_preparation is not None:
+        return _payload_mapping(
+            workflow_command.payload,
+            "llm_dispatch_preparation",
+        )
+
+    scheduled_work_item_count = _payload_positive_int(
+        workflow_command.payload,
+        "scheduled_work_item_count",
+    )
+    return dispatch_preparation_builder.build_payload(
+        workflow_run_id=workflow_run_id,
+        scheduled_work_item_count=scheduled_work_item_count,
+    )
+
+
+def _workflow_command_with_dispatch_preparation(
+    *,
+    workflow_command: WorkflowCommand,
+    dispatch_payload: Mapping[str, object],
+) -> WorkflowCommand:
+    payload = dict(workflow_command.payload)
+    payload["llm_dispatch_preparation"] = dict(dispatch_payload)
+    return WorkflowCommand(
+        command_id=workflow_command.command_id,
+        command_type=workflow_command.command_type,
+        workflow_run_id=workflow_command.workflow_run_id,
+        idempotency_key=workflow_command.idempotency_key,
+        payload=payload,
+        status=workflow_command.status,
+        run_after=workflow_command.run_after,
+        created_at=workflow_command.created_at,
+        updated_at=workflow_command.updated_at,
+    )
 
 
 def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:

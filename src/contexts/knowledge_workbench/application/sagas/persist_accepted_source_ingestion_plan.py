@@ -100,6 +100,7 @@ class PersistAcceptedSourceIngestionPlan:
             content_hash=accepted_plan.content_hash,
             original_filename=accepted_plan.original_filename,
             created_at=accepted_plan.occurred_at,
+            file_size_bytes=accepted_plan.content_size_bytes,
         )
 
         document_accepted = _build_document_accepted_checkpoint(
@@ -169,6 +170,7 @@ def _build_document_accepted_checkpoint(
             "original_filename": accepted_plan.original_filename,
             "source_format": accepted_plan.source_format.value,
             "content_hash": accepted_plan.content_hash,
+            "content_size_bytes": accepted_plan.content_size_bytes,
         },
         updated_at=accepted_plan.occurred_at,
     )

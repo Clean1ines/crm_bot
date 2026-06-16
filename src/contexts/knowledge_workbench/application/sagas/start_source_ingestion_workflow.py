@@ -53,6 +53,7 @@ class SourceIngestionAcceptedPlan:
     content_hash: str
     original_filename: str | None
     occurred_at: datetime
+    content_size_bytes: int = 0
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.project_id, field_name="project_id")
@@ -144,6 +145,7 @@ class StartSourceIngestionWorkflow:
                 content_hash=content_hash,
                 original_filename=command.original_filename,
                 occurred_at=command.occurred_at,
+                content_size_bytes=len(command.content_bytes),
             ),
         )
 

@@ -115,6 +115,40 @@ def _workflow_command(
     )
 
 
+def _legacy_workflow_command_without_dispatch_preparation() -> WorkflowCommand:
+    command = _workflow_command()
+    payload = dict(command.payload)
+    payload.pop("llm_dispatch_preparation", None)
+    return WorkflowCommand(
+        command_id=command.command_id,
+        command_type=command.command_type,
+        workflow_run_id=command.workflow_run_id,
+        idempotency_key=command.idempotency_key,
+        payload=payload,
+        status=command.status,
+        run_after=command.run_after,
+        created_at=command.created_at,
+        updated_at=command.updated_at,
+    )
+
+
+def _workflow_command_with_malformed_dispatch_preparation() -> WorkflowCommand:
+    command = _workflow_command()
+    payload = dict(command.payload)
+    payload["llm_dispatch_preparation"] = "not-a-mapping"
+    return WorkflowCommand(
+        command_id=command.command_id,
+        command_type=command.command_type,
+        workflow_run_id=command.workflow_run_id,
+        idempotency_key=command.idempotency_key,
+        payload=payload,
+        status=command.status,
+        run_after=command.run_after,
+        created_at=command.created_at,
+        updated_at=command.updated_at,
+    )
+
+
 def _attempt(index: int) -> StartedLlmAdmittedAttempt:
     return StartedLlmAdmittedAttempt(
         attempt_id=f"work-{index}:attempt:1",
@@ -715,3 +749,38 @@ async def test_source_split_required_raises_when_prepare_result_has_no_source_un
             source_unit_refs=(),
             source_split_required=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_accepts_legacy_prepare_command_without_llm_dispatch_preparation() -> (
+    None
+):
+    result, prepare, workflow_unit_of_work = await _execute(
+        _legacy_workflow_command_without_dispatch_preparation(),
+    )
+
+    assert result.prepared_dispatch_count == 2
+    assert len(prepare.calls) == 1
+    command = prepare.calls[0]
+    assert command.active_model_ref == "qwen/qwen3-32b"
+    assert command.requested_items == 2
+    assert command.profile.profile_id == "faq_claim_observations"
+    assert command.profile.estimated_prompt_tokens == 3000
+    assert command.profile.estimated_completion_tokens == 500
+    assert command.worker.value == "knowledge-workbench-claim-builder-dispatch"
+    assert command.lease_token_prefix == (
+        f"claim-builder-dispatch:{_workflow_run_id()}"
+    )
+    assert command.account_capacities
+    assert command.account_capacities[0].provider == "groq"
+    assert command.account_capacities[0].account_ref == "groq_org_primary"
+    assert command.account_capacities[0].model_ref == "qwen/qwen3-32b"
+
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert isinstance(next_command.payload["llm_dispatch_preparation"], dict)
+
+
+@pytest.mark.asyncio
+async def test_rejects_malformed_explicit_llm_dispatch_preparation() -> None:
+    with pytest.raises(ValueError, match="llm_dispatch_preparation"):
+        await _execute(_workflow_command_with_malformed_dispatch_preparation())

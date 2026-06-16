@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime
 
@@ -201,6 +202,19 @@ def _hydrate_work_item(row: Mapping[str, object]) -> WorkItem:
 
 
 def _hydrate_schedule_payload(value: object) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        raise TypeError("payload must be Mapping")
-    return value
+    if isinstance(value, Mapping):
+        return dict(value)
+
+    if isinstance(value, str):
+        decoded = json.loads(value)
+        if not isinstance(decoded, Mapping):
+            raise TypeError("payload JSON must decode to Mapping")
+        return dict(decoded)
+
+    if isinstance(value, (bytes, bytearray)):
+        decoded = json.loads(bytes(value).decode("utf-8"))
+        if not isinstance(decoded, Mapping):
+            raise TypeError("payload JSON must decode to Mapping")
+        return dict(decoded)
+
+    raise TypeError("payload must be Mapping")
