@@ -1,8 +1,13 @@
+from collections.abc import Mapping
+from src.domain.project_plane.json_types import JsonValue
 from src.domain.project_plane.thread_views import (
     ThreadMessageView,
     ThreadRuntimeMessageView,
 )
 from src.utils.uuid_utils import ensure_uuid
+from src.infrastructure.db.repositories.jsonb_payload_hydration import (
+    hydrate_jsonb_object_payload,
+)
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -115,10 +120,42 @@ class ThreadMessageRepository:
                     role=row["role"],
                     content=row["content"],
                     created_at=created_at,
-                    metadata=row["metadata"] or {},
+                    metadata=_message_metadata(row["metadata"]),
                 )
             )
 
         messages.reverse()
         logger.debug(f"Retrieved {len(messages)} messages")
         return messages
+
+
+def _message_metadata(value: object) -> dict[str, JsonValue]:
+    if value is None:
+        return {}
+
+    payload = hydrate_jsonb_object_payload(
+        value,
+        field_name="messages.metadata",
+    )
+    return {
+        key: _json_value(item, field_name=f"messages.metadata.{key}")
+        for key, item in payload.items()
+    }
+
+
+def _json_value(value: object, *, field_name: str) -> JsonValue:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+
+    if isinstance(value, list):
+        return [_json_value(item, field_name=field_name) for item in value]
+
+    if isinstance(value, Mapping):
+        result: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"{field_name} must have string keys")
+            result[key] = _json_value(item, field_name=f"{field_name}.{key}")
+        return result
+
+    raise TypeError(f"{field_name} must be JSON value")

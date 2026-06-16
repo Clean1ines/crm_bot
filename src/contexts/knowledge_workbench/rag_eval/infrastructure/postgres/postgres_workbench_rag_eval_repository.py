@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.jsonb_payload_hydration import (
+    hydrate_jsonb_text_array_payload,
+)
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -1095,12 +1098,9 @@ def _pg_vector_text(vector: tuple[float, ...]) -> str:
 
 
 def _text_tuple(value: object) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if not isinstance(value, list):
-        raise TypeError("tuple source must be list")
-    return tuple(
-        item.strip() for item in value if isinstance(item, str) and item.strip()
+    return hydrate_jsonb_text_array_payload(
+        value,
+        field_name="knowledge_workbench_rag_eval.text_array",
     )
 
 

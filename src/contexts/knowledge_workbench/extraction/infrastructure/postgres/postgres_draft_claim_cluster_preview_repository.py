@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.jsonb_payload_hydration import (
+    hydrate_jsonb_object_payload,
+)
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Protocol, cast
@@ -77,15 +80,24 @@ class PostgresDraftClaimClusterPreviewRepository:
         if row is None:
             return None
         row_mapping = cast(Mapping[str, object], row)
-        payload = row_mapping.get("preview_payload")
-        if not isinstance(payload, Mapping):
-            raise ValueError("preview_payload must be object")
         return DraftClaimClusterPreview.from_payload(
             workflow_run_id=_row_text(row_mapping, "workflow_run_id"),
-            payload=cast(JsonObject, dict(payload)),
+            payload=_preview_payload(row_mapping.get("preview_payload")),
             created_at=_row_datetime(row_mapping, "created_at"),
             updated_at=_row_datetime(row_mapping, "updated_at"),
         )
+
+
+def _preview_payload(value: object) -> JsonObject:
+    return cast(
+        JsonObject,
+        dict(
+            hydrate_jsonb_object_payload(
+                value,
+                field_name="draft_claim_cluster_previews.preview_payload",
+            )
+        ),
+    )
 
 
 def _row_text(row: Mapping[str, object], key: str) -> str:

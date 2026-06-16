@@ -11,6 +11,9 @@ from src.domain.project_plane.event_views import EventTimelineItemView
 from src.domain.project_plane.json_types import JsonObject
 from src.domain.project_plane.manager_reply_history import ManagerReplyHistoryItemView
 from src.infrastructure.logging.logger import get_logger
+from src.infrastructure.db.repositories.jsonb_payload_hydration import (
+    hydrate_jsonb_object_payload,
+)
 
 
 logger = get_logger(__name__)
@@ -102,7 +105,7 @@ class EventRepository:
             {
                 "id": row["id"],
                 "type": row["event_type"],
-                "payload": row["payload"],
+                "payload": _event_payload(row["payload"]),
                 "ts": row["created_at"],
             }
             for row in rows
@@ -147,7 +150,7 @@ class EventRepository:
             {
                 "id": row["id"],
                 "type": event_type,
-                "payload": row["payload"],
+                "payload": _event_payload(row["payload"]),
                 "ts": row["created_at"],
                 "stream_id": row["stream_id"],
                 "project_id": project_id,
@@ -192,7 +195,7 @@ class EventRepository:
             {
                 "id": row["id"],
                 "type": row["event_type"],
-                "payload": row["payload"],
+                "payload": _event_payload(row["payload"]),
                 "ts": row["created_at"],
             }
             for row in rows
@@ -251,7 +254,7 @@ class EventRepository:
                 "id": row["id"],
                 "stream_id": row["stream_id"],
                 "project_id": row["project_id"],
-                "payload": row["payload"],
+                "payload": _event_payload(row["payload"]),
                 "created_at": row["created_at"],
             }
             for row in rows
@@ -267,3 +270,12 @@ class EventRepository:
         )
 
         return [ManagerReplyHistoryItemView.from_record(record) for record in records]
+
+
+def _event_payload(value: object) -> dict[str, object]:
+    return dict(
+        hydrate_jsonb_object_payload(
+            value,
+            field_name="events.payload",
+        )
+    )

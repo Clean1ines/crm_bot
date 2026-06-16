@@ -24,6 +24,7 @@ def test_execution_runtime_postgres_payload_readers_use_bounded_jsonb_hydration(
         source = _read(file_path)
         assert "hydrate_jsonb_object_payload" in source
         assert "payload must be Mapping" not in source
+        assert "if not isinstance(payload, Mapping)" not in source
         assert "dispatch_payload must be Mapping" not in source
         assert "schedule_payload must be Mapping" not in source
 

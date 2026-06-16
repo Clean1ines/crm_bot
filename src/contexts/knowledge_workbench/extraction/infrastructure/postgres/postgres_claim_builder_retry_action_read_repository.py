@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.jsonb_payload_hydration import (
+    hydrate_jsonb_object_payload,
+)
 from collections.abc import Mapping
 from datetime import datetime
 
@@ -96,9 +99,10 @@ def _automatic_retry_status_values() -> list[str]:
 
 
 def _record_from_row(row: Mapping[str, object]) -> WorkItemRetryActionRecord:
-    payload = row["payload"]
-    if not isinstance(payload, Mapping):
-        raise TypeError("payload must be mapping")
+    payload = hydrate_jsonb_object_payload(
+        row["payload"],
+        field_name="workflow_runtime_outbox_events.payload",
+    )
 
     return WorkItemRetryActionRecord(
         work_item_id=_required_text(payload, "work_item_id"),
