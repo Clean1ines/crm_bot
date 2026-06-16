@@ -39,6 +39,8 @@ class PostgresTimelineRepository(TimelineRepositoryPort):
                 attempt_id
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)
+            ON CONFLICT (timeline_entry_id) DO UPDATE SET
+                timeline_entry_id = workflow_runtime_timeline_entries.timeline_entry_id
             RETURNING
                 timeline_entry_id,
                 workflow_run_id,

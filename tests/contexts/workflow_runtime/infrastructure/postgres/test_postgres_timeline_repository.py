@@ -41,6 +41,13 @@ class FakeConnection:
     async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
         if "INSERT INTO workflow_runtime_timeline_entries" not in query:
             raise AssertionError(query)
+
+        timeline_entry_id = _arg_str(args, 0)
+        if timeline_entry_id in self.rows:
+            if "ON CONFLICT (timeline_entry_id)" not in query:
+                raise RuntimeError("duplicate timeline entry was not idempotent")
+            return self.rows[timeline_entry_id]
+
         row = {
             "timeline_entry_id": args[0],
             "workflow_run_id": args[1],
@@ -54,7 +61,7 @@ class FakeConnection:
             "work_item_id": args[9],
             "attempt_id": args[10],
         }
-        self.rows[_arg_str(args, 0)] = row
+        self.rows[timeline_entry_id] = row
         return row
 
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
@@ -108,3 +115,21 @@ async def test_timeline_appends_and_lists_recent_entries_ordered_newest_first() 
     )
 
     assert tuple(entry.timeline_entry_id for entry in listed) == ("entry-2", "entry-1")
+
+
+@pytest.mark.asyncio
+async def test_timeline_append_is_idempotent_for_existing_entry_id() -> None:
+    repository = PostgresTimelineRepository(cast(asyncpg.Connection, FakeConnection()))
+
+    first = await repository.append_entry(_entry("entry-1", _time(0)))
+    second = await repository.append_entry(_entry("entry-1", _time(0)))
+
+    assert first.timeline_entry_id == "entry-1"
+    assert second.timeline_entry_id == "entry-1"
+
+    listed = await repository.list_recent_entries(
+        workflow_run_id="workflow-1",
+        limit=10,
+    )
+
+    assert tuple(entry.timeline_entry_id for entry in listed) == ("entry-1",)
