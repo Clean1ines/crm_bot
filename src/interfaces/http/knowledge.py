@@ -2248,7 +2248,7 @@ async def delete_knowledge_document(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Deletes a Workbench document and invalidates document-scoped processing artifacts."""
+    """Hard-deletes a knowledge document and all document-scoped processing artifacts."""
 
     await _require_project_access(
         project_id=project_id,
@@ -2256,28 +2256,230 @@ async def delete_knowledge_document(
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_delete import (
-        WorkbenchDocumentDeleteNotFoundError,
-        WorkbenchDocumentDeleteRejectedError,
-        delete_workbench_document,
-    )
 
-    try:
-        return await delete_workbench_document(
-            pool=pool,
-            project_id=project_id,
-            document_id=document_id,
-        )
-    except WorkbenchDocumentDeleteNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail="Knowledge document not found",
-        ) from exc
-    except WorkbenchDocumentDeleteRejectedError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=str(exc),
-        ) from exc
+    async with pool.acquire() as connection:
+        async with connection.transaction():
+            document_row = await connection.fetchrow(
+                """
+                SELECT document_id
+                FROM knowledge_workbench_documents
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+            )
+            if document_row is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Knowledge document not found",
+                )
+
+            workflow_rows = await connection.fetch(
+                """
+                SELECT workflow_run_id
+                FROM knowledge_extraction_workflow_runs
+                WHERE project_id = $1
+                  AND source_document_ref = $2
+                """,
+                project_id,
+                document_id,
+            )
+            workflow_run_ids: list[str] = []
+            for workflow_row in workflow_rows:
+                workflow_data = dict(workflow_row)
+                workflow_run_id = workflow_data.get("workflow_run_id")
+                if isinstance(workflow_run_id, str) and workflow_run_id.strip():
+                    workflow_run_ids.append(workflow_run_id)
+
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_curation_items
+                WHERE workspace_ref IN (
+                    SELECT workspace_ref
+                    FROM draft_claim_curation_workspaces
+                    WHERE workflow_run_id = ANY($1::text[])
+                )
+                """,
+                workflow_run_ids,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_curation_workspaces
+                WHERE workflow_run_id = ANY($1::text[])
+                """,
+                workflow_run_ids,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_cluster_previews
+                WHERE workflow_run_id = ANY($1::text[])
+                """,
+                workflow_run_ids,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_compaction_comparisons
+                WHERE workflow_run_id = ANY($1::text[])
+                """,
+                workflow_run_ids,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_compaction_candidate_edges
+                WHERE source_document_ref = $1
+                   OR workflow_run_id = ANY($2::text[])
+                """,
+                document_id,
+                workflow_run_ids,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_compaction_groups
+                WHERE source_document_ref = $1
+                   OR workflow_run_id = ANY($2::text[])
+                """,
+                document_id,
+                workflow_run_ids,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_embeddings
+                WHERE source_document_ref = $1
+                   OR workflow_run_id = ANY($2::text[])
+                """,
+                document_id,
+                workflow_run_ids,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_possible_questions
+                WHERE observation_ref IN (
+                    SELECT observation_ref
+                    FROM draft_claim_observations
+                    WHERE source_unit_ref IN (
+                        SELECT unit_ref
+                        FROM source_units
+                        WHERE document_ref = $1
+                    )
+                )
+                """,
+                document_id,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_observation_provenance
+                WHERE observation_ref IN (
+                    SELECT observation_ref
+                    FROM draft_claim_observations
+                    WHERE source_unit_ref IN (
+                        SELECT unit_ref
+                        FROM source_units
+                        WHERE document_ref = $1
+                    )
+                )
+                """,
+                document_id,
+            )
+            await connection.execute(
+                """
+                DELETE FROM draft_claim_observations
+                WHERE source_unit_ref IN (
+                    SELECT unit_ref
+                    FROM source_units
+                    WHERE document_ref = $1
+                )
+                """,
+                document_id,
+            )
+
+            await connection.execute(
+                """
+                DELETE FROM source_documents
+                WHERE document_ref = $1
+                """,
+                document_id,
+            )
+
+            await connection.execute(
+                """
+                DELETE FROM knowledge_extraction_workflow_runs
+                WHERE project_id = $1
+                  AND source_document_ref = $2
+                """,
+                project_id,
+                document_id,
+            )
+
+            await connection.execute(
+                """
+                DELETE FROM knowledge_workbench_registry_application_queue
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+            )
+            await connection.execute(
+                """
+                DELETE FROM knowledge_workbench_section_batch_queue_items
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+            )
+            await connection.execute(
+                """
+                DELETE FROM knowledge_workbench_parallel_section_batch_plans
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+            )
+            await connection.execute(
+                """
+                DELETE FROM knowledge_workbench_processing_node_runs
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+            )
+            await connection.execute(
+                """
+                DELETE FROM knowledge_workbench_processing_runs
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+            )
+            await connection.execute(
+                """
+                DELETE FROM knowledge_workbench_document_sections
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+            )
+            await connection.execute(
+                """
+                DELETE FROM knowledge_workbench_documents
+                WHERE project_id = $1::uuid
+                  AND document_id = $2
+                """,
+                project_id,
+                document_id,
+            )
+
+    return {
+        "document_id": document_id,
+        "deleted": True,
+        "workflow_run_count": len(workflow_run_ids),
+    }
 
 
 @router.delete("")
