@@ -43,6 +43,9 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
 )
 
 
+CLAIM_BUILDER_ACTIVE_MODEL_REF = "qwen/qwen3-32b"
+
+
 class PrepareLlmDispatchBatchPort(Protocol):
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object: ...
 
@@ -177,6 +180,23 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             ):
                 await workflow_unit_of_work.timeline.append_entry(timeline_entry)
 
+            capacity_retry_at = _capacity_retry_at_from_prepare_result(
+                typed_prepare_result,
+            )
+            if capacity_retry_at is not None:
+                next_prepare_command = (
+                    _next_prepare_claim_builder_dispatch_batch_command(
+                        workflow_command=workflow_command,
+                        workflow_run_id=workflow_run_id,
+                        capacity_retry_at=capacity_retry_at,
+                        occurred_at=occurred_at,
+                    )
+                )
+                await workflow_unit_of_work.command_log.append_pending_command(
+                    next_prepare_command,
+                )
+                appended_next_command_count += 1
+
         scheduled_work_item_count = _payload_positive_int(
             workflow_command.payload,
             "scheduled_work_item_count",
@@ -295,6 +315,11 @@ def _prepare_llm_dispatch_batch_command(
 
     return PrepareLlmDispatchBatchCommand(
         work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+        active_model_ref=_payload_text(
+            workflow_command.payload,
+            "active_model_ref",
+            fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
+        ),
         requested_items=requested_items,
         worker=WorkerRef("knowledge-workbench-claim-builder-dispatch"),
         lease_token_prefix=f"claim-builder-dispatch:{workflow_run_id}",
@@ -618,6 +643,33 @@ def _claim_builder_dispatch_batch_prepared_event(
             **preflight_metadata,
         },
         occurred_at=occurred_at,
+    )
+
+
+def _next_prepare_claim_builder_dispatch_batch_command(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    capacity_retry_at: datetime,
+    occurred_at: datetime,
+) -> WorkflowCommand:
+    idempotency_key = (
+        "prepare-claim-builder-dispatch-batch:"
+        f"{workflow_run_id}:"
+        f"{capacity_retry_at.isoformat()}"
+    )
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+        ),
+        workflow_run_id=workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+        payload=dict(workflow_command.payload),
+        status=WorkflowCommandStatus.PENDING,
+        run_after=capacity_retry_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
     )
 
 

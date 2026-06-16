@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Protocol, cast
 
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
@@ -452,9 +452,21 @@ def _empty_preflight_metadata(active_model_ref: str) -> dict[str, object]:
 def _typed_prepare_result(
     prepare_result: object,
 ) -> PrepareLlmDispatchBatchResult:
-    if not isinstance(prepare_result, PrepareLlmDispatchBatchResult):
-        raise TypeError("prepare_result must be PrepareLlmDispatchBatchResult")
-    return prepare_result
+    for attribute_name in (
+        "attempt_result",
+        "capacity_retry_at",
+        "input_size_preflight_decision",
+        "input_size_preflight_reason",
+        "input_size_preflight_active_model_ref",
+        "source_split_required",
+        "affected_work_item_refs",
+        "source_unit_refs",
+    ):
+        if not hasattr(prepare_result, attribute_name):
+            raise TypeError(
+                "prepare_result must provide PrepareLlmDispatchBatchResult contract"
+            )
+    return cast(PrepareLlmDispatchBatchResult, prepare_result)
 
 
 def _preflight_metadata_from_prepare_result(

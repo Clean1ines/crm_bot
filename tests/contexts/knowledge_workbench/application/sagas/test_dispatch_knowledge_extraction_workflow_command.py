@@ -450,6 +450,7 @@ class FakeAttemptResult:
 @dataclass(slots=True)
 class FakePrepareResult:
     attempt_result: FakeAttemptResult
+    capacity_retry_at: datetime | None = None
     input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
@@ -463,10 +464,12 @@ class FakePrepareResult:
 @dataclass(slots=True)
 class FakePrepareLlmDispatchBatch:
     calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
+    capacity_retry_at: datetime | None = None
 
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
         self.calls.append(command)
         return FakePrepareResult(
+            capacity_retry_at=self.capacity_retry_at,
             attempt_result=FakeAttemptResult(
                 started_attempts=(
                     StartedLlmAdmittedAttempt(
@@ -1125,3 +1128,42 @@ async def test_dispatch_repairs_compaction_prepare_command_without_dispatch_prep
     assert prepare.calls[0].worker.value == (
         "knowledge-workbench-draft-claim-compaction-dispatch"
     )
+
+
+@pytest.mark.asyncio
+async def test_prepare_claim_builder_dispatch_rearms_next_prepare_command_after_started_batch() -> (
+    None
+):
+    retry_at = datetime(2026, 6, 10, 12, 1, tzinfo=timezone.utc)
+    prepare = FakePrepareLlmDispatchBatch(capacity_retry_at=retry_at)
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=workflow_unit_of_work,
+        prepare_llm_dispatch_batch=prepare,
+    )
+
+    assert result.dispatched is True
+    assert result.handler_name == "HandlePrepareClaimBuilderDispatchBatchCommandHandler"
+    assert len(prepare.calls) == 1
+
+    pending_types = tuple(
+        command.command_type
+        for command in workflow_unit_of_work.command_log.pending_commands
+    )
+    assert pending_types == (
+        KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value,
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value,
+    )
+
+    next_prepare = workflow_unit_of_work.command_log.pending_commands[1]
+    assert next_prepare.run_after == retry_at
+    assert next_prepare.payload["workflow_run_id"] == _workflow_run_id()
+    assert next_prepare.status is WorkflowCommandStatus.PENDING
