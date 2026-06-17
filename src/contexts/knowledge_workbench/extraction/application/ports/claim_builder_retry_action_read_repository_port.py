@@ -87,8 +87,11 @@ class WorkItemRetryActionSummary:
             self.retry_same_model_count
             + self.retry_fallback_model_count
             + self.retry_larger_output_model_count
+            + self.retry_larger_input_model_count
             + self.split_required_count
             + self.defer_until_capacity_reset_count
+            + self.pause_for_daily_limit_reset_count
+            + self.request_user_low_quality_continue_or_wait_count
         ) > 0
 
     def to_payload(self) -> dict[str, object]:
@@ -98,8 +101,15 @@ class WorkItemRetryActionSummary:
             "retry_same_model_count": self.retry_same_model_count,
             "retry_fallback_model_count": self.retry_fallback_model_count,
             "retry_larger_output_model_count": (self.retry_larger_output_model_count),
+            "retry_larger_input_model_count": (self.retry_larger_input_model_count),
             "split_required_count": self.split_required_count,
             "defer_until_capacity_reset_count": (self.defer_until_capacity_reset_count),
+            "pause_for_daily_limit_reset_count": (
+                self.pause_for_daily_limit_reset_count
+            ),
+            "request_user_low_quality_continue_or_wait_count": (
+                self.request_user_low_quality_continue_or_wait_count
+            ),
             "next_run_after": self.next_run_after.isoformat()
             if self.next_run_after is not None
             else None,
