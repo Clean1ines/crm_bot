@@ -84,8 +84,11 @@ def _retry_action_values() -> list[str]:
         ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
+        ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value,
         ClaimBuilderAttemptNextActionKind.SPLIT_SOURCE_UNIT.value,
         ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value,
+        ClaimBuilderAttemptNextActionKind.PAUSE_FOR_DAILY_LIMIT_RESET.value,
+        ClaimBuilderAttemptNextActionKind.REQUEST_USER_LOW_QUALITY_CONTINUE_OR_WAIT.value,
     ]
 
 
@@ -135,8 +138,11 @@ def _summary_from_records(
     retry_same_model_count = 0
     retry_fallback_model_count = 0
     retry_larger_output_model_count = 0
+    retry_larger_input_model_count = 0
     split_required_count = 0
     defer_until_capacity_reset_count = 0
+    pause_for_daily_limit_reset_count = 0
+    request_user_low_quality_continue_or_wait_count = 0
     future_run_afters: list[datetime] = []
 
     for record in records:
@@ -157,6 +163,11 @@ def _summary_from_records(
             retry_larger_output_model_count += 1
         elif (
             record.next_action_kind
+            == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
+        ):
+            retry_larger_input_model_count += 1
+        elif (
+            record.next_action_kind
             == ClaimBuilderAttemptNextActionKind.SPLIT_SOURCE_UNIT.value
         ):
             split_required_count += 1
@@ -165,6 +176,16 @@ def _summary_from_records(
             == ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
         ):
             defer_until_capacity_reset_count += 1
+        elif (
+            record.next_action_kind
+            == ClaimBuilderAttemptNextActionKind.PAUSE_FOR_DAILY_LIMIT_RESET.value
+        ):
+            pause_for_daily_limit_reset_count += 1
+        elif (
+            record.next_action_kind
+            == ClaimBuilderAttemptNextActionKind.REQUEST_USER_LOW_QUALITY_CONTINUE_OR_WAIT.value
+        ):
+            request_user_low_quality_continue_or_wait_count += 1
 
         if record.next_run_after is not None and record.next_run_after > now:
             future_run_afters.append(record.next_run_after)
@@ -175,8 +196,13 @@ def _summary_from_records(
         retry_same_model_count=retry_same_model_count,
         retry_fallback_model_count=retry_fallback_model_count,
         retry_larger_output_model_count=retry_larger_output_model_count,
+        retry_larger_input_model_count=retry_larger_input_model_count,
         split_required_count=split_required_count,
         defer_until_capacity_reset_count=defer_until_capacity_reset_count,
+        pause_for_daily_limit_reset_count=pause_for_daily_limit_reset_count,
+        request_user_low_quality_continue_or_wait_count=(
+            request_user_low_quality_continue_or_wait_count
+        ),
         next_run_after=min(future_run_afters) if future_run_afters else None,
         records=records,
     )

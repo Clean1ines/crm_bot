@@ -471,9 +471,18 @@ async def _save_progress_snapshot(
     domain_counters["claim_builder_retry_larger_output_model_pending_count"] = (
         retry_action_summary.retry_larger_output_model_count
     )
+    domain_counters["claim_builder_retry_larger_input_model_pending_count"] = (
+        retry_action_summary.retry_larger_input_model_count
+    )
     domain_counters["claim_builder_split_required_pending_count"] = (
         retry_action_summary.split_required_count
     )
+    domain_counters["claim_builder_pause_for_daily_limit_reset_pending_count"] = (
+        retry_action_summary.pause_for_daily_limit_reset_count
+    )
+    domain_counters[
+        "claim_builder_request_user_low_quality_continue_or_wait_pending_count"
+    ] = retry_action_summary.request_user_low_quality_continue_or_wait_count
 
     await workflow_unit_of_work.progress_snapshots.save_snapshot(
         WorkflowProgressSnapshot(
@@ -538,6 +547,8 @@ def _timeline_entry(
 def _selected_retry_strategy(
     retry_action_summary: WorkItemRetryActionSummary,
 ) -> str | None:
+    if retry_action_summary.retry_larger_input_model_count > 0:
+        return "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
     if retry_action_summary.retry_larger_output_model_count > 0:
         return "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
     if _has_retry_strategy(

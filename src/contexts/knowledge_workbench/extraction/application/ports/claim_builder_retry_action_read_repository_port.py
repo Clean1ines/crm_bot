@@ -35,8 +35,11 @@ class WorkItemRetryActionSummary:
     retry_same_model_count: int
     retry_fallback_model_count: int
     retry_larger_output_model_count: int
+    retry_larger_input_model_count: int
     split_required_count: int
     defer_until_capacity_reset_count: int
+    pause_for_daily_limit_reset_count: int
+    request_user_low_quality_continue_or_wait_count: int
     next_run_after: datetime | None
     records: tuple[WorkItemRetryActionRecord, ...] = ()
 
@@ -51,10 +54,22 @@ class WorkItemRetryActionSummary:
                 "retry_larger_output_model_count",
                 self.retry_larger_output_model_count,
             ),
+            (
+                "retry_larger_input_model_count",
+                self.retry_larger_input_model_count,
+            ),
             ("split_required_count", self.split_required_count),
             (
                 "defer_until_capacity_reset_count",
                 self.defer_until_capacity_reset_count,
+            ),
+            (
+                "pause_for_daily_limit_reset_count",
+                self.pause_for_daily_limit_reset_count,
+            ),
+            (
+                "request_user_low_quality_continue_or_wait_count",
+                self.request_user_low_quality_continue_or_wait_count,
             ),
         ):
             _require_non_negative_int(value, field_name)

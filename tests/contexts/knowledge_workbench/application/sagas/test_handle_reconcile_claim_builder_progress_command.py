@@ -182,8 +182,11 @@ def _retry_action_summary(
     retry_same_model_count: int = 0,
     retry_fallback_model_count: int = 0,
     retry_larger_output_model_count: int = 0,
+    retry_larger_input_model_count: int = 0,
     split_required_count: int = 0,
     defer_until_capacity_reset_count: int = 0,
+    pause_for_daily_limit_reset_count: int = 0,
+    request_user_low_quality_continue_or_wait_count: int = 0,
     next_run_after: datetime | None = None,
 ) -> WorkItemRetryActionSummary:
     return WorkItemRetryActionSummary(
@@ -192,8 +195,13 @@ def _retry_action_summary(
         retry_same_model_count=retry_same_model_count,
         retry_fallback_model_count=retry_fallback_model_count,
         retry_larger_output_model_count=retry_larger_output_model_count,
+        retry_larger_input_model_count=retry_larger_input_model_count,
         split_required_count=split_required_count,
         defer_until_capacity_reset_count=defer_until_capacity_reset_count,
+        pause_for_daily_limit_reset_count=pause_for_daily_limit_reset_count,
+        request_user_low_quality_continue_or_wait_count=(
+            request_user_low_quality_continue_or_wait_count
+        ),
         next_run_after=next_run_after,
     )
 
@@ -651,6 +659,26 @@ async def test_retry_larger_output_count_appends_prepare_with_larger_output_stra
     )
     assert next_command.payload["llm_dispatch_preparation_strategy"] == (
         "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_retry_larger_input_count_appends_prepare_with_larger_input_strategy() -> (
+    None
+):
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
+        retry_action_summary=_retry_action_summary(
+            retry_larger_input_model_count=1,
+        ),
+    )
+
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert next_command.payload["claim_builder_next_model_strategy"] == (
+        "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
+    )
+    assert next_command.payload["llm_dispatch_preparation_strategy"] == (
+        "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
     )
 
 
