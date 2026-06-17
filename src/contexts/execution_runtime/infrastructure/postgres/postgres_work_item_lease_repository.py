@@ -70,6 +70,12 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
               AND wi.status IN ('ready', 'deferred', 'retryable_failed')
               AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $2)
             ORDER BY
+              CASE wi.status
+                WHEN 'retryable_failed' THEN 0
+                WHEN 'deferred' THEN 1
+                WHEN 'ready' THEN 2
+                ELSE 3
+              END,
               wi.next_attempt_at NULLS FIRST,
               wi.updated_at,
               wi.work_item_id
@@ -118,6 +124,12 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
               AND wi.status IN ('ready', 'deferred', 'retryable_failed')
               AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $2)
             ORDER BY
+              CASE wi.status
+                WHEN 'retryable_failed' THEN 0
+                WHEN 'deferred' THEN 1
+                WHEN 'ready' THEN 2
+                ELSE 3
+              END,
               wi.next_attempt_at NULLS FIRST,
               wi.updated_at,
               wi.work_item_id

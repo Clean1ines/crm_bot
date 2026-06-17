@@ -30,11 +30,28 @@ class FakeConnection:
     schedules: dict[str, Mapping[str, object]] = field(default_factory=dict)
     executed_queries: list[str] = field(default_factory=list)
 
+    async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
+        self.executed_queries.append(query)
+        work_kind = str(args[0])
+        now = _as_datetime(args[1])
+        limit = int(args[2])
+        candidates = self._due_candidates(work_kind=work_kind, now=now)
+        return candidates[:limit]
+
     async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
         self.executed_queries.append(query)
         work_kind = str(args[0])
         now = _as_datetime(args[1])
-        candidates = []
+        candidates = self._due_candidates(work_kind=work_kind, now=now)
+        return candidates[0] if candidates else None
+
+    def _due_candidates(
+        self,
+        *,
+        work_kind: str,
+        now: datetime,
+    ) -> list[Mapping[str, object]]:
+        candidates: list[Mapping[str, object]] = []
         for row in self.work_items.values():
             if row["work_kind"] != work_kind:
                 continue
@@ -51,6 +68,7 @@ class FakeConnection:
 
         candidates.sort(
             key=lambda candidate: (
+                _status_priority(str(candidate["status"])),
                 candidate["next_attempt_at"] is not None,
                 candidate["next_attempt_at"]
                 or datetime.min.replace(tzinfo=timezone.utc),
@@ -58,7 +76,7 @@ class FakeConnection:
                 candidate["work_item_id"],
             ),
         )
-        return candidates[0] if candidates else None
+        return candidates
 
     async def execute(self, query: str, *args: object) -> str:
         self.executed_queries.append(query)
@@ -148,10 +166,123 @@ def _repository(connection: FakeConnection) -> PostgresWorkItemLeaseRepository:
     return PostgresWorkItemLeaseRepository(cast(asyncpg.Connection, connection))
 
 
+def _status_priority(status: str) -> int:
+    priority_by_status = {
+        WorkItemStatus.RETRYABLE_FAILED.value: 0,
+        WorkItemStatus.DEFERRED.value: 1,
+        WorkItemStatus.READY.value: 2,
+    }
+    return priority_by_status.get(status, 3)
+
+
 def _as_datetime(value: object) -> datetime:
     if not isinstance(value, datetime):
         raise TypeError("expected datetime")
     return value
+
+
+@pytest.mark.asyncio
+async def test_peek_due_work_items_prioritizes_retryable_failed_then_deferred_then_ready() -> (
+    None
+):
+    due_at = _now() - timedelta(seconds=1)
+    connection = _connection_with(
+        _row(
+            work_item_id="work-ready",
+            status=WorkItemStatus.READY,
+            next_attempt_at=None,
+            updated_at=_updated_at(1),
+        ),
+        _row(
+            work_item_id="work-deferred",
+            status=WorkItemStatus.DEFERRED,
+            next_attempt_at=due_at,
+            updated_at=_updated_at(2),
+        ),
+        _row(
+            work_item_id="work-retry",
+            status=WorkItemStatus.RETRYABLE_FAILED,
+            next_attempt_at=due_at,
+            last_error_kind="rate_limit",
+            updated_at=_updated_at(3),
+        ),
+    )
+
+    records = await _repository(connection).peek_due_work_items(
+        work_kind=_work_kind(),
+        requested_items=3,
+        now=_now(),
+    )
+
+    assert tuple(record.work_item.work_item_id for record in records) == (
+        "work-retry",
+        "work-deferred",
+        "work-ready",
+    )
+
+
+@pytest.mark.asyncio
+async def test_lease_due_work_item_prioritizes_retryable_failed_then_deferred_then_ready() -> (
+    None
+):
+    due_at = _now() - timedelta(seconds=1)
+    connection = _connection_with(
+        _row(
+            work_item_id="work-ready",
+            status=WorkItemStatus.READY,
+            next_attempt_at=None,
+            updated_at=_updated_at(1),
+        ),
+        _row(
+            work_item_id="work-deferred",
+            status=WorkItemStatus.DEFERRED,
+            next_attempt_at=due_at,
+            updated_at=_updated_at(2),
+        ),
+        _row(
+            work_item_id="work-retry",
+            status=WorkItemStatus.RETRYABLE_FAILED,
+            next_attempt_at=due_at,
+            last_error_kind="rate_limit",
+            updated_at=_updated_at(3),
+        ),
+    )
+
+    leased = await _repository(connection).lease_due_work_item(
+        work_kind=_work_kind(),
+        worker=_worker(),
+        lease_token=_lease_token(),
+        lease_expires_at=_lease_expires_at(),
+        now=_now(),
+    )
+
+    assert leased is not None
+    assert leased.work_item.work_item_id == "work-retry"
+
+
+@pytest.mark.asyncio
+async def test_peek_due_work_items_excludes_future_retryable_failed() -> None:
+    connection = _connection_with(
+        _row(
+            work_item_id="work-retry-future",
+            status=WorkItemStatus.RETRYABLE_FAILED,
+            next_attempt_at=_now() + timedelta(minutes=1),
+            last_error_kind="rate_limit",
+        ),
+        _row(
+            work_item_id="work-ready",
+            status=WorkItemStatus.READY,
+            next_attempt_at=None,
+        ),
+    )
+
+    records = await _repository(connection).peek_due_work_items(
+        work_kind=_work_kind(),
+        requested_items=3,
+        now=_now(),
+    )
+
+    assert tuple(record.work_item.work_item_id for record in records) == ("work-ready",)
 
 
 @pytest.mark.asyncio
@@ -354,12 +485,17 @@ def test_sql_uses_atomic_skip_locked_due_selection() -> None:
         "wi.status IN ('ready', 'deferred', 'retryable_failed')",
         "wi.next_attempt_at <= $2",
         "ORDER BY",
+        "CASE wi.status",
+        "WHEN 'retryable_failed' THEN 0",
+        "WHEN 'deferred' THEN 1",
+        "WHEN 'ready' THEN 2",
         "LIMIT 1",
         "execution_work_items",
         "execution_work_item_schedules",
     )
     for marker in required:
         assert marker in source
+    assert source.count("CASE wi.status") == 2
 
 
 def test_source_guard_forbids_workbench_capacity_llm_or_artifact_imports() -> None:
