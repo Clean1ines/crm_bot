@@ -84,6 +84,14 @@ def test_valid_single_atomic_claim_returns_valid_claims() -> None:
     )
 
 
+def test_empty_exclusion_scope_is_valid_when_prompt_requires_empty_string() -> None:
+    result = _validate({"claims": [_claim_payload(exclusion_scope="")]})
+
+    assert result.decision is ClaimBuilderOutputValidationDecision.VALID_CLAIMS
+    assert result.failure_reason is None
+    assert result.claims[0].exclusion_scope == ""
+
+
 def test_valid_multiple_claims_returns_valid_claims() -> None:
     result = _validate(
         {

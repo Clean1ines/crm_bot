@@ -79,7 +79,7 @@ class ValidatedClaimBuilderClaim:
             raise TypeError("possible_questions must be tuple")
         for question in self.possible_questions:
             _require_non_empty_text(question, "possible_question")
-        _require_non_empty_text(self.exclusion_scope, "exclusion_scope")
+        _require_text(self.exclusion_scope, "exclusion_scope")
         _require_non_empty_text(self.evidence_block, "evidence_block")
 
 
@@ -219,7 +219,7 @@ def _validate_claim_item(
     if isinstance(questions, ClaimBuilderOutputValidationResult):
         return questions
 
-    exclusion_scope = _non_empty_string(
+    exclusion_scope = _string(
         claim_mapping["exclusion_scope"],
         ClaimBuilderOutputValidationFailureReason.EXCLUSION_SCOPE_EMPTY,
     )
@@ -256,6 +256,18 @@ def _validate_claim_item(
         exclusion_scope=exclusion_scope,
         evidence_block=evidence_block,
     )
+
+
+def _string(
+    value: JsonInputValue,
+    failure_reason: ClaimBuilderOutputValidationFailureReason,
+) -> str | ClaimBuilderOutputValidationResult:
+    if not isinstance(value, str):
+        return _failure(
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            failure_reason,
+        )
+    return value
 
 
 def _non_empty_string(
@@ -340,6 +352,11 @@ def _failure(
         claims=(),
         failure_reason=failure_reason,
     )
+
+
+def _require_text(value: str, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
 
 
 def _require_non_empty_text(value: str, field_name: str) -> None:

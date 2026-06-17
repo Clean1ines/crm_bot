@@ -57,7 +57,7 @@ class ValidatedDraftClaimObservationCandidate:
             raise TypeError("possible_questions must be tuple")
         for question in self.possible_questions:
             _require_non_empty_text(question, "possible_question")
-        _require_non_empty_text(self.exclusion_scope, "exclusion_scope")
+        _require_text(self.exclusion_scope, "exclusion_scope")
         _require_non_empty_text(self.evidence_block, "evidence_block")
         _require_non_empty_text(self.validation_decision, "validation_decision")
 
@@ -78,6 +78,11 @@ class PersistValidatedDraftClaimObservationsPort(Protocol):
         self,
         candidates: tuple[ValidatedDraftClaimObservationCandidate, ...],
     ) -> PersistValidatedDraftClaimObservationsResult: ...
+
+
+def _require_text(value: str, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
 
 
 def _require_non_empty_text(value: str, field_name: str) -> None:
