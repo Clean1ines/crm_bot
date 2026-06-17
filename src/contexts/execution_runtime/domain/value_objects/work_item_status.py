@@ -12,6 +12,8 @@ class WorkItemStatus(StrEnum):
 
     READY = "ready"
     LEASED = "leased"
+    # Legacy compatibility only: new retry/capacity semantics must use
+    # RETRYABLE_FAILED + next_attempt_at/retry action instead of DEFERRED.
     DEFERRED = "deferred"
     COMPLETED = "completed"
     RETRYABLE_FAILED = "retryable_failed"
@@ -34,6 +36,5 @@ class WorkItemStatus(StrEnum):
     def is_waiting(self) -> bool:
         return self in {
             WorkItemStatus.READY,
-            WorkItemStatus.DEFERRED,
             WorkItemStatus.RETRYABLE_FAILED,
         }

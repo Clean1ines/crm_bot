@@ -135,7 +135,7 @@ class ClaimBuilderLlmDispatchOutputValidator:
                 ValidateClaimBuilderOutputCommand(
                     output_payload=decoded_payload,
                     source_unit_text=_source_unit_text(dispatch_payload),
-                    empty_claims_retry_already_attempted=attempt_number > 1,
+                    empty_claims_attempt_count=max(attempt_number - 1, 0),
                 )
             )
 

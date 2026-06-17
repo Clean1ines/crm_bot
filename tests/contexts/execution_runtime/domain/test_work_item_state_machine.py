@@ -119,7 +119,7 @@ def test_complete_requires_leased_item_and_clears_lease_fields() -> None:
         WorkItemStateMachine.complete_leased(_ready_item())
 
 
-def test_defer_leased_item_sets_wait_until_and_clears_lease() -> None:
+def test_defer_leased_item_marks_retryable_with_wait_until_and_clears_lease() -> None:
     leased = _leased_item()
     wait_until = WaitUntil(_now() + timedelta(seconds=60))
 
@@ -129,7 +129,7 @@ def test_defer_leased_item_sets_wait_until_and_clears_lease() -> None:
         error_kind="minute_limit",
     )
 
-    assert deferred.status is WorkItemStatus.DEFERRED
+    assert deferred.status is WorkItemStatus.RETRYABLE_FAILED
     assert deferred.next_attempt_at == wait_until
     assert deferred.last_error_kind == "minute_limit"
     assert deferred.leased_by is None
@@ -226,7 +226,7 @@ def test_mark_split_superseded_waiting_accepts_ready_item() -> None:
     assert superseded.last_error_kind is None
 
 
-def test_mark_split_superseded_waiting_accepts_deferred_item() -> None:
+def test_mark_split_superseded_waiting_accepts_retryable_capacity_wait_item() -> None:
     superseded = WorkItemStateMachine.mark_split_superseded_waiting(_deferred_item())
 
     assert superseded.status is WorkItemStatus.SPLIT_SUPERSEDED

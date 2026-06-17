@@ -117,7 +117,6 @@ async def test_retry_action_for_retryable_failed_work_item_is_counted() -> None:
     assert connection.last_status_values == [
         WorkItemStatus.READY.value,
         WorkItemStatus.LEASED.value,
-        WorkItemStatus.DEFERRED.value,
         WorkItemStatus.RETRYABLE_FAILED.value,
     ]
     assert connection.last_query is not None
@@ -126,7 +125,7 @@ async def test_retry_action_for_retryable_failed_work_item_is_counted() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retry_action_for_deferred_work_item_is_counted() -> None:
+async def test_retry_action_for_legacy_deferred_work_item_is_ignored() -> None:
     summary, _ = await _summarize(
         (
             FakeRetryActionRow(
@@ -138,7 +137,8 @@ async def test_retry_action_for_deferred_work_item_is_counted() -> None:
         )
     )
 
-    assert summary.retry_same_model_count == 1
+    assert summary.retry_same_model_count == 0
+    assert summary.records == ()
 
 
 @pytest.mark.asyncio

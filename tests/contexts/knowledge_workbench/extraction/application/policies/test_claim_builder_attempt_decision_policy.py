@@ -31,12 +31,16 @@ def _valid_payload() -> dict[str, object]:
     }
 
 
-def _validation(payload: dict[str, object], *, attempted: bool = False):
+def _validation(
+    payload: dict[str, object],
+    *,
+    empty_claims_attempt_count: int = 0,
+):
     return ClaimBuilderOutputValidationPolicy().validate(
         ValidateClaimBuilderOutputCommand(
             output_payload=payload,
             source_unit_text=SOURCE_UNIT_TEXT,
-            empty_claims_retry_already_attempted=attempted,
+            empty_claims_attempt_count=empty_claims_attempt_count,
         )
     )
 
@@ -102,9 +106,26 @@ def test_truncated_output_retries_larger_output_model() -> None:
     )
 
 
-def test_empty_claims_first_time_retries_fallback_model() -> None:
+def test_empty_claims_first_time_retries_same_model() -> None:
     decision = ClaimBuilderAttemptDecisionPolicy().decide(
         _command(validation_result=_validation({"claims": []})),
+    )
+
+    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL
+    assert decision.validation_decision is (
+        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL
+    )
+    assert decision.next_model_strategy is ClaimBuilderNextModelStrategy.SAME_MODEL
+
+
+def test_empty_claims_after_same_model_retry_uses_fallback_check_model() -> None:
+    decision = ClaimBuilderAttemptDecisionPolicy().decide(
+        _command(
+            validation_result=_validation(
+                {"claims": []},
+                empty_claims_attempt_count=1,
+            )
+        ),
     )
 
     assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_FALLBACK_MODEL
@@ -116,9 +137,14 @@ def test_empty_claims_first_time_retries_fallback_model() -> None:
     )
 
 
-def test_empty_claims_after_fallback_attempt_is_valid_empty() -> None:
+def test_empty_claims_after_fallback_check_is_valid_empty() -> None:
     decision = ClaimBuilderAttemptDecisionPolicy().decide(
-        _command(validation_result=_validation({"claims": []}, attempted=True)),
+        _command(
+            validation_result=_validation(
+                {"claims": []},
+                empty_claims_attempt_count=2,
+            )
+        ),
     )
 
     assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.VALID_EMPTY

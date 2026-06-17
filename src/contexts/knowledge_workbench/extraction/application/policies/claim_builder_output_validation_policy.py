@@ -54,13 +54,15 @@ class ClaimBuilderOutputValidationFailureReason(Enum):
 class ValidateClaimBuilderOutputCommand:
     output_payload: JsonInputValue
     source_unit_text: str
-    empty_claims_retry_already_attempted: bool
+    empty_claims_attempt_count: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.source_unit_text, str):
             raise TypeError("source_unit_text must be str")
-        if not isinstance(self.empty_claims_retry_already_attempted, bool):
-            raise TypeError("empty_claims_retry_already_attempted must be bool")
+        if not isinstance(self.empty_claims_attempt_count, int):
+            raise TypeError("empty_claims_attempt_count must be int")
+        if self.empty_claims_attempt_count < 0:
+            raise ValueError("empty_claims_attempt_count must be >= 0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,15 +153,20 @@ class ClaimBuilderOutputValidationPolicy:
             )
 
         if not claims_value:
-            if command.empty_claims_retry_already_attempted:
-                return ClaimBuilderOutputValidationResult(
-                    decision=ClaimBuilderOutputValidationDecision.VALID_EMPTY,
-                    claims=(),
-                    failure_reason=None,
+            if command.empty_claims_attempt_count <= 0:
+                return _failure(
+                    ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+                    ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED,
                 )
-            return _failure(
-                ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL,
-                ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED,
+            if command.empty_claims_attempt_count == 1:
+                return _failure(
+                    ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL,
+                    ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED,
+                )
+            return ClaimBuilderOutputValidationResult(
+                decision=ClaimBuilderOutputValidationDecision.VALID_EMPTY,
+                claims=(),
+                failure_reason=None,
             )
 
         validated_claims: list[ValidatedClaimBuilderClaim] = []

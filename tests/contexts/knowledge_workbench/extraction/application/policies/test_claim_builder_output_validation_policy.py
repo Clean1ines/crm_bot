@@ -44,13 +44,13 @@ def _validate(
     output_payload: JsonInputValue,
     *,
     source_unit_text: str = SOURCE_UNIT_TEXT,
-    empty_claims_retry_already_attempted: bool = False,
+    empty_claims_attempt_count: int = 0,
 ) -> ClaimBuilderOutputValidationResult:
     return ClaimBuilderOutputValidationPolicy().validate(
         ValidateClaimBuilderOutputCommand(
             output_payload=output_payload,
             source_unit_text=source_unit_text,
-            empty_claims_retry_already_attempted=empty_claims_retry_already_attempted,
+            empty_claims_attempt_count=empty_claims_attempt_count,
         )
     )
 
@@ -142,8 +142,23 @@ def test_claims_not_list_retries_same_model() -> None:
     )
 
 
-def test_empty_claims_first_time_retries_fallback_model() -> None:
+def test_empty_claims_first_time_retries_same_model() -> None:
     result = _validate({"claims": []})
+
+    _assert_failure(
+        result,
+        decision=ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+        failure_reason=(
+            ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED
+        ),
+    )
+
+
+def test_empty_claims_after_same_model_retry_uses_fallback_check_model() -> None:
+    result = _validate(
+        {"claims": []},
+        empty_claims_attempt_count=1,
+    )
 
     _assert_failure(
         result,
@@ -154,10 +169,10 @@ def test_empty_claims_first_time_retries_fallback_model() -> None:
     )
 
 
-def test_empty_claims_after_retry_returns_valid_empty() -> None:
+def test_empty_claims_after_fallback_check_returns_valid_empty() -> None:
     result = _validate(
         {"claims": []},
-        empty_claims_retry_already_attempted=True,
+        empty_claims_attempt_count=2,
     )
 
     assert result.decision is ClaimBuilderOutputValidationDecision.VALID_EMPTY

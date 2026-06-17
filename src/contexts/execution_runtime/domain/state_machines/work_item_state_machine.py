@@ -30,7 +30,6 @@ class WorkItemStateMachine:
     ) -> WorkItem:
         if item.status not in {
             WorkItemStatus.READY,
-            WorkItemStatus.DEFERRED,
             WorkItemStatus.RETRYABLE_FAILED,
         }:
             raise InvalidWorkItemTransition(
@@ -79,7 +78,7 @@ class WorkItemStateMachine:
         WorkItemStateMachine._require_leased(item, "defer")
         return replace(
             item,
-            status=WorkItemStatus.DEFERRED,
+            status=WorkItemStatus.RETRYABLE_FAILED,
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
@@ -220,7 +219,7 @@ class WorkItemStateMachine:
             raise ValueError("reason must be non-empty when provided")
         return replace(
             item,
-            status=WorkItemStatus.DEFERRED,
+            status=WorkItemStatus.RETRYABLE_FAILED,
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,

@@ -93,7 +93,6 @@ def _automatic_retry_status_values() -> list[str]:
     return [
         WorkItemStatus.READY.value,
         WorkItemStatus.LEASED.value,
-        WorkItemStatus.DEFERRED.value,
         WorkItemStatus.RETRYABLE_FAILED.value,
     ]
 

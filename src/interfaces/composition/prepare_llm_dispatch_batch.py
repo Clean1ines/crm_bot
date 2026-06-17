@@ -551,8 +551,7 @@ def _admission_lane_due_records(
     retry_lane = tuple(
         record
         for record in due_records
-        if record.work_item.status
-        in {WorkItemStatus.RETRYABLE_FAILED, WorkItemStatus.DEFERRED}
+        if record.work_item.status is WorkItemStatus.RETRYABLE_FAILED
     )
     if retry_lane:
         return retry_lane
