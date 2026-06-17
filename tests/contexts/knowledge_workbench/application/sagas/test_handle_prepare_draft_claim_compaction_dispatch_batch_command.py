@@ -86,7 +86,7 @@ def _payload() -> dict[str, object]:
         "llm_dispatch_preparation": {
             "profile": {
                 "profile_id": "draft_claim_compaction",
-                "estimated_prompt_tokens": 90000,
+                "estimated_prompt_tokens": 12345,
                 "estimated_completion_tokens": 4000,
                 "estimated_requests": 1,
             },
@@ -316,6 +316,10 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     assert prepare.calls[0].work_kind == DRAFT_CLAIM_COMPACTION_WORK_KIND
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
     assert prepare.calls[0].use_local_active_model_tpm_budget is True
+    assert prepare.calls[0].profile is not None
+    assert prepare.calls[0].profile.estimated_prompt_tokens == 12345
+    assert prepare.calls[0].profile.estimated_completion_tokens == 4000
+    assert prepare.calls[0].profile.estimated_requests == 1
     assert workflow_uow.outbox.events[0].event_type == (
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED.value
     )

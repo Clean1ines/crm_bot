@@ -16,21 +16,33 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
 )
 
 
-def _raw(ref: str, *, active: bool = True) -> DraftClaimCompactionNode:
+def _raw(
+    ref: str,
+    *,
+    active: bool = True,
+    estimated_input_tokens: int = 1,
+) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
         node_ref=ref,
         node_kind=DraftClaimCompactionNodeKind.RAW,
         source_claim_refs=(f"source-{ref}",),
         active=active,
+        estimated_input_tokens=estimated_input_tokens,
     )
 
 
-def _compacted(ref: str, *, active: bool = True) -> DraftClaimCompactionNode:
+def _compacted(
+    ref: str,
+    *,
+    active: bool = True,
+    estimated_input_tokens: int = 1,
+) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
         node_ref=ref,
         node_kind=DraftClaimCompactionNodeKind.COMPACTED,
         source_claim_refs=(f"source-{ref}",),
         active=active,
+        estimated_input_tokens=estimated_input_tokens,
     )
 
 
@@ -88,6 +100,25 @@ def test_compacted_vs_compacted_has_priority_over_mixed_and_raw() -> None:
         is DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
     )
     assert decision.node_refs == ("A", "B")
+
+
+def test_next_work_item_carries_prompt_estimate_from_node_refs() -> None:
+    decision = _plan(
+        _state(
+            nodes=(
+                _compacted("A", estimated_input_tokens=1200),
+                _compacted("B", estimated_input_tokens=3400),
+                _raw("X", estimated_input_tokens=999),
+            ),
+        )
+    )
+
+    assert (
+        decision.work_type
+        is DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
+    )
+    assert decision.node_refs == ("A", "B")
+    assert decision.next_work_item.estimated_prompt_tokens == 4600
 
 
 def test_known_different_compacted_pair_blocks_raw_bridge_to_other_side() -> None:

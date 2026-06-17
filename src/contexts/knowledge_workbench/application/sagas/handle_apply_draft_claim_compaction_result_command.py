@@ -332,6 +332,13 @@ async def _schedule_next_work(
             "prompt_variant": next_work_item.work_type.value,
             "model_id": next_work_item.primary_model_id,
             "node_refs": list(next_work_item.node_refs),
+            "estimated_prompt_tokens": next_work_item.estimated_prompt_tokens,
+            "estimated_completion_tokens": next_work_item.estimated_completion_tokens,
+            "estimated_requests": next_work_item.estimated_requests,
+            "llm_capacity_estimate": {
+                "estimated_input_tokens": next_work_item.estimated_prompt_tokens,
+                "reserved_output_tokens": next_work_item.estimated_completion_tokens,
+            },
         },
     )
     return await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
@@ -364,6 +371,7 @@ def _next_workflow_command_after_apply(
             workflow_command=workflow_command,
             workflow_run_id=apply_command.workflow_run_id,
             batch_ref=batch_ref,
+            next_work_item=outcome.next_decision.next_work_item,
             scheduled_work_item_count=scheduled_count,
             occurred_at=workflow_command.updated_at,
         )
@@ -383,6 +391,7 @@ def _prepare_dispatch_batch_command(
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
     batch_ref: str,
+    next_work_item: DraftClaimCompactionNextWorkItem,
     scheduled_work_item_count: int,
     occurred_at,
 ) -> WorkflowCommand:
@@ -403,12 +412,10 @@ def _prepare_dispatch_batch_command(
             "scheduled_work_item_count": scheduled_work_item_count,
             "caused_by_command_id": workflow_command.command_id.value,
             "llm_dispatch_preparation": {
-                "profile": {
-                    "profile_id": "draft_claim_compaction",
-                    "estimated_prompt_tokens": 90000,
-                    "estimated_completion_tokens": 4000,
-                    "estimated_requests": 1,
-                },
+                "profile": _next_work_profile_payload(
+                    batch_ref=batch_ref,
+                    next_work_item=next_work_item,
+                ),
                 "account_capacities": (),
                 "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
                 "requested_items": scheduled_work_item_count,
@@ -424,6 +431,20 @@ def _prepare_dispatch_batch_command(
         created_at=occurred_at,
         updated_at=occurred_at,
     )
+
+
+def _next_work_profile_payload(
+    *,
+    batch_ref: str,
+    next_work_item: DraftClaimCompactionNextWorkItem,
+) -> dict[str, int | str]:
+    estimated_prompt_tokens = max(next_work_item.estimated_prompt_tokens, 1)
+    return {
+        "profile_id": f"draft_claim_compaction:{batch_ref}",
+        "estimated_prompt_tokens": estimated_prompt_tokens,
+        "estimated_completion_tokens": next_work_item.estimated_completion_tokens,
+        "estimated_requests": next_work_item.estimated_requests,
+    }
 
 
 def _command_causation_scope(workflow_command: WorkflowCommand) -> str:

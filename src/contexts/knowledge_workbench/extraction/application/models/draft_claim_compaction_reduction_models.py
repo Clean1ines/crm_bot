@@ -193,6 +193,9 @@ class DraftClaimCompactionNextWorkItem:
     node_refs: tuple[str, ...]
     primary_model_id: str = PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID
     degraded_model_id: str | None = None
+    estimated_prompt_tokens: int = 0
+    estimated_completion_tokens: int = 4000
+    estimated_requests: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "work_type", _next_work_item_type(self.work_type))
@@ -200,6 +203,15 @@ class DraftClaimCompactionNextWorkItem:
         _text(self.primary_model_id, "primary_model_id")
         if self.degraded_model_id is not None:
             _text(self.degraded_model_id, "degraded_model_id")
+        _non_negative_int(
+            self.estimated_prompt_tokens,
+            "estimated_prompt_tokens",
+        )
+        _non_negative_int(
+            self.estimated_completion_tokens,
+            "estimated_completion_tokens",
+        )
+        _positive_int(self.estimated_requests, "estimated_requests")
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +267,20 @@ def _budget_fit_status(
         return DraftClaimCompactionBudgetFitStatus(value)
     except ValueError as exc:
         raise ValueError("budget fit status is not allowed") from exc
+
+
+def _non_negative_int(value: int, name: str) -> None:
+    if not isinstance(value, int):
+        raise TypeError(f"{name} must be int")
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0")
+
+
+def _positive_int(value: int, name: str) -> None:
+    if not isinstance(value, int):
+        raise TypeError(f"{name} must be int")
+    if value <= 0:
+        raise ValueError(f"{name} must be > 0")
 
 
 def _text(value: str, name: str) -> None:

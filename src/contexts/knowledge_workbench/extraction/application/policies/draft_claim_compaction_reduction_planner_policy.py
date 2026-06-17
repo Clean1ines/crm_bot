@@ -308,9 +308,31 @@ def _decision(
             work_type=work_type,
             node_refs=node_refs,
             primary_model_id=state.primary_model_id,
+            estimated_prompt_tokens=_estimated_prompt_tokens(
+                state=state,
+                node_refs=node_refs,
+            ),
         ),
         reason=reason,
     )
+
+
+def _estimated_prompt_tokens(
+    *,
+    state: DraftClaimCompactionPlannerState,
+    node_refs: tuple[str, ...],
+) -> int:
+    nodes_by_ref = {node.node_ref: node for node in state.nodes}
+    total = 0
+    for node_ref in node_refs:
+        node = nodes_by_ref.get(node_ref)
+        if node is None:
+            continue
+        total += node.estimated_input_tokens
+
+    if node_refs and total <= 0:
+        return 1
+    return total
 
 
 def _wait_for_user_model_choice(

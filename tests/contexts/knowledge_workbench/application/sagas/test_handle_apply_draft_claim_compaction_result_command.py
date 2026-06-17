@@ -642,6 +642,7 @@ def _decision(
     work_type: DraftClaimCompactionNextWorkItemType,
     *,
     node_refs: tuple[str, ...] = (),
+    estimated_prompt_tokens: int = 1,
 ) -> DraftClaimCompactionPlannerDecision:
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
@@ -651,6 +652,7 @@ def _decision(
             if work_type
             is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
             else None,
+            estimated_prompt_tokens=estimated_prompt_tokens,
         ),
         reason="test decision",
     )
@@ -734,6 +736,18 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         == "knowledge-workbench-draft-claim-compaction-dispatch"
     )
     assert dispatch_payload["account_capacities"] == ()
+    assert dispatch_payload["profile"]["estimated_prompt_tokens"] == 1
+    assert dispatch_payload["profile"]["estimated_completion_tokens"] == 4000
+    assert dispatch_payload["profile"]["estimated_requests"] == 1
+    scheduled_payload = scheduling.saved_payloads[0]
+    assert isinstance(scheduled_payload, dict)
+    assert scheduled_payload["estimated_prompt_tokens"] == 1
+    assert scheduled_payload["estimated_completion_tokens"] == 4000
+    assert scheduled_payload["estimated_requests"] == 1
+    assert scheduled_payload["llm_capacity_estimate"] == {
+        "estimated_input_tokens": 1,
+        "reserved_output_tokens": 4000,
+    }
 
 
 @pytest.mark.asyncio
@@ -787,6 +801,13 @@ def _expected_next_work_schedule_payload(
         "prompt_variant": work_type.value,
         "model_id": "openai/gpt-oss-120b",
         "node_refs": list(node_refs),
+        "estimated_prompt_tokens": 1,
+        "estimated_completion_tokens": 4000,
+        "estimated_requests": 1,
+        "llm_capacity_estimate": {
+            "estimated_input_tokens": 1,
+            "reserved_output_tokens": 4000,
+        },
     }
 
 

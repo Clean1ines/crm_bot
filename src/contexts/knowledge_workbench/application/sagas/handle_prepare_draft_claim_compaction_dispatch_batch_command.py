@@ -7,6 +7,9 @@ from typing import Protocol, cast
 
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
+    LlmTaskCapacityProfile,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -303,6 +306,7 @@ def _prepare_llm_dispatch_batch_command(
         work_kind=DRAFT_CLAIM_COMPACTION_WORK_KIND,
         active_model_ref=_active_model_ref_from_payload(workflow_command.payload),
         requested_items=requested_items,
+        profile=_profile_from_payload(workflow_command.payload),
         worker=WorkerRef(
             _payload_text(
                 workflow_command.payload,
@@ -318,6 +322,35 @@ def _prepare_llm_dispatch_batch_command(
             workflow_command.payload,
         ),
         use_local_active_model_tpm_budget=True,
+    )
+
+
+def _profile_from_payload(
+    payload: Mapping[str, object],
+) -> LlmTaskCapacityProfile | None:
+    llm_dispatch_preparation = payload.get("llm_dispatch_preparation")
+    if not isinstance(llm_dispatch_preparation, Mapping):
+        return None
+
+    profile_payload = llm_dispatch_preparation.get("profile")
+    if not isinstance(profile_payload, Mapping):
+        return None
+
+    return LlmTaskCapacityProfile(
+        profile_id=_payload_text(profile_payload, "profile_id"),
+        estimated_prompt_tokens=_payload_positive_int(
+            profile_payload,
+            "estimated_prompt_tokens",
+        ),
+        estimated_completion_tokens=_payload_non_negative_int(
+            profile_payload,
+            "estimated_completion_tokens",
+        ),
+        estimated_requests=_payload_positive_int(
+            profile_payload,
+            "estimated_requests",
+            fallback=1,
+        ),
     )
 
 
