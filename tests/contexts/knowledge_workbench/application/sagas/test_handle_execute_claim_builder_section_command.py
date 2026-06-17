@@ -245,15 +245,6 @@ def _execution_result(
             capacity_observation=_capacity_payload(),
         )
         work_status = WorkItemStatus.COMPLETED
-    elif status is LlmDispatchExecutionStatus.DEFERRED:
-        llm_result = LlmDispatchExecutionResult(
-            status=status,
-            finished_at=_finished_at(),
-            error_kind="minute_limit",
-            next_attempt_at=_finished_at() + timedelta(minutes=1),
-            capacity_observation={**_capacity_payload(), "outcome_class": status.value},
-        )
-        work_status = WorkItemStatus.DEFERRED
     else:
         llm_result = LlmDispatchExecutionResult(
             status=status,
@@ -707,16 +698,16 @@ async def test_updates_progress_snapshot_and_timeline() -> None:
 
 
 @pytest.mark.asyncio
-async def test_deferred_outcome_updates_deferred_progress() -> None:
+async def test_retryable_outcome_updates_retryable_progress() -> None:
     _, _, _, workflow_unit_of_work, draft_persistence = await _execute(
-        execution_result=_execution_result(LlmDispatchExecutionStatus.DEFERRED),
+        execution_result=_execution_result(LlmDispatchExecutionStatus.RETRYABLE_FAILED),
     )
 
     snapshot = workflow_unit_of_work.progress_snapshots.snapshot
     assert snapshot is not None
-    assert snapshot.deferred_work_items == 1
+    assert snapshot.retryable_failed_work_items == 1
     assert workflow_unit_of_work.outbox.events[1].event_type == (
-        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_DEFERRED.value
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
     )
 
 

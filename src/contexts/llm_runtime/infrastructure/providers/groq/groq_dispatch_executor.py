@@ -222,9 +222,7 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             error_kind=error_kind,
             wait_until=wait_until,
         )
-        next_attempt_at = (
-            wait_until if status is LlmDispatchExecutionStatus.DEFERRED else None
-        )
+        next_attempt_at = wait_until if isinstance(wait_until, datetime) else None
 
         LOGGER.warning(
             "knowledge_llm_groq_execution_failed",
@@ -381,7 +379,7 @@ def _map_error_kind_to_status(
     wait_until: object,
 ) -> LlmDispatchExecutionStatus:
     if error_kind is LlmErrorKind.MINUTE_LIMIT and isinstance(wait_until, datetime):
-        return LlmDispatchExecutionStatus.DEFERRED
+        return LlmDispatchExecutionStatus.RETRYABLE_FAILED
     if error_kind is LlmErrorKind.AUTH_ERROR:
         return LlmDispatchExecutionStatus.TERMINAL_FAILED
     return LlmDispatchExecutionStatus.RETRYABLE_FAILED

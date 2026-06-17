@@ -1082,7 +1082,7 @@ def _event_type_for_status(
     if status is LlmDispatchExecutionStatus.SUCCEEDED:
         return KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED
     if status is LlmDispatchExecutionStatus.DEFERRED:
-        return KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_DEFERRED
+        return KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED
     if status is LlmDispatchExecutionStatus.RETRYABLE_FAILED:
         return KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED
     if status is LlmDispatchExecutionStatus.TERMINAL_FAILED:

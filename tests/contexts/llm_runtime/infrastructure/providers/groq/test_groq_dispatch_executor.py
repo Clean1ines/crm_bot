@@ -173,7 +173,7 @@ async def test_transport_mapper_retryable_error_maps_to_retryable_failed() -> No
 
 
 @pytest.mark.asyncio
-async def test_minute_limit_with_wait_until_maps_to_deferred() -> None:
+async def test_minute_limit_with_wait_until_maps_to_retryable_failed() -> None:
     transport = FakeGroqTransport(
         response=GroqTransportResponse(
             status_code=429,
@@ -184,7 +184,7 @@ async def test_minute_limit_with_wait_until_maps_to_deferred() -> None:
 
     result = await _executor(transport).execute_dispatch(_execution_input())
 
-    assert result.status is LlmDispatchExecutionStatus.DEFERRED
+    assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
     assert result.error_kind == "minute_limit"
     assert result.next_attempt_at is not None
     assert result.next_attempt_at > result.finished_at

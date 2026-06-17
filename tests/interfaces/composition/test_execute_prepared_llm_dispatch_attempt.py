@@ -233,7 +233,7 @@ async def test_terminal_failed_maps_to_terminal_outcome() -> None:
 
 
 @pytest.mark.asyncio
-async def test_deferred_maps_to_deferred_outcome_with_next_attempt_at() -> None:
+async def test_legacy_deferred_maps_to_retryable_outcome_with_next_attempt_at() -> None:
     _, _, repository = await _execute(
         llm_result=LlmDispatchExecutionResult(
             status=LlmDispatchExecutionStatus.DEFERRED,
@@ -243,7 +243,10 @@ async def test_deferred_maps_to_deferred_outcome_with_next_attempt_at() -> None:
         ),
     )
 
-    assert repository.records[0].outcome_status is WorkItemAttemptOutcomeStatus.DEFERRED
+    assert (
+        repository.records[0].outcome_status
+        is WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED
+    )
     assert repository.records[0].error_kind == "minute_limit"
     assert repository.records[0].next_attempt_at == _next_attempt_at()
 

@@ -293,7 +293,7 @@ def _map_recorded_outcome_status(
     if status is WorkItemAttemptOutcomeStatus.TERMINAL_FAILED:
         return LlmDispatchExecutionStatus.TERMINAL_FAILED
     if status is WorkItemAttemptOutcomeStatus.DEFERRED:
-        return LlmDispatchExecutionStatus.DEFERRED
+        return LlmDispatchExecutionStatus.RETRYABLE_FAILED
     raise ValueError("unsupported recorded attempt outcome status")
 
 
@@ -345,7 +345,7 @@ def _map_status(
     if status is LlmDispatchExecutionStatus.TERMINAL_FAILED:
         return WorkItemAttemptOutcomeStatus.TERMINAL_FAILED
     if status is LlmDispatchExecutionStatus.DEFERRED:
-        return WorkItemAttemptOutcomeStatus.DEFERRED
+        return WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED
     raise ValueError("unsupported LLM dispatch execution status")
 
 
