@@ -329,6 +329,9 @@ class PrepareLlmDispatchBatch:
                     preflight_active_model_ref=preflight_result.active_model_ref,
                 )
                 resolved_active_model_ref = preflight_result.active_model_ref
+                use_local_primary_tpm_budget = (
+                    resolved_active_model_ref == self.route_catalog.primary_model_ref()
+                )
                 if (
                     preflight_result.decision
                     is LlmDispatchInputSizePreflightDecision.SOURCE_SPLIT_REQUIRED
@@ -352,6 +355,7 @@ class PrepareLlmDispatchBatch:
                     capacity_observation_repository=capacity_observation_repository,
                     profile=preparation_profile,
                     now=command.now,
+                    use_local_primary_tpm_budget=use_local_primary_tpm_budget,
                 )
                 LOGGER.info(
                     "knowledge_llm_prepare_account_capacities",
@@ -371,12 +375,14 @@ class PrepareLlmDispatchBatch:
                         for capacity in account_capacities
                     ],
                 )
-                capacity_retry_at = await _next_capacity_retry_at(
-                    capacity_observation_repository=capacity_observation_repository,
-                    provider_account_refs=provider_account_refs,
-                    model_ref=resolved_active_model_ref,
-                    now=command.now,
-                )
+                capacity_retry_at = None
+                if not use_local_primary_tpm_budget:
+                    capacity_retry_at = await _next_capacity_retry_at(
+                        capacity_observation_repository=capacity_observation_repository,
+                        provider_account_refs=provider_account_refs,
+                        model_ref=resolved_active_model_ref,
+                        now=command.now,
+                    )
 
                 lease_result = await _lease_input_admitted_work_items(
                     lease_repository=lease_repository,
@@ -433,7 +439,13 @@ class PrepareLlmDispatchBatch:
                 )
 
                 next_capacity_retry_at = capacity_retry_at
-                if attempt_result.started_attempts and next_capacity_retry_at is None:
+                if (
+                    use_local_primary_tpm_budget
+                    and due_records
+                    and not lease_result.leased
+                ):
+                    next_capacity_retry_at = command.now + timedelta(seconds=60)
+                elif attempt_result.started_attempts and next_capacity_retry_at is None:
                     next_capacity_retry_at = command.now + timedelta(seconds=60)
 
                 return PrepareLlmDispatchBatchResult(
@@ -458,6 +470,17 @@ class _InputAdmittedCandidate:
     account_ref: str
     model_ref: str
     estimated_input_tokens: int
+
+
+@dataclass(slots=True)
+class _PrimaryMinuteUsage:
+    request_count: int = 0
+    token_count: int = 0
+
+    def record(self, *, token_count: int | None) -> None:
+        self.request_count += 1
+        if token_count is not None:
+            self.token_count += token_count
 
 
 @dataclass(slots=True)
@@ -743,6 +766,7 @@ async def _preparation_account_capacities(
     capacity_observation_repository: PostgresLlmAttemptCapacityObservationRepository,
     profile: LlmTaskCapacityProfile,
     now: datetime,
+    use_local_primary_tpm_budget: bool,
 ) -> tuple[LlmProviderAccountCapacity, ...]:
     if not due_records:
         if not command.account_capacities:
@@ -758,6 +782,20 @@ async def _preparation_account_capacities(
             model_profiles=model_profiles,
         )
     )
+    if use_local_primary_tpm_budget:
+        observations = (
+            await capacity_observation_repository.observations_for_accounts_since(
+                provider="groq",
+                account_refs=provider_account_refs,
+                model_ref=active_model_ref,
+                since=now - timedelta(seconds=60),
+            )
+        )
+        return _local_primary_tpm_account_capacities(
+            seed_capacities=seed_capacities,
+            observations=observations,
+        )
+
     observations = (
         await capacity_observation_repository.latest_observations_for_accounts(
             provider="groq",
@@ -778,6 +816,59 @@ async def _preparation_account_capacities(
         )
         for seed_capacity in seed_capacities
     )
+
+
+def _local_primary_tpm_account_capacities(
+    *,
+    seed_capacities: tuple[LlmProviderAccountCapacity, ...],
+    observations: tuple[LlmAttemptCapacityObservation, ...],
+) -> tuple[LlmProviderAccountCapacity, ...]:
+    usage_by_account_ref = {
+        seed_capacity.account_ref: _PrimaryMinuteUsage()
+        for seed_capacity in seed_capacities
+    }
+
+    for observation in observations:
+        usage = usage_by_account_ref.get(observation.account_ref)
+        if usage is None:
+            continue
+        usage.record(token_count=_actual_token_usage(observation))
+
+    capacities: list[LlmProviderAccountCapacity] = []
+    for seed_capacity in seed_capacities:
+        usage = usage_by_account_ref[seed_capacity.account_ref]
+        capacities.append(
+            LlmProviderAccountCapacity(
+                provider=seed_capacity.provider,
+                account_ref=seed_capacity.account_ref,
+                model_ref=seed_capacity.model_ref,
+                remaining_minute_requests=max(
+                    seed_capacity.remaining_minute_requests - usage.request_count,
+                    0,
+                ),
+                remaining_minute_tokens=max(
+                    seed_capacity.remaining_minute_tokens - usage.token_count,
+                    0,
+                ),
+                remaining_daily_requests=seed_capacity.remaining_daily_requests,
+                remaining_daily_tokens=seed_capacity.remaining_daily_tokens,
+            ),
+        )
+
+    return tuple(capacities)
+
+
+def _actual_token_usage(observation: LlmAttemptCapacityObservation) -> int | None:
+    if observation.actual_total_tokens is not None:
+        return observation.actual_total_tokens
+    if (
+        observation.actual_prompt_tokens is not None
+        and observation.actual_completion_tokens is not None
+    ):
+        return observation.actual_prompt_tokens + observation.actual_completion_tokens
+    if observation.actual_prompt_tokens is not None:
+        return observation.actual_prompt_tokens
+    return None
 
 
 def _capacity_from_latest_observation(

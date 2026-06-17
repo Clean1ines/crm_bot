@@ -129,6 +129,53 @@ class PostgresLlmAttemptCapacityObservationRepository(
         )
         return tuple(_observation_from_row(row) for row in rows)
 
+    async def observations_for_accounts_since(
+        self,
+        *,
+        provider: str,
+        account_refs: tuple[str, ...],
+        model_ref: str,
+        since: datetime,
+    ) -> tuple[LlmAttemptCapacityObservation, ...]:
+        _require_non_empty_text(provider, field_name="provider")
+        _require_non_empty_text(model_ref, field_name="model_ref")
+        _require_non_empty_text_tuple(account_refs, field_name="account_refs")
+        if not isinstance(since, datetime):
+            raise TypeError("since must be datetime")
+        if since.tzinfo is None or since.utcoffset() is None:
+            raise ValueError("since must be timezone-aware")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT
+                provider,
+                account_ref,
+                model_ref,
+                remaining_minute_requests,
+                remaining_minute_tokens,
+                remaining_daily_requests,
+                remaining_daily_tokens,
+                minute_reset_at,
+                daily_reset_at,
+                actual_prompt_tokens,
+                actual_completion_tokens,
+                actual_total_tokens,
+                outcome_class,
+                observed_at
+            FROM llm_attempt_capacity_observations
+            WHERE provider = $1
+              AND model_ref = $2
+              AND account_ref = ANY($3::text[])
+              AND observed_at >= $4
+            ORDER BY observed_at ASC
+            """,
+            provider,
+            model_ref,
+            list(account_refs),
+            since,
+        )
+        return tuple(_observation_from_row(row) for row in rows)
+
 
 def _observation_from_row(
     row: Mapping[str, object],

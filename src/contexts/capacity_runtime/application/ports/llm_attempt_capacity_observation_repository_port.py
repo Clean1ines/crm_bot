@@ -117,6 +117,15 @@ class LlmAttemptCapacityObservationRepositoryPort(Protocol):
         observation: LlmAttemptCapacityObservation,
     ) -> None: ...
 
+    async def observations_for_accounts_since(
+        self,
+        *,
+        provider: str,
+        account_refs: tuple[str, ...],
+        model_ref: str,
+        since: datetime,
+    ) -> tuple[LlmAttemptCapacityObservation, ...]: ...
+
 
 def _payload_text(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
