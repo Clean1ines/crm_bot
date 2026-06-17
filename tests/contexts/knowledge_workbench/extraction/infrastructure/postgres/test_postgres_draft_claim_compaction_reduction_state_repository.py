@@ -153,6 +153,24 @@ class FakeReductionStateConnection:
 
         if (
             "FROM draft_claim_compaction_nodes" in query
+            and "AND node_ref = ANY" in query
+        ):
+            workflow_run_id = _str_arg(args[0])
+            group_ref = _str_arg(args[1])
+            node_refs = tuple(str(item) for item in _sequence_arg(args[2]))
+            return [
+                node
+                for node in sorted(
+                    self.nodes.values(),
+                    key=lambda row: str(row["node_ref"]),
+                )
+                if node["workflow_run_id"] == workflow_run_id
+                and node["group_ref"] == group_ref
+                and node["node_ref"] in node_refs
+            ]
+
+        if (
+            "FROM draft_claim_compaction_nodes" in query
             and "WHERE node_ref = ANY" in query
         ):
             node_refs = tuple(str(item) for item in _sequence_arg(args[0]))
@@ -242,6 +260,20 @@ class FakeReductionStateConnection:
         if "FROM draft_claim_compaction_rounds" in query:
             return []
 
+        if "FROM execution_work_items" in query:
+            return [
+                {
+                    "ready_work_item_count": 0,
+                    "leased_work_item_count": 0,
+                    "deferred_work_item_count": 0,
+                    "retryable_failed_work_item_count": 0,
+                    "completed_work_item_count": 0,
+                    "terminal_failed_work_item_count": 0,
+                    "active_work_item_count": 0,
+                    "due_waiting_work_item_count": 0,
+                }
+            ]
+
         raise AssertionError(f"unexpected fetch query: {query}")
 
 
@@ -317,6 +349,60 @@ async def test_load_planner_state_returns_active_raw_nodes_and_sources() -> None
     assert state.nodes[0].node_kind.value == "raw"
     assert state.nodes[0].source_claim_refs == ("claim-a",)
     assert state.nodes[0].sources[0].source_ref == "claim-a"
+
+
+@pytest.mark.asyncio
+async def test_reduced_rewrite_rejects_source_node_from_another_group() -> None:
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    connection.nodes["group-1-compacted"] = _compacted_node_row(
+        node_ref="group-1-compacted",
+        group_ref="group-1",
+    )
+    connection.nodes["group-2-compacted"] = _compacted_node_row(
+        node_ref="group-2-compacted",
+        group_ref="group-2",
+    )
+
+    with pytest.raises(ValueError, match="source compacted nodes are not available"):
+        await repository.apply_reduced_rewrite_result(
+            workflow_run_id="workflow-1",
+            group_ref="group-1",
+            batch_ref="batch-1",
+            work_item_id="work-1",
+            round_index=1,
+            source_node_refs=("group-1-compacted", "group-2-compacted"),
+            rewrite=DraftClaimReducedRewriteOutput(
+                key="merged",
+                claim="Merged claim",
+                triples=(_triple(),),
+            ),
+            created_at=_now(),
+        )
+
+
+def _compacted_node_row(
+    *,
+    node_ref: str,
+    group_ref: str,
+) -> dict[str, object]:
+    return {
+        "node_ref": node_ref,
+        "workflow_run_id": "workflow-1",
+        "group_ref": group_ref,
+        "node_kind": "compacted",
+        "active": True,
+        "source_claim_refs": json.dumps((f"source-{node_ref}",)),
+        "supersedes_node_refs": json.dumps(()),
+        "estimated_input_tokens": 10,
+        "compacted_key": f"key-{node_ref}",
+        "compacted_claim": f"Compacted claim {node_ref}",
+        "compacted_claim_kind": "definition",
+        "compacted_granularity": "atomic",
+        "compacted_merge_decision": "merged",
+        "compacted_triples": json.dumps([_triple().to_json_dict()]),
+        "compacted_payload": None,
+    }
 
 
 def _str_arg(value: object) -> str:

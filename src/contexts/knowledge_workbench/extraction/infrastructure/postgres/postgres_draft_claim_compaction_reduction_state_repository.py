@@ -437,7 +437,11 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
         del batch_ref, work_item_id
-        source_nodes = await self._load_nodes_by_ref(source_node_refs)
+        source_nodes = await self._load_nodes_by_ref(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            node_refs=source_node_refs,
+        )
         if len(source_nodes) != len(set(source_node_refs)):
             raise ValueError("source compacted nodes are not available")
 
@@ -547,6 +551,9 @@ class PostgresDraftClaimCompactionReductionStateRepository(
 
     async def _load_nodes_by_ref(
         self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
         node_refs: tuple[str, ...],
     ) -> tuple[DraftClaimCompactionNode, ...]:
         if not node_refs:
@@ -559,9 +566,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                    compacted_granularity, compacted_merge_decision,
                    compacted_triples, compacted_payload
             FROM draft_claim_compaction_nodes
-            WHERE node_ref = ANY($1::text[])
+            WHERE workflow_run_id = $1
+              AND group_ref = $2
+              AND node_ref = ANY($3::text[])
             ORDER BY node_ref
             """,
+            workflow_run_id,
+            group_ref,
             list(node_refs),
         )
         source_rows = await self._connection.fetch(
