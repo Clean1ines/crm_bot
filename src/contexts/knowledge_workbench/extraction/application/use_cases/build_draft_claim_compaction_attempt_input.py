@@ -11,8 +11,11 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionBatchForDispatch,
+    DraftClaimForCompaction,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionPromptClaim,
+    DraftClaimCompactionPromptPayload,
     DraftClaimReducedRewriteInputClaim,
     DraftClaimReducedRewritePayload,
 )
@@ -99,13 +102,7 @@ class BuildDraftClaimCompactionAttemptInput:
         if batch.prompt_variant == "draft_vs_draft":
             return await self._draft_vs_draft(work_item=work_item, batch=batch)
         if batch.prompt_variant == "mixed":
-            return await self._payload_unavailable(
-                batch=batch,
-                message=(
-                    "mixed batch requires explicit raw and compacted node refs "
-                    "before attempt payload can be built"
-                ),
-            )
+            return await self._mixed(work_item=work_item, batch=batch)
         if batch.prompt_variant == "reduced_rewrite":
             return await self._reduced_rewrite(work_item=work_item, batch=batch)
         raise UnsupportedDraftClaimCompactionPromptVariant(
@@ -143,6 +140,89 @@ class BuildDraftClaimCompactionAttemptInput:
             work_item_id=work_item.work_item_id,
             prompt_kind=DraftClaimCompactionPromptKind.DRAFT_CLAIM_COMPACTION,
             prompt_ref=DRAFT_CLAIM_COMPACTION_PROMPT_REF,
+            model_id=batch.model_id,
+            payload=payload,
+            expected_output_kind=(
+                DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS
+            ),
+        )
+
+    async def _mixed(
+        self,
+        *,
+        work_item: WorkItem,
+        batch: DraftClaimCompactionBatchForDispatch,
+    ) -> DraftClaimCompactionAttemptInput:
+        state = await self.reduction_state_repository.load_planner_state(
+            workflow_run_id=batch.workflow_run_id,
+            group_ref=batch.group_ref,
+        )
+        if state is None:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "draft claim compaction reduction state is unavailable",
+            )
+
+        nodes_by_ref = {node.node_ref: node for node in state.nodes}
+        compacted_nodes: list[DraftClaimCompactionNode] = []
+        raw_claim_refs: list[str] = []
+
+        for ref in batch.member_observation_refs:
+            node = nodes_by_ref.get(ref)
+            if node is None:
+                raw_claim_refs.append(ref)
+                continue
+            if not node.active:
+                raise DraftClaimCompactionPayloadUnavailable(
+                    "mixed batch must reference active nodes only",
+                )
+            if node.node_kind is DraftClaimCompactionNodeKind.COMPACTED:
+                compacted_nodes.append(node)
+                continue
+            if node.node_kind is DraftClaimCompactionNodeKind.RAW:
+                raw_claim_refs.extend(node.source_claim_refs)
+                continue
+
+        raw_claim_refs_tuple = _dedupe_preserving_order(tuple(raw_claim_refs))
+        if not compacted_nodes or not raw_claim_refs_tuple:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "mixed batch requires compacted node refs and raw claim refs",
+            )
+
+        claims = await self.compaction_plan_repository.list_claims_for_compaction_batch(
+            batch_ref=batch.batch_ref,
+        )
+        claims_by_ref = {claim.observation_ref: claim for claim in claims}
+        missing_raw_refs = tuple(
+            raw_ref for raw_ref in raw_claim_refs_tuple if raw_ref not in claims_by_ref
+        )
+        if missing_raw_refs:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "mixed batch raw claims are unavailable: "
+                + ", ".join(missing_raw_refs),
+            )
+
+        payload = DraftClaimCompactionPromptPayload(
+            claims=tuple(
+                _mixed_compacted_prompt_claim(node) for node in compacted_nodes
+            )
+            + tuple(
+                _raw_prompt_claim(claims_by_ref[raw_ref])
+                for raw_ref in raw_claim_refs_tuple
+            ),
+            prompt_variant="mixed",
+        ).to_json_dict()
+        payload["mixed_input"] = {
+            "compacted_node_refs": [node.node_ref for node in compacted_nodes],
+            "raw_claim_refs": list(raw_claim_refs_tuple),
+        }
+
+        return DraftClaimCompactionAttemptInput(
+            workflow_run_id=batch.workflow_run_id,
+            group_ref=batch.group_ref,
+            batch_ref=batch.batch_ref,
+            work_item_id=work_item.work_item_id,
+            prompt_kind=DraftClaimCompactionPromptKind.MIXED_CLAIM_COMPACTION,
+            prompt_ref=MIXED_CLAIM_COMPACTION_PROMPT_REF,
             model_id=batch.model_id,
             payload=payload,
             expected_output_kind=(
@@ -248,6 +328,50 @@ def _parse_claim_compaction_work_item_id(work_item_id: str) -> tuple[str, str]:
             "work_item_id must include batch_ref",
         )
     return workflow_run_id, batch_ref
+
+
+def _mixed_compacted_prompt_claim(
+    node: DraftClaimCompactionNode,
+) -> DraftClaimCompactionPromptClaim:
+    if node.compacted_claim is None:
+        raise DraftClaimCompactionPayloadUnavailable(
+            f"compacted node has no compacted_claim: {node.node_ref}",
+        )
+    return DraftClaimCompactionPromptClaim(
+        claim_id=node.node_ref,
+        claim=node.compacted_claim,
+        questions=(),
+        exclusion_scope=(),
+        granularity=node.compacted_granularity or "composite",
+    )
+
+
+def _raw_prompt_claim(
+    claim: DraftClaimForCompaction,
+) -> DraftClaimCompactionPromptClaim:
+    return DraftClaimCompactionPromptClaim(
+        claim_id=claim.observation_ref,
+        claim=claim.claim,
+        questions=_dedupe_preserving_order(claim.possible_questions),
+        exclusion_scope=_dedupe_preserving_order(claim.exclusion_scope),
+        granularity=claim.granularity,
+    )
+
+
+def _dedupe_preserving_order(values: tuple[str, ...]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if not isinstance(value, str):
+            raise TypeError("values must contain str")
+        normalized = value.strip()
+        if not normalized:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return tuple(result)
 
 
 def _reduced_input_claim(

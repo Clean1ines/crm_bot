@@ -332,6 +332,8 @@ async def _schedule_next_work(
             "prompt_variant": next_work_item.work_type.value,
             "model_id": next_work_item.primary_model_id,
             "node_refs": list(next_work_item.node_refs),
+            "compacted_node_refs": list(_compacted_node_refs(next_work_item)),
+            "raw_claim_refs": list(_raw_claim_refs(next_work_item)),
             "estimated_prompt_tokens": next_work_item.estimated_prompt_tokens,
             "estimated_completion_tokens": next_work_item.estimated_completion_tokens,
             "estimated_requests": next_work_item.estimated_requests,
@@ -344,6 +346,56 @@ async def _schedule_next_work(
     return await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,))
     )
+
+
+def _compacted_node_refs(
+    next_work_item: DraftClaimCompactionNextWorkItem,
+) -> tuple[str, ...]:
+    if next_work_item.work_type in {
+        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+        DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
+    }:
+        return next_work_item.node_refs
+
+    if next_work_item.work_type is DraftClaimCompactionNextWorkItemType.MIXED:
+        return tuple(
+            node_ref
+            for node_ref in next_work_item.node_refs
+            if _raw_claim_ref_from_node_ref(node_ref) is None
+        )
+
+    return ()
+
+
+def _raw_claim_refs(
+    next_work_item: DraftClaimCompactionNextWorkItem,
+) -> tuple[str, ...]:
+    if next_work_item.work_type is DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT:
+        return tuple(
+            _raw_claim_ref_from_node_ref(node_ref) or node_ref
+            for node_ref in next_work_item.node_refs
+        )
+
+    if next_work_item.work_type is DraftClaimCompactionNextWorkItemType.MIXED:
+        return tuple(
+            raw_claim_ref
+            for node_ref in next_work_item.node_refs
+            if (raw_claim_ref := _raw_claim_ref_from_node_ref(node_ref)) is not None
+        )
+
+    return ()
+
+
+def _raw_claim_ref_from_node_ref(node_ref: str) -> str | None:
+    parts = node_ref.split(":", 3)
+    if len(parts) != 4:
+        return None
+    if parts[0] != "raw":
+        return None
+    raw_claim_ref = parts[3].strip()
+    if not raw_claim_ref:
+        return None
+    return raw_claim_ref
 
 
 def _next_workflow_command_after_apply(

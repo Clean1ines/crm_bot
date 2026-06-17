@@ -6,6 +6,9 @@ import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_apply_result import (
+    raw_claim_node_ref,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_attempt_input import (
     DraftClaimCompactionExpectedOutputKind,
     DraftClaimCompactionPromptKind,
@@ -114,6 +117,16 @@ class FakeReductionStateRepository:
                     compacted_key="refund_support_b",
                     compacted_claim="Product supports refunds in channel B.",
                     compacted_triples=(_triple(),),
+                ),
+                DraftClaimCompactionNode(
+                    node_ref=raw_claim_node_ref(
+                        workflow_run_id="workflow-1",
+                        group_ref="group-1",
+                        observation_ref="claim-c",
+                    ),
+                    node_kind=DraftClaimCompactionNodeKind.RAW,
+                    source_claim_refs=("claim-c",),
+                    active=True,
                 ),
             ),
         )
@@ -286,7 +299,7 @@ async def test_mixed_is_unavailable_without_explicit_raw_and_compacted_node_refs
 
     with pytest.raises(
         DraftClaimCompactionPayloadUnavailable,
-        match="explicit raw and compacted node refs",
+        match="compacted node refs and raw claim refs",
     ):
         await use_case.execute(_work_item())
 
@@ -355,6 +368,82 @@ async def test_mixed_remains_unavailable_without_explicit_raw_and_compacted_node
 
     with pytest.raises(
         DraftClaimCompactionPayloadUnavailable,
-        match="explicit raw and compacted node refs",
+        match="compacted node refs and raw claim refs",
+    ):
+        await use_case.execute(_work_item())
+
+
+@pytest.mark.asyncio
+async def test_mixed_builds_payload_from_compacted_node_and_raw_claim_ref() -> None:
+    raw_node_ref = raw_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        observation_ref="claim-c",
+    )
+    batch = DraftClaimCompactionBatchForDispatch(
+        batch_ref="batch-1",
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        prompt_variant="mixed",
+        model_id="openai/gpt-oss-120b",
+        estimated_input_tokens=100,
+        member_observation_refs=("compacted-a", raw_node_ref),
+    )
+    use_case = BuildDraftClaimCompactionAttemptInput(
+        compaction_plan_repository=FakePlanRepository(
+            batch=batch,
+            claims=(_claim("claim-c"),),
+        ),
+        reduction_state_repository=FakeReductionStateRepository(),
+    )
+
+    result = await use_case.execute(_work_item())
+
+    assert result.prompt_kind is DraftClaimCompactionPromptKind.MIXED_CLAIM_COMPACTION
+    assert result.expected_output_kind is (
+        DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS
+    )
+    assert result.prompt_ref.endswith("enriched_claim_compaction.txt")
+    assert result.payload["mixed_input"] == {
+        "compacted_node_refs": ["compacted-a"],
+        "raw_claim_refs": ["claim-c"],
+    }
+    assert [claim["id"] for claim in result.payload["claims"]] == [
+        "compacted-a",
+        "claim-c",
+    ]
+    assert result.payload["claims"][0]["claim"] == (
+        "Product supports refunds in channel A."
+    )
+    assert result.payload["claims"][1]["claim"] == "Claim claim-c"
+
+
+@pytest.mark.asyncio
+async def test_mixed_rejects_compacted_node_from_another_cluster_state() -> None:
+    raw_node_ref = raw_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        observation_ref="claim-c",
+    )
+    batch = DraftClaimCompactionBatchForDispatch(
+        batch_ref="batch-1",
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        prompt_variant="mixed",
+        model_id="openai/gpt-oss-120b",
+        estimated_input_tokens=100,
+        member_observation_refs=("compacted-from-other-group", raw_node_ref),
+    )
+    use_case = BuildDraftClaimCompactionAttemptInput(
+        compaction_plan_repository=FakePlanRepository(
+            batch=batch,
+            claims=(_claim("claim-c"),),
+        ),
+        reduction_state_repository=FakeReductionStateRepository(),
+    )
+
+    with pytest.raises(
+        DraftClaimCompactionPayloadUnavailable,
+        match="compacted node refs and raw claim refs",
     ):
         await use_case.execute(_work_item())

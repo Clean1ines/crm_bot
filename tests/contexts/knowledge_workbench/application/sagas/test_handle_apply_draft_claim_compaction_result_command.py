@@ -741,6 +741,11 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     assert dispatch_payload["profile"]["estimated_requests"] == 1
     scheduled_payload = scheduling.saved_payloads[0]
     assert isinstance(scheduled_payload, dict)
+    assert scheduled_payload["compacted_node_refs"] == [
+        "compacted-a",
+        "compacted-b",
+    ]
+    assert scheduled_payload["raw_claim_refs"] == []
     assert scheduled_payload["estimated_prompt_tokens"] == 1
     assert scheduled_payload["estimated_completion_tokens"] == 4000
     assert scheduled_payload["estimated_requests"] == 1
@@ -801,6 +806,16 @@ def _expected_next_work_schedule_payload(
         "prompt_variant": work_type.value,
         "model_id": "openai/gpt-oss-120b",
         "node_refs": list(node_refs),
+        "compacted_node_refs": list(node_refs)
+        if work_type
+        in {
+            DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+            DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
+        }
+        else [],
+        "raw_claim_refs": list(node_refs)
+        if work_type is DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT
+        else [],
         "estimated_prompt_tokens": 1,
         "estimated_completion_tokens": 4000,
         "estimated_requests": 1,
