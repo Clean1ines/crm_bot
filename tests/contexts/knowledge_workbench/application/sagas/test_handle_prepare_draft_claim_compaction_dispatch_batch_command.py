@@ -377,6 +377,58 @@ async def test_empty_account_capacity_completes_without_prepare_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_daily_exhausted_primary_model_waits_for_user_model_choice() -> None:
+    payload = _payload()
+    preparation_value = payload["llm_dispatch_preparation"]
+    assert isinstance(preparation_value, dict)
+    preparation = dict(preparation_value)
+    preparation["account_capacities"] = (
+        {
+            "provider": "groq",
+            "account_ref": "groq_org_primary",
+            "model_ref": "openai/gpt-oss-120b",
+            "remaining_minute_requests": 10,
+            "remaining_minute_tokens": 100000,
+            "remaining_daily_requests": 0,
+            "remaining_daily_tokens": 1000000,
+        },
+    )
+    payload["llm_dispatch_preparation"] = preparation
+    prepare = FakePrepareLlmDispatchBatch(started_attempts=())
+    workflow_uow = FakeWorkflowUnitOfWork()
+
+    result = (
+        await HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler().execute(
+            HandlePrepareDraftClaimCompactionDispatchBatchCommand(
+                workflow_command=_command(payload=payload)
+            ),
+            prepare_llm_dispatch_batch=prepare,
+            workflow_unit_of_work=workflow_uow,
+        )
+    )
+
+    assert result.prepared_dispatch_count == 0
+    assert result.appended_event_count == 1
+    assert prepare.calls[0].use_local_active_model_tpm_budget is True
+    assert workflow_uow.outbox.events[0].event_type == (
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE.value
+    )
+    assert workflow_uow.outbox.events[0].payload["reason"] == (
+        "primary_model_daily_capacity_exhausted"
+    )
+    assert workflow_uow.outbox.events[0].payload["primary_model_id"] == (
+        "openai/gpt-oss-120b"
+    )
+    assert workflow_uow.outbox.events[0].payload["degraded_candidate_model_id"] == (
+        "llama-3.3-70b-versatile"
+    )
+    assert workflow_uow.timeline.entries[0].message == (
+        "Draft claim compaction waiting for user model choice"
+    )
+    assert workflow_uow.command_log.completed == [_command().command_id]
+
+
+@pytest.mark.asyncio
 async def test_rejects_wrong_command_type() -> None:
     with pytest.raises(ValueError, match="PrepareDraftClaimCompactionDispatchBatch"):
         await HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler().execute(

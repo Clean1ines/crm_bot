@@ -46,6 +46,7 @@ DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
 DRAFT_CLAIM_COMPACTION_WORKER_REF = (
     "knowledge-workbench-draft-claim-compaction-dispatch"
 )
+DRAFT_CLAIM_COMPACTION_DEGRADED_MODEL_REF = "llama-3.3-70b-versatile"
 
 
 class PrepareLlmDispatchBatchPort(Protocol):
@@ -156,6 +157,57 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
                 command_id=workflow_command.command_id,
                 run_after=capacity_retry_at,
                 rescheduled_at=occurred_at,
+            )
+            return HandlePrepareDraftClaimCompactionDispatchBatchResult(
+                workflow_run_id=workflow_run_id,
+                prepared_dispatch_count=prepared_dispatch_count,
+                appended_event_count=appended_event_count,
+                appended_next_command_count=0,
+                completed_command_id=workflow_command.command_id,
+            )
+
+        if (
+            prepared_dispatch_count == 0
+            and typed_prepare_result is not None
+            and _waiting_user_model_choice_required(
+                payload=workflow_command.payload,
+                prepare_result=typed_prepare_result,
+            )
+        ):
+            waiting_event = _waiting_user_model_choice_event(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                scheduled_work_item_count=_payload_positive_int(
+                    workflow_command.payload,
+                    "scheduled_work_item_count",
+                ),
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.outbox.append_event(waiting_event)
+            appended_event_count = 1
+            await workflow_unit_of_work.timeline.append_entry(
+                _waiting_user_model_choice_timeline_entry(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    scheduled_work_item_count=_payload_positive_int(
+                        workflow_command.payload,
+                        "scheduled_work_item_count",
+                    ),
+                    preflight_metadata=preflight_metadata,
+                    occurred_at=occurred_at,
+                )
+            )
+            await _save_progress_snapshot(
+                workflow_unit_of_work=workflow_unit_of_work,
+                workflow_run_id=workflow_run_id,
+                prepared_dispatch_count=prepared_dispatch_count,
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.command_log.mark_command_completed(
+                command_id=workflow_command.command_id,
+                completed_at=occurred_at,
             )
             return HandlePrepareDraftClaimCompactionDispatchBatchResult(
                 workflow_run_id=workflow_run_id,
@@ -447,6 +499,150 @@ def _capacity_throttled_timeline_entry(
         occurred_at=occurred_at,
         source_ref=DRAFT_CLAIM_COMPACTION_WORK_KIND.value,
     )
+
+
+def _waiting_user_model_choice_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    scheduled_work_item_count: int,
+    preflight_metadata: Mapping[str, object],
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    return WorkflowEvent(
+        event_id=WorkflowEventId(
+            "workflow-event:"
+            f"{workflow_run_id}:"
+            f"{KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE.value}:"
+            f"{workflow_command.command_id.value}"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE.value
+        ),
+        workflow_run_id=workflow_run_id,
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "reason": "primary_model_daily_capacity_exhausted",
+            "scheduled_work_item_count": scheduled_work_item_count,
+            "primary_model_id": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+            "degraded_candidate_model_id": DRAFT_CLAIM_COMPACTION_DEGRADED_MODEL_REF,
+            **preflight_metadata,
+        },
+        occurred_at=occurred_at,
+        causation_command_id=workflow_command.command_id,
+        correlation_id=workflow_command.command_id.value,
+    )
+
+
+def _waiting_user_model_choice_timeline_entry(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    scheduled_work_item_count: int,
+    preflight_metadata: Mapping[str, object],
+    occurred_at: datetime,
+) -> WorkflowTimelineEntry:
+    return WorkflowTimelineEntry(
+        timeline_entry_id=(
+            f"workflow-timeline:{workflow_run_id}:"
+            "PrepareDraftClaimCompactionDispatchBatch:waiting-user-model-choice:"
+            f"{occurred_at.isoformat()}"
+        ),
+        workflow_run_id=workflow_run_id,
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE.value
+        ),
+        phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
+        severity=WorkflowTimelineSeverity.INFO,
+        message="Draft claim compaction waiting for user model choice",
+        payload_summary={
+            "workflow_run_id": workflow_run_id,
+            "reason": "primary_model_daily_capacity_exhausted",
+            "scheduled_work_item_count": scheduled_work_item_count,
+            "primary_model_id": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+            "degraded_candidate_model_id": DRAFT_CLAIM_COMPACTION_DEGRADED_MODEL_REF,
+            "input_size_preflight_decision": preflight_metadata[
+                "input_size_preflight_decision"
+            ],
+            "input_size_preflight_reason": preflight_metadata[
+                "input_size_preflight_reason"
+            ],
+        },
+        occurred_at=occurred_at,
+        source_ref=workflow_command.command_type,
+    )
+
+
+def _waiting_user_model_choice_required(
+    *,
+    payload: Mapping[str, object],
+    prepare_result: PrepareLlmDispatchBatchResult,
+) -> bool:
+    if prepare_result.capacity_retry_at is not None:
+        return False
+
+    if (
+        _active_model_ref_from_payload(payload)
+        != DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF
+    ):
+        return False
+
+    account_capacities = _account_capacity_payloads(payload)
+    active_account_capacities = tuple(
+        account_capacity
+        for account_capacity in account_capacities
+        if account_capacity.get("model_ref") == DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF
+    )
+    if not active_account_capacities:
+        return False
+
+    return all(
+        _daily_capacity_exhausted_payload(account_capacity)
+        for account_capacity in active_account_capacities
+    )
+
+
+def _account_capacity_payloads(
+    payload: Mapping[str, object],
+) -> tuple[Mapping[str, object], ...]:
+    llm_dispatch_preparation = payload.get("llm_dispatch_preparation")
+    if not isinstance(llm_dispatch_preparation, Mapping):
+        return ()
+
+    value = llm_dispatch_preparation.get("account_capacities")
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, str)
+        or isinstance(value, bytes)
+    ):
+        return ()
+
+    account_capacities: list[Mapping[str, object]] = []
+    for item in value:
+        if isinstance(item, Mapping):
+            account_capacities.append(item)
+    return tuple(account_capacities)
+
+
+def _daily_capacity_exhausted_payload(
+    account_capacity: Mapping[str, object],
+) -> bool:
+    return (
+        _mapping_non_negative_int(account_capacity, "remaining_daily_requests") == 0
+        or _mapping_non_negative_int(account_capacity, "remaining_daily_tokens") == 0
+    )
+
+
+def _mapping_non_negative_int(
+    payload: Mapping[str, object],
+    key: str,
+) -> int:
+    value = payload.get(key)
+    if not isinstance(value, int):
+        raise ValueError(f"account capacity payload must include integer {key}")
+    if value < 0:
+        raise ValueError(f"account capacity payload {key} must be >= 0")
+    return value
 
 
 def _empty_preflight_metadata(active_model_ref: str) -> dict[str, object]:
