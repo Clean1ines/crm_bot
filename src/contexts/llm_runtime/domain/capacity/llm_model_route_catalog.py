@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
+DAILY_LIMIT_FALLBACK_EXCLUDED_MODEL_REFS = ("openai/gpt-oss-120b",)
+
+
 class LlmModelRouteRole(StrEnum):
     PRIMARY = "primary"
     AUTOMATIC_FALLBACK = "automatic_fallback"
@@ -116,6 +119,13 @@ class LlmModelRouteCatalog:
             for route in self._ordered_routes_with_role(
                 LlmModelRouteRole.AUTOMATIC_FALLBACK,
             )
+        )
+
+    def automatic_fallback_model_refs_for_daily_limit(self) -> tuple[str, ...]:
+        return tuple(
+            model_ref
+            for model_ref in self.automatic_fallback_model_refs()
+            if model_ref not in DAILY_LIMIT_FALLBACK_EXCLUDED_MODEL_REFS
         )
 
     def automatic_fallback_model_refs_with_larger_output_limit(

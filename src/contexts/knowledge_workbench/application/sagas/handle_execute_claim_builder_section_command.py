@@ -80,6 +80,9 @@ from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
 
 LOGGER = structlog.get_logger(__name__)
 
+DAILY_LIMIT_ERROR_KIND = "daily_limit"
+DAILY_LIMIT_FALLBACK_MODEL_STRATEGY = "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
+
 
 class ExecutePreparedLlmDispatchAttemptPort(Protocol):
     async def execute(
@@ -245,6 +248,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
 
         finished_at = execution_result.llm_result.finished_at
         outcome_status = execution_result.llm_result.status.value
+        attempt_action_metadata = _attempt_action_metadata(execution_result)
         LOGGER.info(
             "knowledge_claim_builder_execute_llm_result",
             workflow_run_id=workflow_run_id,
@@ -256,7 +260,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             if execution_result.llm_result.next_attempt_at is not None
             else None,
             has_output_payload=execution_result.llm_result.output_payload is not None,
-            validation_metadata=execution_result.validation_metadata,
+            validation_metadata=attempt_action_metadata,
         )
 
         capacity_observation = _capacity_observation_from_result(execution_result)
@@ -317,7 +321,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             work_item_id=work_item_id,
             execution_result=execution_result,
             capacity_observation=capacity_observation,
-            validation_metadata=execution_result.validation_metadata,
+            validation_metadata=attempt_action_metadata,
             persisted_draft_claim_count=persisted_draft_claim_count,
         )
         await workflow_unit_of_work.outbox.append_event(outcome_event)
@@ -337,7 +341,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             workflow_run_id=workflow_run_id,
             status=execution_result.llm_result.status,
             capacity_observation=capacity_observation,
-            validation_metadata=execution_result.validation_metadata,
+            validation_metadata=attempt_action_metadata,
             persisted_draft_claim_count=persisted_draft_claim_count,
             occurred_at=finished_at,
         )
@@ -350,7 +354,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                 work_item_id=work_item_id,
                 execution_result=execution_result,
                 capacity_observation=capacity_observation,
-                validation_metadata=execution_result.validation_metadata,
+                validation_metadata=attempt_action_metadata,
                 persisted_draft_claim_count=persisted_draft_claim_count,
             ),
         )
@@ -741,6 +745,43 @@ async def _persist_validated_draft_claims(
         )
     )
     return result.persisted_count
+
+
+def _attempt_action_metadata(
+    execution_result: ExecutePreparedLlmDispatchAttemptResult,
+) -> Mapping[str, object] | None:
+    if execution_result.validation_metadata is not None:
+        return execution_result.validation_metadata
+    return _provider_daily_limit_retry_metadata(execution_result)
+
+
+def _provider_daily_limit_retry_metadata(
+    execution_result: ExecutePreparedLlmDispatchAttemptResult,
+) -> dict[str, object] | None:
+    if execution_result.llm_result.error_kind != DAILY_LIMIT_ERROR_KIND:
+        return None
+
+    return {
+        "claim_builder_attempt_outcome_kind": (
+            ClaimBuilderAttemptOutcomeKind.RETRY_FALLBACK_MODEL.value
+        ),
+        "claim_builder_attempt_next_action_kind": (
+            ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+        ),
+        "claim_builder_attempt_next_action_reason": DAILY_LIMIT_ERROR_KIND,
+        "claim_builder_attempt_next_model_strategy": (
+            DAILY_LIMIT_FALLBACK_MODEL_STRATEGY
+        ),
+        "claim_builder_should_persist_claims": False,
+        "claim_builder_should_mark_work_item_completed": False,
+        "claim_builder_requires_source_split": False,
+        "claim_builder_next_run_after": None,
+        "validation_decision": None,
+        "validation_failure_reason": None,
+        "validated_claim_count": 0,
+        "next_model_strategy": DAILY_LIMIT_FALLBACK_MODEL_STRATEGY,
+        "retry_recommended": True,
+    }
 
 
 def _should_persist_claims(

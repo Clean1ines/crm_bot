@@ -64,6 +64,15 @@ class ResolveLlmDispatchPreparationStrategy:
             )
 
         if strategy in {
+            "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED",
+            "RETRY_DAILY_LIMIT_FALLBACK_MODEL",
+        }:
+            return ResolveLlmDispatchPreparationStrategyResult(
+                active_model_ref=_first_daily_limit_fallback(command.route_catalog),
+                strategy_applied=strategy,
+            )
+
+        if strategy in {
             "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED",
             "RETRY_LARGER_OUTPUT_LIMIT_MODEL",
         }:
@@ -94,6 +103,13 @@ def _first_automatic_fallback(route_catalog: LlmModelRouteCatalog) -> str:
     fallback_model_refs = route_catalog.automatic_fallback_model_refs()
     if not fallback_model_refs:
         raise ValueError("route catalog has no automatic fallback model refs")
+    return fallback_model_refs[0]
+
+
+def _first_daily_limit_fallback(route_catalog: LlmModelRouteCatalog) -> str:
+    fallback_model_refs = route_catalog.automatic_fallback_model_refs_for_daily_limit()
+    if not fallback_model_refs:
+        raise ValueError("route catalog has no daily-limit fallback model refs")
     return fallback_model_refs[0]
 
 

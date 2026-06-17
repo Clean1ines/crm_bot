@@ -527,11 +527,26 @@ def _selected_retry_strategy(
 ) -> str | None:
     if retry_action_summary.retry_larger_output_model_count > 0:
         return "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+    if _has_retry_strategy(
+        retry_action_summary,
+        "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED",
+    ):
+        return "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
     if retry_action_summary.retry_fallback_model_count > 0:
         return "FALLBACK_MODEL_REQUIRED"
     if retry_action_summary.retry_same_model_count > 0:
         return "SAME_MODEL"
     return None
+
+
+def _has_retry_strategy(
+    retry_action_summary: WorkItemRetryActionSummary,
+    strategy: str,
+) -> bool:
+    return any(
+        record.next_model_strategy == strategy
+        for record in retry_action_summary.records
+    )
 
 
 def _timeline_message(

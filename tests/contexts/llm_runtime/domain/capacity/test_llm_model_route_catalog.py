@@ -109,7 +109,7 @@ def test_catalog_returns_capacity_limits_by_model_ref() -> None:
 
     limits = catalog.capacity_limits_for_model_ref("openai/gpt-oss-120b")
 
-    assert limits.input_token_limit == 131072
+    assert limits.input_token_limit == 8_000
     assert limits.output_token_limit == 16384
 
 
@@ -135,6 +135,7 @@ def test_larger_input_fallback_returns_only_larger_input_models_by_order() -> No
         "qwen/qwen3-32b",
     ) == (
         "openai/gpt-oss-120b",
+        "llama-3.3-70b-versatile",
         "meta-llama/llama-4-scout-17b-16e-instruct",
     )
 
@@ -294,3 +295,15 @@ def test_enabled_reasoning_provider_options_include_effort_when_present() -> Non
         "reasoning_enabled": True,
         "reasoning_effort": "medium",
     }
+
+
+def test_daily_limit_fallback_chain_excludes_openai_gpt_oss() -> None:
+    catalog = default_groq_llm_model_route_catalog()
+
+    assert catalog.automatic_fallback_model_refs()[0] == "openai/gpt-oss-120b"
+    assert catalog.automatic_fallback_model_refs_for_daily_limit()[0] == (
+        "llama-3.3-70b-versatile"
+    )
+    assert "openai/gpt-oss-120b" not in (
+        catalog.automatic_fallback_model_refs_for_daily_limit()
+    )

@@ -253,3 +253,16 @@ def test_larger_output_strategy_without_larger_output_fallback_raises() -> None:
                 route_catalog=catalog,
             )
         )
+
+
+def test_daily_limit_fallback_skips_openai_gpt_oss() -> None:
+    result = ResolveLlmDispatchPreparationStrategy().execute(
+        ResolveLlmDispatchPreparationStrategyCommand(
+            current_active_model_ref="qwen/qwen3-32b",
+            strategy="DAILY_LIMIT_FALLBACK_MODEL_REQUIRED",
+            route_catalog=default_groq_llm_model_route_catalog(),
+        )
+    )
+
+    assert result.active_model_ref == "llama-3.3-70b-versatile"
+    assert result.strategy_applied == "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
