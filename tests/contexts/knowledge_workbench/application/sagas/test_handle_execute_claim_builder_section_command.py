@@ -1096,6 +1096,33 @@ async def test_invalid_retry_decision_persists_zero_draft_claims() -> None:
     )
 
 
+def test_invalid_json_without_truncation_retries_same_model() -> None:
+    validator = ClaimBuilderLlmDispatchOutputValidator(
+        policy=ClaimBuilderOutputValidationPolicy(),
+    )
+
+    result = validator.validate(
+        dispatch_payload=_dispatch().dispatch_payload,
+        output_payload={"raw_text": '{"claims":['},
+        llm_status=LlmDispatchExecutionStatus.SUCCEEDED,
+        finished_at=_finished_at(),
+        attempt_number=1,
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
+    assert result.metadata["validation_decision"] == (
+        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL.value
+    )
+    assert result.metadata["validation_failure_reason"] == (
+        ClaimBuilderOutputValidationFailureReason.INVALID_JSON_RETRY_REQUIRED.value
+    )
+    assert result.metadata["claim_builder_attempt_next_action_kind"] == (
+        ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value
+    )
+    assert result.metadata["claim_builder_attempt_next_model_strategy"] == "SAME_MODEL"
+    assert result.metadata["claim_builder_should_persist_claims"] is False
+
+
 def test_truncated_output_metadata_uses_larger_output_next_action() -> None:
     validator = ClaimBuilderLlmDispatchOutputValidator(
         policy=ClaimBuilderOutputValidationPolicy(),

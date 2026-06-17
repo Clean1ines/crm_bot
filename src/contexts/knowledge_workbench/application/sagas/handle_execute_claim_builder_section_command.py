@@ -400,7 +400,7 @@ def _decoded_claim_builder_output(
             decoded = json.loads(raw_text)
         except json.JSONDecodeError:
             return _synthetic_validation_failure(
-                ClaimBuilderOutputValidationFailureReason.TRUNCATED_JSON_RETRY_REQUIRED,
+                ClaimBuilderOutputValidationFailureReason.INVALID_JSON_RETRY_REQUIRED,
             )
         if _is_json_input_value(decoded):
             return decoded
