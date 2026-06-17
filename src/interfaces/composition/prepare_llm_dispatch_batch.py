@@ -25,6 +25,9 @@ from src.contexts.execution_runtime.application.ports.work_item_lease_repository
     WorkItemLeaseRepositoryPort,
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.execution_runtime.application.use_cases.lease_admitted_work_items import (
@@ -542,6 +545,20 @@ class _MutableInputCapacity:
         self.remaining_daily_tokens -= estimated_input_tokens
 
 
+def _admission_lane_due_records(
+    due_records: tuple[DueWorkItemRecord, ...],
+) -> tuple[DueWorkItemRecord, ...]:
+    retry_lane = tuple(
+        record
+        for record in due_records
+        if record.work_item.status
+        in {WorkItemStatus.RETRYABLE_FAILED, WorkItemStatus.DEFERRED}
+    )
+    if retry_lane:
+        return retry_lane
+    return due_records
+
+
 async def _lease_input_admitted_work_items(
     *,
     lease_repository: PostgresWorkItemLeaseRepository,
@@ -563,8 +580,9 @@ async def _lease_input_admitted_work_items(
     mutable_accounts = [
         _MutableInputCapacity.from_capacity(account) for account in active_accounts
     ]
+    admission_records = _admission_lane_due_records(due_records)
     candidates = _input_admitted_candidates(
-        due_records=due_records,
+        due_records=admission_records,
         mutable_accounts=mutable_accounts,
         requested_items=requested_items,
     )

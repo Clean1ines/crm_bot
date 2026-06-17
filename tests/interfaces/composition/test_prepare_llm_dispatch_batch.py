@@ -133,6 +133,7 @@ class FakeConnection:
 
         candidates.sort(
             key=lambda row: (
+                _status_priority(str(row["status"])),
                 row["next_attempt_at"] is not None,
                 row["next_attempt_at"] or datetime.min.replace(tzinfo=timezone.utc),
                 row["updated_at"],
@@ -185,6 +186,7 @@ class FakeConnection:
 
         candidates.sort(
             key=lambda row: (
+                _status_priority(str(row["status"])),
                 row["next_attempt_at"] is not None,
                 row["next_attempt_at"] or datetime.min.replace(tzinfo=timezone.utc),
                 row["updated_at"],
@@ -394,6 +396,15 @@ def _runner(pool: FakePool) -> PrepareLlmDispatchBatch:
     )
 
 
+def _status_priority(status: str) -> int:
+    priority_by_status = {
+        WorkItemStatus.RETRYABLE_FAILED.value: 0,
+        WorkItemStatus.DEFERRED.value: 1,
+        WorkItemStatus.READY.value: 2,
+    }
+    return priority_by_status.get(status, 3)
+
+
 def _as_datetime(value: object) -> datetime:
     if not isinstance(value, datetime):
         raise TypeError("expected datetime")
@@ -456,6 +467,107 @@ async def test_rollback_if_attempt_dispatch_insert_fails() -> None:
     assert connection.work_items["work-2"]["status"] == "ready"
     assert connection.attempts == {}
     assert connection.dispatches == {}
+
+
+@pytest.mark.asyncio
+async def test_retry_lane_blocks_fresh_admission_when_retry_does_not_fit_capacity() -> (
+    None
+):
+    connection = FakeConnection()
+
+    retry_row = _work_item_row("work-retry-large", ordinal=1)
+    retry_row["status"] = WorkItemStatus.RETRYABLE_FAILED.value
+    retry_row["attempt_count"] = 1
+    retry_row["next_attempt_at"] = _now() - timedelta(seconds=1)
+    retry_row["last_error_kind"] = "minute_capacity"
+
+    fresh_row = _work_item_row("work-fresh-small", ordinal=2)
+    fresh_row["status"] = WorkItemStatus.READY.value
+    fresh_row["next_attempt_at"] = None
+
+    connection.work_items["work-retry-large"] = retry_row
+    connection.work_items["work-fresh-small"] = fresh_row
+    connection.schedules["work-retry-large"] = _schedule_payload(
+        source_unit_ref="unit-retry-large",
+        profile=_large_input_profile(9000),
+    )
+    connection.schedules["work-fresh-small"] = _schedule_payload(
+        source_unit_ref="unit-fresh-small",
+        profile=_large_input_profile(1000),
+    )
+
+    result = await _runner(FakePool(connection=connection)).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    minute_requests=1,
+                    minute_tokens=4000,
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            requested_items=2,
+        ),
+    )
+
+    assert result.lease_result.leased == ()
+    assert result.attempt_result.started_attempts == ()
+    assert connection.attempts == {}
+    assert connection.dispatches == {}
+    assert connection.work_items["work-retry-large"]["status"] == (
+        WorkItemStatus.RETRYABLE_FAILED.value
+    )
+    assert connection.work_items["work-fresh-small"]["status"] == (
+        WorkItemStatus.READY.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_retry_lane_admits_retry_only_even_when_fresh_also_fits() -> None:
+    connection = FakeConnection()
+
+    retry_row = _work_item_row("work-retry", ordinal=1)
+    retry_row["status"] = WorkItemStatus.RETRYABLE_FAILED.value
+    retry_row["attempt_count"] = 1
+    retry_row["next_attempt_at"] = _now() - timedelta(seconds=1)
+    retry_row["last_error_kind"] = "validation_failed"
+
+    fresh_row = _work_item_row("work-fresh", ordinal=2)
+    fresh_row["status"] = WorkItemStatus.READY.value
+    fresh_row["next_attempt_at"] = None
+
+    connection.work_items["work-retry"] = retry_row
+    connection.work_items["work-fresh"] = fresh_row
+    connection.schedules["work-retry"] = _schedule_payload(
+        source_unit_ref="unit-retry",
+        profile=_large_input_profile(1000),
+    )
+    connection.schedules["work-fresh"] = _schedule_payload(
+        source_unit_ref="unit-fresh",
+        profile=_large_input_profile(1000),
+    )
+
+    result = await _runner(FakePool(connection=connection)).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    minute_requests=2,
+                    minute_tokens=4000,
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            requested_items=2,
+        ),
+    )
+
+    assert len(result.lease_result.leased) == 1
+    assert len(result.attempt_result.started_attempts) == 1
+    assert connection.work_items["work-retry"]["status"] == "leased"
+    assert connection.work_items["work-fresh"]["status"] == WorkItemStatus.READY.value
+    assert {
+        str(dispatch["work_item_id"]) for dispatch in connection.dispatches.values()
+    } == {"work-retry"}
 
 
 @pytest.mark.asyncio
