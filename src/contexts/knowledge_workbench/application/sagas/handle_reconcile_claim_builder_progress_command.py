@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -255,6 +256,7 @@ def _next_command(
         selected_retry_strategy=selected_retry_strategy,
         scheduled_work_item_count=summary.total_count,
     )
+    causation_scope = _prepare_command_causation_scope(workflow_command)
 
     if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW:
         return _prepare_dispatch_batch_command(
@@ -265,7 +267,7 @@ def _next_command(
             selected_retry_strategy=selected_retry_strategy,
             run_after=occurred_at,
             occurred_at=occurred_at,
-            suffix=f"now:{prepare_suffix_scope}",
+            suffix=f"now:{prepare_suffix_scope}:{causation_scope}",
         )
 
     if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER:
@@ -280,7 +282,10 @@ def _next_command(
             selected_retry_strategy=selected_retry_strategy,
             run_after=next_due_at,
             occurred_at=occurred_at,
-            suffix=f"later:{prepare_suffix_scope}:{next_due_at.isoformat()}",
+            suffix=(
+                f"later:{prepare_suffix_scope}:"
+                f"{next_due_at.isoformat()}:{causation_scope}"
+            ),
         )
 
     if decision is ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SPLIT_REQUIRED:
@@ -307,6 +312,13 @@ def _prepare_command_suffix_scope(
 ) -> str:
     strategy_scope = selected_retry_strategy or "default"
     return f"{strategy_scope}:scheduled:{scheduled_work_item_count}"
+
+
+def _prepare_command_causation_scope(workflow_command: WorkflowCommand) -> str:
+    digest = hashlib.sha256(
+        workflow_command.command_id.value.encode("utf-8")
+    ).hexdigest()
+    return f"cause:{digest[:16]}"
 
 
 def _prepare_dispatch_batch_command(

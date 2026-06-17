@@ -93,15 +93,16 @@ def _workflow_command(
     status: WorkflowCommandStatus = WorkflowCommandStatus.PENDING,
     workflow_run_id: str = _workflow_run_id(),
     payload_workflow_run_id: str | None = None,
+    reconcile_ref: str = "work-1-attempt-1",
 ) -> WorkflowCommand:
     return WorkflowCommand(
         command_id=WorkflowCommandId(
-            f"workflow-command:reconcile-claim-builder-progress:{workflow_run_id}:work-1-attempt-1"
+            f"workflow-command:reconcile-claim-builder-progress:{workflow_run_id}:{reconcile_ref}"
         ),
         command_type=command_type,
         workflow_run_id=workflow_run_id,
         idempotency_key=WorkflowIdempotencyKey(
-            f"reconcile-claim-builder-progress:{workflow_run_id}:work-1-attempt-1"
+            f"reconcile-claim-builder-progress:{workflow_run_id}:{reconcile_ref}"
         ),
         payload={
             "workflow_run_id": payload_workflow_run_id or workflow_run_id,
@@ -434,13 +435,16 @@ async def test_ready_work_appends_prepare_dispatch_batch_now() -> None:
 
 
 @pytest.mark.asyncio
-async def test_repeated_reconcile_keeps_prepare_payload_stable_when_live_counts_change() -> (
+async def test_same_reconcile_replay_keeps_prepare_key_and_payload_stable_when_counts_change() -> (
     None
 ):
+    workflow_command = _workflow_command()
     _, _, _, first_uow = await _execute(
+        workflow_command=workflow_command,
         summary=_summary(ready_count=2, completed_count=1),
     )
     _, _, _, second_uow = await _execute(
+        workflow_command=workflow_command,
         summary=_summary(ready_count=1, completed_count=2),
     )
 
@@ -452,6 +456,27 @@ async def test_repeated_reconcile_keeps_prepare_payload_stable_when_live_counts_
     assert first_command.payload["scheduled_work_item_count"] == 3
     assert "summary" not in first_command.payload
     assert "retry_action_summary" not in first_command.payload
+
+
+@pytest.mark.asyncio
+async def test_distinct_reconcile_commands_create_distinct_prepare_keys_for_next_batches() -> (
+    None
+):
+    _, _, _, first_uow = await _execute(
+        workflow_command=_workflow_command(reconcile_ref="work-1-attempt-1"),
+        summary=_summary(ready_count=2, completed_count=1),
+    )
+    _, _, _, second_uow = await _execute(
+        workflow_command=_workflow_command(reconcile_ref="work-2-attempt-1"),
+        summary=_summary(ready_count=1, completed_count=2),
+    )
+
+    first_command = first_uow.command_log.pending_commands[0]
+    second_command = second_uow.command_log.pending_commands[0]
+
+    assert first_command.idempotency_key != second_command.idempotency_key
+    assert dict(first_command.payload) == dict(second_command.payload)
+    assert first_command.payload["scheduled_work_item_count"] == 3
 
 
 @pytest.mark.asyncio
