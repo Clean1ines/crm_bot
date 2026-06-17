@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_repository_port import (
@@ -89,6 +90,7 @@ def _record(
     attempt_number: int = 1,
     error_kind: str | None = None,
     next_attempt_at: datetime | None = None,
+    validation_metadata: dict[str, object] | None = None,
 ) -> WorkItemAttemptOutcomeRecord:
     return WorkItemAttemptOutcomeRecord(
         attempt_id="attempt-1",
@@ -99,6 +101,7 @@ def _record(
         outcome_status=outcome_status,
         error_kind=error_kind,
         next_attempt_at=next_attempt_at,
+        validation_metadata=validation_metadata,
     )
 
 
@@ -138,6 +141,7 @@ async def test_succeeded_updates_attempt_and_completes_work_item() -> None:
         _finished_at(),
         "succeeded",
         None,
+        None,
         "work-1",
         1,
     )
@@ -147,6 +151,35 @@ async def test_succeeded_updates_attempt_and_completes_work_item() -> None:
     assert work_item_args[4] is None
     assert work_item_args[5] is None
     assert work_item_args[6] is None
+
+
+@pytest.mark.asyncio
+async def test_succeeded_updates_attempt_with_validation_metadata() -> None:
+    connection = FakeConnection(row=_leased_row())
+
+    work_item = await _execute(
+        connection,
+        _record(
+            validation_metadata={
+                "draft_claim_compaction_validation_decision": "valid_output",
+                "expected_output_kind": "compacted_claims",
+            },
+        ),
+    )
+
+    assert work_item.status is WorkItemStatus.COMPLETED
+    assert _attempt_update_args(connection) == (
+        "attempt-1",
+        _finished_at(),
+        "succeeded",
+        None,
+        (
+            '{"draft_claim_compaction_validation_decision": "valid_output", '
+            '"expected_output_kind": "compacted_claims"}'
+        ),
+        "work-1",
+        1,
+    )
 
 
 @pytest.mark.asyncio
@@ -166,9 +199,10 @@ async def test_retryable_failed_updates_attempt_and_moves_work_item_to_retryable
 
     assert work_item.status is WorkItemStatus.RETRYABLE_FAILED
     assert work_item.last_error_kind == "rate_limit"
-    assert _attempt_update_args(connection)[2:4] == (
+    assert _attempt_update_args(connection)[2:5] == (
         "retryable_failed",
         "rate_limit",
+        None,
     )
     work_item_args = _work_item_update_args(connection)
     assert work_item_args[1] == "retryable_failed"
@@ -192,9 +226,10 @@ async def test_terminal_failed_updates_attempt_and_moves_work_item_to_terminal()
 
     assert work_item.status is WorkItemStatus.TERMINAL_FAILED
     assert work_item.last_error_kind == "schema_error"
-    assert _attempt_update_args(connection)[2:4] == (
+    assert _attempt_update_args(connection)[2:5] == (
         "terminal_failed",
         "schema_error",
+        None,
     )
     work_item_args = _work_item_update_args(connection)
     assert work_item_args[1] == "terminal_failed"
@@ -217,7 +252,11 @@ async def test_deferred_updates_attempt_and_next_attempt_at() -> None:
 
     assert work_item.status is WorkItemStatus.DEFERRED
     assert work_item.last_error_kind == "quota_wait"
-    assert _attempt_update_args(connection)[2:4] == ("deferred", "quota_wait")
+    assert _attempt_update_args(connection)[2:5] == (
+        "deferred",
+        "quota_wait",
+        None,
+    )
     work_item_args = _work_item_update_args(connection)
     assert work_item_args[1] == "deferred"
     assert work_item_args[6] == _next_attempt_at()

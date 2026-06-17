@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from datetime import datetime
 
 import asyncpg
@@ -55,7 +57,8 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 a.attempt_number AS recorded_attempt_number,
                 a.finished_at AS recorded_finished_at,
                 a.outcome_status AS recorded_outcome_status,
-                a.error_kind AS recorded_error_kind
+                a.error_kind AS recorded_error_kind,
+                a.validation_metadata AS recorded_validation_metadata
             FROM execution_work_item_attempts a
             JOIN execution_work_items w
               ON w.work_item_id = a.work_item_id
@@ -94,6 +97,9 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 else None
             ),
             next_attempt_at=next_attempt_at,
+            validation_metadata=_validation_metadata_from_row(
+                row["recorded_validation_metadata"],
+            ),
             work_item=_hydrate_work_item(row),
         )
 
@@ -133,15 +139,17 @@ class PostgresWorkItemAttemptOutcomeRepository(
             SET
                 finished_at = $2,
                 outcome_status = $3,
-                error_kind = $4
+                error_kind = $4,
+                validation_metadata = $5::jsonb
             WHERE attempt_id = $1
-              AND work_item_id = $5
-              AND attempt_number = $6
+              AND work_item_id = $6
+              AND attempt_number = $7
             """,
             record.attempt_id,
             record.finished_at,
             record.outcome_status.value,
             record.error_kind,
+            _jsonb_payload(record.validation_metadata),
             record.work_item_id,
             record.attempt_number,
         )
@@ -179,6 +187,33 @@ class PostgresWorkItemAttemptOutcomeRepository(
         )
 
         return transitioned
+
+
+def _jsonb_payload(payload: Mapping[str, object] | None) -> str | None:
+    if payload is None:
+        return None
+    return json.dumps(dict(payload))
+
+
+def _validation_metadata_from_row(value: object) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        decoded = json.loads(value)
+    elif isinstance(value, Mapping):
+        decoded = dict(value)
+    else:
+        raise TypeError("validation_metadata must be json object or None")
+
+    if not isinstance(decoded, dict):
+        raise TypeError("validation_metadata must decode to object")
+
+    result: dict[str, object] = {}
+    for key, item in decoded.items():
+        if not isinstance(key, str):
+            raise TypeError("validation_metadata keys must be text")
+        result[key] = item
+    return result
 
 
 def _validate_current_lease(

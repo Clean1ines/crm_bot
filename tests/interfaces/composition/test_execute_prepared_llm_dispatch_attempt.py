@@ -8,6 +8,7 @@ from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch
     WorkItemAttemptDispatchForExecution,
 )
 from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_repository_port import (
+    RecordedWorkItemAttemptOutcome,
     WorkItemAttemptOutcomeRecord,
     WorkItemAttemptOutcomeStatus,
 )
@@ -28,6 +29,7 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
 from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttempt,
     ExecutePreparedLlmDispatchAttemptCommand,
+    LlmDispatchOutputValidationResult,
 )
 
 
@@ -45,6 +47,30 @@ class FakeDispatchRepository:
         return self.dispatch
 
 
+class FakeOutputValidator:
+    def validate(
+        self,
+        *,
+        dispatch_payload,
+        output_payload,
+        llm_status,
+        finished_at,
+        attempt_number,
+    ) -> LlmDispatchOutputValidationResult:
+        del dispatch_payload, output_payload, finished_at, attempt_number
+        return LlmDispatchOutputValidationResult(
+            status=llm_status,
+            error_kind=None,
+            next_attempt_at=None,
+            metadata={
+                "draft_claim_compaction_validation_decision": "valid_output",
+                "expected_output_kind": "compacted_claims",
+                "compacted_claims": [{"key": "refunds"}],
+                "_private_runtime_object": object(),
+            },
+        )
+
+
 class FakeLlmExecutor:
     def __init__(self, result: LlmDispatchExecutionResult) -> None:
         self.result = result
@@ -59,8 +85,20 @@ class FakeLlmExecutor:
 
 
 class FakeOutcomeRepository:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        recorded: RecordedWorkItemAttemptOutcome | None = None,
+    ) -> None:
         self.records: list[WorkItemAttemptOutcomeRecord] = []
+        self.recorded = recorded
+
+    async def get_recorded_attempt_outcome(
+        self,
+        *,
+        attempt_id: str,
+    ) -> RecordedWorkItemAttemptOutcome | None:
+        del attempt_id
+        return self.recorded
 
     async def record_attempt_outcome(
         self,
@@ -119,6 +157,7 @@ def _runner(
         outcome_recorder=RecordWorkItemAttemptOutcome(
             repository=outcome_repository,
         ),
+        recorded_outcome_reader=outcome_repository,
     )
 
 
@@ -309,3 +348,77 @@ async def test_execution_result_exposes_capacity_observation_contract() -> None:
     )
 
     assert result.llm_result.capacity_observation == capacity_observation
+
+
+@pytest.mark.asyncio
+async def test_validation_metadata_is_recorded_as_public_json_payload() -> None:
+    repository = FakeOutcomeRepository()
+    runner = _runner(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.SUCCEEDED,
+            finished_at=_finished_at(),
+            output_payload={"raw_text": "{}"},
+        ),
+        outcome_repository=repository,
+    )
+
+    result = await runner.execute(
+        ExecutePreparedLlmDispatchAttemptCommand(
+            attempt_id="attempt-1",
+            output_validator=FakeOutputValidator(),
+        )
+    )
+
+    assert result.validation_metadata is not None
+    assert "_private_runtime_object" in result.validation_metadata
+    assert repository.records[0].validation_metadata == {
+        "draft_claim_compaction_validation_decision": "valid_output",
+        "expected_output_kind": "compacted_claims",
+        "compacted_claims": [{"key": "refunds"}],
+    }
+
+
+@pytest.mark.asyncio
+async def test_recorded_attempt_outcome_replays_validation_metadata() -> None:
+    metadata = {
+        "draft_claim_compaction_validation_decision": "valid_output",
+        "expected_output_kind": "compacted_claims",
+        "compacted_claims": [{"key": "refunds"}],
+    }
+    repository = FakeOutcomeRepository(
+        recorded=RecordedWorkItemAttemptOutcome(
+            attempt_id="attempt-1",
+            work_item_id="work-1",
+            attempt_number=1,
+            finished_at=_finished_at(),
+            outcome_status=WorkItemAttemptOutcomeStatus.SUCCEEDED,
+            work_item=WorkItem(
+                work_item_id="work-1",
+                work_kind=WorkKind("execution.test"),
+                status=WorkItemStatus.COMPLETED,
+            ),
+            validation_metadata=metadata,
+        )
+    )
+    llm_executor = FakeLlmExecutor(
+        LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.SUCCEEDED,
+            finished_at=_finished_at(),
+            output_payload={"raw_text": "{}"},
+        )
+    )
+    runner = ExecutePreparedLlmDispatchAttempt(
+        dispatch_repository=FakeDispatchRepository(dispatch=_dispatch()),
+        llm_executor=llm_executor,
+        outcome_recorder=RecordWorkItemAttemptOutcome(repository=repository),
+        recorded_outcome_reader=repository,
+    )
+
+    result = await runner.execute(
+        ExecutePreparedLlmDispatchAttemptCommand(attempt_id="attempt-1")
+    )
+
+    assert llm_executor.inputs == []
+    assert result.validation_metadata == metadata
+    assert result.llm_result.output_payload == {"already_recorded": True}

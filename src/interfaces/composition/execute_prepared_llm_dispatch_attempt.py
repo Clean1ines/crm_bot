@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -153,7 +154,7 @@ class ExecutePreparedLlmDispatchAttempt:
                     outcome_result=RecordWorkItemAttemptOutcomeResult(
                         work_item=recorded_outcome.work_item,
                     ),
-                    validation_metadata=None,
+                    validation_metadata=recorded_outcome.validation_metadata,
                 )
 
         provider_llm_result = await self.llm_executor.execute_dispatch(
@@ -220,6 +221,11 @@ class ExecutePreparedLlmDispatchAttempt:
                 outcome_status=_map_status(llm_result.status),
                 error_kind=llm_result.error_kind,
                 next_attempt_at=llm_result.next_attempt_at,
+                validation_metadata=_recordable_validation_metadata(
+                    validation_result.metadata
+                    if validation_result is not None
+                    else None,
+                ),
             ),
         )
         LOGGER.info(
@@ -241,6 +247,25 @@ class ExecutePreparedLlmDispatchAttempt:
                 else None
             ),
         )
+
+
+def _recordable_validation_metadata(
+    metadata: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    if metadata is None:
+        return None
+
+    recordable: dict[str, object] = {}
+    for key, value in metadata.items():
+        if key.startswith("_"):
+            continue
+        try:
+            encoded = json.dumps(value)
+        except TypeError:
+            continue
+        decoded = json.loads(encoded)
+        recordable[key] = decoded
+    return recordable
 
 
 def _llm_result_from_recorded_outcome(

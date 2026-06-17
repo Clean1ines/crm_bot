@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -26,6 +27,7 @@ class WorkItemAttemptOutcomeRecord:
     outcome_status: WorkItemAttemptOutcomeStatus
     error_kind: str | None = None
     next_attempt_at: datetime | None = None
+    validation_metadata: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.attempt_id, field_name="attempt_id")
@@ -43,6 +45,12 @@ class WorkItemAttemptOutcomeRecord:
 
         if not isinstance(self.outcome_status, WorkItemAttemptOutcomeStatus):
             raise TypeError("outcome_status must be WorkItemAttemptOutcomeStatus")
+
+        if self.validation_metadata is not None and not isinstance(
+            self.validation_metadata,
+            Mapping,
+        ):
+            raise TypeError("validation_metadata must be Mapping when provided")
 
         if self.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
             if self.error_kind is not None:
@@ -88,19 +96,30 @@ class RecordedWorkItemAttemptOutcome:
     work_item: WorkItem
     error_kind: str | None = None
     next_attempt_at: datetime | None = None
+    validation_metadata: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.attempt_id, field_name="attempt_id")
         _require_non_empty_text(self.work_item_id, field_name="work_item_id")
+
         if not isinstance(self.attempt_number, int):
             raise TypeError("attempt_number must be int")
         if self.attempt_number <= 0:
             raise ValueError("attempt_number must be > 0")
+
         _require_timezone_aware(self.finished_at, field_name="finished_at")
+
         if not isinstance(self.outcome_status, WorkItemAttemptOutcomeStatus):
             raise TypeError("outcome_status must be WorkItemAttemptOutcomeStatus")
+
         if not isinstance(self.work_item, WorkItem):
             raise TypeError("work_item must be WorkItem")
+
+        if self.validation_metadata is not None and not isinstance(
+            self.validation_metadata,
+            Mapping,
+        ):
+            raise TypeError("validation_metadata must be Mapping when provided")
 
         if self.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
             if self.error_kind is not None:

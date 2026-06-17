@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -22,6 +23,7 @@ class RecordWorkItemAttemptOutcomeCommand:
     outcome_status: WorkItemAttemptOutcomeStatus
     error_kind: str | None = None
     next_attempt_at: datetime | None = None
+    validation_metadata: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +48,7 @@ class RecordWorkItemAttemptOutcome:
             outcome_status=command.outcome_status,
             error_kind=command.error_kind,
             next_attempt_at=command.next_attempt_at,
+            validation_metadata=command.validation_metadata,
         )
         work_item = await self.repository.record_attempt_outcome(record)
         return RecordWorkItemAttemptOutcomeResult(work_item=work_item)
