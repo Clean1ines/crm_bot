@@ -225,6 +225,7 @@ class PostgresCommandLogRepository(CommandLogRepositoryPort):
               AND run_after <= NOW()
             ORDER BY run_after ASC, created_at ASC
             LIMIT $3
+            FOR UPDATE SKIP LOCKED
             """,
             workflow_run_id,
             WorkflowCommandStatus.PENDING.value,
