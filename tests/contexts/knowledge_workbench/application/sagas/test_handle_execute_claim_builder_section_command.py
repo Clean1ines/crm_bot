@@ -640,6 +640,43 @@ async def test_appends_reconcile_claim_builder_progress_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reconcile_command_propagates_claim_builder_prepare_origin_trace() -> (
+    None
+):
+    base_command = _workflow_command()
+    payload = dict(base_command.payload)
+    payload["claim_builder_prepare_command_id"] = (
+        "workflow-command:prepare-claim-builder-dispatch-batch:origin"
+    )
+    payload["claim_builder_prepare_idempotency_key"] = (
+        "prepare-claim-builder-dispatch-batch:origin"
+    )
+    workflow_command = WorkflowCommand(
+        command_id=base_command.command_id,
+        command_type=base_command.command_type,
+        workflow_run_id=base_command.workflow_run_id,
+        idempotency_key=base_command.idempotency_key,
+        payload=payload,
+        status=base_command.status,
+        run_after=base_command.run_after,
+        created_at=base_command.created_at,
+        updated_at=base_command.updated_at,
+    )
+
+    _, _, _, workflow_unit_of_work, _ = await _execute(
+        workflow_command=workflow_command,
+    )
+
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert next_command.payload["claim_builder_prepare_command_id"] == (
+        "workflow-command:prepare-claim-builder-dispatch-batch:origin"
+    )
+    assert next_command.payload["claim_builder_prepare_idempotency_key"] == (
+        "prepare-claim-builder-dispatch-batch:origin"
+    )
+
+
+@pytest.mark.asyncio
 async def test_marks_execute_claim_builder_section_completed() -> None:
     result, _, _, workflow_unit_of_work, _ = await _execute()
 

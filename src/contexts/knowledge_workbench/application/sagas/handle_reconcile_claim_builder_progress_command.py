@@ -315,9 +315,22 @@ def _prepare_command_suffix_scope(
 
 
 def _prepare_command_causation_scope(workflow_command: WorkflowCommand) -> str:
-    digest = hashlib.sha256(
-        workflow_command.command_id.value.encode("utf-8")
-    ).hexdigest()
+    origin_command_id = _optional_payload_text(
+        workflow_command.payload,
+        "claim_builder_prepare_command_id",
+    )
+    origin_idempotency_key = _optional_payload_text(
+        workflow_command.payload,
+        "claim_builder_prepare_idempotency_key",
+    )
+    if origin_command_id is not None:
+        material = origin_command_id
+        if origin_idempotency_key is not None:
+            material = f"{origin_command_id}:{origin_idempotency_key}"
+    else:
+        material = f"legacy-reconcile:{workflow_command.command_id.value}"
+
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     return f"cause:{digest[:16]}"
 
 
@@ -571,6 +584,18 @@ def _severity(
     if summary.terminal_failed_count > 0:
         return WorkflowTimelineSeverity.WARNING
     return WorkflowTimelineSeverity.INFO
+
+
+def _optional_payload_text(
+    payload: Mapping[str, object],
+    key: str,
+) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"workflow command payload {key} must be non-empty text")
+    return value
 
 
 def _payload_text(

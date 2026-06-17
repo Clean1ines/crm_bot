@@ -1188,6 +1188,15 @@ def _reconcile_command_payload(
         if not isinstance(dispatch_preparation, Mapping):
             raise ValueError("llm_dispatch_preparation must be mapping")
         payload["llm_dispatch_preparation"] = dict(dispatch_preparation)
+
+    for key in (
+        "claim_builder_prepare_command_id",
+        "claim_builder_prepare_idempotency_key",
+    ):
+        value = _optional_mapping_text(workflow_command.payload, key)
+        if value is not None:
+            payload[key] = value
+
     return payload
 
 

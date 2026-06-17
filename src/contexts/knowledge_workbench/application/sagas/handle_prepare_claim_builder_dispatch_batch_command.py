@@ -804,6 +804,10 @@ def _execute_claim_builder_section_commands(
             "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
             "dispatch_attempt_id": dispatch_attempt_id,
             "work_item_id": work_item_id,
+            "claim_builder_prepare_command_id": workflow_command.command_id.value,
+            "claim_builder_prepare_idempotency_key": (
+                workflow_command.idempotency_key.value
+            ),
         }
         if dispatch_preparation is not None:
             if not isinstance(dispatch_preparation, Mapping):

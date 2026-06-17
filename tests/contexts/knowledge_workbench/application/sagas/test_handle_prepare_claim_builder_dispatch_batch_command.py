@@ -500,6 +500,20 @@ async def test_appends_execute_claim_builder_section_per_prepared_attempt() -> N
 
 
 @pytest.mark.asyncio
+async def test_execute_commands_include_claim_builder_prepare_origin_trace() -> None:
+    _, _, workflow_unit_of_work = await _execute()
+    prepare_command = _workflow_command()
+
+    for command in workflow_unit_of_work.command_log.pending_commands:
+        assert command.payload["claim_builder_prepare_command_id"] == (
+            prepare_command.command_id.value
+        )
+        assert command.payload["claim_builder_prepare_idempotency_key"] == (
+            prepare_command.idempotency_key.value
+        )
+
+
+@pytest.mark.asyncio
 async def test_marks_prepare_failed_when_scheduled_work_prepares_zero_attempts() -> (
     None
 ):
