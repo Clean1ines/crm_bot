@@ -100,14 +100,16 @@ class FakeConnection:
     async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
         if "llm_attempt_capacity_observations" in query:
             provider = str(args[0])
-            account_refs = tuple(str(item) for item in args[1])
-            model_ref = str(args[2])
+            model_ref = str(args[1])
+            account_refs = tuple(str(item) for item in args[2])
+            since = _as_datetime(args[3]) if len(args) > 3 else None
             return [
                 row
                 for row in self.capacity_observations
                 if row.get("provider") == provider
                 and row.get("account_ref") in account_refs
                 and row.get("model_ref") == model_ref
+                and (since is None or _as_datetime(row["observed_at"]) >= since)
             ]
 
         work_kind = str(args[0])
@@ -140,6 +142,10 @@ class FakeConnection:
         return candidates[:limit]
 
     async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        if "FROM execution_work_item_attempt_dispatches" in query:
+            attempt_id = str(args[0])
+            return self.dispatches.get(attempt_id)
+
         if "wi.work_item_id = $2" in query:
             work_kind = str(args[0])
             work_item_id = str(args[1])
@@ -359,6 +365,7 @@ def _command(
     now: datetime | None = None,
     started_at: datetime | None = None,
     dispatch_preparation_strategy: str | None = None,
+    use_local_active_model_tpm_budget: bool = False,
 ) -> PrepareLlmDispatchBatchCommand:
     return PrepareLlmDispatchBatchCommand(
         work_kind=_work_kind(),
@@ -372,6 +379,7 @@ def _command(
         now=now or _now(),
         started_at=started_at or _started_at(),
         dispatch_preparation_strategy=dispatch_preparation_strategy,
+        use_local_active_model_tpm_budget=use_local_active_model_tpm_budget,
     )
 
 
@@ -602,6 +610,148 @@ async def test_prepare_absent_active_model_starts_no_attempts() -> None:
     assert connection.attempts == {}
     assert connection.dispatches == {}
     assert connection.transactions[0].committed is True
+
+
+@pytest.mark.asyncio
+async def test_non_primary_active_model_can_use_local_tpm_budget() -> None:
+    connection = _connection_with_due_items(2)
+    connection.capacity_observations.append(
+        {
+            "provider": "groq",
+            "account_ref": "openai_1",
+            "model_ref": "openai/gpt-oss-120b",
+            "remaining_minute_requests": 10,
+            "remaining_minute_tokens": 7000,
+            "remaining_daily_requests": 100,
+            "remaining_daily_tokens": 50000,
+            "minute_reset_at": None,
+            "daily_reset_at": None,
+            "actual_prompt_tokens": 3000,
+            "actual_completion_tokens": 500,
+            "actual_total_tokens": 3500,
+            "outcome_class": "succeeded",
+            "observed_at": _now() - timedelta(seconds=30),
+        }
+    )
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="openai_1",
+                    minute_requests=10,
+                    minute_tokens=7000,
+                    model_ref="openai/gpt-oss-120b",
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            active_model_ref="openai/gpt-oss-120b",
+            requested_items=2,
+            use_local_active_model_tpm_budget=True,
+        ),
+    )
+
+    assert len(result.attempt_result.started_attempts) == 1
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 1
+    assert {
+        dispatch["llm_allocation_payload"]["model_ref"]
+        for dispatch in connection.dispatches.values()
+    } == {"openai/gpt-oss-120b"}
+
+
+@pytest.mark.asyncio
+async def test_non_primary_active_model_deferred_without_tokens_exhausts_local_minute() -> (
+    None
+):
+    connection = _connection_with_due_items(1)
+    connection.capacity_observations.append(
+        {
+            "provider": "groq",
+            "account_ref": "openai_1",
+            "model_ref": "openai/gpt-oss-120b",
+            "remaining_minute_requests": 10,
+            "remaining_minute_tokens": 7000,
+            "remaining_daily_requests": 100,
+            "remaining_daily_tokens": 50000,
+            "minute_reset_at": None,
+            "daily_reset_at": None,
+            "actual_prompt_tokens": None,
+            "actual_completion_tokens": None,
+            "actual_total_tokens": None,
+            "outcome_class": "deferred",
+            "observed_at": _now() - timedelta(seconds=30),
+        }
+    )
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="openai_1",
+                    minute_requests=10,
+                    minute_tokens=7000,
+                    model_ref="openai/gpt-oss-120b",
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            active_model_ref="openai/gpt-oss-120b",
+            requested_items=1,
+            use_local_active_model_tpm_budget=True,
+        ),
+    )
+
+    assert result.attempt_result.started_attempts == ()
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 0
+    assert result.capacity_retry_at == _now() + timedelta(seconds=60)
+
+
+@pytest.mark.asyncio
+async def test_non_primary_active_model_daily_exhaustion_blocks_local_account() -> None:
+    connection = _connection_with_due_items(1)
+    connection.capacity_observations.append(
+        {
+            "provider": "groq",
+            "account_ref": "openai_1",
+            "model_ref": "openai/gpt-oss-120b",
+            "remaining_minute_requests": 10,
+            "remaining_minute_tokens": 7000,
+            "remaining_daily_requests": 0,
+            "remaining_daily_tokens": 50000,
+            "minute_reset_at": None,
+            "daily_reset_at": _now() + timedelta(hours=12),
+            "actual_prompt_tokens": None,
+            "actual_completion_tokens": None,
+            "actual_total_tokens": None,
+            "outcome_class": "deferred",
+            "observed_at": _now() - timedelta(seconds=30),
+        }
+    )
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="openai_1",
+                    minute_requests=10,
+                    minute_tokens=7000,
+                    model_ref="openai/gpt-oss-120b",
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            active_model_ref="openai/gpt-oss-120b",
+            requested_items=1,
+            use_local_active_model_tpm_budget=True,
+        ),
+    )
+
+    assert result.attempt_result.started_attempts == ()
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 0
 
 
 @pytest.mark.asyncio

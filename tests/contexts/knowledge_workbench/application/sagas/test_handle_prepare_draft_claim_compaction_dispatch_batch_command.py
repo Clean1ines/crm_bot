@@ -42,9 +42,11 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 )
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
+    PrepareLlmDispatchBatchResult,
 )
 from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
     StartedLlmAdmittedAttempt,
+    StartLlmAdmittedWorkItemAttemptsResult,
 )
 
 
@@ -113,15 +115,32 @@ class FakeAttemptResult:
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
 
 
-@dataclass(slots=True)
-class FakePrepareResult:
-    attempt_result: FakeAttemptResult
-    input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
-    input_size_preflight_reason: str = "input size preflight used active model"
-    input_size_preflight_active_model_ref: str | None = "openai/gpt-oss-120b"
-    source_split_required: bool = False
-    affected_work_item_refs: tuple[str, ...] = ()
-    source_unit_refs: tuple[str, ...] = ()
+def _fake_prepare_result(
+    started_attempts: tuple[StartedLlmAdmittedAttempt, ...],
+) -> PrepareLlmDispatchBatchResult:
+    result = object.__new__(PrepareLlmDispatchBatchResult)
+    object.__setattr__(result, "lease_result", None)
+    object.__setattr__(
+        result,
+        "attempt_result",
+        StartLlmAdmittedWorkItemAttemptsResult(started_attempts=started_attempts),
+    )
+    object.__setattr__(result, "input_size_preflight_decision", "USE_ACTIVE_MODEL")
+    object.__setattr__(
+        result,
+        "input_size_preflight_reason",
+        "input size preflight used active model",
+    )
+    object.__setattr__(
+        result,
+        "input_size_preflight_active_model_ref",
+        "openai/gpt-oss-120b",
+    )
+    object.__setattr__(result, "source_split_required", False)
+    object.__setattr__(result, "affected_work_item_refs", ())
+    object.__setattr__(result, "source_unit_refs", ())
+    object.__setattr__(result, "capacity_retry_at", None)
+    return result
 
 
 @dataclass(slots=True)
@@ -131,9 +150,7 @@ class FakePrepareLlmDispatchBatch:
 
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
         self.calls.append(command)
-        return FakePrepareResult(
-            attempt_result=FakeAttemptResult(started_attempts=self.started_attempts)
-        )
+        return _fake_prepare_result(self.started_attempts)
 
 
 @dataclass(slots=True)
@@ -298,6 +315,7 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     assert result.appended_next_command_count == 0
     assert prepare.calls[0].work_kind == DRAFT_CLAIM_COMPACTION_WORK_KIND
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
+    assert prepare.calls[0].use_local_active_model_tpm_budget is True
     assert workflow_uow.outbox.events[0].event_type == (
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED.value
     )

@@ -128,6 +128,7 @@ class PrepareLlmDispatchBatchCommand:
     account_capacities: tuple[LlmProviderAccountCapacity, ...] = ()
     active_model_ref: str | None = None
     dispatch_preparation_strategy: str | None = None
+    use_local_active_model_tpm_budget: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.work_kind, WorkKind):
@@ -165,6 +166,8 @@ class PrepareLlmDispatchBatchCommand:
                 self.dispatch_preparation_strategy,
                 field_name="dispatch_preparation_strategy",
             )
+        if not isinstance(self.use_local_active_model_tpm_budget, bool):
+            raise TypeError("use_local_active_model_tpm_budget must be bool")
         if self.started_at < self.now:
             raise ValueError("started_at must be >= now")
 
@@ -329,8 +332,10 @@ class PrepareLlmDispatchBatch:
                     preflight_active_model_ref=preflight_result.active_model_ref,
                 )
                 resolved_active_model_ref = preflight_result.active_model_ref
-                use_local_primary_tpm_budget = (
-                    resolved_active_model_ref == self.route_catalog.primary_model_ref()
+                use_local_active_model_tpm_budget = (
+                    command.use_local_active_model_tpm_budget
+                    or resolved_active_model_ref
+                    == self.route_catalog.primary_model_ref()
                 )
                 if (
                     preflight_result.decision
@@ -355,7 +360,7 @@ class PrepareLlmDispatchBatch:
                     capacity_observation_repository=capacity_observation_repository,
                     profile=preparation_profile,
                     now=command.now,
-                    use_local_primary_tpm_budget=use_local_primary_tpm_budget,
+                    use_local_active_model_tpm_budget=use_local_active_model_tpm_budget,
                 )
                 LOGGER.info(
                     "knowledge_llm_prepare_account_capacities",
@@ -376,7 +381,7 @@ class PrepareLlmDispatchBatch:
                     ],
                 )
                 capacity_retry_at = None
-                if not use_local_primary_tpm_budget:
+                if not use_local_active_model_tpm_budget:
                     capacity_retry_at = await _next_capacity_retry_at(
                         capacity_observation_repository=capacity_observation_repository,
                         provider_account_refs=provider_account_refs,
@@ -440,11 +445,15 @@ class PrepareLlmDispatchBatch:
 
                 next_capacity_retry_at = capacity_retry_at
                 if (
-                    use_local_primary_tpm_budget
+                    use_local_active_model_tpm_budget
                     and due_records
                     and not lease_result.leased
                 ):
-                    next_capacity_retry_at = command.now + timedelta(seconds=60)
+                    next_capacity_retry_at = _local_active_model_capacity_retry_at(
+                        account_capacities=account_capacities,
+                        active_model_ref=resolved_active_model_ref,
+                        now=command.now,
+                    )
                 elif attempt_result.started_attempts and next_capacity_retry_at is None:
                     next_capacity_retry_at = command.now + timedelta(seconds=60)
 
@@ -473,10 +482,11 @@ class _InputAdmittedCandidate:
 
 
 @dataclass(slots=True)
-class _PrimaryMinuteUsage:
+class _LocalAccountUsage:
     request_count: int = 0
     token_count: int = 0
     minute_exhausted: bool = False
+    daily_exhausted: bool = False
 
     def record(self, *, token_count: int | None) -> None:
         self.request_count += 1
@@ -485,6 +495,9 @@ class _PrimaryMinuteUsage:
 
     def exhaust_minute(self) -> None:
         self.minute_exhausted = True
+
+    def exhaust_daily(self) -> None:
+        self.daily_exhausted = True
 
 
 @dataclass(slots=True)
@@ -770,7 +783,7 @@ async def _preparation_account_capacities(
     capacity_observation_repository: PostgresLlmAttemptCapacityObservationRepository,
     profile: LlmTaskCapacityProfile,
     now: datetime,
-    use_local_primary_tpm_budget: bool,
+    use_local_active_model_tpm_budget: bool,
 ) -> tuple[LlmProviderAccountCapacity, ...]:
     if not due_records:
         if not command.account_capacities:
@@ -786,16 +799,20 @@ async def _preparation_account_capacities(
             model_profiles=model_profiles,
         )
     )
-    if use_local_primary_tpm_budget:
+    observation_account_refs = _capacity_account_refs_for_observations(
+        provider_account_refs=provider_account_refs,
+        seed_capacities=seed_capacities,
+    )
+    if use_local_active_model_tpm_budget:
         observations = (
             await capacity_observation_repository.observations_for_accounts_since(
                 provider="groq",
-                account_refs=provider_account_refs,
+                account_refs=observation_account_refs,
                 model_ref=active_model_ref,
                 since=now - timedelta(seconds=60),
             )
         )
-        return _local_primary_tpm_account_capacities(
+        return _local_active_model_tpm_account_capacities(
             seed_capacities=seed_capacities,
             observations=observations,
         )
@@ -803,7 +820,7 @@ async def _preparation_account_capacities(
     observations = (
         await capacity_observation_repository.latest_observations_for_accounts(
             provider="groq",
-            account_refs=provider_account_refs,
+            account_refs=observation_account_refs,
             model_ref=active_model_ref,
         )
     )
@@ -822,13 +839,29 @@ async def _preparation_account_capacities(
     )
 
 
-def _local_primary_tpm_account_capacities(
+def _capacity_account_refs_for_observations(
+    *,
+    provider_account_refs: tuple[str, ...],
+    seed_capacities: tuple[LlmProviderAccountCapacity, ...],
+) -> tuple[str, ...]:
+    refs: list[str] = []
+    for seed_capacity in seed_capacities:
+        if seed_capacity.account_ref not in refs:
+            refs.append(seed_capacity.account_ref)
+
+    if refs:
+        return tuple(refs)
+
+    return provider_account_refs
+
+
+def _local_active_model_tpm_account_capacities(
     *,
     seed_capacities: tuple[LlmProviderAccountCapacity, ...],
     observations: tuple[LlmAttemptCapacityObservation, ...],
 ) -> tuple[LlmProviderAccountCapacity, ...]:
     usage_by_account_ref = {
-        seed_capacity.account_ref: _PrimaryMinuteUsage()
+        seed_capacity.account_ref: _LocalAccountUsage()
         for seed_capacity in seed_capacities
     }
 
@@ -836,6 +869,9 @@ def _local_primary_tpm_account_capacities(
         usage = usage_by_account_ref.get(observation.account_ref)
         if usage is None:
             continue
+
+        if _daily_capacity_exhausted(observation):
+            usage.exhaust_daily()
 
         actual_token_usage = _actual_token_usage(observation)
         if observation.outcome_class == "deferred" and actual_token_usage is None:
@@ -860,6 +896,13 @@ def _local_primary_tpm_account_capacities(
                 0,
             )
 
+        if usage.daily_exhausted:
+            remaining_daily_requests = 0
+            remaining_daily_tokens = 0
+        else:
+            remaining_daily_requests = seed_capacity.remaining_daily_requests
+            remaining_daily_tokens = seed_capacity.remaining_daily_tokens
+
         capacities.append(
             LlmProviderAccountCapacity(
                 provider=seed_capacity.provider,
@@ -867,12 +910,41 @@ def _local_primary_tpm_account_capacities(
                 model_ref=seed_capacity.model_ref,
                 remaining_minute_requests=remaining_minute_requests,
                 remaining_minute_tokens=remaining_minute_tokens,
-                remaining_daily_requests=seed_capacity.remaining_daily_requests,
-                remaining_daily_tokens=seed_capacity.remaining_daily_tokens,
+                remaining_daily_requests=remaining_daily_requests,
+                remaining_daily_tokens=remaining_daily_tokens,
             ),
         )
 
     return tuple(capacities)
+
+
+def _daily_capacity_exhausted(observation: LlmAttemptCapacityObservation) -> bool:
+    return (
+        observation.remaining_daily_requests == 0
+        or observation.remaining_daily_tokens == 0
+    )
+
+
+def _local_active_model_capacity_retry_at(
+    *,
+    account_capacities: tuple[LlmProviderAccountCapacity, ...],
+    active_model_ref: str,
+    now: datetime,
+) -> datetime | None:
+    for capacity in account_capacities:
+        if capacity.model_ref != active_model_ref:
+            continue
+        if (
+            capacity.remaining_daily_requests == 0
+            or capacity.remaining_daily_tokens == 0
+        ):
+            continue
+        if (
+            capacity.remaining_minute_requests == 0
+            or capacity.remaining_minute_tokens == 0
+        ):
+            return now + timedelta(seconds=60)
+    return None
 
 
 def _actual_token_usage(observation: LlmAttemptCapacityObservation) -> int | None:
