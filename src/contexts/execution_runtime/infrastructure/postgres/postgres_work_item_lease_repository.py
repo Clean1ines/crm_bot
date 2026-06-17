@@ -67,14 +67,13 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
             JOIN execution_work_item_schedules wis
               ON wis.work_item_id = wi.work_item_id
             WHERE wi.work_kind = $1
-              AND wi.status IN ('ready', 'deferred', 'retryable_failed')
+              AND wi.status IN ('ready', 'retryable_failed')
               AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $2)
             ORDER BY
               CASE wi.status
                 WHEN 'retryable_failed' THEN 0
-                WHEN 'deferred' THEN 1
-                WHEN 'ready' THEN 2
-                ELSE 3
+                WHEN 'ready' THEN 1
+                ELSE 2
               END,
               wi.next_attempt_at NULLS FIRST,
               wi.updated_at,
@@ -121,14 +120,13 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
             JOIN execution_work_item_schedules wis
               ON wis.work_item_id = wi.work_item_id
             WHERE wi.work_kind = $1
-              AND wi.status IN ('ready', 'deferred', 'retryable_failed')
+              AND wi.status IN ('ready', 'retryable_failed')
               AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $2)
             ORDER BY
               CASE wi.status
                 WHEN 'retryable_failed' THEN 0
-                WHEN 'deferred' THEN 1
-                WHEN 'ready' THEN 2
-                ELSE 3
+                WHEN 'ready' THEN 1
+                ELSE 2
               END,
               wi.next_attempt_at NULLS FIRST,
               wi.updated_at,
@@ -217,7 +215,7 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
               ON wis.work_item_id = wi.work_item_id
             WHERE wi.work_kind = $1
               AND wi.work_item_id = $2
-              AND wi.status IN ('ready', 'deferred', 'retryable_failed')
+              AND wi.status IN ('ready', 'retryable_failed')
               AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $3)
             FOR UPDATE SKIP LOCKED
             LIMIT 1

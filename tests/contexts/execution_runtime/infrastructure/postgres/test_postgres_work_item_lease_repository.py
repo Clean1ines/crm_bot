@@ -55,7 +55,7 @@ class FakeConnection:
         for row in self.work_items.values():
             if row["work_kind"] != work_kind:
                 continue
-            if row["status"] not in {"ready", "deferred", "retryable_failed"}:
+            if row["status"] not in {"ready", "retryable_failed"}:
                 continue
             next_attempt_at = row["next_attempt_at"]
             if next_attempt_at is not None and _as_datetime(next_attempt_at) > now:
@@ -169,10 +169,9 @@ def _repository(connection: FakeConnection) -> PostgresWorkItemLeaseRepository:
 def _status_priority(status: str) -> int:
     priority_by_status = {
         WorkItemStatus.RETRYABLE_FAILED.value: 0,
-        WorkItemStatus.DEFERRED.value: 1,
-        WorkItemStatus.READY.value: 2,
+        WorkItemStatus.READY.value: 1,
     }
-    return priority_by_status.get(status, 3)
+    return priority_by_status.get(status, 2)
 
 
 def _as_datetime(value: object) -> datetime:
@@ -182,7 +181,7 @@ def _as_datetime(value: object) -> datetime:
 
 
 @pytest.mark.asyncio
-async def test_peek_due_work_items_prioritizes_retryable_failed_then_deferred_then_ready() -> (
+async def test_peek_due_work_items_prioritizes_retryable_failed_then_ready_and_ignores_deferred() -> (
     None
 ):
     due_at = _now() - timedelta(seconds=1)
@@ -216,13 +215,12 @@ async def test_peek_due_work_items_prioritizes_retryable_failed_then_deferred_th
 
     assert tuple(record.work_item.work_item_id for record in records) == (
         "work-retry",
-        "work-deferred",
         "work-ready",
     )
 
 
 @pytest.mark.asyncio
-async def test_lease_due_work_item_prioritizes_retryable_failed_then_deferred_then_ready() -> (
+async def test_lease_due_work_item_prioritizes_retryable_failed_then_ready_and_ignores_deferred() -> (
     None
 ):
     due_at = _now() - timedelta(seconds=1)
@@ -482,13 +480,12 @@ def test_sql_uses_atomic_skip_locked_due_selection() -> None:
 
     required = (
         "FOR UPDATE SKIP LOCKED",
-        "wi.status IN ('ready', 'deferred', 'retryable_failed')",
+        "wi.status IN ('ready', 'retryable_failed')",
         "wi.next_attempt_at <= $2",
         "ORDER BY",
         "CASE wi.status",
         "WHEN 'retryable_failed' THEN 0",
-        "WHEN 'deferred' THEN 1",
-        "WHEN 'ready' THEN 2",
+        "WHEN 'ready' THEN 1",
         "LIMIT 1",
         "execution_work_items",
         "execution_work_item_schedules",
@@ -605,3 +602,13 @@ async def test_lease_due_work_item_accepts_json_string_schedule_payload() -> Non
     assert dict(leased.schedule_payload) == {"source_unit_ref": "unit-1"}
     assert leased.work_item.status.value == "leased"
     assert connection.executed
+
+
+def test_source_guard_forbids_deferred_due_selection() -> None:
+    source = Path(
+        "src/contexts/execution_runtime/infrastructure/postgres/"
+        "postgres_work_item_lease_repository.py",
+    ).read_text(encoding="utf-8")
+
+    assert "'deferred'" not in source
+    assert "WorkItemStatus.DEFERRED" not in source

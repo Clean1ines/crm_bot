@@ -24,7 +24,6 @@ class DueWorkItemRecord:
             raise TypeError("work_item must be WorkItem")
         if self.work_item.status not in {
             WorkItemStatus.READY,
-            WorkItemStatus.DEFERRED,
             WorkItemStatus.RETRYABLE_FAILED,
         }:
             raise ValueError("work_item must be due and not leased")
