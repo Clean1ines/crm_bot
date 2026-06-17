@@ -98,3 +98,39 @@ def test_local_primary_tpm_budget_never_waits_for_provider_reset_headers() -> No
 
     assert capacities[0].remaining_minute_tokens == 3_000
     assert capacities[0].remaining_minute_requests == 59
+
+
+def test_local_primary_tpm_budget_exhausts_account_after_deferred_without_tokens() -> (
+    None
+):
+    capacities = prepare_llm_dispatch_batch._local_primary_tpm_account_capacities(
+        seed_capacities=(
+            _seed_capacity("groq_org_primary"),
+            _seed_capacity("groq_org_secondary"),
+        ),
+        observations=(
+            LlmAttemptCapacityObservation(
+                provider="groq",
+                account_ref="groq_org_secondary",
+                model_ref="qwen/qwen3-32b",
+                remaining_minute_requests=None,
+                remaining_minute_tokens=None,
+                remaining_daily_requests=999,
+                remaining_daily_tokens=490_000,
+                minute_reset_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
+                daily_reset_at=None,
+                actual_prompt_tokens=None,
+                actual_completion_tokens=None,
+                actual_total_tokens=None,
+                outcome_class="deferred",
+                observed_at=_now(),
+            ),
+        ),
+    )
+
+    by_account = {capacity.account_ref: capacity for capacity in capacities}
+
+    assert by_account["groq_org_primary"].remaining_minute_requests == 60
+    assert by_account["groq_org_primary"].remaining_minute_tokens == 6_000
+    assert by_account["groq_org_secondary"].remaining_minute_requests == 0
+    assert by_account["groq_org_secondary"].remaining_minute_tokens == 0

@@ -476,11 +476,15 @@ class _InputAdmittedCandidate:
 class _PrimaryMinuteUsage:
     request_count: int = 0
     token_count: int = 0
+    minute_exhausted: bool = False
 
     def record(self, *, token_count: int | None) -> None:
         self.request_count += 1
         if token_count is not None:
             self.token_count += token_count
+
+    def exhaust_minute(self) -> None:
+        self.minute_exhausted = True
 
 
 @dataclass(slots=True)
@@ -832,24 +836,37 @@ def _local_primary_tpm_account_capacities(
         usage = usage_by_account_ref.get(observation.account_ref)
         if usage is None:
             continue
-        usage.record(token_count=_actual_token_usage(observation))
+
+        actual_token_usage = _actual_token_usage(observation)
+        if observation.outcome_class == "deferred" and actual_token_usage is None:
+            usage.exhaust_minute()
+            continue
+
+        usage.record(token_count=actual_token_usage)
 
     capacities: list[LlmProviderAccountCapacity] = []
     for seed_capacity in seed_capacities:
         usage = usage_by_account_ref[seed_capacity.account_ref]
+        if usage.minute_exhausted:
+            remaining_minute_requests = 0
+            remaining_minute_tokens = 0
+        else:
+            remaining_minute_requests = max(
+                seed_capacity.remaining_minute_requests - usage.request_count,
+                0,
+            )
+            remaining_minute_tokens = max(
+                seed_capacity.remaining_minute_tokens - usage.token_count,
+                0,
+            )
+
         capacities.append(
             LlmProviderAccountCapacity(
                 provider=seed_capacity.provider,
                 account_ref=seed_capacity.account_ref,
                 model_ref=seed_capacity.model_ref,
-                remaining_minute_requests=max(
-                    seed_capacity.remaining_minute_requests - usage.request_count,
-                    0,
-                ),
-                remaining_minute_tokens=max(
-                    seed_capacity.remaining_minute_tokens - usage.token_count,
-                    0,
-                ),
+                remaining_minute_requests=remaining_minute_requests,
+                remaining_minute_tokens=remaining_minute_tokens,
                 remaining_daily_requests=seed_capacity.remaining_daily_requests,
                 remaining_daily_tokens=seed_capacity.remaining_daily_tokens,
             ),
