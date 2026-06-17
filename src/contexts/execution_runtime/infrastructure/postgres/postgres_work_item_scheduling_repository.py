@@ -73,6 +73,13 @@ class PostgresWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
         payload_hash: str,
         payload: Mapping[str, object],
     ) -> None:
+        payload_json = json.dumps(
+            payload,
+            default=str,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
         await self._connection.execute(
             """
             INSERT INTO execution_work_items (
@@ -86,7 +93,9 @@ class PostgresWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
                 next_attempt_at,
                 last_error_kind
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)            """,
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (work_item_id) DO NOTHING
+            """,
             item.work_item_id,
             item.work_kind.value,
             item.status.value,
@@ -97,6 +106,7 @@ class PostgresWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
             item.next_attempt_at.value if item.next_attempt_at is not None else None,
             item.last_error_kind,
         )
+
         await self._connection.execute(
             """
             INSERT INTO execution_work_item_schedules (
@@ -105,12 +115,35 @@ class PostgresWorkItemSchedulingRepository(WorkItemSchedulingRepositoryPort):
                 payload_hash,
                 payload
             )
-            VALUES ($1, $2, $3, $4::jsonb)            """,
+            VALUES ($1, $2, $3, $4::jsonb)
+            ON CONFLICT (work_item_id) DO NOTHING
+            """,
             item.work_item_id,
             idempotency_key,
             payload_hash,
-            json.dumps(payload, default=str, separators=(",", ":"), sort_keys=True),
+            payload_json,
         )
+
+        existing_schedule = await self._connection.fetchrow(
+            """
+            SELECT
+                idempotency_key,
+                payload_hash
+            FROM execution_work_item_schedules
+            WHERE work_item_id = $1
+            """,
+            item.work_item_id,
+        )
+        if existing_schedule is None:
+            raise RuntimeError("scheduled work item was saved without schedule payload")
+
+        existing_idempotency_key = str(existing_schedule["idempotency_key"])
+        existing_payload_hash = str(existing_schedule["payload_hash"])
+
+        if existing_idempotency_key != idempotency_key:
+            raise ValueError("scheduled work item idempotency key conflict")
+        if existing_payload_hash != payload_hash:
+            raise ValueError("scheduled work item payload hash conflict")
 
 
 def _hydrate_work_item(row: Mapping[str, object]) -> WorkItem:
