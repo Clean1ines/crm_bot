@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -360,6 +361,7 @@ def _next_workflow_command_after_apply(
             next_work_item=outcome.next_decision.next_work_item,
         )
         return _prepare_dispatch_batch_command(
+            workflow_command=workflow_command,
             workflow_run_id=apply_command.workflow_run_id,
             batch_ref=batch_ref,
             scheduled_work_item_count=scheduled_count,
@@ -378,12 +380,16 @@ def _next_workflow_command_after_apply(
 
 def _prepare_dispatch_batch_command(
     *,
+    workflow_command: WorkflowCommand,
     workflow_run_id: str,
     batch_ref: str,
     scheduled_work_item_count: int,
     occurred_at,
 ) -> WorkflowCommand:
-    idempotency_key = f"draft-claim-compaction-dispatch:{workflow_run_id}:{batch_ref}"
+    idempotency_key = (
+        "draft-claim-compaction-dispatch:"
+        f"{workflow_run_id}:{batch_ref}:{_command_causation_scope(workflow_command)}"
+    )
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
         command_type=(
@@ -395,6 +401,7 @@ def _prepare_dispatch_batch_command(
             "workflow_run_id": workflow_run_id,
             "work_kind": WORK_KIND.value,
             "scheduled_work_item_count": scheduled_work_item_count,
+            "caused_by_command_id": workflow_command.command_id.value,
             "llm_dispatch_preparation": {
                 "profile": {
                     "profile_id": "draft_claim_compaction",
@@ -417,6 +424,12 @@ def _prepare_dispatch_batch_command(
         created_at=occurred_at,
         updated_at=occurred_at,
     )
+
+
+def _command_causation_scope(workflow_command: WorkflowCommand) -> str:
+    return hashlib.sha256(
+        workflow_command.command_id.value.encode("utf-8"),
+    ).hexdigest()[:12]
 
 
 def _reconcile_progress_command(

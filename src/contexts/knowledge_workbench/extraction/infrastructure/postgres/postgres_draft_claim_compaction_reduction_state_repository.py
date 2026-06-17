@@ -91,6 +91,47 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             workflow_run_id,
         )
 
+        work_item_rows = await self._connection.fetch(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE status = 'ready') AS ready_work_item_count,
+                COUNT(*) FILTER (WHERE status = 'leased') AS leased_work_item_count,
+                COUNT(*) FILTER (WHERE status = 'deferred') AS deferred_work_item_count,
+                COUNT(*) FILTER (
+                    WHERE status = 'retryable_failed'
+                ) AS retryable_failed_work_item_count,
+                COUNT(*) FILTER (
+                    WHERE status = 'completed'
+                ) AS completed_work_item_count,
+                COUNT(*) FILTER (
+                    WHERE status = 'terminal_failed'
+                ) AS terminal_failed_work_item_count,
+                COUNT(*) FILTER (
+                    WHERE status IN (
+                        'ready',
+                        'leased',
+                        'deferred',
+                        'retryable_failed'
+                    )
+                ) AS active_work_item_count,
+                COUNT(*) FILTER (
+                    WHERE status = 'ready'
+                       OR (
+                           status IN ('deferred', 'retryable_failed')
+                           AND (
+                               next_attempt_at IS NULL
+                               OR next_attempt_at <= now()
+                           )
+                       )
+                ) AS due_waiting_work_item_count
+            FROM execution_work_items
+            WHERE work_kind = 'knowledge_workbench.draft_claim_compaction'
+              AND work_item_id LIKE $1
+            """,
+            f"claim-compaction:{workflow_run_id}:%",
+        )
+        work_item_counts = work_item_rows[0] if work_item_rows else {}
+
         node_counts = {_str(row, "group_ref"): row for row in node_rows}
         comparison_counts = {_str(row, "group_ref"): row for row in comparison_rows}
         group_refs = tuple(sorted(set(node_counts) | set(comparison_counts)))
@@ -144,6 +185,42 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             active_group_count=active_group_count,
             active_node_count=active_node_count,
             pending_comparison_count=pending_comparison_count,
+            active_work_item_count=_optional_int(
+                work_item_counts,
+                "active_work_item_count",
+            ),
+            completed_work_item_count=_optional_int(
+                work_item_counts,
+                "completed_work_item_count",
+            ),
+            failed_work_item_count=(
+                _optional_int(work_item_counts, "retryable_failed_work_item_count")
+                + _optional_int(work_item_counts, "terminal_failed_work_item_count")
+            ),
+            ready_work_item_count=_optional_int(
+                work_item_counts,
+                "ready_work_item_count",
+            ),
+            leased_work_item_count=_optional_int(
+                work_item_counts,
+                "leased_work_item_count",
+            ),
+            deferred_work_item_count=_optional_int(
+                work_item_counts,
+                "deferred_work_item_count",
+            ),
+            retryable_failed_work_item_count=_optional_int(
+                work_item_counts,
+                "retryable_failed_work_item_count",
+            ),
+            terminal_failed_work_item_count=_optional_int(
+                work_item_counts,
+                "terminal_failed_work_item_count",
+            ),
+            due_waiting_work_item_count=_optional_int(
+                work_item_counts,
+                "due_waiting_work_item_count",
+            ),
         )
 
     async def load_planner_state(

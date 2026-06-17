@@ -17,6 +17,12 @@ class DraftClaimCompactionProgressSummary:
     active_work_item_count: int = 0
     completed_work_item_count: int = 0
     failed_work_item_count: int = 0
+    ready_work_item_count: int = 0
+    leased_work_item_count: int = 0
+    deferred_work_item_count: int = 0
+    retryable_failed_work_item_count: int = 0
+    terminal_failed_work_item_count: int = 0
+    due_waiting_work_item_count: int = 0
 
     def __post_init__(self) -> None:
         _text(self.workflow_run_id, "workflow_run_id")
@@ -33,6 +39,15 @@ class DraftClaimCompactionProgressSummary:
             ("active_work_item_count", self.active_work_item_count),
             ("completed_work_item_count", self.completed_work_item_count),
             ("failed_work_item_count", self.failed_work_item_count),
+            ("ready_work_item_count", self.ready_work_item_count),
+            ("leased_work_item_count", self.leased_work_item_count),
+            ("deferred_work_item_count", self.deferred_work_item_count),
+            (
+                "retryable_failed_work_item_count",
+                self.retryable_failed_work_item_count,
+            ),
+            ("terminal_failed_work_item_count", self.terminal_failed_work_item_count),
+            ("due_waiting_work_item_count", self.due_waiting_work_item_count),
         ):
             _non_negative_int(value, field_name)
 
@@ -53,6 +68,14 @@ class DraftClaimCompactionProgressSummary:
     def has_waiting_user_model_choice(self) -> bool:
         return self.waiting_user_model_choice_group_count > 0
 
+    @property
+    def has_due_compaction_work_items(self) -> bool:
+        return self.due_waiting_work_item_count > 0
+
+    @property
+    def has_active_compaction_work_items(self) -> bool:
+        return self.active_work_item_count > 0
+
     def to_payload(self) -> JsonObject:
         return {
             "workflow_run_id": self.workflow_run_id,
@@ -67,6 +90,12 @@ class DraftClaimCompactionProgressSummary:
             "active_work_item_count": self.active_work_item_count,
             "completed_work_item_count": self.completed_work_item_count,
             "failed_work_item_count": self.failed_work_item_count,
+            "ready_work_item_count": self.ready_work_item_count,
+            "leased_work_item_count": self.leased_work_item_count,
+            "deferred_work_item_count": self.deferred_work_item_count,
+            "retryable_failed_work_item_count": self.retryable_failed_work_item_count,
+            "terminal_failed_work_item_count": self.terminal_failed_work_item_count,
+            "due_waiting_work_item_count": self.due_waiting_work_item_count,
         }
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -201,6 +202,7 @@ class HandleClusterDraftClaimsCommandHandler:
         if scheduled_work_item_count > 0:
             await workflow_unit_of_work.command_log.append_pending_command(
                 _prepare_dispatch_batch_command(
+                    workflow_command=workflow_command,
                     workflow_run_id=workflow_run_id,
                     scheduled_work_item_count=scheduled_work_item_count,
                     occurred_at=workflow_command.updated_at,
@@ -250,11 +252,15 @@ class HandleClusterDraftClaimsCommandHandler:
 
 def _prepare_dispatch_batch_command(
     *,
+    workflow_command: WorkflowCommand,
     workflow_run_id: str,
     scheduled_work_item_count: int,
     occurred_at,
 ) -> WorkflowCommand:
-    idempotency_key = f"draft-claim-compaction-dispatch:{workflow_run_id}:initial"
+    idempotency_key = (
+        "draft-claim-compaction-dispatch:"
+        f"{workflow_run_id}:initial:{_command_causation_scope(workflow_command)}"
+    )
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
         command_type=(
@@ -268,12 +274,25 @@ def _prepare_dispatch_batch_command(
             "scheduled_work_item_count": scheduled_work_item_count,
             "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
             "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+            "caused_by_command_id": workflow_command.command_id.value,
+            "llm_dispatch_preparation": {
+                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+                "requested_items": scheduled_work_item_count,
+                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+                "account_capacities": (),
+            },
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=occurred_at,
         created_at=occurred_at,
         updated_at=occurred_at,
     )
+
+
+def _command_causation_scope(workflow_command: WorkflowCommand) -> str:
+    return hashlib.sha256(
+        workflow_command.command_id.value.encode("utf-8"),
+    ).hexdigest()[:12]
 
 
 def _raw_nodes_for_group(

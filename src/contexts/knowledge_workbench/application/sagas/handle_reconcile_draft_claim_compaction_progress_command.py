@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -46,6 +47,13 @@ class DraftClaimCompactionProgressDecision(StrEnum):
     ACTIVE = "ACTIVE"
     WAITING_USER_MODEL_CHOICE = "WAITING_USER_MODEL_CHOICE"
     ALL_GROUPS_COMPACTED = "ALL_GROUPS_COMPACTED"
+
+
+DRAFT_CLAIM_COMPACTION_WORK_KIND = "knowledge_workbench.draft_claim_compaction"
+DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
+DRAFT_CLAIM_COMPACTION_WORKER_REF = (
+    "knowledge-workbench-draft-claim-compaction-dispatch"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,7 +192,7 @@ def _decide(
 ) -> DraftClaimCompactionProgressDecision:
     if summary.has_waiting_user_model_choice:
         return DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE
-    if summary.all_groups_done:
+    if summary.all_groups_done and not summary.has_active_compaction_work_items:
         return DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED
     return DraftClaimCompactionProgressDecision.ACTIVE
 
@@ -197,6 +205,17 @@ def _next_command(
     decision: DraftClaimCompactionProgressDecision,
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
+    if (
+        decision is DraftClaimCompactionProgressDecision.ACTIVE
+        and summary.has_due_compaction_work_items
+    ):
+        return _prepare_dispatch_batch_command(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            scheduled_work_item_count=summary.due_waiting_work_item_count,
+            occurred_at=occurred_at,
+        )
+
     if decision is not DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED:
         return None
 
@@ -216,6 +235,51 @@ def _next_command(
         created_at=occurred_at,
         updated_at=occurred_at,
     )
+
+
+def _prepare_dispatch_batch_command(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    scheduled_work_item_count: int,
+    occurred_at: datetime,
+) -> WorkflowCommand:
+    causation_scope = _command_causation_scope(workflow_command)
+    idempotency_key = (
+        f"draft-claim-compaction-dispatch:{workflow_run_id}:reconcile:{causation_scope}"
+    )
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+        ),
+        workflow_run_id=workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "work_kind": DRAFT_CLAIM_COMPACTION_WORK_KIND,
+            "scheduled_work_item_count": scheduled_work_item_count,
+            "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+            "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+            "caused_by_command_id": workflow_command.command_id.value,
+            "llm_dispatch_preparation": {
+                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+                "requested_items": scheduled_work_item_count,
+                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+                "account_capacities": (),
+            },
+        },
+        status=WorkflowCommandStatus.PENDING,
+        run_after=occurred_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+
+
+def _command_causation_scope(workflow_command: WorkflowCommand) -> str:
+    return hashlib.sha256(
+        workflow_command.command_id.value.encode("utf-8"),
+    ).hexdigest()[:12]
 
 
 def _progress_reconciled_event(
@@ -338,9 +402,9 @@ async def _save_progress_snapshot(
             scheduled_work_items=summary.group_count,
             running_work_items=summary.active_group_count,
             completed_work_items=summary.done_group_count,
-            deferred_work_items=0,
-            retryable_failed_work_items=0,
-            terminal_failed_work_items=summary.failed_work_item_count,
+            deferred_work_items=summary.deferred_work_item_count,
+            retryable_failed_work_items=summary.retryable_failed_work_item_count,
+            terminal_failed_work_items=summary.terminal_failed_work_item_count,
             blocked_work_items=summary.waiting_user_model_choice_group_count,
             domain_counters=domain_counters,
             started_at=existing.started_at if existing is not None else occurred_at,

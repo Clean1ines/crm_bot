@@ -242,6 +242,38 @@ async def test_active_groups_reconciles_progress_and_completes_command() -> None
 
 
 @pytest.mark.asyncio
+async def test_active_due_work_items_appends_prepare_command() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(
+            active_group_count=2,
+            active_work_item_count=1,
+            ready_work_item_count=1,
+            due_waiting_work_item_count=1,
+        )
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+    )
+
+    assert result.decision == "ACTIVE"
+    assert result.appended_next_command_count == 1
+    assert len(workflow_uow.command_log.pending_commands) == 1
+    next_command = workflow_uow.command_log.pending_commands[0]
+    assert (
+        next_command.command_type
+        == KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert next_command.payload["scheduled_work_item_count"] == 1
+    assert next_command.payload["active_model_ref"] == "openai/gpt-oss-120b"
+    assert next_command.payload["caused_by_command_id"] == _command().command_id.value
+    assert ":reconcile:" in next_command.idempotency_key.value
+
+
+@pytest.mark.asyncio
 async def test_all_groups_done_appends_done_event_and_preview_command() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     repository = FakeReductionStateRepository(
@@ -331,6 +363,13 @@ def _summary(
     done_group_count: int = 0,
     waiting_user_model_choice_group_count: int = 0,
     active_group_count: int = 2,
+    active_work_item_count: int = 0,
+    ready_work_item_count: int = 0,
+    leased_work_item_count: int = 0,
+    deferred_work_item_count: int = 0,
+    retryable_failed_work_item_count: int = 0,
+    terminal_failed_work_item_count: int = 0,
+    due_waiting_work_item_count: int = 0,
 ) -> DraftClaimCompactionProgressSummary:
     return DraftClaimCompactionProgressSummary(
         workflow_run_id=_workflow_run_id(),
@@ -340,4 +379,15 @@ def _summary(
         active_group_count=active_group_count,
         active_node_count=4,
         pending_comparison_count=1,
+        active_work_item_count=active_work_item_count,
+        completed_work_item_count=0,
+        failed_work_item_count=(
+            retryable_failed_work_item_count + terminal_failed_work_item_count
+        ),
+        ready_work_item_count=ready_work_item_count,
+        leased_work_item_count=leased_work_item_count,
+        deferred_work_item_count=deferred_work_item_count,
+        retryable_failed_work_item_count=retryable_failed_work_item_count,
+        terminal_failed_work_item_count=terminal_failed_work_item_count,
+        due_waiting_work_item_count=due_waiting_work_item_count,
     )

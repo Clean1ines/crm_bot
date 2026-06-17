@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -69,6 +70,12 @@ def _now() -> datetime:
 
 def _workflow_run_id() -> str:
     return "workflow-1"
+
+
+def _command_causation_scope(command: WorkflowCommand) -> str:
+    return hashlib.sha256(
+        command.command_id.value.encode("utf-8"),
+    ).hexdigest()[:12]
 
 
 def _command(
@@ -712,7 +719,8 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     )
     assert command.idempotency_key.value == (
         "draft-claim-compaction-dispatch:"
-        "workflow-1:group-1:compacted_vs_compacted:compacted-a--compacted-b"
+        "workflow-1:group-1:compacted_vs_compacted:compacted-a--compacted-b:"
+        f"{_command_causation_scope(_command())}"
     )
     payload = command.payload
     assert payload["workflow_run_id"] == _workflow_run_id()
@@ -825,5 +833,6 @@ async def test_repeated_apply_dispatch_does_not_duplicate_next_prepare_command()
     assert len(scheduling.saved_payloads) == 1
     assert workflow_uow.command_log.pending_commands[0].idempotency_key.value == (
         "draft-claim-compaction-dispatch:"
-        "workflow-1:group-1:compacted_vs_compacted:compacted-a--compacted-b"
+        "workflow-1:group-1:compacted_vs_compacted:compacted-a--compacted-b:"
+        f"{_command_causation_scope(_command())}"
     )
