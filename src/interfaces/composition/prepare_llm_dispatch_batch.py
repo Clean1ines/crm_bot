@@ -303,15 +303,11 @@ class PrepareLlmDispatchBatch:
                     now=command.now.isoformat(),
                 )
 
-                dispatch_preparation_strategy = (
-                    _dispatch_preparation_strategy_from_retry_plan(
-                        retry_plan=command.retry_plan,
-                        legacy_strategy=command.dispatch_preparation_strategy,
-                    )
-                )
+                dispatch_preparation_strategy = command.dispatch_preparation_strategy
                 admission_due_records = _admission_lane_due_records(
                     due_records,
                     dispatch_preparation_strategy=dispatch_preparation_strategy,
+                    retry_plan=command.retry_plan,
                 )
                 preparation_profile = _preparation_profile(
                     command=command,
@@ -325,8 +321,9 @@ class PrepareLlmDispatchBatch:
                 strategy_result = ResolveLlmDispatchPreparationStrategy().execute(
                     ResolveLlmDispatchPreparationStrategyCommand(
                         current_active_model_ref=initial_model_ref,
-                        strategy=dispatch_preparation_strategy,
                         route_catalog=self.route_catalog,
+                        retry_plan=command.retry_plan,
+                        strategy=dispatch_preparation_strategy,
                     )
                 )
                 preflight_result = ResolveLlmDispatchInputSizePreflight().execute(
@@ -623,7 +620,18 @@ def _admission_lane_due_records(
     due_records: tuple[DueWorkItemRecord, ...],
     *,
     dispatch_preparation_strategy: str | None = None,
+    retry_plan: WorkItemRetryPlan | None = None,
 ) -> tuple[DueWorkItemRecord, ...]:
+    if retry_plan is not None:
+        retry_lane = tuple(
+            record
+            for record in due_records
+            if record.work_item.status is WorkItemStatus.RETRYABLE_FAILED
+        )
+        if retry_lane:
+            return retry_lane
+        return due_records
+
     if dispatch_preparation_strategy is None:
         ready_lane = tuple(
             record

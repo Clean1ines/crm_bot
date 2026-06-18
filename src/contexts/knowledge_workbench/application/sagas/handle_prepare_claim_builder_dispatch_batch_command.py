@@ -342,7 +342,7 @@ def _prepare_llm_dispatch_batch_command(
         account_capacities=_account_capacities_from_dispatch_preparation(
             workflow_command.payload,
         ),
-        dispatch_preparation_strategy=_dispatch_preparation_strategy(
+        dispatch_preparation_strategy=_legacy_dispatch_preparation_strategy_from_payload(
             workflow_command.payload,
         ),
         retry_plan=_retry_plan_from_payload(workflow_command.payload),
@@ -461,9 +461,12 @@ def _retry_plan_from_payload(payload: Mapping[str, object]) -> WorkItemRetryPlan
     return None
 
 
-def _dispatch_preparation_strategy(
+def _legacy_dispatch_preparation_strategy_from_payload(
     payload: Mapping[str, object],
 ) -> str | None:
+    if _retry_plan_from_payload(payload) is not None:
+        return None
+
     for key in (
         "llm_dispatch_preparation_strategy",
         "claim_builder_next_model_strategy",
