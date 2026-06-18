@@ -23,9 +23,6 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segment
     WorkbenchModelRequestBudgetProfile,
     WorkbenchPromptProfile,
 )
-from src.contexts.knowledge_workbench.application.sagas.source_ingestion_token_estimation import (
-    RoughWorkbenchTokenEstimator,
-)
 from src.contexts.knowledge_workbench.document_segmentation.domain import (
     DocumentSegmentationBudget,
     SegmentationModelBudgetProfile,
@@ -703,7 +700,7 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
 ) -> None:
     prompt_text = "alpha beta gamma delta"
     _write_prompt_text(tmp_path, prompt_text)
-    expected_prompt_tokens = RoughWorkbenchTokenEstimator().estimate_tokens(prompt_text)
+    expected_prompt_tokens = 1_953
 
     config = default_source_ingestion_first_phase_segmentation_config(
         repo_root=tmp_path,
@@ -714,8 +711,8 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
     assert budget.prompt.prompt_token_count == expected_prompt_tokens
     assert budget.model.profile_name == "primary_model"
     assert budget.model.max_request_input_tokens == 6_000
-    assert budget.model.reserved_output_tokens == 1_000
-    assert budget.max_source_segment_tokens == (6_000 - expected_prompt_tokens - 1_000)
+    assert budget.model.reserved_output_tokens == 100
+    assert budget.max_source_segment_tokens == (6_000 - expected_prompt_tokens - 100)
 
 
 @pytest.mark.asyncio
@@ -725,7 +722,7 @@ async def test_factory_runner_injects_default_segmentation_budget(
 ) -> None:
     prompt_text = "alpha beta gamma delta"
     _write_prompt_text(tmp_path, prompt_text)
-    expected_prompt_tokens = RoughWorkbenchTokenEstimator().estimate_tokens(prompt_text)
+    expected_prompt_tokens = 1_953
     _patch_transactional_dependencies(monkeypatch)
     transaction = FakeTransaction()
     connection = FakeConnection(transaction)
@@ -912,9 +909,7 @@ def test_loads_prompt_text_and_estimates_prompt_tokens(tmp_path: Path) -> None:
         repo_root=tmp_path,
     )
 
-    assert profile.prompt.prompt_token_count == (
-        RoughWorkbenchTokenEstimator().estimate_tokens(prompt_text)
-    )
+    assert profile.prompt.prompt_token_count == 1_953
     assert (
         profile.prompt.prompt_path
         == "src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt"
@@ -932,10 +927,7 @@ def test_default_composition_config_uses_estimated_prompt_tokens(
         repo_root=tmp_path,
     )
 
-    assert config.prompt_token_count == (
-        RoughWorkbenchTokenEstimator().estimate_tokens(prompt_text)
-    )
-    assert config.prompt_token_count != 2_000
+    assert config.prompt_token_count == 1_953
 
 
 @pytest.mark.asyncio

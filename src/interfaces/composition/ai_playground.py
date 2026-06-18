@@ -161,6 +161,7 @@ class GroqAiPlaygroundAdapter:
         return GroqChatRequestOptions(
             response_format=response_format,
             reasoning_effort=reasoning_effort,
+            max_completion_tokens=request.max_completion_tokens,
         )
 
 

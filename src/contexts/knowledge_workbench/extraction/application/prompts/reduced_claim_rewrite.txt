@@ -1,41 +1,71 @@
 NODE: reduced_claim_rewrite
 
-You receive one JSON object.
+INPUT := one JSON object.
+TASK := rewrite already compacted claims into one compacted semantic core.
+OUTPUT := exactly one JSON object.
+NEVER output text outside JSON.
 
-Your task is to rewrite already compacted claims into one compacted semantic core.
-
-Return only one JSON object.
-
-# Input
-
+INPUT_SCHEMA:
 {
-  "compacted_claims": [
-    {
-      "key": "",
-      "claim": "",
-      "triples": []
-    }
-  ]
+"compacted_claims": [
+{
+"key": "",
+"claim": "",
+"triples": []
+}
+]
 }
 
-# Output
-
+OUTPUT_SCHEMA:
 {
-  "key": "",
-  "claim": "",
-  "triples": []
+"key": "",
+"claim": "",
+"triples": []
 }
 
-# Task rules
+CONTEXT:
+Input compacted_claims are already known by application to belong to one semantic merge candidate.
+Do not decide membership.
+Do not decide source refs.
+Do not decide merge_decision.
 
-1. The input claims are already known by the application to belong to one semantic merge candidate.
-2. Do not decide source refs.
-3. Do not decide merge decision.
-4. Rewrite only the final key, claim, and triples.
-5. Preserve the meaning of all input claims.
-6. Prefer a stable snake_case key based on the final meaning.
-7. Remove duplicate triples.
-8. Keep useful triples when still valid.
-9. Add triples only when clearly supported by the final rewritten claim.
-10. Return valid JSON only.
-11. Return no text outside JSON.
+REWRITE_RULES:
+Preserve meaning of all input claims.
+Rewrite only:
+
+* key
+* claim
+* triples
+
+KEY_RULES:
+key := stable snake_case based on final meaning.
+Prefer concise semantic key.
+Do not include source ids in key.
+
+CLAIM_RULES:
+claim := compact semantic core covering all input claims.
+Keep all important meaning.
+Remove duplication.
+Do not add unsupported facts.
+Do not weaken limitations/conditions/exceptions.
+Do not hide distinct important conditions if they belong to this semantic candidate.
+Use same language as input claims.
+
+TRIPLE_RULES:
+Remove duplicate triples.
+Keep useful triples if still valid.
+Add triples only if clearly supported by final rewritten claim.
+Do not add unsupported triples.
+If no useful triples -> [].
+TRIPLE_LANG:
+subject, object, qualifiers should use the same language as the compacted claim unless they are product names, enum-like technical identifiers, or source terms.
+predicate stays English controlled enum.
+FINAL_ASSERT:
+valid JSON only.
+top-level fields exactly:
+key, claim, triples.
+no source refs.
+no merge_decision.
+no questions.
+no exclusion_scope.
+no text outside JSON.

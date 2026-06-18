@@ -267,7 +267,7 @@ def test_source_unit_refs_are_deterministic_from_segment_keys() -> None:
     )
 
 
-def test_non_markdown_fallback_still_produces_paragraph_groups() -> None:
+def test_non_markdown_fallback_packs_adjacent_paragraphs_when_budget_allows() -> None:
     document = _source_document(source_format=SourceFormat.PLAIN_TEXT)
 
     units = build_source_units_from_text(
@@ -277,13 +277,11 @@ def test_non_markdown_fallback_still_produces_paragraph_groups() -> None:
         segmentation_budget=_budget(max_request_input_tokens=100),
     )
 
-    assert len(units) == 3
+    assert len(units) == 1
     assert all(unit.unit_kind is SourceUnitKind.PARAGRAPH_GROUP for unit in units)
-    assert tuple(unit.heading_path.parts for unit in units) == ((), (), ())
-    assert tuple(unit.text.value for unit in units) == (
-        "First paragraph.",
-        "Second paragraph.\nStill second.",
-        "Third paragraph.",
+    assert tuple(unit.heading_path.parts for unit in units) == ((),)
+    assert units[0].text.value == (
+        "First paragraph.\n\nSecond paragraph.\nStill second.\n\nThird paragraph."
     )
 
 

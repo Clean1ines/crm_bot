@@ -101,6 +101,7 @@ class RunAiPlaygroundService:
             response_format=request.response_format,
             reasoning_effort=request.reasoning_effort,
             reasoning_format=request.reasoning_format,
+            max_completion_tokens=request.max_completion_tokens,
         )
 
     @staticmethod

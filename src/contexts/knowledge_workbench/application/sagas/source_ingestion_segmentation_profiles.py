@@ -75,19 +75,19 @@ class SourceIngestionSegmentationProfile:
 def default_source_ingestion_segmentation_profile() -> (
     SourceIngestionSegmentationProfile
 ):
-    # prompt_token_count is currently a conservative static estimate.
-    # A later tokenizer/profile patch will compute or verify it outside
-    # document_segmentation.
+    # During source ingestion this field is intentionally only a small
+    # input safety gap. Output budget is resolved later per concrete LLM
+    # dispatch attempt from the actual source-unit prompt estimate.
     return SourceIngestionSegmentationProfile(
         prompt=WorkbenchPromptProfile(
             prompt_name="claim_builder_section_extraction",
             node_id="faq_claim_observations",
             prompt_path="src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
-            prompt_token_count=2_000,
+            prompt_token_count=1_953,
         ),
         primary_model=WorkbenchModelRequestBudgetProfile(
             profile_name="primary_model",
             max_request_input_tokens=6_000,
-            reserved_output_tokens=1_000,
+            reserved_output_tokens=100,
         ),
     )

@@ -201,16 +201,17 @@ class CreateSourceUnitsForIngestion:
 
 
 def default_source_ingestion_segmentation_budget() -> DocumentSegmentationBudget:
-    # Production config will later pass real prompt/model request-budget values.
+    # Keep only a small input safety gap here. Concrete output budget belongs
+    # to LLM dispatch, not document segmentation.
     return DocumentSegmentationBudget(
         prompt=SegmentationPromptProfile(
             prompt_name="claim_builder_section_extraction",
-            prompt_token_count=2_000,
+            prompt_token_count=1_953,
         ),
         model=SegmentationModelBudgetProfile(
             profile_name="primary_model",
             max_request_input_tokens=6_000,
-            reserved_output_tokens=1_000,
+            reserved_output_tokens=100,
         ),
     )
 
@@ -437,6 +438,7 @@ def _segment_document_text(
     return _fallback_non_markdown_segments(
         document_key=document.document_ref.value,
         raw_text=raw_text,
+        segmentation_budget=segmentation_budget,
     )
 
 
@@ -444,18 +446,24 @@ def _fallback_non_markdown_segments(
     *,
     document_key: str,
     raw_text: str,
+    segmentation_budget: DocumentSegmentationBudget,
 ) -> tuple[DocumentSegment, ...]:
     paragraphs = _split_paragraphs(raw_text)
     if not paragraphs:
         raise ValueError("raw_text must contain at least one paragraph")
 
+    packed_paragraph_groups = _pack_adjacent_paragraphs(
+        paragraphs=paragraphs,
+        max_tokens=segmentation_budget.max_source_segment_tokens,
+    )
+
     return tuple(
         _build_fallback_document_segment(
             document_key=document_key,
-            text=paragraph,
+            text=paragraph_group,
             ordinal=ordinal,
         )
-        for ordinal, paragraph in enumerate(paragraphs)
+        for ordinal, paragraph_group in enumerate(packed_paragraph_groups)
     )
 
 
@@ -497,6 +505,31 @@ def _split_paragraphs(raw_text: str) -> tuple[str, ...]:
         paragraphs.append("\n".join(current_lines).strip())
 
     return tuple(paragraph for paragraph in paragraphs if paragraph)
+
+
+def _pack_adjacent_paragraphs(
+    *,
+    paragraphs: tuple[str, ...],
+    max_tokens: int,
+) -> tuple[str, ...]:
+    if max_tokens <= 0:
+        raise ValueError("max_tokens must be > 0")
+
+    groups: list[str] = []
+    current: list[str] = []
+
+    for paragraph in paragraphs:
+        candidate = "\n\n".join((*current, paragraph)).strip()
+        if current and max(1, (len(candidate) + 3) // 4) > max_tokens:
+            groups.append("\n\n".join(current).strip())
+            current = [paragraph]
+            continue
+        current.append(paragraph)
+
+    if current:
+        groups.append("\n\n".join(current).strip())
+
+    return tuple(group for group in groups if group)
 
 
 def _build_source_unit_from_segment(

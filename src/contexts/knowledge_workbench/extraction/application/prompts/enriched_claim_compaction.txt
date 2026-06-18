@@ -1,355 +1,181 @@
-NODE: faq_fact_registry_canonicalization
+NODE: enriched_claim_compaction
 
-Prompt C — controlled canonical fact graph canonicalization.
+INPUT := one JSON object.
+TASK := compact raw claims + already compacted/enriched claims into fewer, richer, non-duplicating enriched claims.
+OUTPUT := exactly one JSON object.
+NEVER output text outside JSON.
 
-Ты получаешь один JSON input:
-
+INPUT_SCHEMA:
 {
-"canonicalization_unit": {},
-"registry_snapshot_payload": {},
-"relevant_registry_state": {},
-"canonical_facts": []
+"claims": [
+{
+"id": "",
+"claim": "",
+"questions": [],
+"exclusion_scope": [],
+"granularity": "atomic"
 }
-
-Ты должен вернуть только один JSON object.
-Никакого markdown, комментариев, пояснений, текста до или после JSON.
-
-Задача:
-превратить одну canonicalization_unit в обновление canonical fact registry.
-
-Смысл входов:
-
-canonicalization_unit:
-Группа local claims после document-level retrieval/clustering.
-Это не секция документа и не весь документ.
-members — локальные claims с evidence, triples, possible_questions, scope, exclusion_scope и local_relations.
-similarity_edges — детерминированные связи похожести между members.
-
-registry_snapshot_payload:
-Текущий registry snapshot/state.
-Его нужно использовать как основу нового snapshot.
-Неизменённые canonical_facts и fact_relations из registry_snapshot_payload должны сохраниться.
-
-relevant_registry_state:
-Только релевантные уже существующие registry fragments/candidate facts, найденные кодом.
-Не рассматривай это как весь project registry.
-Не делай merge с fact, которого нет в relevant_registry_state или canonical_facts.
-
-canonical_facts:
-Текущие canonical facts, переданные кодом как релевантное состояние.
-Это кандидаты для update/refine/extend/reuse.
-
-КРИТИЧЕСКИЕ ПРАВИЛА JSON-КОНТРАКТА
-
-1. Верни только JSON object.
-2. Top-level ключи должны быть ровно:
-   fact_registry, registry_update_summary, warnings, metrics.
-3. Не используй null.
-4. Если список пустой, используй [].
-5. Если объект пустой, используй {}.
-6. Если текстовое поле неизвестно, используй "".
-7. Не пропускай обязательные поля.
-8. Не придумывай enum-токены.
-9. Relation должен быть только из controlled relation list.
-10. claim_kind должен сохраняться из source claim или быть одним из controlled claim_kind.
-11. Нельзя терять существующие canonical facts и fact_relations из registry_snapshot_payload, если они не конфликтуют с обновлением.
-12. Нельзя выдумывать факты, которых нет в canonicalization_unit.members, relevant_registry_state или canonical_facts.
-13. Нельзя создавать fact без evidence/mentions/source_refs.
-
-Controlled claim_kind:
-
-definition | property | capability | limitation | rule | condition | process | list | comparison | criterion | example_set | value | exception | other
-
-Controlled relation:
-
-part_of | has_part | narrows | broadens | refines | extends | overlaps | contradicts | same_meaning | supports | sets_boundary_for
-
-Relation meanings:
-
-* same_meaning — facts выражают одно и то же знание;
-* part_of — source fact является компонентом target fact;
-* has_part — source fact содержит target fact как компонент;
-* narrows — source fact является более узким случаем target fact;
-* broadens — source fact является более общим знанием;
-* refines — source fact уточняет формулировку, boundary, condition или scope без большого нового блока содержания;
-* extends — source fact добавляет новое существенное содержание;
-* overlaps — facts относятся к одной теме, но утверждают разные аспекты;
-* contradicts — facts несовместимы;
-* supports — source fact объясняет или обосновывает target fact;
-* sets_boundary_for — source fact задаёт границу применимости target fact.
-
-Правила обработки:
-
-1. Верни полный updated fact_registry snapshot.
-   Это значит: output.fact_registry.canonical_facts должен содержать все сохранённые старые facts плюс новые/обновлённые facts.
-   output.fact_registry.fact_relations должен содержать все сохранённые старые relations плюс новые/обновлённые relations.
-
-2. Работай только с:
-
-   * canonicalization_unit.members;
-   * canonicalization_unit.similarity_edges;
-   * relevant_registry_state;
-   * canonical_facts;
-   * registry_snapshot_payload.
-
-3. Не выдумывай весь project registry.
-   Если существующего fact нет во входе, не обновляй его.
-
-4. Singleton canonicalization_unit валиден.
-   Если в группе один member и нет подходящего existing fact, создай новый canonical fact.
-
-5. Если members выражают одно и то же знание:
-
-   * создай или обнови один canonical fact;
-   * сохрани evidence/mentions всех members;
-   * объедини question_variants;
-   * уточни scope/exclusion_scope;
-   * не теряй старые useful fields existing fact.
-
-6. Если members не должны схлопываться в один fact:
-
-   * создай отдельные canonical facts или сохрани existing facts отдельно;
-   * добавь fact_relations только если связь подтверждена evidence, local_relations или similarity_edges.
-
-7. При update/refine/extend existing fact:
-
-   * сохрани старое полезное содержание;
-   * добавь новые mentions;
-   * добавь новое evidence;
-   * обнови question_variants;
-   * уточни scope/exclusion_scope;
-   * добавь derived_fact_notes, если были сделаны выводы, уточнения или merge decisions.
-
-8. Если claim не может быть надёжно внесён в registry:
-
-   * не выдумывай fact;
-   * добавь warning с причиной;
-   * не увеличивай created_fact_count.
-
-9. fact_id:
-
-   * для existing fact сохраняй его fact_id;
-   * для нового fact создай стабильный fact_id в формате "fact_<short_key>";
-   * short_key должен быть коротким snake_case от смысла claim;
-   * не используй случайные UUID;
-   * не оставляй fact_id пустым.
-
-10. fact_key:
-
-* должен быть стабильным snake_case ключом canonical fact;
-* для existing fact сохраняй fact_key, если он уже есть;
-* для нового fact создай fact_key из смысла claim;
-* не оставляй fact_key пустым.
-
-11. claim:
-
-* краткая canonical формулировка факта;
-* должна быть на русском языке;
-* должна быть подтверждена evidence;
-* не добавляй маркетинговые или лишние формулировки.
-
-12. answer:
-
-* короткий ответный вариант canonical fact;
-* должен быть пригоден для runtime retrieval/preview;
-* не должен противоречить claim;
-* если claim уже достаточно короткий, answer может быть близок к claim.
-
-13. triples:
-
-* сохраняй полезные triples из members;
-* не добавляй triples, не подтверждённые evidence;
-* predicate внутри triples должен оставаться controlled predicate из Prompt A;
-* не придумывай predicate вне списка.
-
-14. mentions:
-    Каждый mention должен связывать canonical fact с local claim/member.
-    Если во входе есть member local_ref, section_id, node_run_id или evidence/source refs — сохрани их в mentions настолько полно, насколько возможно.
-    Не оставляй mentions пустым для нового или обновлённого fact.
-
-15. evidence:
-    evidence должен содержать выдержки/ссылки на source evidence из members.
-    Новый или обновлённый fact обязан иметь evidence.
-    Не выдумывай evidence.
-
-16. source_refs:
-    source_refs должны ссылаться на source/member/section/evidence, если это доступно во входе.
-    Если точных refs нет, используй доступные local_ref/member ids.
-    Не оставляй source_refs пустым для нового fact, если во входе есть local_ref.
-
-17. question_variants:
-    Объедини possible_questions из members и existing fact.
-    Удали дубли.
-    Не выдумывай слишком много вопросов.
-    Если вопросов нет, используй [].
-
-18. scope:
-    Граница применимости canonical fact.
-    Если members имеют одинаковый scope, сохрани его.
-    Если scope отличается, уточни общий scope или оставь "" и добавь note в derived_fact_notes.
-    Не выдумывай scope.
-
-19. exclusion_scope:
-    Что fact явно не покрывает.
-    Если exclusion_scope отсутствует, используй "".
-    Не выдумывай exclusion_scope.
-
-20. fact_relations:
-    Каждый relation object обязан содержать:
-    source_fact_id, target_fact_id, relation, reason, evidence_refs.
-    reason обязателен.
-    evidence_refs всегда массив.
-    Если evidence_refs нет, используй [].
-    Не создавай relation без понятного основания.
-
-21. registry_update_summary:
-    created_fact_count — количество новых canonical facts.
-    updated_fact_count — количество existing facts, которые были изменены.
-    created_relation_count — количество новых fact_relations.
-    notes — короткие технические заметки о merge/update decisions.
-
-22. warnings:
-    Массив строк.
-    Добавляй warning, если:
-
-* claim нельзя надёжно внести;
-* evidence недостаточно;
-* members конфликтуют;
-* relation не подтверждена;
-* вход неполный, но обработка частично возможна.
-
-23. metrics:
-    Объект с простыми JSON-значениями.
-    Можно включить:
-
-* input_member_count;
-* output_fact_count;
-* output_relation_count;
-* merged_member_count;
-* warning_count.
-
-JSON output schema:
-
+],
+"enriched_claims": [
 {
-"fact_registry": {
-"version": 1,
-"canonical_facts": [
-{
-"fact_id": "",
-"fact_key": "",
+"key": "",
 "claim": "",
 "claim_kind": "definition",
 "granularity": "atomic",
+"source_claim_refs": [],
 "triples": [],
-"mentions": [],
-"question_variants": [],
-"answer": "",
-"scope": "",
-"exclusion_scope": "",
-"source_refs": [],
-"evidence": [],
-"derived_fact_notes": [],
-"metadata": {},
-"status": "active"
-}
-],
-"fact_relations": [
-{
-"source_fact_id": "",
-"target_fact_id": "",
-"relation": "supports",
-"reason": "",
-"evidence_refs": []
+"merge_decision": "merged"
 }
 ]
-},
-"registry_update_summary": {
-"created_fact_count": 0,
-"updated_fact_count": 0,
-"created_relation_count": 0,
-"notes": []
-},
-"warnings": [],
-"metrics": {}
 }
 
-Мини-пример решения для singleton unit:
-
-Input meaning:
-Один local claim говорит: "Бот может отвечать клиентам в Telegram."
-
-Valid output:
-
+OUTPUT_SCHEMA:
 {
-"fact_registry": {
-"version": 1,
-"canonical_facts": [
+"compacted_claims": [
 {
-"fact_id": "fact_bot_telegram_replies",
-"fact_key": "bot_telegram_replies",
-"claim": "Бот может отвечать клиентам в Telegram.",
-"claim_kind": "capability",
+"key": "",
+"claim": "",
+"claim_kind": "definition",
 "granularity": "atomic",
-"triples": [
+"source_claim_refs": [],
+"triples": [],
+"merge_decision": "merged"
+}
+]
+}
+
+LANG:
+
+* write `claim` in same language as input claims
+* keep enum values in English
+
+claim_kind ∈ {
+definition, property, capability, limitation, rule, condition, process, list,
+comparison, criterion, example_set, value, exception, other
+}
+
+granularity ∈ {atomic, composite}
+merge_decision ∈ {merged, unmerged}
+
+TRIPLE:
 {
-"subject": "бот",
-"predicate": "has_capability",
-"object": "отвечать клиентам в Telegram",
+"subject": "",
+"predicate": "",
+"object": "",
 "qualifiers": []
 }
-],
-"mentions": [
+
+predicate ∈ {
+is_a, has_capability, has_property, has_value, has_limitation,
+requires, supports, integrates_with, used_for, handles, transfers_to,
+provides, improves, checks, removes, creates, connects_to
+}
+
+MERGE_RULES:
+Compare raw claims and enriched claims by meaning.
+IF same core knowledge -> merge.
+IF raw claim is already covered by enriched claim:
+keep enriched claim
+add raw claim.id to source_claim_refs.
+IF raw claim adds important content to enriched claim:
+update claim text to preserve added content.
+IF enriched A overlaps enriched B and one is fuller:
+keep fuller claim
+merge source refs
+merge useful valid triples.
+IF enriched A + enriched B contain complementary content answering same core question:
+produce one richer claim.
+IF facts are distinct -> keep separate.
+NEVER collapse distinct facts into one vague claim.
+NEVER output questions.
+NEVER output exclusion_scope.
+
+TRACE_RULES:
+Every raw claim.id MUST appear exactly once across output source_claim_refs.
+Every enriched_claim.source_claim_refs MUST be preserved unless content is rejected as duplicate with no useful source refs.
+source_claim_refs SHOULD contain raw source ids, not enriched keys.
+IF enriched claim has empty source_claim_refs:
+preserve traceability as "enriched:{key}".
+
+MERGE_DECISION_RULES:
+IF output claim has more than one source ref -> merge_decision = "merged".
+IF output claim has exactly one source ref -> merge_decision = "unmerged".
+
+KEY_RULES:
+key := stable snake_case based on final compacted meaning.
+Prefer existing enriched key IF meaning remains same.
+Change key only IF final meaning becomes materially broader/different.
+
+TRIPLE_RULES:
+Preserve useful enriched triples if still valid.
+Add triples only if final compacted claim clearly supports them.
+Remove duplicate triples.
+Triples MUST use allowed predicates.
+TRIPLE_LANG:
+subject, object, qualifiers should use the same language as the compacted claim unless they are product names, enum-like technical identifiers, or source terms.
+predicate stays English controlled enum.
+EXAMPLE:
+
+RAW_CLAIM:
 {
-"local_ref": "c1"
-}
-],
-"question_variants": [
-"Может ли бот отвечать клиентам в Telegram?"
-],
-"answer": "Бот может отвечать клиентам в Telegram.",
-"scope": "Telegram",
-"exclusion_scope": "",
-"source_refs": [
-"c1"
-],
-"evidence": [
-"Бот отвечает клиентам в Telegram"
-],
-"derived_fact_notes": [],
-"metadata": {},
-"status": "active"
-}
-],
-"fact_relations": []
-},
-"registry_update_summary": {
-"created_fact_count": 1,
-"updated_fact_count": 0,
-"created_relation_count": 0,
-"notes": [
-"Создан новый canonical fact из singleton canonicalization_unit."
-]
-},
-"warnings": [],
-"metrics": {
-"input_member_count": 1,
-"output_fact_count": 1,
-"output_relation_count": 0,
-"merged_member_count": 1,
-"warning_count": 0
-}
+"id": "claim_7",
+"claim": "The system lets a manager manually answer a client in the web panel.",
+"questions": [],
+"exclusion_scope": [],
+"granularity": "atomic"
 }
 
-Перед финальным ответом проверь себя:
+ENRICHED_CLAIM:
+{
+"key": "manager_handoff",
+"claim": "The assistant transfers complex client requests to a manager.",
+"claim_kind": "process",
+"granularity": "atomic",
+"source_claim_refs": ["claim_3"],
+"triples": [
+{
+"subject": "assistant",
+"predicate": "transfers_to",
+"object": "manager",
+"qualifiers": ["complex client requests"]
+}
+],
+"merge_decision": "unmerged"
+}
 
-* output содержит только JSON object;
-* top-level ключи: fact_registry, registry_update_summary, warnings, metrics;
-* fact_registry содержит version, canonical_facts, fact_relations;
-* все старые facts/relations из registry_snapshot_payload сохранены, если не были изменены;
-* каждый новый/обновлённый fact имеет fact_id, fact_key, claim, claim_kind, granularity, answer;
-* каждый новый/обновлённый fact имеет mentions, source_refs или evidence;
-* каждый relation имеет source_fact_id, target_fact_id, relation, reason, evidence_refs;
-* relation взят только из controlled relation list;
-* нет null;
-* нет markdown;
-* нет текста вне JSON.
+VALID_OUTPUT:
+{
+"key": "manager_handoff",
+"claim": "The assistant transfers complex client requests to a manager, and the manager can answer the client manually in the web panel.",
+"claim_kind": "process",
+"granularity": "atomic",
+"source_claim_refs": ["claim_3", "claim_7"],
+"triples": [
+{
+"subject": "assistant",
+"predicate": "transfers_to",
+"object": "manager",
+"qualifiers": ["complex client requests"]
+},
+{
+"subject": "manager",
+"predicate": "handles",
+"object": "manual client reply",
+"qualifiers": ["web panel"]
+}
+],
+"merge_decision": "merged"
+}
+
+FINAL_ASSERT:
+valid JSON only.
+top-level key == "compacted_claims".
+each item has exactly:
+key, claim, claim_kind, granularity, source_claim_refs, triples, merge_decision.
+every raw claim id appears exactly once.
+enriched source refs preserved.
+empty enriched source refs represented as "enriched:{key}".
+no questions.
+no exclusion_scope.
+triples use only allowed predicates.
+no text outside JSON.

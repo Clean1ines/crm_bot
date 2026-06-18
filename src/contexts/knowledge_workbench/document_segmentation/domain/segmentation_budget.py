@@ -7,7 +7,7 @@ TokenEstimator = Callable[[str], int]
 def estimate_tokens_roughly(text: str) -> int:
     if not text.strip():
         return 0
-    return max(1, (len(text) + 3) // 4)
+    return max(1, (len(text) * 10 + 32) // 33)
 
 
 @dataclass(frozen=True, slots=True)

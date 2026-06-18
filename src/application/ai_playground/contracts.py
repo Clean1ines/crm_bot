@@ -63,6 +63,7 @@ class AiPlaygroundRunRequest(BaseModel):
     response_format: AiPlaygroundResponseFormat = "text"
     reasoning_effort: AiPlaygroundReasoningEffort | None = None
     reasoning_format: AiPlaygroundReasoningFormat | None = None
+    max_completion_tokens: int | None = Field(default=None, ge=1)
 
 
 class AiPlaygroundUsage(BaseModel):

@@ -57,6 +57,13 @@ def _message() -> GroqChatMessage:
     )
 
 
+def _profile_by_model_id(model_id: str) -> ModelProfile:
+    for profile in build_groq_free_plan_model_profiles():
+        if profile.model_id.value == model_id:
+            return profile
+    raise AssertionError(f"missing model profile: {model_id}")
+
+
 def _custom_profile(
     *,
     supports_json_object: bool = True,
@@ -99,7 +106,7 @@ def test_builder_creates_chat_completion_payload_with_json_mode() -> None:
         {"role": "user", "content": "Return JSON."},
     ]
     assert request.payload["response_format"] == {"type": "json_object"}
-    assert request.payload["max_completion_tokens"] == 40_960
+    assert "max_completion_tokens" not in request.payload
     assert request.payload["temperature"] == 0.0
 
 
@@ -147,10 +154,10 @@ def test_qwen_default_catalog_settings_suppress_reasoning() -> None:
 
 
 def test_execution_settings_enabled_uses_explicit_reasoning_effort() -> None:
-    gpt_oss_profile = build_groq_free_plan_model_profiles()[2]
+    gpt_oss_profile = _profile_by_model_id("openai/gpt-oss-120b")
 
     request = GroqChatRequestBuilder().build(
-        route=_route(model="openai/gpt-oss-20b"),
+        route=_route(model="openai/gpt-oss-120b"),
         model_profile=gpt_oss_profile,
         messages=(_message(),),
         options=GroqChatRequestOptions(
@@ -167,10 +174,10 @@ def test_execution_settings_enabled_uses_explicit_reasoning_effort() -> None:
 def test_options_reasoning_effort_overrides_execution_settings_reasoning_effort() -> (
     None
 ):
-    gpt_oss_profile = build_groq_free_plan_model_profiles()[2]
+    gpt_oss_profile = _profile_by_model_id("openai/gpt-oss-120b")
 
     request = GroqChatRequestBuilder().build(
-        route=_route(model="openai/gpt-oss-20b"),
+        route=_route(model="openai/gpt-oss-120b"),
         model_profile=gpt_oss_profile,
         messages=(_message(),),
         options=GroqChatRequestOptions(

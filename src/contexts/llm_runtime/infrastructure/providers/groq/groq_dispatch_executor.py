@@ -65,11 +65,16 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 execution_input,
             )
             model_profile = self._find_model_profile(route=parsed.route)
+            max_completion_tokens = _resolve_max_completion_tokens(
+                parsed=parsed,
+                model_profile=model_profile,
+            )
             request = self.request_builder.build(
                 route=parsed.route,
                 model_profile=model_profile,
                 messages=parsed.messages,
                 options=GroqChatRequestOptions(
+                    max_completion_tokens=max_completion_tokens,
                     execution_settings=parsed.execution_settings,
                 ),
             )
@@ -87,6 +92,9 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 ),
                 payload_keys=sorted(request.payload.keys()),
                 has_max_completion_tokens="max_completion_tokens" in request.payload,
+                max_completion_tokens=request.payload.get("max_completion_tokens"),
+                estimated_input_tokens=parsed.estimated_input_tokens,
+                reserved_output_tokens=parsed.reserved_output_tokens,
                 response_format=request.payload.get("response_format"),
                 temperature=request.payload.get("temperature"),
                 reasoning_effort=request.payload.get("reasoning_effort"),
@@ -288,6 +296,8 @@ class _ParsedGroqDispatchPayload:
     route: LlmRoute
     messages: tuple[GroqChatMessage, ...]
     execution_settings: LlmModelExecutionSettings
+    estimated_input_tokens: int
+    reserved_output_tokens: int
 
     @classmethod
     def from_execution_input(
@@ -329,7 +339,54 @@ class _ParsedGroqDispatchPayload:
             execution_settings=_parse_execution_settings(
                 execution_settings_payload,
             ),
+            estimated_input_tokens=_parse_estimated_input_tokens(schedule_payload),
+            reserved_output_tokens=_parse_reserved_output_tokens(schedule_payload),
         )
+
+
+def _resolve_max_completion_tokens(
+    *,
+    parsed: _ParsedGroqDispatchPayload,
+    model_profile: ModelProfile,
+) -> int | None:
+    requested_output_tokens = parsed.reserved_output_tokens
+    tpm_limit = model_profile.rate_limits.tokens_per_minute
+    if tpm_limit is not None:
+        input_safety_gap_tokens = 100
+        local_output_budget = (
+            tpm_limit - parsed.estimated_input_tokens - input_safety_gap_tokens
+        )
+        if local_output_budget <= 0:
+            return None
+        requested_output_tokens = min(requested_output_tokens, local_output_budget)
+
+    requested_output_tokens = min(
+        requested_output_tokens,
+        model_profile.max_output_tokens,
+    )
+    if requested_output_tokens <= 0:
+        return None
+    return requested_output_tokens
+
+
+def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int:
+    estimate_payload = _require_mapping(schedule_payload, "llm_capacity_estimate")
+    value = estimate_payload.get("estimated_input_tokens")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("llm_capacity_estimate.estimated_input_tokens must be int")
+    if value <= 0:
+        raise ValueError("llm_capacity_estimate.estimated_input_tokens must be > 0")
+    return value
+
+
+def _parse_reserved_output_tokens(schedule_payload: Mapping[str, object]) -> int:
+    estimate_payload = _require_mapping(schedule_payload, "llm_capacity_estimate")
+    value = estimate_payload.get("reserved_output_tokens")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("llm_capacity_estimate.reserved_output_tokens must be int")
+    if value < 0:
+        raise ValueError("llm_capacity_estimate.reserved_output_tokens must be >= 0")
+    return value
 
 
 def _parse_provider_messages(

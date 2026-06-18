@@ -8,6 +8,8 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
 from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
     estimate_tokens_roughly,
 )
+
+
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     ClaimBuilderSectionWorkPlan,
 )
@@ -16,6 +18,10 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
     ClaimBuilderSectionExtractionPromptContract,
     ClaimBuilderSectionExtractionPromptInput,
 )
+
+CLAIM_BUILDER_MEASURED_PROMPT_TOKENS = 1_953
+CLAIM_BUILDER_MODEL_TPM_TOKENS = 6_000
+CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,17 +124,26 @@ def _claim_builder_token_estimate(
     plan: ClaimBuilderSectionWorkPlan,
     prompt_contract: ClaimBuilderSectionExtractionPromptContract,
 ) -> dict[str, object]:
-    prompt_message_tokens = tuple(
-        max(1, estimate_tokens_roughly(message["content"]))
-        for message in prompt_contract.provider_messages
-    )
+    del prompt_contract
     source_unit_token_count = max(1, estimate_tokens_roughly(plan.source_unit_text))
-    estimated_input_tokens = sum(prompt_message_tokens)
-    reserved_output_tokens = max(1024, min(4096, estimated_input_tokens))
+    estimated_input_tokens = (
+        CLAIM_BUILDER_MEASURED_PROMPT_TOKENS + source_unit_token_count
+    )
+    available_output_tokens = max(
+        0,
+        CLAIM_BUILDER_MODEL_TPM_TOKENS
+        - estimated_input_tokens
+        - CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS,
+    )
+    reserved_output_tokens = min(
+        4096,
+        estimated_input_tokens,
+        available_output_tokens,
+    )
 
     return {
-        "estimator": "rough_char_div_4_actual_provider_messages",
-        "prompt_message_tokens": prompt_message_tokens,
+        "estimator": "measured_prompt_1953_source_char_div_3_3_tpm_capped_output",
+        "prompt_message_tokens": (CLAIM_BUILDER_MEASURED_PROMPT_TOKENS,),
         "source_unit_token_count": source_unit_token_count,
         "estimated_input_tokens": estimated_input_tokens,
         "reserved_output_tokens": reserved_output_tokens,

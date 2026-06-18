@@ -1,41 +1,24 @@
 NODE: faq_claim_observations
 
-Return exactly one valid JSON object.
-The response must start with `{` and end with `}`.
+OUTPUT := one valid JSON object only.
+MUST start `{` and end `}`.
+NEVER: markdown | code fences | comments | explanations | text outside JSON | unknown fields | null.
 
-Forbidden:
+INPUT := one fragment of a business document.
+DOC_DOMAIN := business/product/service/process/rules/conditions/pricing/warranty/delivery/support/implementation/onboarding/booking/consultation/payment/refunds/restrictions/roles/customer scenarios/quality control/testing/evaluation/service operation.
 
-* markdown;
-* ```json;
-  ```
-* comments;
-* explanations;
-* any text before JSON;
-* any text after JSON;
-* fields outside the schema;
-* null values.
+TASK := extract `claims`.
 
-You receive one fragment of a business-oriented document.
+CLAIM := standalone useful answer to one real business-customer intent.
+CUSTOMER_INTENT := understand | choose | buy | order | implement | use | pay | receive | return | configure | verify | evaluate | control product/service/process/result.
 
-The document may be about any business, product, service, process, rules, conditions, pricing, warranty, delivery, support, implementation, onboarding, booking, consultation, payment, refunds, restrictions, employee roles, customer scenarios, quality control, testing, evaluation, or service operation.
+LANG:
+keys = schema keys exactly.
+values = same language as source.
+do not translate.
+evidence_block = exact source wording.
 
-Your task is to extract `claims`.
-
-A claim is a useful standalone answer that a business customer could receive in response to a real question.
-
-A business customer is a person who wants to understand, choose, buy, order, implement, use, pay for, receive, return, configure, verify, evaluate, or control a product, service, process, or result.
-
-Language rule:
-
-* JSON keys must stay exactly as defined in the schema.
-* All field values must be written in the same language as the source document fragment.
-* If the document fragment is in Russian, write `claim`, `possible_questions`, `exclusion_scope`, and `evidence_block` in Russian.
-* If the document fragment is in English, write field values in English.
-* Do not translate the source fragment.
-* `evidence_block` must preserve the original wording exactly.
-
-Output format:
-
+SCHEMA:
 {
 "claims": [
 {
@@ -48,137 +31,155 @@ Output format:
 ]
 }
 
-If there are no useful claims:
+NO_CLAIMS := {"claims":[]}
 
-{
-"claims": []
+FIELDS := claim, granularity, possible_questions, exclusion_scope, evidence_block.
+granularity ∈ {"atomic","composite"}
+possible_questions := string[]
+exclusion_scope := string
+evidence_block := string
+
+PROCESS:
+
+1. Detect FRAGMENT_FUNCTION.
+2. Extract by function, not isolated words.
+3. Return JSON only.
+
+FRAGMENT_FUNCTION ∈ {
+definition, value/result, contents/features/roles/components,
+process/scenario/steps, rules/conditions/restrictions/risks/exceptions/limits,
+choice/configuration/use/payment/refund/support,
+testing/verification/evaluation/audit/quality-control,
+checklist/criteria/control-questions/test-questions/rubric,
+comparison, supported-or-not-supported,
+problem/error/dispute/uncertainty/missing-data/handoff
 }
 
-Each claim object must contain exactly these fields:
+INTENT_HINTS:
+"What is this product?" -> what/for what
+"What is included?" -> contents/result
+"Work stages" -> process/stages
+"Limitations" -> limits/unsupported
+"Test questions" -> how to test/questions
+"Quality criteria" -> how to evaluate/criteria
+"Payment terms" -> payment
+"Refunds" -> return/refund
+"When manager is needed" -> human handoff
 
-* claim;
-* granularity;
-* possible_questions;
-* exclusion_scope;
-* evidence_block.
+CORE:
+one claim = one customer intent.
+claim ≠ sentence/list item/topic/heading.
+atomic := one short standalone answer.
+composite := list/process/conditions/functions/roles/stages/options/criteria/questions/rules that together answer one intent.
 
-`granularity` must be only "atomic" or "composite".
-`possible_questions` must always be an array of strings.
-`exclusion_scope` must always be a string.
-`evidence_block` must always be a string.
+IF same intent -> merge.
+IF different intents -> split.
+NEVER split useful composite into microclaims.
+NEVER merge distinct facts into vague mega-claim.
 
----
+HEADING:
+heading = intent clue only.
+NEVER heading-only claim.
+IF heading + body/list answer one general question -> composite.
+IF claim uses heading + list -> evidence_block includes heading + relevant list items exactly.
 
-## 1. First identify the function of the fragment
+LIST/TEST/CRITERIA:
+IF fragment contains list/checklist/criteria/control questions/test questions/expected topics/rubric/testing scenarios:
+detect general intent first.
 
-Before extracting claims, determine what the fragment is doing.
+IF answers how to test / which questions / which criteria / which topics / how to evaluate/verify/control/audit:
+claim about testing/evaluation/verification/control method.
 
-A fragment may:
+NEVER:
+test question -> product fact.
+"Expected topic: X" -> "Product does X".
+question wording -> factual claim.
 
-* define something;
-* explain value or result;
-* list contents, functions, features, roles, or components;
-* describe a process, scenario, or sequence of steps;
-* state rules, conditions, restrictions, risks, exceptions, or limits;
-* explain how to choose, implement, configure, use, pay, return, or get support;
-* explain how to test, verify, evaluate, audit, or control quality;
-* provide a checklist, criteria, control questions, test questions, expected topics, or an evaluation rubric;
-* compare alternatives;
-* describe what is supported or not supported;
-* explain what happens in a problem, error, dispute, uncertainty, or human-handoff case.
+ALLOWED:
+testing/evaluation/control claim.
+question groups + expected topics inside composite claim.
+checked but unexplained topics -> exclusion_scope.
 
-Extract claims according to the function of the fragment, not only according to individual words inside it.
+EXTRACT_IF customer learns:
+what | for whom | problem | value/result | included | capability |
+process | actions/stages/options | condition | price/deadline/rate/limit/payment |
+restriction/risk/prohibition/exception | requirement |
+problem/error/dispute/missing-data/complex-case behavior |
+quality/test/evaluation/audit/validation method |
+test questions/criteria/checklists/topics.
 
-Examples:
+SKIP_IF:
+heading-only | service phrase | no answer value | internal note | vague thesis |
+artificial/strange question | thought fragment | broader than evidence |
+guess | technical/org detail without customer value |
+product fact inferred only from test question/expected topic.
 
-* section "What is this product?" → intent: "What is this?", "What is it for?"
-* section "What is included?" → intent: "What is included?", "What does the customer get?"
-* section "Work stages" → intent: "How does the process work?", "What are the stages?"
-* section "Limitations" → intent: "What limitations are there?", "What is not supported?"
-* section "Test questions for checking the knowledge base" → intent: "How should the knowledge base be checked?", "Which questions should be used for testing?"
-* section "Quality criteria" → intent: "How should the result be evaluated?", "Which criteria should be used?"
-* section "Payment terms" → intent: "How can the customer pay?", "What are the payment terms?"
-* section "Refunds" → intent: "Can the customer return it?", "How does the refund process work?"
-* section "When a manager is needed" → intent: "When is the issue handed over to a human?"
+SEPARATE_IF distinct:
+benefit/result | saving/risk-reduction/speedup/simplification/manual-work replacement/quality improvement |
+IF/WHEN/ONLY_AFTER/BEFORE/AFTER condition |
+prohibition/risk/exception/limit/impossibility/restriction by time/role/plan/region/payment/condition.
 
-Do not turn a fragment into claims about another topic if the fragment itself answers a question about testing, verification, selection, configuration, evaluation, criteria, or process.
+IF whole section = limitations list:
+create general composite limitations claim first.
+optionally add atomic important limitations.
 
----
+CLAIM_RULES:
+claim MUST be ready customer answer, standalone, realistic, useful, evidence-based.
+claim MUST NOT be broader than evidence or add absent entities/actions/conditions/conclusions.
+claim MUST NOT be ad fluff or mechanical heading paraphrase.
 
-## 2. Main extraction principle
+QUESTIONS:
+possible_questions := 1..3 natural variants of same intent.
+All questions expect same answer.
+IF questions need different answers -> split.
+NEVER question broader than claim+evidence.
+NEVER "why" unless evidence gives reason.
+NEVER artificial meta-questions:
+"which fragment/claim/section says", "what information is contained", "what is mentioned in the text".
+IF no natural question -> [] and reconsider claim.
 
-One claim = one standalone customer question or one standalone customer intent.
+BAD_WHY:
+claim: "Ready-made integrations with CRM/Google Sheets/WhatsApp are not available yet."
+bad: "Why are there no CRM integrations?"
+good: ["Are ready-made CRM integrations available?","Is there an integration with Google Sheets?","Is WhatsApp supported?"]
 
-A claim is not the same as a sentence.
-A claim is not the same as a list item.
-A claim is not the same as a topic.
-A claim is not the same as a heading.
-A claim is a ready-to-use answer unit.
+EXCLUSION:
+exclusion_scope := retrieval boundary.
+Add topic T iff:
+T literally appears in evidence_block
+AND T could be separate customer question
+AND claim only mentions/includes T in overview/checklist/criteria/testing/composite answer
+AND claim does not answer T in detail.
 
-`atomic` means a short standalone answer to one question.
+NEVER add absent/synonym/guess/nearby/generalized/direct-answer topics.
+IF none -> "".
 
-`composite` means a complete answer made of a list, process, set of conditions, functions, roles, stages, options, criteria, questions, or rules, if together they answer one customer question.
+EVIDENCE:
+evidence_block REQUIRED.
+evidence_block := exact quote from source.
+NEVER paraphrase/summarize/add/replace/fix style.
+IF one sentence -> whole sentence.
+IF adjacent sentences -> all complete.
+IF list/process/checklist/criteria/test questions -> whole supporting block.
+IF heading + list -> heading + relevant list items.
+IF no exact quote supports claim -> no claim.
 
-Do not split useful composite answers into microclaims.
-
-Do not merge different customer intents into one claim.
-
-If several statements together provide a complete answer to one customer question, combine them into one composite claim.
-
-If statements answer different customer questions, split them into different claims.
-
-If a list item is not a normal standalone answer to a separate customer question, keep it inside the composite claim.
-
-If a list item can be an important standalone answer to a direct customer question, it may also become a separate atomic claim.
-
----
-
-## 3. Heading as intent
-
-A heading may define the main customer intent of the section.
-
-Use the heading as a clue when it explains which question the fragment answers.
-
-Do not turn the heading itself into a claim.
-
-Create a heading-based claim only when the body of the fragment provides actual content for the answer.
-
-If heading + list together answer a general customer question, first create one composite claim for the section or semantic block.
-
-If a claim is based on a heading and a list, `evidence_block` must include the heading and the relevant list items exactly.
-
-Example:
-
-Fragment:
+EXAMPLE_LIMITATIONS:
+SOURCE:
 "## Main limitations
 
 1. The website widget is not available yet.
 2. Ready-made integrations with external systems are not available yet.
 3. Complex questions are handed over to a manager."
 
-Correct claim:
-"Main limitations: the website widget is not available yet, ready-made integrations with external systems are not available yet, and complex questions are handed over to a manager."
+CORRECT:
+claim = "Main limitations: the website widget is not available yet, ready-made integrations with external systems are not available yet, and complex questions are handed over to a manager."
+granularity = "composite"
+possible_questions = ["What limitations are there?","What is not supported yet?","Which limitations should be considered?"]
+evidence_block = heading + list exactly.
 
-possible_questions:
-[
-"What limitations are there?",
-"What is not supported yet?",
-"Which limitations should be considered?"
-]
-
----
-
-## 4. Lists, checklists, tests, and criteria
-
-If the fragment contains a list, checklist, criteria, control questions, test questions, expected topics, evaluation rubric, or testing scenarios, do not automatically turn individual items into claims about the tested subject.
-
-First determine the general intent of the fragment.
-
-If the fragment answers "how to test?", "which questions to use?", "which criteria to use?", "which topics to cover?", or "how to evaluate quality?", create a composite claim about that testing, evaluation, verification, or control method.
-
-Example:
-
-Fragment:
+EXAMPLE_TESTING:
+SOURCE:
 "## Test questions for checking the knowledge base
 
 ### About the product
@@ -197,327 +198,50 @@ product positioning, value, difference from a regular bot.
 Expected topic:
 search review, questions, quality evaluation."
 
-Correct claim:
-"The knowledge base can be checked with test questions about the product and search; each group of questions has an expected answer topic."
-
-possible_questions:
-[
-"How should the knowledge base be checked?",
-"Which questions should be used to test the knowledge base?",
-"Which topics should the knowledge base check cover?"
-]
-
-exclusion_scope:
-"product; search; expected topic; product positioning; search review; quality evaluation"
-
-Why:
-the claim answers a question about checking the knowledge base, but it is not a detailed direct answer about product positioning, search review, or quality evaluation.
-
-Forbidden:
-
-* turning a test question into a product claim;
-* turning "Expected topic: X" into "The product does X";
-* combining a question and expected topic into a new product fact unless the source fragment states that fact directly.
-
-Allowed:
-
-* extracting a claim about how to check, evaluate, control, validate, or test something;
-* using question groups and expected topics as parts of a composite answer about testing;
-* adding checked topics to `exclusion_scope` if the claim mentions them but does not explain them in detail.
-
----
-
-## 5. What to extract
-
-Extract a claim if it helps the customer understand at least one of the following:
-
-* what something is;
-* who it is for;
-* what problem it solves;
-* what value, benefit, or result it provides;
-* what is included in a product, service, plan, package, process, check, or scenario;
-* what the customer, user, employee, manager, operator, system, service, or team can do;
-* how a process or scenario works;
-* what actions are available;
-* what stages exist;
-* under which conditions something happens;
-* what deadlines, prices, rates, limits, or payment options exist;
-* what restrictions, risks, prohibitions, or exceptions exist;
-* what is required from the customer, user, or organization;
-* what happens in a problem, error, dispute, missing-data case, or complex case;
-* what result the customer gets;
-* how to check quality of a product, service, knowledge base, search, answer, implementation, or configuration;
-* which test questions, criteria, checklists, or topics should be used for checking;
-* how to evaluate, control, audit, or validate the result.
-
-Do not extract a claim if it is:
-
-* a heading without body content;
-* a service phrase;
-* a section meta-description without useful answer value;
-* an internal editorial note without customer value;
-* a technical or organizational detail without customer value;
-* a vague thesis without useful answer content;
-* an artificial claim with a strange question;
-* a fragment of thought;
-* broader than `evidence_block`;
-* a guess not present in the source;
-* a claim about a product, service, or feature built only from a test question or expected topic, not from a direct statement in the document.
-
----
-
-## 6. Composite vs atomic
-
-If a list, process, set of functions, conditions, stages, rules, criteria, questions, or options together answers one question, create one composite claim.
-
-Example:
-"The service includes diagnostics, solution selection, setup, employee training, and post-launch support."
-
-Correct:
-one composite claim answering "What is included in the service?"
-
-Incorrect:
-separate claims "The service includes diagnostics", "The service includes setup", if the customer expects the full contents in one answer.
-
-If the fragment contains different intents, split them.
-
-Example:
-"Delivery takes up to three business days. Payment is available by card or invoice. Refunds are available within 14 days."
-
-This produces three claims:
-
-* delivery time;
-* payment methods;
-* refund conditions.
-
----
-
-## 7. Overview claims
-
-An overview claim answers general questions such as:
-
-* "What is this?"
-* "What is it for?"
-* "Who is it for?"
-* "What is the main value?"
-* "What does the service generally do?"
-* "What problem does it solve?"
-
-An overview claim may briefly mention other topics: price, delivery, support, warranty, integrations, training, deadlines, restrictions, employees, managers, communication channels, quality checks, or separate features.
-
-A brief overview mention is not a detailed answer about that topic.
-
-If a claim only mentions a topic but does not explain it in detail, add that topic to `exclusion_scope`.
-
-Do not create a separate claim for a topic if the fragment only names it but does not provide a standalone answer.
-
-Do not add a question to `possible_questions` if the claim answers it only partially, superficially, or as an overview mention.
-
----
-
-## 8. Separate values, conditions, and limitations
-
-If the fragment contains a separate benefit, saving, risk reduction, speedup, simplification, replacement of manual work, quality improvement, or other customer result, it is usually a separate claim.
-
-If the fragment contains an important condition such as "if", "when", "in case of", "only after", "before", or "after", it is usually a separate claim.
-
-If the fragment contains a prohibition, risk, exception, limit, impossibility, restriction by time, role, plan, region, payment method, or condition, it is usually a separate claim.
-
-If the whole section is a list of limitations, first create a general composite claim answering "What limitations are there?", then optionally add atomic claims for important individual limitations.
-
----
-
-## 9. Rules for `claim`
-
-`claim` must:
-
-* sound like a ready short answer to the customer;
-* be understandable without reading the whole document;
-* answer a realistic customer question;
-* be based only on `evidence_block`;
-* not be broader than `evidence_block`;
-* not add entities, actions, conditions, or conclusions absent from `evidence_block`;
-* not be advertising fluff;
-* not be a mechanical paraphrase of a heading;
-* be complete enough to be a useful answer.
-
----
-
-## 10. Rules for `possible_questions`
-
-`possible_questions` are 1–3 natural phrasings of the same customer intent.
-
-They must lead to the claim as a direct answer.
-
-All questions in `possible_questions` must expect the same answer.
-
-If the questions require different answers, the claim is too broad and must be split.
-
-Do not add a question if the claim answers it only partially, superficially, or as an overview.
-
-Do not add a question that requires a more detailed answer than the claim and `evidence_block` provide.
-
-Do not add a "why" question unless `evidence_block` explains the reason.
-
-Bad:
-claim: "Ready-made integrations with CRM/Google Sheets/WhatsApp are not available yet."
-possible_questions: ["Why are there no CRM integrations?"]
-
-Good:
-possible_questions:
-[
-"Are ready-made CRM integrations available?",
-"Is there an integration with Google Sheets?",
-"Is WhatsApp supported?"
-]
-
-Do not write artificial questions such as:
-
-* "which knowledge fragment...";
-* "what is the property...";
-* "which claim...";
-* "what does the section describe...";
-* "what information is contained...";
-* "which section says...";
-* "what is mentioned in the text...".
-
-If no natural direct question exists, return `possible_questions: []` and reconsider whether the claim is needed.
-
----
-
-## 11. Rules for `exclusion_scope`
-
-`exclusion_scope` is a retrieval boundary.
-
-It contains topics that are literally named in `evidence_block` and could be separate customer questions, but the current claim does not explain them as a direct detailed answer.
-
-Add a topic to `exclusion_scope` only if all are true:
-
-1. the topic literally appears in `evidence_block`;
-2. the topic could be a separate customer question;
-3. the claim only mentions the topic or includes it in an overview, checklist, criteria, testing list, or general composite answer;
-4. the claim does not answer the question about that topic in detail.
-
-Do not add a topic to `exclusion_scope` if the claim directly answers a question about it.
-
-If no such topics exist, return "".
-
-Positive example:
-
-Fragment:
+CORRECT:
+claim = "The knowledge base can be checked with test questions about the product and search; each group of questions has an expected answer topic."
+granularity = "composite"
+possible_questions = ["How should the knowledge base be checked?","Which questions should be used to test the knowledge base?","Which topics should the knowledge base check cover?"]
+exclusion_scope = "product; search; expected topic; product positioning; search review; quality evaluation"
+
+WHY:
+claim is about checking the knowledge base, not product/search facts.
+
+EXCLUSION_EXAMPLES:
+SOURCE:
 "The service helps companies receive online requests, process customer messages faster, and control team work."
+claim = same sentence.
+possible_questions = ["What is the service for?","What value does the service provide?","What does the service help companies do?"]
+exclusion_scope = "online requests; process customer messages; control team work"
+WHY: general value answer, topics not explained in detail.
 
-claim:
-"The service helps companies receive online requests, process customer messages faster, and control team work."
-
-possible_questions:
-[
-"What is the service for?",
-"What value does the service provide?",
-"What does the service help companies do?"
-]
-
-exclusion_scope:
-"online requests; process customer messages; control team work"
-
-Why:
-the claim directly answers a general value question, but does not explain in detail how online requests, message processing, or team control work.
-
-Empty exclusion_scope example:
-
-Fragment:
+SOURCE:
 "Ready-made integrations with CRM/Google Sheets/WhatsApp are not available yet."
+claim = same sentence.
+possible_questions = ["Are ready-made CRM integrations available?","Is there an integration with Google Sheets?","Is WhatsApp supported?"]
+exclusion_scope = ""
+WHY: topics are direct answer parts.
 
-claim:
-"Ready-made integrations with CRM/Google Sheets/WhatsApp are not available yet."
-
-possible_questions:
-[
-"Are ready-made CRM integrations available?",
-"Is there an integration with Google Sheets?",
-"Is WhatsApp supported?"
-]
-
-exclusion_scope:
-""
-
-Why:
-CRM, Google Sheets, and WhatsApp are direct parts of the answer. The claim directly answers whether those integrations exist.
-
-Forbidden example:
-
-Fragment:
+FORBIDDEN:
+SOURCE:
 "The service helps companies receive online requests."
+NEVER exclusion_scope = "CRM; sales automation; integrations"
+WHY: absent from evidence.
 
-claim:
-"The service helps companies receive online requests."
-
-possible_questions:
-[
-"What is the service for?",
-"What does the service help companies do?"
-]
-
-exclusion_scope:
-"CRM; sales automation; integrations"
-
-Why forbidden:
-the words "CRM", "sales automation", and "integrations" are not present in `evidence_block`. Do not add synonyms, guesses, nearby topics, or generalizations absent from the quote.
-
----
-
-## 12. Rules for `evidence_block`
-
-`evidence_block` is required.
-
-`evidence_block` must be an exact quote from the source fragment.
-
-Do not paraphrase `evidence_block`.
-Do not summarize `evidence_block`.
-Do not add words absent from the source fragment.
-Do not replace words with synonyms.
-Do not correct the style of the document.
-
-If a claim is based on one sentence, include that whole sentence.
-
-If a claim is based on several adjacent sentences, include those sentences completely.
-
-If a claim is based on a list, include the relevant list lines completely.
-
-If a claim is based on a process, checklist, criteria, or test questions, include the whole source block that supports the claim.
-
-If a claim is based on a heading and a list under it, include the heading and the relevant list items completely.
-
-If no exact source quote directly supports the claim, do not create the claim.
-
----
-
-## 13. Final self-check
-
-Before returning JSON, verify:
-
-* the response starts with `{`;
-* the response ends with `}`;
-* the top-level key is exactly `"claims"`;
-* claims is an array;
-* every claim has only schema fields;
-* every claim answers one customer intent;
-* field values are in the same language as the source document;
-* the function of the fragment is considered first;
-* if the fragment answers a question about checking, evaluation, control, criteria, or testing, the claim is about that function, not a made-up fact about the tested subject;
-* all possible_questions of one claim are variants of one question;
-* if the heading defines the general intent, it is considered;
-* if the section is a list of limitations, conditions, stages, features, contents, criteria, or test questions, a composite claim is created for the whole list or semantic block;
-* composite claims are not split into microclaims;
-* one claim does not vacuum up different intents;
-* overview claims do not turn all mentions into direct answers;
-* separate value, condition, or limitation is not hidden inside a general claim if it can be a separate direct question;
-* possible_questions do not ask "why" unless evidence_block explains the reason;
-* exclusion_scope contains only topics mentioned but not explained in detail;
-* exclusion_scope contains only words or short phrases literally present in evidence_block;
-* exclusion_scope does not contain direct parts of the answer to possible_questions;
-* evidence_block is an exact quote from the source fragment;
-* claim is not broader than evidence_block;
-* there is no null;
-* there is no markdown;
-* there is no text outside JSON.
+FINAL_ASSERT:
+JSON only.
+top-level key == "claims".
+claims is array.
+each claim has exact fields only.
+no null/markdown/text outside JSON.
+language == source.
+function considered first.
+testing/evaluation/control -> method claim, not invented product fact.
+composite not micro-split.
+different intents not merged.
+overview mentions not inflated.
+important separate condition/limitation/result not hidden.
+possible_questions same intent and not broader than evidence.
+exclusion_scope only literal mentioned-but-not-explained topics, not direct answer parts.
+evidence exact.
+claim <= evidence.
