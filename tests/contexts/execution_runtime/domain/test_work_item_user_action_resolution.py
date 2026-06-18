@@ -59,17 +59,17 @@ def test_resolve_user_action_required_to_ready_requeues_work_item() -> None:
     assert resolved.lease_expires_at is None
 
 
-def test_resolve_user_action_required_to_deferred_waits_until_reset() -> None:
+def test_resolve_user_action_required_to_retryable_failed_waits_until_reset() -> None:
     item = _user_action_required_item()
     wait_until = WaitUntil(_now() + timedelta(hours=12))
 
-    resolved = WorkItemStateMachine.resolve_user_action_required_to_deferred(
+    resolved = WorkItemStateMachine.resolve_user_action_required_to_retryable_failed(
         item,
         wait_until=wait_until,
         reason="resume_after_daily_reset",
     )
 
-    assert resolved.status is WorkItemStatus.DEFERRED
+    assert resolved.status is WorkItemStatus.RETRYABLE_FAILED
     assert resolved.next_attempt_at == wait_until
     assert resolved.last_error_kind == "resume_after_daily_reset"
     assert not resolved.is_due(_now())
@@ -86,7 +86,7 @@ def test_user_action_resolution_requires_user_action_required_item() -> None:
         WorkItemStateMachine.resolve_user_action_required_to_ready(ready)
 
     with pytest.raises(InvalidWorkItemTransition):
-        WorkItemStateMachine.resolve_user_action_required_to_deferred(
+        WorkItemStateMachine.resolve_user_action_required_to_retryable_failed(
             ready,
             wait_until=WaitUntil(_now() + timedelta(hours=12)),
         )

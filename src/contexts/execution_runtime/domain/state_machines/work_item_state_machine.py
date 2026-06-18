@@ -208,13 +208,16 @@ class WorkItemStateMachine:
         )
 
     @staticmethod
-    def resolve_user_action_required_to_deferred(
+    def resolve_user_action_required_to_retryable_failed(
         item: WorkItem,
         *,
         wait_until: WaitUntil,
         reason: str | None = None,
     ) -> WorkItem:
-        WorkItemStateMachine._require_user_action_required(item, "resolve to deferred")
+        WorkItemStateMachine._require_user_action_required(
+            item,
+            "resolve to retryable failed",
+        )
         if reason is not None and not reason.strip():
             raise ValueError("reason must be non-empty when provided")
         return replace(
