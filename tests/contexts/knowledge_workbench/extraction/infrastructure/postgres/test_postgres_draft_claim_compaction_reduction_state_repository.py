@@ -21,6 +21,16 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
     PostgresDraftClaimCompactionReductionStateRepository,
     build_initial_raw_node,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_apply_result import (
+    compacted_claim_node_ref,
+    raw_claim_node_ref,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionNextWorkItemType,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_reduction_planner_policy import (
+    DraftClaimCompactionReductionPlannerPolicy,
+)
 
 
 def _now() -> datetime:
@@ -140,7 +150,7 @@ class FakeReductionStateConnection:
                 "left_node_ref": key[0],
                 "right_node_ref": key[1],
                 "status": _str_arg(args[5]),
-                "result_node_ref": _str_arg(args[6]),
+                "result_node_ref": _optional_str_arg(args[6]),
                 "round_index": key[2],
             }
             return "INSERT 0 1"
@@ -618,6 +628,111 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
     assert len(inactive_nodes) == 2
     assert state.comparisons[0].status.value == "merged"
     assert state.comparisons[0].result_node_ref == active_nodes[0].node_ref
+
+
+@pytest.mark.asyncio
+async def test_component_incompatibility_survives_reload_after_mixed_merge() -> None:
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+                estimated_input_tokens=10,
+            ),
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-b",
+                estimated_input_tokens=10,
+            ),
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-c",
+                estimated_input_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+
+    raw_a = raw_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        observation_ref="claim-a",
+    )
+    raw_b = raw_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        observation_ref="claim-b",
+    )
+    raw_c = raw_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        observation_ref="claim-c",
+    )
+
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(
+            _compacted_claim(("claim-a",)),
+            _compacted_claim(("claim-c",)),
+        ),
+        compared_node_refs=(raw_a, raw_c),
+        created_at=_now(),
+    )
+
+    compacted_a = compacted_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        source_claim_refs=("claim-a",),
+    )
+
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-2",
+        work_item_id="work-item-2",
+        round_index=1,
+        compacted_claims=(_compacted_claim(("claim-a", "claim-b")),),
+        compared_node_refs=(compacted_a, raw_b),
+        created_at=_now(),
+    )
+
+    state = await repository.load_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+    )
+
+    assert state is not None
+    active_node_refs = {node.node_ref for node in state.active_nodes()}
+    assert active_node_refs == {
+        compacted_claim_node_ref(
+            workflow_run_id="workflow-1",
+            group_ref="group-1",
+            source_claim_refs=("claim-a", "claim-b"),
+        ),
+        compacted_claim_node_ref(
+            workflow_run_id="workflow-1",
+            group_ref="group-1",
+            source_claim_refs=("claim-c",),
+        ),
+    }
+    assert state.incompatibilities
+
+    decision = DraftClaimCompactionReductionPlannerPolicy().plan_next_step(state)
+
+    assert decision.work_type is DraftClaimCompactionNextWorkItemType.DONE
+    assert decision.node_refs == ()
 
 
 @pytest.mark.asyncio

@@ -344,6 +344,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
     ) -> DraftClaimCompactionApplyPersistenceResult:
         del batch_ref, work_item_id
         compared_node_refs = tuple(compared_node_refs)
+        compared_nodes = await self._load_compared_nodes_for_apply(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            compared_node_refs=compared_node_refs,
+        )
+        compared_source_sets = _source_claim_refs_by_node_ref(compared_nodes)
+
         inserted_nodes = 0
         inserted_sources = 0
         inserted_comparisons = 0
@@ -351,6 +358,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         requested_nodes = len(compacted_claims)
         requested_sources = 0
         requested_comparisons = 0
+        output_component_refs_by_source_set: dict[tuple[str, ...], str] = {}
 
         for claim in compacted_claims:
             node_ref = compacted_claim_node_ref(
@@ -358,13 +366,18 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 group_ref=group_ref,
                 source_claim_refs=claim.source_claim_refs,
             )
-            raw_node_refs = tuple(
+            fallback_raw_node_refs = tuple(
                 raw_claim_node_ref(
                     workflow_run_id=workflow_run_id,
                     group_ref=group_ref,
                     observation_ref=source_ref,
                 )
                 for source_ref in claim.source_claim_refs
+            )
+            source_node_refs = _matched_source_node_refs_for_claim(
+                claim_source_claim_refs=claim.source_claim_refs,
+                compared_source_sets=compared_source_sets,
+                fallback_raw_node_refs=fallback_raw_node_refs,
             )
 
             if _inserted(
@@ -385,7 +398,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     DraftClaimCompactionNodeKind.COMPACTED.value,
                     True,
                     json.dumps(list(claim.source_claim_refs), sort_keys=True),
-                    json.dumps(list(raw_node_refs), sort_keys=True),
+                    json.dumps(list(source_node_refs), sort_keys=True),
                     0,
                     claim.key,
                     claim.claim,
@@ -426,7 +439,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     WHERE node_ref = ANY($2::text[]) AND active = true
                     """,
                     created_at,
-                    list(raw_node_refs),
+                    list(source_node_refs),
                 )
             )
 
@@ -434,12 +447,15 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 workflow_run_id=workflow_run_id,
                 group_ref=group_ref,
                 result_node_ref=node_ref,
-                source_node_refs=raw_node_refs,
+                source_node_refs=source_node_refs,
                 source_claim_refs=claim.source_claim_refs,
                 created_at=created_at,
             )
+            output_component_refs_by_source_set[
+                tuple(sorted(claim.source_claim_refs))
+            ] = component_ref_for_node(node_ref)
 
-            for left, right in _node_ref_pairs(raw_node_refs):
+            for left, right in _node_ref_pairs(source_node_refs):
                 requested_comparisons += 1
                 if await self._insert_merged_comparison(
                     workflow_run_id=workflow_run_id,
@@ -457,12 +473,11 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 compared_node_refs[0],
                 compared_node_refs[1],
             )
-            if not await self._compacted_claims_merge_compared_nodes(
-                workflow_run_id=workflow_run_id,
-                group_ref=group_ref,
-                compared_node_refs=(left_compared, right_compared),
+            compared_pair_merged = _compacted_claims_merge_compared_source_sets(
+                compared_source_sets=compared_source_sets,
                 compacted_claims=compacted_claims,
-            ):
+            )
+            if not compared_pair_merged:
                 requested_comparisons += 1
                 if await self._insert_not_merged_comparison(
                     workflow_run_id=workflow_run_id,
@@ -473,12 +488,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     created_at=created_at,
                 ):
                     inserted_comparisons += 1
-                await self._insert_component_incompatibility_for_nodes(
+                await self._insert_component_incompatibility_for_output_sides(
                     workflow_run_id=workflow_run_id,
                     group_ref=group_ref,
                     left_node_ref=left_compared,
                     right_node_ref=right_compared,
-                    round_index=round_index,
+                    compared_source_sets=compared_source_sets,
+                    output_component_refs_by_source_set=output_component_refs_by_source_set,
                     created_at=created_at,
                 )
 
@@ -707,41 +723,20 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             )
         )
 
-    async def _compacted_claims_merge_compared_nodes(
+    async def _load_compared_nodes_for_apply(
         self,
         *,
         workflow_run_id: str,
         group_ref: str,
-        compared_node_refs: tuple[str, str],
-        compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
-    ) -> bool:
-        rows = await self._connection.fetch(
-            """
-            SELECT node_ref, source_claim_refs
-            FROM draft_claim_compaction_nodes
-            WHERE workflow_run_id = $1
-              AND group_ref = $2
-              AND node_ref = ANY($3::text[])
-            ORDER BY node_ref
-            """,
-            workflow_run_id,
-            group_ref,
-            list(compared_node_refs),
+        compared_node_refs: tuple[str, ...],
+    ) -> tuple[DraftClaimCompactionNode, ...]:
+        if not compared_node_refs:
+            return ()
+        return await self._load_nodes_by_ref(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            node_refs=compared_node_refs,
         )
-        if len(rows) != len(compared_node_refs):
-            return False
-        union_source_claim_refs = _dedupe_sorted(
-            source_claim_ref
-            for row in rows
-            for source_claim_ref in _json_text_tuple(
-                row["source_claim_refs"],
-                "source_claim_refs",
-            )
-        )
-        for claim in compacted_claims:
-            if tuple(sorted(claim.source_claim_refs)) == union_source_claim_refs:
-                return True
-        return False
 
     async def _insert_not_merged_comparison(
         self,
@@ -916,6 +911,46 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 left_node_ref=left_node_ref,
                 right_node_ref=right_node_ref,
             ),
+            created_at=created_at,
+        )
+
+    async def _insert_component_incompatibility_for_output_sides(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        left_node_ref: str,
+        right_node_ref: str,
+        compared_source_sets: Mapping[str, tuple[str, ...]],
+        output_component_refs_by_source_set: Mapping[tuple[str, ...], str],
+        created_at: datetime,
+    ) -> None:
+        left_component_ref = _output_component_ref_for_compared_node(
+            node_ref=left_node_ref,
+            compared_source_sets=compared_source_sets,
+            output_component_refs_by_source_set=output_component_refs_by_source_set,
+        )
+        right_component_ref = _output_component_ref_for_compared_node(
+            node_ref=right_node_ref,
+            compared_source_sets=compared_source_sets,
+            output_component_refs_by_source_set=output_component_refs_by_source_set,
+        )
+        if left_component_ref is None or right_component_ref is None:
+            await self._insert_component_incompatibility_for_nodes(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                left_node_ref=left_node_ref,
+                right_node_ref=right_node_ref,
+                round_index=0,
+                created_at=created_at,
+            )
+            return
+        await self._insert_component_incompatibility(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            left_component_ref=left_component_ref,
+            right_component_ref=right_component_ref,
+            source_comparison_ref=None,
             created_at=created_at,
         )
 
@@ -1564,6 +1599,59 @@ def _affected(status: object) -> int:
         return int(text.rsplit(" ", 1)[1])
     except (IndexError, ValueError):
         return 0
+
+
+def _source_claim_refs_by_node_ref(
+    nodes: tuple[DraftClaimCompactionNode, ...],
+) -> dict[str, tuple[str, ...]]:
+    return {node.node_ref: tuple(sorted(node.source_claim_refs)) for node in nodes}
+
+
+def _matched_source_node_refs_for_claim(
+    *,
+    claim_source_claim_refs: tuple[str, ...],
+    compared_source_sets: Mapping[str, tuple[str, ...]],
+    fallback_raw_node_refs: tuple[str, ...],
+) -> tuple[str, ...]:
+    claim_source_set = set(claim_source_claim_refs)
+    matched_refs = tuple(
+        node_ref
+        for node_ref, source_claim_refs in sorted(compared_source_sets.items())
+        if set(source_claim_refs).issubset(claim_source_set)
+    )
+    if matched_refs:
+        return matched_refs
+    return fallback_raw_node_refs
+
+
+def _compacted_claims_merge_compared_source_sets(
+    *,
+    compared_source_sets: Mapping[str, tuple[str, ...]],
+    compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
+) -> bool:
+    if len(compared_source_sets) != 2:
+        return False
+    union_source_claim_refs = _dedupe_sorted(
+        source_claim_ref
+        for source_claim_refs in compared_source_sets.values()
+        for source_claim_ref in source_claim_refs
+    )
+    for claim in compacted_claims:
+        if tuple(sorted(claim.source_claim_refs)) == union_source_claim_refs:
+            return True
+    return False
+
+
+def _output_component_ref_for_compared_node(
+    *,
+    node_ref: str,
+    compared_source_sets: Mapping[str, tuple[str, ...]],
+    output_component_refs_by_source_set: Mapping[tuple[str, ...], str],
+) -> str | None:
+    source_claim_refs = compared_source_sets.get(node_ref)
+    if source_claim_refs is None:
+        return None
+    return output_component_refs_by_source_set.get(tuple(sorted(source_claim_refs)))
 
 
 def _component(row: Mapping[str, object]) -> DraftClaimCompactionComponent:
