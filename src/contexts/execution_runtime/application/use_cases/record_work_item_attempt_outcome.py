@@ -11,6 +11,9 @@ from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +26,7 @@ class RecordWorkItemAttemptOutcomeCommand:
     outcome_status: WorkItemAttemptOutcomeStatus
     error_kind: str | None = None
     next_attempt_at: datetime | None = None
+    retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
 
 
@@ -48,6 +52,7 @@ class RecordWorkItemAttemptOutcome:
             outcome_status=command.outcome_status,
             error_kind=command.error_kind,
             next_attempt_at=command.next_attempt_at,
+            retry_plan=command.retry_plan,
             validation_metadata=command.validation_metadata,
         )
         work_item = await self.repository.record_attempt_outcome(record)

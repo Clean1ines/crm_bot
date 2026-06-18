@@ -8,6 +8,9 @@ from typing import Protocol
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 
 
 class WorkItemAttemptOutcomeStatus(StrEnum):
@@ -27,6 +30,7 @@ class WorkItemAttemptOutcomeRecord:
     outcome_status: WorkItemAttemptOutcomeStatus
     error_kind: str | None = None
     next_attempt_at: datetime | None = None
+    retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
@@ -46,6 +50,18 @@ class WorkItemAttemptOutcomeRecord:
         if not isinstance(self.outcome_status, WorkItemAttemptOutcomeStatus):
             raise TypeError("outcome_status must be WorkItemAttemptOutcomeStatus")
 
+        if self.retry_plan is not None and not isinstance(
+            self.retry_plan,
+            WorkItemRetryPlan,
+        ):
+            raise TypeError("retry_plan must be WorkItemRetryPlan when provided")
+
+        if self.retry_plan is not None and not isinstance(
+            self.retry_plan,
+            WorkItemRetryPlan,
+        ):
+            raise TypeError("retry_plan must be WorkItemRetryPlan when provided")
+
         if self.validation_metadata is not None and not isinstance(
             self.validation_metadata,
             Mapping,
@@ -57,6 +73,8 @@ class WorkItemAttemptOutcomeRecord:
                 raise ValueError("error_kind must be None for succeeded outcome")
             if self.next_attempt_at is not None:
                 raise ValueError("next_attempt_at must be None for succeeded outcome")
+            if self.retry_plan is not None:
+                raise ValueError("retry_plan must be None for succeeded outcome")
             return
 
         if self.error_kind is None:
@@ -67,6 +85,10 @@ class WorkItemAttemptOutcomeRecord:
             if self.next_attempt_at is not None:
                 raise ValueError(
                     "next_attempt_at must be None for terminal failed outcome",
+                )
+            if self.retry_plan is not None:
+                raise ValueError(
+                    "retry_plan must be None for terminal failed outcome",
                 )
             return
 
@@ -84,6 +106,14 @@ class WorkItemAttemptOutcomeRecord:
             )
             if self.next_attempt_at <= self.finished_at:
                 raise ValueError("next_attempt_at must be after finished_at")
+            if self.retry_plan is None:
+                raise ValueError(
+                    "retry_plan is required for retryable/deferred outcomes",
+                )
+            if self.retry_plan is None:
+                raise ValueError(
+                    "retry_plan is required for retryable/deferred outcomes",
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +126,7 @@ class RecordedWorkItemAttemptOutcome:
     work_item: WorkItem
     error_kind: str | None = None
     next_attempt_at: datetime | None = None
+    retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
@@ -126,6 +157,8 @@ class RecordedWorkItemAttemptOutcome:
                 raise ValueError("error_kind must be None for succeeded outcome")
             if self.next_attempt_at is not None:
                 raise ValueError("next_attempt_at must be None for succeeded outcome")
+            if self.retry_plan is not None:
+                raise ValueError("retry_plan must be None for succeeded outcome")
             return
 
         if self.error_kind is None:
@@ -136,6 +169,10 @@ class RecordedWorkItemAttemptOutcome:
             if self.next_attempt_at is not None:
                 raise ValueError(
                     "next_attempt_at must be None for terminal failed outcome",
+                )
+            if self.retry_plan is not None:
+                raise ValueError(
+                    "retry_plan must be None for terminal failed outcome",
                 )
             return
 

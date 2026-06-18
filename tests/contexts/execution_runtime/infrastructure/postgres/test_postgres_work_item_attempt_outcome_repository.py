@@ -9,6 +9,9 @@ from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_
     WorkItemAttemptOutcomeStatus,
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -78,6 +81,7 @@ def _leased_row(
         else None,
         "next_attempt_at": None,
         "last_error_kind": None,
+        "retry_plan": None,
     }
 
 
@@ -91,6 +95,7 @@ def _record(
     error_kind: str | None = None,
     next_attempt_at: datetime | None = None,
     validation_metadata: dict[str, object] | None = None,
+    retry_plan: WorkItemRetryPlan | None = None,
 ) -> WorkItemAttemptOutcomeRecord:
     return WorkItemAttemptOutcomeRecord(
         attempt_id="attempt-1",
@@ -101,6 +106,7 @@ def _record(
         outcome_status=outcome_status,
         error_kind=error_kind,
         next_attempt_at=next_attempt_at,
+        retry_plan=retry_plan,
         validation_metadata=validation_metadata,
     )
 
@@ -151,6 +157,7 @@ async def test_succeeded_updates_attempt_and_completes_work_item() -> None:
     assert work_item_args[4] is None
     assert work_item_args[5] is None
     assert work_item_args[6] is None
+    assert work_item_args[8] is None
 
 
 @pytest.mark.asyncio
@@ -194,11 +201,13 @@ async def test_retryable_failed_updates_attempt_and_moves_work_item_to_retryable
             outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
             error_kind="rate_limit",
             next_attempt_at=_next_attempt_at(),
+            retry_plan=WorkItemRetryPlan.RETRY_OTHER_ORG,
         ),
     )
 
     assert work_item.status is WorkItemStatus.RETRYABLE_FAILED
     assert work_item.last_error_kind == "rate_limit"
+    assert work_item.retry_plan is WorkItemRetryPlan.RETRY_OTHER_ORG
     assert _attempt_update_args(connection)[2:5] == (
         "retryable_failed",
         "rate_limit",
@@ -208,6 +217,7 @@ async def test_retryable_failed_updates_attempt_and_moves_work_item_to_retryable
     assert work_item_args[1] == "retryable_failed"
     assert work_item_args[6] == _next_attempt_at()
     assert work_item_args[7] == "rate_limit"
+    assert work_item_args[8] == WorkItemRetryPlan.RETRY_OTHER_ORG.value
 
 
 @pytest.mark.asyncio
@@ -247,20 +257,23 @@ async def test_deferred_updates_attempt_and_next_attempt_at() -> None:
             outcome_status=WorkItemAttemptOutcomeStatus.DEFERRED,
             error_kind="quota_wait",
             next_attempt_at=_next_attempt_at(),
+            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
         ),
     )
 
-    assert work_item.status is WorkItemStatus.DEFERRED
+    assert work_item.status is WorkItemStatus.RETRYABLE_FAILED
     assert work_item.last_error_kind == "quota_wait"
+    assert work_item.retry_plan is WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
     assert _attempt_update_args(connection)[2:5] == (
         "deferred",
         "quota_wait",
         None,
     )
     work_item_args = _work_item_update_args(connection)
-    assert work_item_args[1] == "deferred"
+    assert work_item_args[1] == "retryable_failed"
     assert work_item_args[6] == _next_attempt_at()
     assert work_item_args[7] == "quota_wait"
+    assert work_item_args[8] == WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW.value
 
 
 @pytest.mark.asyncio
