@@ -43,7 +43,6 @@ definition, property, capability, limitation, rule, condition, process, list,
 comparison, criterion, example_set, value, exception, other
 }
 
-granularity ∈ {atomic, composite}
 merge_decision ∈ {merged, unmerged}
 
 TRIPLE:
@@ -69,7 +68,7 @@ IF claims describe different facts/values/limitations/rules/processes -> keep se
 IF composite claim is one practical answer bundle -> keep composite.
 NEVER create vague mega-claim hiding distinct facts.
 NEVER output questions.
-NEVER output exclusion_scope.
+NEVER output exclusion_scope.\nNEVER output granularity.
 
 TRACE_RULES:
 Every input claim.id MUST appear exactly once across all source_claim_refs.
@@ -82,7 +81,6 @@ key := stable snake_case based on compacted claim meaning.
 
 CLASSIFICATION_RULES:
 claim_kind := kind of compacted claim, not first source claim.
-granularity := granularity of compacted claim.
 
 TRIPLE_RULES:
 Build triples from compacted meaning.
@@ -145,7 +143,7 @@ FINAL_ASSERT:
 valid JSON only.
 top-level key == "compacted_claims".
 each item has exactly:
-key, claim, claim_kind, granularity, source_claim_refs, triples, merge_decision.
+key, claim, claim_kind, source_claim_refs, triples, merge_decision.
 every input id appears exactly once.
 no unknown source ids.
 no questions.

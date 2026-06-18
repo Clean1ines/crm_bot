@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
     DraftClaimCompactionClaimKind,
-    DraftClaimCompactionGranularity,
     DraftClaimCompactionMergeDecision,
     DraftClaimCompactionOutput,
     DraftClaimCompactionOutputClaim,
@@ -26,7 +25,6 @@ _OUTPUT_CLAIM_FIELDS = frozenset(
         "key",
         "claim",
         "claim_kind",
-        "granularity",
         "source_claim_refs",
         "triples",
         "merge_decision",
@@ -190,10 +188,6 @@ def _validate_compacted_claim(
             claim_value["claim_kind"],
             f"compacted_claims[{index}].claim_kind",
         ),
-        granularity=_granularity(
-            claim_value["granularity"],
-            f"compacted_claims[{index}].granularity",
-        ),
         source_claim_refs=source_claim_refs,
         triples=_triples(claim_value["triples"], f"compacted_claims[{index}].triples"),
         merge_decision=merge_decision,
@@ -259,20 +253,6 @@ def _claim_kind(
     except ValueError as exc:
         raise InvalidDraftClaimCompactionOutput(
             f"{field_name} is not allowed",
-        ) from exc
-
-
-def _granularity(
-    value: JsonValue,
-    field_name: str,
-) -> DraftClaimCompactionGranularity:
-    if not isinstance(value, str):
-        raise InvalidDraftClaimCompactionOutput(f"{field_name} must be str")
-    try:
-        return DraftClaimCompactionGranularity(value)
-    except ValueError as exc:
-        raise InvalidDraftClaimCompactionOutput(
-            f"{field_name} must be atomic or composite",
         ) from exc
 
 

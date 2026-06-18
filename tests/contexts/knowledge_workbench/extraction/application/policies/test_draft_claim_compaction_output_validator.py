@@ -16,7 +16,6 @@ def _valid_payload() -> JsonObject:
                 "key": "refund-support",
                 "claim": "Product supports refunds.",
                 "claim_kind": "capability",
-                "granularity": "atomic",
                 "source_claim_refs": ["claim-a", "claim-b"],
                 "triples": [
                     {
@@ -32,7 +31,6 @@ def _valid_payload() -> JsonObject:
                 "key": "delivery-limit",
                 "claim": "Delivery has limits.",
                 "claim_kind": "limitation",
-                "granularity": "atomic",
                 "source_claim_refs": ["claim-c"],
                 "triples": [],
                 "merge_decision": "unmerged",
@@ -158,7 +156,6 @@ def test_accepts_empty_triples() -> None:
                 "key": "refund-support",
                 "claim": "Product supports refunds.",
                 "claim_kind": "capability",
-                "granularity": "atomic",
                 "source_claim_refs": ["claim-a"],
                 "triples": [],
                 "merge_decision": "unmerged",

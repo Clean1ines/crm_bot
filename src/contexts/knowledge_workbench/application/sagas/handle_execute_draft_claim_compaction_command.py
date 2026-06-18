@@ -929,7 +929,6 @@ def _compacted_claim_payload(claim: DraftClaimCompactionOutputClaim) -> JsonObje
         "key": claim.key,
         "claim": claim.claim,
         "claim_kind": claim.claim_kind.value,
-        "granularity": claim.granularity.value,
         "source_claim_refs": list(claim.source_claim_refs),
         "triples": [_triple_payload(triple) for triple in claim.triples],
         "merge_decision": claim.merge_decision.value,

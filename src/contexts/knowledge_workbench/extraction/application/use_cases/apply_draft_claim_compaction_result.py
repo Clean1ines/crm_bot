@@ -63,7 +63,9 @@ class ApplyDraftClaimCompactionResult:
                 work_item_id=command.work_item_id,
                 round_index=command.round_index,
                 compacted_claims=enriched_output.compacted_claims,
-                compared_node_refs=_compared_node_refs(command.left_node_ref, command.right_node_ref),
+                compared_node_refs=_compared_node_refs(
+                    command.left_node_ref, command.right_node_ref
+                ),
                 created_at=command.created_at,
             )
             created_node_refs = tuple(

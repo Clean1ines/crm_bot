@@ -59,23 +59,17 @@ class DraftClaimCompactionPromptClaim:
     claim_id: str
     claim: str
     questions: tuple[str, ...]
-    exclusion_scope: tuple[str, ...]
-    granularity: str
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.claim_id, "claim_id")
         _require_non_empty_text(self.claim, "claim")
         _require_text_tuple(self.questions, "questions")
-        _require_text_tuple(self.exclusion_scope, "exclusion_scope")
-        _require_non_empty_text(self.granularity, "granularity")
 
     def to_json_dict(self) -> JsonObject:
         return {
             "id": self.claim_id,
             "claim": self.claim,
             "questions": _json_string_list(self.questions),
-            "exclusion_scope": _json_string_list(self.exclusion_scope),
-            "granularity": self.granularity,
         }
 
 
@@ -126,7 +120,6 @@ class DraftClaimCompactionOutputClaim:
     key: str
     claim: str
     claim_kind: DraftClaimCompactionClaimKind
-    granularity: DraftClaimCompactionGranularity
     source_claim_refs: tuple[str, ...]
     triples: tuple[DraftClaimCompactionTriple, ...]
     merge_decision: DraftClaimCompactionMergeDecision
@@ -135,7 +128,6 @@ class DraftClaimCompactionOutputClaim:
         _require_non_empty_text(self.key, "key")
         _require_non_empty_text(self.claim, "claim")
         object.__setattr__(self, "claim_kind", _claim_kind(self.claim_kind))
-        object.__setattr__(self, "granularity", _granularity(self.granularity))
         _require_text_tuple(self.source_claim_refs, "source_claim_refs")
         if not self.source_claim_refs:
             raise ValueError("source_claim_refs must be non-empty")
@@ -160,7 +152,6 @@ class DraftClaimCompactionOutputClaim:
             "key": self.key,
             "claim": self.claim,
             "claim_kind": self.claim_kind.value,
-            "granularity": self.granularity.value,
             "source_claim_refs": _json_string_list(self.source_claim_refs),
             "triples": triples_json,
             "merge_decision": self.merge_decision.value,

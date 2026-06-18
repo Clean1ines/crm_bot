@@ -341,8 +341,6 @@ def _mixed_compacted_prompt_claim(
         claim_id=node.node_ref,
         claim=node.compacted_claim,
         questions=(),
-        exclusion_scope=(),
-        granularity=node.compacted_granularity or "composite",
     )
 
 
@@ -353,8 +351,6 @@ def _raw_prompt_claim(
         claim_id=claim.observation_ref,
         claim=claim.claim,
         questions=_dedupe_preserving_order(claim.possible_questions),
-        exclusion_scope=_dedupe_preserving_order(claim.exclusion_scope),
-        granularity=claim.granularity,
     )
 
 

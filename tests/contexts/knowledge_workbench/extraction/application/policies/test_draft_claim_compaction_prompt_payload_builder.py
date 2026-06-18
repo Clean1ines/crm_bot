@@ -67,8 +67,6 @@ def test_build_draft_vs_draft_payload_includes_only_minimal_semantic_fields() ->
         "id": "claim-a",
         "claim": "Claim text claim-a",
         "questions": ["What is it?"],
-        "exclusion_scope": ["pricing"],
-        "granularity": "atomic",
     }
     assert "evidence_block" not in claim_json
     assert "source_unit_ref" not in claim_json
@@ -89,7 +87,8 @@ def test_build_draft_vs_draft_payload_deduplicates_lists_preserving_order() -> N
     claim_json = payload.to_json_dict()["claims"][0]
 
     assert claim_json["questions"] == ["What is it?", "How does it work?"]
-    assert claim_json["exclusion_scope"] == ["pricing", "delivery"]
+    assert "exclusion_scope" not in claim_json
+    assert "granularity" not in claim_json
 
 
 def _triple() -> DraftClaimCompactionTriple:
@@ -106,7 +105,6 @@ def _compacted_claim(key: str) -> DraftClaimCompactionOutputClaim:
         key=key,
         claim=f"Claim {key}",
         claim_kind="capability",
-        granularity="atomic",
         source_claim_refs=(f"source-{key}",),
         triples=(_triple(),),
         merge_decision="unmerged",

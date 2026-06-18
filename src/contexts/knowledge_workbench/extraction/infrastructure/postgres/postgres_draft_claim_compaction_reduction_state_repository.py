@@ -1618,9 +1618,7 @@ def _compacted_claims_merge_compared_nodes(
         _source_claim_refs_from_node_ref(node_ref) for node_ref in compared_node_refs
     )
     union_refs = _dedupe_sorted(
-        source_ref
-        for source_refs in compared_source_sets
-        for source_ref in source_refs
+        source_ref for source_refs in compared_source_sets for source_ref in source_refs
     )
     for claim in compacted_claims:
         if tuple(sorted(claim.source_claim_refs)) == union_refs:

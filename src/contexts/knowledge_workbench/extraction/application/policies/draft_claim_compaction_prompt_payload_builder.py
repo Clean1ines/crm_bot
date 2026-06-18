@@ -31,8 +31,6 @@ class DraftClaimCompactionPromptPayloadBuilder:
                     claim_id=claim.observation_ref,
                     claim=claim.claim,
                     questions=_dedupe_texts(claim.possible_questions),
-                    exclusion_scope=_dedupe_texts(claim.exclusion_scope),
-                    granularity=claim.granularity,
                 )
                 for claim in claims
             ),

@@ -223,7 +223,6 @@ def _compacted_claim(
         key=key,
         claim="Product supports refunds.",
         claim_kind="capability",
-        granularity="atomic",
         source_claim_refs=source_refs,
         triples=(
             DraftClaimCompactionTriple(

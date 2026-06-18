@@ -6,8 +6,6 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionBudgetFitStatus,
     DraftClaimCompactionComparison,
     DraftClaimCompactionComparisonStatus,
-    DraftClaimCompactionComponent,
-    DraftClaimCompactionComponentIncompatibility,
     DraftClaimCompactionNextWorkItem,
     DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionNode,
@@ -186,7 +184,8 @@ class _ComponentIndex:
             incompatibility.pair_key
             for incompatibility in state.incompatibilities
             if incompatibility.left_component_ref in set(component_by_node_ref.values())
-            and incompatibility.right_component_ref in set(component_by_node_ref.values())
+            and incompatibility.right_component_ref
+            in set(component_by_node_ref.values())
         )
         return cls(
             component_by_node_ref=component_by_node_ref,
@@ -257,14 +256,19 @@ class _ComponentIndex:
         right_node_ref: str,
         comparison_index: _ComparisonIndex,
     ) -> bool:
-        left_component_ref = self.component_by_node_ref.get(left_node_ref, left_node_ref)
+        left_component_ref = self.component_by_node_ref.get(
+            left_node_ref, left_node_ref
+        )
         right_component_ref = self.component_by_node_ref.get(
             right_node_ref,
             right_node_ref,
         )
         if left_component_ref == right_component_ref:
             return False
-        if _pair_key(left_component_ref, right_component_ref) in self.incompatible_pairs:
+        if (
+            _pair_key(left_component_ref, right_component_ref)
+            in self.incompatible_pairs
+        ):
             return False
         status = comparison_index.status(left_node_ref, right_node_ref)
         if status is DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL:
@@ -305,7 +309,9 @@ def _find_bridge_rewrite(
             if right_status is not DraftClaimCompactionComparisonStatus.MERGED:
                 continue
             left_result = comparison_index.result_node_ref(left.node_ref, raw.node_ref)
-            right_result = comparison_index.result_node_ref(right.node_ref, raw.node_ref)
+            right_result = comparison_index.result_node_ref(
+                right.node_ref, raw.node_ref
+            )
             if left_result is None or right_result is None:
                 continue
             if not component_index.can_compare(

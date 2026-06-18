@@ -392,7 +392,6 @@ def _nodes_tuple(value: tuple[DraftClaimCompactionNode, ...]) -> None:
             raise TypeError("nodes must contain DraftClaimCompactionNode")
 
 
-
 def _components_tuple(value: tuple[DraftClaimCompactionComponent, ...]) -> None:
     if not isinstance(value, tuple):
         raise TypeError("components must be tuple")
@@ -407,7 +406,9 @@ def _incompatibilities_tuple(
     if not isinstance(value, tuple):
         raise TypeError("incompatibilities must be tuple")
     for incompatibility in value:
-        if not isinstance(incompatibility, DraftClaimCompactionComponentIncompatibility):
+        if not isinstance(
+            incompatibility, DraftClaimCompactionComponentIncompatibility
+        ):
             raise TypeError(
                 "incompatibilities must contain "
                 "DraftClaimCompactionComponentIncompatibility",
