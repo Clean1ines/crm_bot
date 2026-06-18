@@ -66,7 +66,13 @@ class ResolveLlmDispatchPreparationStrategy:
                 strategy_applied=strategy,
             )
 
-        if strategy in {"FALLBACK_MODEL_REQUIRED", "RETRY_FALLBACK_MODEL"}:
+        if strategy == "RETRY_FALLBACK_MODEL":
+            raise ValueError(
+                "RETRY_FALLBACK_MODEL is not an explicit dispatch preparation "
+                "strategy; use a specific retry cause strategy instead"
+            )
+
+        if strategy == "FALLBACK_MODEL_REQUIRED":
             return ResolveLlmDispatchPreparationStrategyResult(
                 active_model_ref=_first_automatic_fallback(command.route_catalog),
                 strategy_applied=strategy,

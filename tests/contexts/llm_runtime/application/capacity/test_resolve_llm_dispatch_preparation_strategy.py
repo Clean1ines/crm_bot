@@ -114,13 +114,9 @@ def test_empty_claims_check_required_marker_resolves_first_automatic_fallback_mo
     assert result.strategy_applied == "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
 
 
-def test_retry_fallback_model_resolves_first_automatic_fallback_model() -> None:
-    catalog = _catalog()
-
-    result = _resolver().execute(_command("RETRY_FALLBACK_MODEL"))
-
-    assert result.active_model_ref == catalog.automatic_fallback_model_refs()[0]
-    assert result.strategy_applied == "RETRY_FALLBACK_MODEL"
+def test_retry_fallback_model_marker_is_rejected_as_generic_retry_route() -> None:
+    with pytest.raises(ValueError, match="RETRY_FALLBACK_MODEL"):
+        _resolver().execute(_command("RETRY_FALLBACK_MODEL"))
 
 
 def test_fallback_required_marker_resolves_first_automatic_fallback_model() -> None:
