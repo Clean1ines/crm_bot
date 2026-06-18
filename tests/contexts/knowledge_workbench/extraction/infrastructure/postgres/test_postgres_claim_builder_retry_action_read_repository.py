@@ -113,6 +113,7 @@ async def test_retry_action_for_retryable_failed_work_item_is_counted() -> None:
     )
 
     assert summary.retry_fallback_model_count == 1
+    assert summary.retry_empty_claims_check_model_count == 0
     assert summary.retry_larger_output_model_count == 0
     assert connection.last_status_values == [
         WorkItemStatus.READY.value,

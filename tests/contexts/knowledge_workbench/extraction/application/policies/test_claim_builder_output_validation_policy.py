@@ -162,7 +162,7 @@ def test_empty_claims_after_same_model_retry_uses_fallback_check_model() -> None
 
     _assert_failure(
         result,
-        decision=ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL,
+        decision=(ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL),
         failure_reason=(
             ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED
         ),

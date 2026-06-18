@@ -102,24 +102,30 @@ def test_retry_same_model_maps_to_retry_same_model() -> None:
     assert action.should_mark_work_item_completed is False
 
 
-def test_retry_fallback_model_maps_to_retry_fallback_model() -> None:
+def test_retry_empty_claims_check_model_maps_to_explicit_check_action() -> None:
     action = _action(
         _decision(
-            outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_FALLBACK_MODEL,
+            outcome_kind=(
+                ClaimBuilderAttemptOutcomeKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL
+            ),
             validation_decision=(
-                ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL
+                ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL
             ),
             validation_failure_reason=(
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED
             ),
-            next_model_strategy=(ClaimBuilderNextModelStrategy.FALLBACK_MODEL_REQUIRED),
+            next_model_strategy=(
+                ClaimBuilderNextModelStrategy.EMPTY_CLAIMS_CHECK_MODEL_REQUIRED
+            ),
             retry_recommended=True,
         )
     )
 
-    assert action.kind is ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL
+    assert action.kind is (
+        ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL
+    )
     assert action.next_model_strategy is (
-        ClaimBuilderNextModelStrategy.FALLBACK_MODEL_REQUIRED
+        ClaimBuilderNextModelStrategy.EMPTY_CLAIMS_CHECK_MODEL_REQUIRED
     )
     assert action.should_mark_work_item_completed is False
 

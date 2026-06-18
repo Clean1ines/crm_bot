@@ -16,6 +16,7 @@ class ClaimBuilderAttemptOutcomeKind(Enum):
     VALID_CLAIMS = "VALID_CLAIMS"
     VALID_EMPTY = "VALID_EMPTY"
     RETRY_SAME_MODEL = "RETRY_SAME_MODEL"
+    RETRY_EMPTY_CLAIMS_CHECK_MODEL = "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
     RETRY_FALLBACK_MODEL = "RETRY_FALLBACK_MODEL"
     RETRY_LARGER_OUTPUT_LIMIT_MODEL = "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
     TERMINAL_INVALID = "TERMINAL_INVALID"
@@ -23,6 +24,7 @@ class ClaimBuilderAttemptOutcomeKind(Enum):
 
 class ClaimBuilderNextModelStrategy(Enum):
     SAME_MODEL = "SAME_MODEL"
+    EMPTY_CLAIMS_CHECK_MODEL_REQUIRED = "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
     FALLBACK_MODEL_REQUIRED = "FALLBACK_MODEL_REQUIRED"
     LARGER_OUTPUT_LIMIT_MODEL_REQUIRED = "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
 
@@ -205,6 +207,16 @@ def _decision_from_validation(
             claims=(),
             next_model_strategy=None,
             retry_recommended=False,
+        )
+
+    if (
+        validation_result.decision
+        is ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL
+    ):
+        return _retry_decision(
+            outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL,
+            validation_result=validation_result,
+            strategy=ClaimBuilderNextModelStrategy.EMPTY_CLAIMS_CHECK_MODEL_REQUIRED,
         )
 
     if (

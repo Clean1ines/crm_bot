@@ -57,6 +57,15 @@ class ResolveLlmDispatchPreparationStrategy:
                 strategy_applied=strategy,
             )
 
+        if strategy in {
+            "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED",
+            "RETRY_EMPTY_CLAIMS_CHECK_MODEL",
+        }:
+            return ResolveLlmDispatchPreparationStrategyResult(
+                active_model_ref=_first_automatic_fallback(command.route_catalog),
+                strategy_applied=strategy,
+            )
+
         if strategy in {"FALLBACK_MODEL_REQUIRED", "RETRY_FALLBACK_MODEL"}:
             return ResolveLlmDispatchPreparationStrategyResult(
                 active_model_ref=_first_automatic_fallback(command.route_catalog),

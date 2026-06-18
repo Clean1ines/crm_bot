@@ -128,12 +128,14 @@ def test_empty_claims_after_same_model_retry_uses_fallback_check_model() -> None
         ),
     )
 
-    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_FALLBACK_MODEL
+    assert decision.outcome_kind is (
+        ClaimBuilderAttemptOutcomeKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL
+    )
     assert decision.validation_decision is (
-        ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL
+        ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL
     )
     assert decision.next_model_strategy is (
-        ClaimBuilderNextModelStrategy.FALLBACK_MODEL_REQUIRED
+        ClaimBuilderNextModelStrategy.EMPTY_CLAIMS_CHECK_MODEL_REQUIRED
     )
 
 

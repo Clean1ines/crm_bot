@@ -26,6 +26,7 @@ class ClaimBuilderOutputValidationDecision(Enum):
     VALID_CLAIMS = "VALID_CLAIMS"
     VALID_EMPTY = "VALID_EMPTY"
     RETRY_SAME_MODEL = "RETRY_SAME_MODEL"
+    RETRY_EMPTY_CLAIMS_CHECK_MODEL = "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
     RETRY_FALLBACK_MODEL = "RETRY_FALLBACK_MODEL"
     RETRY_LARGER_OUTPUT_LIMIT_MODEL = "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
     TERMINAL_INVALID = "TERMINAL_INVALID"
@@ -161,7 +162,7 @@ class ClaimBuilderOutputValidationPolicy:
                 )
             if command.empty_claims_attempt_count == 1:
                 return _failure(
-                    ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL,
+                    ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL,
                     ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED,
                 )
             return ClaimBuilderOutputValidationResult(

@@ -92,6 +92,28 @@ def test_same_model_marker_keeps_active_model_ref() -> None:
     assert result.strategy_applied == "SAME_MODEL"
 
 
+def test_retry_empty_claims_check_model_resolves_first_automatic_fallback_model() -> (
+    None
+):
+    catalog = _catalog()
+
+    result = _resolver().execute(_command("RETRY_EMPTY_CLAIMS_CHECK_MODEL"))
+
+    assert result.active_model_ref == catalog.automatic_fallback_model_refs()[0]
+    assert result.strategy_applied == "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
+
+
+def test_empty_claims_check_required_marker_resolves_first_automatic_fallback_model() -> (
+    None
+):
+    catalog = _catalog()
+
+    result = _resolver().execute(_command("EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"))
+
+    assert result.active_model_ref == catalog.automatic_fallback_model_refs()[0]
+    assert result.strategy_applied == "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
+
+
 def test_retry_fallback_model_resolves_first_automatic_fallback_model() -> None:
     catalog = _catalog()
 

@@ -180,6 +180,7 @@ class FakeWorkItemProgressReadRepository:
 def _retry_action_summary(
     *,
     retry_same_model_count: int = 0,
+    retry_empty_claims_check_model_count: int = 0,
     retry_fallback_model_count: int = 0,
     retry_larger_output_model_count: int = 0,
     retry_larger_input_model_count: int = 0,
@@ -193,6 +194,7 @@ def _retry_action_summary(
         workflow_run_id=_workflow_run_id(),
         work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
         retry_same_model_count=retry_same_model_count,
+        retry_empty_claims_check_model_count=retry_empty_claims_check_model_count,
         retry_fallback_model_count=retry_fallback_model_count,
         retry_larger_output_model_count=retry_larger_output_model_count,
         retry_larger_input_model_count=retry_larger_input_model_count,

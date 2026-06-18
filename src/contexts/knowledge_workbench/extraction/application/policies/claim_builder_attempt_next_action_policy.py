@@ -15,6 +15,7 @@ class ClaimBuilderAttemptNextActionKind(Enum):
     PERSIST_VALID_CLAIMS = "PERSIST_VALID_CLAIMS"
     ACCEPT_VALID_EMPTY = "ACCEPT_VALID_EMPTY"
     RETRY_SAME_MODEL = "RETRY_SAME_MODEL"
+    RETRY_EMPTY_CLAIMS_CHECK_MODEL = "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
     RETRY_FALLBACK_MODEL = "RETRY_FALLBACK_MODEL"
     RETRY_LARGER_OUTPUT_LIMIT_MODEL = "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
     RETRY_LARGER_INPUT_LIMIT_MODEL = "RETRY_LARGER_INPUT_LIMIT_MODEL"
@@ -67,6 +68,7 @@ class ClaimBuilderAttemptNextAction:
                 raise ValueError("ACCEPT_VALID_EMPTY must mark work item completed")
         if self.kind in {
             ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL,
+            ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL,
             ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL,
             ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL,
             ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL,
@@ -117,6 +119,16 @@ class ClaimBuilderAttemptNextActionPolicy:
                 kind=ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL,
                 decision=decision,
                 fallback_reason="retry_same_model",
+            )
+
+        if (
+            decision.outcome_kind
+            is ClaimBuilderAttemptOutcomeKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL
+        ):
+            return _retry_action(
+                kind=ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL,
+                decision=decision,
+                fallback_reason="retry_empty_claims_check_model",
             )
 
         if decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_FALLBACK_MODEL:

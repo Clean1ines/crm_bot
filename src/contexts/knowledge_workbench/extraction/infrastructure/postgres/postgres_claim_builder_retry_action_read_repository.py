@@ -82,6 +82,7 @@ class PostgresClaimBuilderRetryActionReadRepository(
 def _retry_action_values() -> list[str]:
     return [
         ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value,
+        ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value,
@@ -136,6 +137,7 @@ def _summary_from_records(
     now: datetime,
 ) -> WorkItemRetryActionSummary:
     retry_same_model_count = 0
+    retry_empty_claims_check_model_count = 0
     retry_fallback_model_count = 0
     retry_larger_output_model_count = 0
     retry_larger_input_model_count = 0
@@ -151,6 +153,11 @@ def _summary_from_records(
             == ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value
         ):
             retry_same_model_count += 1
+        elif (
+            record.next_action_kind
+            == ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
+        ):
+            retry_empty_claims_check_model_count += 1
         elif (
             record.next_action_kind
             == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
@@ -194,6 +201,7 @@ def _summary_from_records(
         workflow_run_id=workflow_run_id,
         work_kind=work_kind,
         retry_same_model_count=retry_same_model_count,
+        retry_empty_claims_check_model_count=retry_empty_claims_check_model_count,
         retry_fallback_model_count=retry_fallback_model_count,
         retry_larger_output_model_count=retry_larger_output_model_count,
         retry_larger_input_model_count=retry_larger_input_model_count,

@@ -33,6 +33,7 @@ class WorkItemRetryActionSummary:
     workflow_run_id: str
     work_kind: WorkKind
     retry_same_model_count: int
+    retry_empty_claims_check_model_count: int
     retry_fallback_model_count: int
     retry_larger_output_model_count: int
     retry_larger_input_model_count: int
@@ -49,6 +50,10 @@ class WorkItemRetryActionSummary:
             raise TypeError("work_kind must be WorkKind")
         for field_name, value in (
             ("retry_same_model_count", self.retry_same_model_count),
+            (
+                "retry_empty_claims_check_model_count",
+                self.retry_empty_claims_check_model_count,
+            ),
             ("retry_fallback_model_count", self.retry_fallback_model_count),
             (
                 "retry_larger_output_model_count",
@@ -85,6 +90,7 @@ class WorkItemRetryActionSummary:
     def has_retry_actions(self) -> bool:
         return (
             self.retry_same_model_count
+            + self.retry_empty_claims_check_model_count
             + self.retry_fallback_model_count
             + self.retry_larger_output_model_count
             + self.retry_larger_input_model_count
@@ -99,6 +105,9 @@ class WorkItemRetryActionSummary:
             "workflow_run_id": self.workflow_run_id,
             "work_kind": self.work_kind.value,
             "retry_same_model_count": self.retry_same_model_count,
+            "retry_empty_claims_check_model_count": (
+                self.retry_empty_claims_check_model_count
+            ),
             "retry_fallback_model_count": self.retry_fallback_model_count,
             "retry_larger_output_model_count": (self.retry_larger_output_model_count),
             "retry_larger_input_model_count": (self.retry_larger_input_model_count),

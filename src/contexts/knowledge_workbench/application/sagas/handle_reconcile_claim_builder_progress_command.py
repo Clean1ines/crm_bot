@@ -465,6 +465,9 @@ async def _save_progress_snapshot(
     domain_counters["claim_builder_retry_same_model_pending_count"] = (
         retry_action_summary.retry_same_model_count
     )
+    domain_counters["claim_builder_retry_empty_claims_check_model_pending_count"] = (
+        retry_action_summary.retry_empty_claims_check_model_count
+    )
     domain_counters["claim_builder_retry_fallback_model_pending_count"] = (
         retry_action_summary.retry_fallback_model_count
     )
@@ -556,6 +559,8 @@ def _selected_retry_strategy(
         "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED",
     ):
         return "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
+    if retry_action_summary.retry_empty_claims_check_model_count > 0:
+        return "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
     if retry_action_summary.retry_fallback_model_count > 0:
         return "FALLBACK_MODEL_REQUIRED"
     if retry_action_summary.retry_same_model_count > 0:
