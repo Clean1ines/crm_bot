@@ -667,6 +667,30 @@ async def test_retry_fallback_model_count_appends_prepare_with_fallback_strategy
 
 
 @pytest.mark.asyncio
+async def test_retry_strategy_prepare_key_ignores_reconcile_causation() -> None:
+    _, _, _, first_uow = await _execute(
+        workflow_command=_workflow_command(reconcile_ref="work-1-attempt-1"),
+        summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
+        retry_action_summary=_retry_action_summary(retry_fallback_model_count=1),
+    )
+    _, _, _, second_uow = await _execute(
+        workflow_command=_workflow_command(reconcile_ref="work-2-attempt-1"),
+        summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
+        retry_action_summary=_retry_action_summary(retry_fallback_model_count=1),
+    )
+
+    first_command = first_uow.command_log.pending_commands[0]
+    second_command = second_uow.command_log.pending_commands[0]
+
+    assert first_command.idempotency_key == second_command.idempotency_key
+    assert first_command.payload == second_command.payload
+    assert first_command.run_after == second_command.run_after
+    assert first_command.payload["selected_retry_strategy"] == (
+        "FALLBACK_MODEL_REQUIRED"
+    )
+
+
+@pytest.mark.asyncio
 async def test_retry_larger_output_count_appends_prepare_with_larger_output_strategy() -> (
     None
 ):

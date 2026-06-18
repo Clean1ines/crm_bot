@@ -256,7 +256,11 @@ def _next_command(
         selected_retry_strategy=selected_retry_strategy,
         scheduled_work_item_count=summary.total_count,
     )
-    causation_scope = _prepare_command_causation_scope(workflow_command)
+    causation_scope = (
+        None
+        if selected_retry_strategy is not None
+        else _prepare_command_causation_scope(workflow_command)
+    )
 
     if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW:
         return _prepare_dispatch_batch_command(
@@ -267,7 +271,11 @@ def _next_command(
             selected_retry_strategy=selected_retry_strategy,
             run_after=occurred_at,
             occurred_at=occurred_at,
-            suffix=f"now:{prepare_suffix_scope}:{causation_scope}",
+            suffix=_prepare_command_idempotency_suffix(
+                prefix="now",
+                prepare_suffix_scope=prepare_suffix_scope,
+                causation_scope=causation_scope,
+            ),
         )
 
     if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER:
@@ -282,9 +290,12 @@ def _next_command(
             selected_retry_strategy=selected_retry_strategy,
             run_after=next_due_at,
             occurred_at=occurred_at,
-            suffix=(
-                f"later:{prepare_suffix_scope}:"
-                f"{next_due_at.isoformat()}:{causation_scope}"
+            suffix=_prepare_command_idempotency_suffix(
+                prefix="later",
+                prepare_suffix_scope=(
+                    f"{prepare_suffix_scope}:{next_due_at.isoformat()}"
+                ),
+                causation_scope=causation_scope,
             ),
         )
 
@@ -312,6 +323,17 @@ def _prepare_command_suffix_scope(
 ) -> str:
     strategy_scope = selected_retry_strategy or "default"
     return f"{strategy_scope}:scheduled:{scheduled_work_item_count}"
+
+
+def _prepare_command_idempotency_suffix(
+    *,
+    prefix: str,
+    prepare_suffix_scope: str,
+    causation_scope: str | None,
+) -> str:
+    if causation_scope is None:
+        return f"{prefix}:{prepare_suffix_scope}"
+    return f"{prefix}:{prepare_suffix_scope}:{causation_scope}"
 
 
 def _prepare_command_causation_scope(workflow_command: WorkflowCommand) -> str:
