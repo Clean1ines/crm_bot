@@ -92,9 +92,38 @@ def _read_prompt_text() -> str:
         raise ValueError("Prompt contract file must be non-empty")
     if f"NODE: {CLAIM_BUILDER_SECTION_EXTRACTION_PROMPT_ID}" not in prompt_text:
         raise ValueError("Prompt contract file has unexpected node id")
-    if "Return exactly one valid JSON object." not in prompt_text:
+    if not _requires_strict_json_output(prompt_text):
         raise ValueError("Prompt contract file must require strict JSON output")
     return prompt_text
+
+
+def _requires_strict_json_output(prompt_text: str) -> bool:
+    normalized = " ".join(prompt_text.lower().split())
+
+    has_json_object_contract = "json" in normalized and "object" in normalized
+    has_boundary_contract = (
+        ("start" in normalized and "end" in normalized)
+        or "output :=" in normalized
+        or "valid json object" in normalized
+    )
+    has_schema_contract = '"claims"' in prompt_text or "claims" in normalized
+    forbids_non_json_text = (
+        "any text before json" in normalized
+        or "any text after json" in normalized
+        or "text before json" in normalized
+        or "text after json" in normalized
+        or "markdown" in normalized
+        or "comments" in normalized
+        or "explanations" in normalized
+        or "output :=" in normalized
+    )
+
+    return (
+        has_json_object_contract
+        and has_boundary_contract
+        and has_schema_contract
+        and forbids_non_json_text
+    )
 
 
 def _system_message(prompt_text: str) -> str:
