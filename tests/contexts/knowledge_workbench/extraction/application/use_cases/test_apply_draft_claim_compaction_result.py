@@ -74,6 +74,7 @@ class FakeReductionStateRepository:
         work_item_id: str,
         round_index: int,
         compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
+        compared_node_refs: tuple[str, ...] = (),
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
         assert workflow_run_id == "workflow-1"
@@ -82,6 +83,18 @@ class FakeReductionStateRepository:
         assert work_item_id == "work-item-1"
         assert round_index == 0
         assert created_at == _now()
+        assert compared_node_refs == (
+            raw_claim_node_ref(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+            ),
+            raw_claim_node_ref(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-b",
+            ),
+        )
         assert compacted_claims[0].source_claim_refs == ("claim-a", "claim-b")
         assert compacted_claims[0].granularity.value == "composite"
         assert compacted_claims[0].possible_questions == ("Q1", "Q2")

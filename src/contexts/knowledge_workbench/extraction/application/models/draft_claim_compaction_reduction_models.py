@@ -146,6 +146,44 @@ class DraftClaimCompactionComparison:
 
 
 @dataclass(frozen=True, slots=True)
+class DraftClaimCompactionComponent:
+    component_ref: str
+    representative_node_ref: str
+    source_claim_refs: tuple[str, ...]
+    active: bool = True
+    supersedes_component_refs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        _text(self.component_ref, "component_ref")
+        _text(self.representative_node_ref, "representative_node_ref")
+        _text_tuple(self.source_claim_refs, "source_claim_refs", allow_empty=False)
+        if not isinstance(self.active, bool):
+            raise TypeError("active must be bool")
+        _text_tuple(
+            self.supersedes_component_refs,
+            "supersedes_component_refs",
+            allow_empty=True,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionComponentIncompatibility:
+    left_component_ref: str
+    right_component_ref: str
+
+    def __post_init__(self) -> None:
+        _text(self.left_component_ref, "left_component_ref")
+        _text(self.right_component_ref, "right_component_ref")
+        if self.left_component_ref == self.right_component_ref:
+            raise ValueError("incompatibility component refs must be different")
+
+    @property
+    def pair_key(self) -> tuple[str, str]:
+        left, right = sorted((self.left_component_ref, self.right_component_ref))
+        return left, right
+
+
+@dataclass(frozen=True, slots=True)
 class DraftClaimCompactionRound:
     round_index: int
     comparisons: tuple[DraftClaimCompactionComparison, ...]
@@ -162,6 +200,8 @@ class DraftClaimCompactionPlannerState:
     nodes: tuple[DraftClaimCompactionNode, ...]
     comparisons: tuple[DraftClaimCompactionComparison, ...] = ()
     rounds: tuple[DraftClaimCompactionRound, ...] = ()
+    components: tuple[DraftClaimCompactionComponent, ...] = ()
+    incompatibilities: tuple[DraftClaimCompactionComponentIncompatibility, ...] = ()
     budget_fit: DraftClaimCompactionBudgetFit = field(
         default_factory=lambda: DraftClaimCompactionBudgetFit(
             DraftClaimCompactionBudgetFitStatus.FITS_PRIMARY,
@@ -175,6 +215,8 @@ class DraftClaimCompactionPlannerState:
         _nodes_tuple(self.nodes)
         _comparisons_tuple(self.comparisons)
         _rounds_tuple(self.rounds)
+        _components_tuple(self.components)
+        _incompatibilities_tuple(self.incompatibilities)
         if not isinstance(self.budget_fit, DraftClaimCompactionBudgetFit):
             raise TypeError("budget_fit must be DraftClaimCompactionBudgetFit")
         _text(self.primary_model_id, "primary_model_id")
@@ -185,6 +227,9 @@ class DraftClaimCompactionPlannerState:
 
     def active_nodes(self) -> tuple[DraftClaimCompactionNode, ...]:
         return tuple(node for node in self.nodes if node.active)
+
+    def active_components(self) -> tuple[DraftClaimCompactionComponent, ...]:
+        return tuple(component for component in self.components if component.active)
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,6 +390,28 @@ def _nodes_tuple(value: tuple[DraftClaimCompactionNode, ...]) -> None:
     for node in value:
         if not isinstance(node, DraftClaimCompactionNode):
             raise TypeError("nodes must contain DraftClaimCompactionNode")
+
+
+
+def _components_tuple(value: tuple[DraftClaimCompactionComponent, ...]) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError("components must be tuple")
+    for component in value:
+        if not isinstance(component, DraftClaimCompactionComponent):
+            raise TypeError("components must contain DraftClaimCompactionComponent")
+
+
+def _incompatibilities_tuple(
+    value: tuple[DraftClaimCompactionComponentIncompatibility, ...],
+) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError("incompatibilities must be tuple")
+    for incompatibility in value:
+        if not isinstance(incompatibility, DraftClaimCompactionComponentIncompatibility):
+            raise TypeError(
+                "incompatibilities must contain "
+                "DraftClaimCompactionComponentIncompatibility",
+            )
 
 
 def _comparisons_tuple(value: tuple[DraftClaimCompactionComparison, ...]) -> None:

@@ -914,6 +914,8 @@ async def _delete_compaction_artifacts(
 ) -> int:
     total = 0
     for table_name in (
+        "draft_claim_compaction_component_incompatibilities",
+        "draft_claim_compaction_components",
         "draft_claim_compaction_comparisons",
         "draft_claim_compaction_rounds",
         "draft_claim_compaction_node_sources",

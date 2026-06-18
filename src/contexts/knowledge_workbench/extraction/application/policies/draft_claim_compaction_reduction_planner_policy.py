@@ -6,6 +6,8 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionBudgetFitStatus,
     DraftClaimCompactionComparison,
     DraftClaimCompactionComparisonStatus,
+    DraftClaimCompactionComponent,
+    DraftClaimCompactionComponentIncompatibility,
     DraftClaimCompactionNextWorkItem,
     DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionNode,
@@ -29,7 +31,8 @@ class DraftClaimCompactionReductionPlannerPolicy:
                 "ordinary comparison and reduced rewrite exceed primary budget",
             )
 
-        index = _ComparisonIndex(state.comparisons)
+        comparison_index = _ComparisonIndex(state.comparisons)
+        component_index = _ComponentIndex.from_state(state)
         active_nodes = _ordered_active_nodes(state)
         active_compacted = _nodes_by_kind(
             active_nodes,
@@ -40,7 +43,8 @@ class DraftClaimCompactionReductionPlannerPolicy:
         reduced_rewrite = _find_bridge_rewrite(
             active_compacted=active_compacted,
             active_raw=active_raw,
-            index=index,
+            comparison_index=comparison_index,
+            component_index=component_index,
         )
         if reduced_rewrite is not None:
             return _decision(
@@ -50,7 +54,11 @@ class DraftClaimCompactionReductionPlannerPolicy:
                 reason="two bridge comparisons merged after primary too-large pair",
             )
 
-        compacted_pair = _first_uncompared_pair(active_compacted, index)
+        compacted_pair = _first_comparable_pair(
+            active_compacted,
+            comparison_index=comparison_index,
+            component_index=component_index,
+        )
         if compacted_pair is not None:
             return _decision(
                 state=state,
@@ -62,7 +70,8 @@ class DraftClaimCompactionReductionPlannerPolicy:
         bridge_pair = _find_bridge_comparison(
             active_compacted=active_compacted,
             active_raw=active_raw,
-            index=index,
+            comparison_index=comparison_index,
+            component_index=component_index,
         )
         if bridge_pair is not None:
             return _decision(
@@ -72,10 +81,11 @@ class DraftClaimCompactionReductionPlannerPolicy:
                 reason="primary too-large compacted pair can be probed through raw node",
             )
 
-        mixed_pair = _first_uncompared_mixed_pair(
+        mixed_pair = _first_comparable_mixed_pair(
             active_compacted=active_compacted,
             active_raw=active_raw,
-            index=index,
+            comparison_index=comparison_index,
+            component_index=component_index,
         )
         if mixed_pair is not None:
             return _decision(
@@ -85,7 +95,11 @@ class DraftClaimCompactionReductionPlannerPolicy:
                 reason="pending raw node must be compared with compacted node",
             )
 
-        raw_pair = _first_uncompared_pair(active_raw, index)
+        raw_pair = _first_comparable_pair(
+            active_raw,
+            comparison_index=comparison_index,
+            component_index=component_index,
+        )
         if raw_pair is not None:
             return _decision(
                 state=state,
@@ -94,7 +108,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
                 reason="raw-vs-raw is lowest ordinary comparison priority",
             )
 
-        if _has_unresolved_primary_too_large_pair(active_nodes, index):
+        if _has_unresolved_primary_too_large_pair(active_nodes, comparison_index):
             return _wait_for_user_model_choice(
                 state,
                 "unresolved comparison is too large for primary model",
@@ -104,7 +118,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             state=state,
             work_type=DraftClaimCompactionNextWorkItemType.DONE,
             node_refs=(),
-            reason="all active nodes are reduced or pairwise known different",
+            reason="all active components are reduced or known incompatible",
         )
 
 
@@ -144,6 +158,120 @@ class _ComparisonIndex:
         return None
 
 
+@dataclass(frozen=True, slots=True)
+class _ComponentIndex:
+    component_by_node_ref: dict[str, str]
+    incompatible_pairs: frozenset[tuple[str, str]]
+
+    @classmethod
+    def from_state(cls, state: DraftClaimCompactionPlannerState) -> _ComponentIndex:
+        if state.components:
+            return cls._from_persisted_state(state)
+        return cls._from_legacy_state(state)
+
+    @classmethod
+    def _from_persisted_state(
+        cls,
+        state: DraftClaimCompactionPlannerState,
+    ) -> _ComponentIndex:
+        component_by_node_ref: dict[str, str] = {}
+        for component in state.components:
+            if not component.active:
+                continue
+            component_by_node_ref[component.representative_node_ref] = (
+                component.component_ref
+            )
+
+        incompatible_pairs = frozenset(
+            incompatibility.pair_key
+            for incompatibility in state.incompatibilities
+            if incompatibility.left_component_ref in set(component_by_node_ref.values())
+            and incompatibility.right_component_ref in set(component_by_node_ref.values())
+        )
+        return cls(
+            component_by_node_ref=component_by_node_ref,
+            incompatible_pairs=incompatible_pairs,
+        )
+
+    @classmethod
+    def _from_legacy_state(
+        cls,
+        state: DraftClaimCompactionPlannerState,
+    ) -> _ComponentIndex:
+        active_nodes = state.active_nodes()
+        active_refs = {node.node_ref for node in active_nodes}
+        parents = {node_ref: node_ref for node_ref in active_refs}
+
+        def find(node_ref: str) -> str:
+            parent = parents[node_ref]
+            if parent != node_ref:
+                parents[node_ref] = find(parent)
+            return parents[node_ref]
+
+        def union(left: str, right: str) -> None:
+            left_root = find(left)
+            right_root = find(right)
+            if left_root == right_root:
+                return
+            new_root = min(left_root, right_root)
+            old_root = max(left_root, right_root)
+            parents[old_root] = new_root
+
+        for comparison in state.comparisons:
+            if comparison.status is not DraftClaimCompactionComparisonStatus.MERGED:
+                continue
+            if (
+                comparison.left_node_ref not in active_refs
+                or comparison.right_node_ref not in active_refs
+            ):
+                continue
+            union(comparison.left_node_ref, comparison.right_node_ref)
+
+        component_by_node_ref = {
+            node_ref: find(node_ref) for node_ref in sorted(active_refs)
+        }
+
+        incompatible_pairs: set[tuple[str, str]] = set()
+        for comparison in state.comparisons:
+            if comparison.status is not DraftClaimCompactionComparisonStatus.NOT_MERGED:
+                continue
+            if (
+                comparison.left_node_ref not in active_refs
+                or comparison.right_node_ref not in active_refs
+            ):
+                continue
+            left_component = find(comparison.left_node_ref)
+            right_component = find(comparison.right_node_ref)
+            if left_component == right_component:
+                continue
+            incompatible_pairs.add(_pair_key(left_component, right_component))
+
+        return cls(
+            component_by_node_ref=component_by_node_ref,
+            incompatible_pairs=frozenset(incompatible_pairs),
+        )
+
+    def can_compare(
+        self,
+        left_node_ref: str,
+        right_node_ref: str,
+        comparison_index: _ComparisonIndex,
+    ) -> bool:
+        left_component_ref = self.component_by_node_ref.get(left_node_ref, left_node_ref)
+        right_component_ref = self.component_by_node_ref.get(
+            right_node_ref,
+            right_node_ref,
+        )
+        if left_component_ref == right_component_ref:
+            return False
+        if _pair_key(left_component_ref, right_component_ref) in self.incompatible_pairs:
+            return False
+        status = comparison_index.status(left_node_ref, right_node_ref)
+        if status is DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL:
+            return False
+        return status is None
+
+
 def _ordered_active_nodes(
     state: DraftClaimCompactionPlannerState,
 ) -> tuple[DraftClaimCompactionNode, ...]:
@@ -161,23 +289,30 @@ def _find_bridge_rewrite(
     *,
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
-    index: _ComparisonIndex,
+    comparison_index: _ComparisonIndex,
+    component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(active_compacted):
-        if index.status(left.node_ref, right.node_ref) is not (
+        if comparison_index.status(left.node_ref, right.node_ref) is not (
             DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL
         ):
             continue
         for raw in active_raw:
-            left_status = index.status(left.node_ref, raw.node_ref)
-            right_status = index.status(right.node_ref, raw.node_ref)
+            left_status = comparison_index.status(left.node_ref, raw.node_ref)
+            right_status = comparison_index.status(right.node_ref, raw.node_ref)
             if left_status is not DraftClaimCompactionComparisonStatus.MERGED:
                 continue
             if right_status is not DraftClaimCompactionComparisonStatus.MERGED:
                 continue
-            left_result = index.result_node_ref(left.node_ref, raw.node_ref)
-            right_result = index.result_node_ref(right.node_ref, raw.node_ref)
+            left_result = comparison_index.result_node_ref(left.node_ref, raw.node_ref)
+            right_result = comparison_index.result_node_ref(right.node_ref, raw.node_ref)
             if left_result is None or right_result is None:
+                continue
+            if not component_index.can_compare(
+                left_result,
+                right_result,
+                comparison_index,
+            ):
                 continue
             return _pair_key(left_result, right_result)
     return None
@@ -187,32 +322,49 @@ def _find_bridge_comparison(
     *,
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
-    index: _ComparisonIndex,
+    comparison_index: _ComparisonIndex,
+    component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(active_compacted):
-        if index.status(left.node_ref, right.node_ref) is not (
+        if comparison_index.status(left.node_ref, right.node_ref) is not (
             DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL
         ):
             continue
         for raw in active_raw:
-            left_pair = _mixed_candidate(left, raw, active_compacted, index)
+            left_pair = _mixed_candidate(
+                left,
+                raw,
+                comparison_index=comparison_index,
+                component_index=component_index,
+            )
             if left_pair is not None:
                 return left_pair
-            right_pair = _mixed_candidate(right, raw, active_compacted, index)
+            right_pair = _mixed_candidate(
+                right,
+                raw,
+                comparison_index=comparison_index,
+                component_index=component_index,
+            )
             if right_pair is not None:
                 return right_pair
     return None
 
 
-def _first_uncompared_mixed_pair(
+def _first_comparable_mixed_pair(
     *,
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
-    index: _ComparisonIndex,
+    comparison_index: _ComparisonIndex,
+    component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
     for compacted in active_compacted:
         for raw in active_raw:
-            pair = _mixed_candidate(compacted, raw, active_compacted, index)
+            pair = _mixed_candidate(
+                compacted,
+                raw,
+                comparison_index=comparison_index,
+                component_index=component_index,
+            )
             if pair is not None:
                 return pair
     return None
@@ -221,60 +373,37 @@ def _first_uncompared_mixed_pair(
 def _mixed_candidate(
     compacted: DraftClaimCompactionNode,
     raw: DraftClaimCompactionNode,
-    active_compacted: tuple[DraftClaimCompactionNode, ...],
-    index: _ComparisonIndex,
+    *,
+    comparison_index: _ComparisonIndex,
+    component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
-    if index.status(compacted.node_ref, raw.node_ref) is not None:
-        return None
-    if _blocked_by_known_different_compacted_node(
-        compacted=compacted,
-        raw=raw,
-        active_compacted=active_compacted,
-        index=index,
+    if not component_index.can_compare(
+        compacted.node_ref,
+        raw.node_ref,
+        comparison_index,
     ):
         return None
     return compacted.node_ref, raw.node_ref
 
 
-def _blocked_by_known_different_compacted_node(
-    *,
-    compacted: DraftClaimCompactionNode,
-    raw: DraftClaimCompactionNode,
-    active_compacted: tuple[DraftClaimCompactionNode, ...],
-    index: _ComparisonIndex,
-) -> bool:
-    for other in active_compacted:
-        if other.node_ref == compacted.node_ref:
-            continue
-        raw_merged_with_other = (
-            index.status(other.node_ref, raw.node_ref)
-            is DraftClaimCompactionComparisonStatus.MERGED
-        )
-        compacted_known_different = (
-            index.status(other.node_ref, compacted.node_ref)
-            is DraftClaimCompactionComparisonStatus.NOT_MERGED
-        )
-        if raw_merged_with_other and compacted_known_different:
-            return True
-    return False
-
-
-def _first_uncompared_pair(
+def _first_comparable_pair(
     nodes: tuple[DraftClaimCompactionNode, ...],
-    index: _ComparisonIndex,
+    *,
+    comparison_index: _ComparisonIndex,
+    component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(nodes):
-        if index.status(left.node_ref, right.node_ref) is None:
+        if component_index.can_compare(left.node_ref, right.node_ref, comparison_index):
             return left.node_ref, right.node_ref
     return None
 
 
 def _has_unresolved_primary_too_large_pair(
     active_nodes: tuple[DraftClaimCompactionNode, ...],
-    index: _ComparisonIndex,
+    comparison_index: _ComparisonIndex,
 ) -> bool:
     for left, right in _node_pairs(active_nodes):
-        if index.status(left.node_ref, right.node_ref) is (
+        if comparison_index.status(left.node_ref, right.node_ref) is (
             DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL
         ):
             return True

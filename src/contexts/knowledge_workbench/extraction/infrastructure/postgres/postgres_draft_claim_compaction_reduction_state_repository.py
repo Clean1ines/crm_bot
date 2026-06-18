@@ -28,6 +28,8 @@ from src.contexts.knowledge_workbench.extraction.application.models.enriched_dra
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionComparison,
     DraftClaimCompactionComparisonStatus,
+    DraftClaimCompactionComponent,
+    DraftClaimCompactionComponentIncompatibility,
     DraftClaimCompactionNode,
     DraftClaimCompactionNodeKind,
     DraftClaimCompactionNodeSource,
@@ -295,11 +297,37 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             for row in round_rows
         )
 
+        component_rows = await self._connection.fetch(
+            """
+            SELECT component_ref, representative_node_ref, active,
+                   source_claim_refs, supersedes_component_refs
+            FROM draft_claim_compaction_components
+            WHERE workflow_run_id = $1 AND group_ref = $2
+            ORDER BY component_ref
+            """,
+            workflow_run_id,
+            group_ref,
+        )
+        incompatibility_rows = await self._connection.fetch(
+            """
+            SELECT left_component_ref, right_component_ref
+            FROM draft_claim_compaction_component_incompatibilities
+            WHERE workflow_run_id = $1 AND group_ref = $2
+            ORDER BY left_component_ref, right_component_ref
+            """,
+            workflow_run_id,
+            group_ref,
+        )
+
         return DraftClaimCompactionPlannerState(
             cluster_ref=group_ref,
             nodes=tuple(_node(row, sources_by_node) for row in node_rows),
             comparisons=comparisons,
             rounds=rounds,
+            components=tuple(_component(row) for row in component_rows),
+            incompatibilities=tuple(
+                _component_incompatibility(row) for row in incompatibility_rows
+            ),
         )
 
     async def apply_compacted_claims_result(
@@ -311,9 +339,11 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         work_item_id: str,
         round_index: int,
         compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
+        compared_node_refs: tuple[str, ...] = (),
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
         del batch_ref, work_item_id
+        compared_node_refs = tuple(compared_node_refs)
         inserted_nodes = 0
         inserted_sources = 0
         inserted_comparisons = 0
@@ -400,6 +430,15 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 )
             )
 
+            await self._upsert_merged_component(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                result_node_ref=node_ref,
+                source_node_refs=raw_node_refs,
+                source_claim_refs=claim.source_claim_refs,
+                created_at=created_at,
+            )
+
             for left, right in _node_ref_pairs(raw_node_refs):
                 requested_comparisons += 1
                 if await self._insert_merged_comparison(
@@ -412,6 +451,36 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     created_at=created_at,
                 ):
                     inserted_comparisons += 1
+
+        if len(compared_node_refs) == 2:
+            left_compared, right_compared = ordered_pair(
+                compared_node_refs[0],
+                compared_node_refs[1],
+            )
+            if not await self._compacted_claims_merge_compared_nodes(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                compared_node_refs=(left_compared, right_compared),
+                compacted_claims=compacted_claims,
+            ):
+                requested_comparisons += 1
+                if await self._insert_not_merged_comparison(
+                    workflow_run_id=workflow_run_id,
+                    group_ref=group_ref,
+                    round_index=round_index,
+                    left_node_ref=left_compared,
+                    right_node_ref=right_compared,
+                    created_at=created_at,
+                ):
+                    inserted_comparisons += 1
+                await self._insert_component_incompatibility_for_nodes(
+                    workflow_run_id=workflow_run_id,
+                    group_ref=group_ref,
+                    left_node_ref=left_compared,
+                    right_node_ref=right_compared,
+                    round_index=round_index,
+                    created_at=created_at,
+                )
 
         requested_total = requested_nodes + requested_sources + requested_comparisons
         inserted_total = inserted_nodes + inserted_sources + inserted_comparisons
@@ -524,6 +593,15 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             )
         )
 
+        await self._upsert_merged_component(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            result_node_ref=node_ref,
+            source_node_refs=source_node_refs,
+            source_claim_refs=union_source_claim_refs,
+            created_at=created_at,
+        )
+
         for left, right in _node_ref_pairs(source_node_refs):
             if await self._insert_merged_comparison(
                 workflow_run_id=workflow_run_id,
@@ -629,6 +707,335 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             )
         )
 
+    async def _compacted_claims_merge_compared_nodes(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        compared_node_refs: tuple[str, str],
+        compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
+    ) -> bool:
+        rows = await self._connection.fetch(
+            """
+            SELECT node_ref, source_claim_refs
+            FROM draft_claim_compaction_nodes
+            WHERE workflow_run_id = $1
+              AND group_ref = $2
+              AND node_ref = ANY($3::text[])
+            ORDER BY node_ref
+            """,
+            workflow_run_id,
+            group_ref,
+            list(compared_node_refs),
+        )
+        if len(rows) != len(compared_node_refs):
+            return False
+        union_source_claim_refs = _dedupe_sorted(
+            source_claim_ref
+            for row in rows
+            for source_claim_ref in _json_text_tuple(
+                row["source_claim_refs"],
+                "source_claim_refs",
+            )
+        )
+        for claim in compacted_claims:
+            if tuple(sorted(claim.source_claim_refs)) == union_source_claim_refs:
+                return True
+        return False
+
+    async def _insert_not_merged_comparison(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        round_index: int,
+        left_node_ref: str,
+        right_node_ref: str,
+        created_at: datetime,
+    ) -> bool:
+        left, right = ordered_pair(left_node_ref, right_node_ref)
+        return _inserted(
+            await self._connection.execute(
+                """
+                INSERT INTO draft_claim_compaction_comparisons
+                (comparison_ref, workflow_run_id, group_ref, left_node_ref,
+                 right_node_ref, status, result_node_ref, round_index,
+                 created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                ON CONFLICT (workflow_run_id, group_ref, left_node_ref, right_node_ref, round_index)
+                DO NOTHING
+                """,
+                comparison_ref(
+                    workflow_run_id=workflow_run_id,
+                    group_ref=group_ref,
+                    round_index=round_index,
+                    left_node_ref=left,
+                    right_node_ref=right,
+                ),
+                workflow_run_id,
+                group_ref,
+                left,
+                right,
+                DraftClaimCompactionComparisonStatus.NOT_MERGED.value,
+                None,
+                round_index,
+                created_at,
+                created_at,
+            )
+        )
+
+    async def _upsert_initial_component(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        node: DraftClaimCompactionNode,
+        created_at: datetime,
+    ) -> None:
+        await self._connection.execute(
+            """
+            INSERT INTO draft_claim_compaction_components
+            (component_ref, workflow_run_id, group_ref, representative_node_ref,
+             active, source_claim_refs, supersedes_component_refs,
+             created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9)
+            ON CONFLICT (component_ref) DO NOTHING
+            """,
+            component_ref_for_node(node.node_ref),
+            workflow_run_id,
+            group_ref,
+            node.node_ref,
+            True,
+            json.dumps(list(node.source_claim_refs), sort_keys=True),
+            json.dumps([], sort_keys=True),
+            created_at,
+            created_at,
+        )
+
+    async def _upsert_merged_component(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        result_node_ref: str,
+        source_node_refs: tuple[str, ...],
+        source_claim_refs: tuple[str, ...],
+        created_at: datetime,
+    ) -> None:
+        source_component_refs = await self._active_component_refs_for_nodes(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            node_refs=source_node_refs,
+        )
+        result_component_ref = component_ref_for_node(result_node_ref)
+        inherited_refs = await self._inherited_incompatible_component_refs(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            component_refs=source_component_refs,
+        )
+
+        await self._connection.execute(
+            """
+            UPDATE draft_claim_compaction_components
+            SET active = false, updated_at = $1
+            WHERE workflow_run_id = $2
+              AND group_ref = $3
+              AND component_ref = ANY($4::text[])
+              AND active = true
+            """,
+            created_at,
+            workflow_run_id,
+            group_ref,
+            list(source_component_refs),
+        )
+        await self._connection.execute(
+            """
+            INSERT INTO draft_claim_compaction_components
+            (component_ref, workflow_run_id, group_ref, representative_node_ref,
+             active, source_claim_refs, supersedes_component_refs,
+             created_at, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9)
+            ON CONFLICT (component_ref) DO UPDATE
+            SET active = EXCLUDED.active,
+                representative_node_ref = EXCLUDED.representative_node_ref,
+                source_claim_refs = EXCLUDED.source_claim_refs,
+                supersedes_component_refs = EXCLUDED.supersedes_component_refs,
+                updated_at = EXCLUDED.updated_at
+            """,
+            result_component_ref,
+            workflow_run_id,
+            group_ref,
+            result_node_ref,
+            True,
+            json.dumps(list(source_claim_refs), sort_keys=True),
+            json.dumps(list(source_component_refs), sort_keys=True),
+            created_at,
+            created_at,
+        )
+        for inherited_ref in inherited_refs:
+            if inherited_ref in source_component_refs:
+                continue
+            await self._insert_component_incompatibility(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                left_component_ref=result_component_ref,
+                right_component_ref=inherited_ref,
+                source_comparison_ref=None,
+                created_at=created_at,
+            )
+
+    async def _insert_component_incompatibility_for_nodes(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        left_node_ref: str,
+        right_node_ref: str,
+        round_index: int,
+        created_at: datetime,
+    ) -> None:
+        left_component_ref = await self._active_component_ref_for_node(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            node_ref=left_node_ref,
+        )
+        right_component_ref = await self._active_component_ref_for_node(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            node_ref=right_node_ref,
+        )
+        await self._insert_component_incompatibility(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            left_component_ref=left_component_ref,
+            right_component_ref=right_component_ref,
+            source_comparison_ref=comparison_ref(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                round_index=round_index,
+                left_node_ref=left_node_ref,
+                right_node_ref=right_node_ref,
+            ),
+            created_at=created_at,
+        )
+
+    async def _insert_component_incompatibility(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        left_component_ref: str,
+        right_component_ref: str,
+        source_comparison_ref: str | None,
+        created_at: datetime,
+    ) -> None:
+        if left_component_ref == right_component_ref:
+            return
+        left, right = ordered_pair(left_component_ref, right_component_ref)
+        await self._connection.execute(
+            """
+            INSERT INTO draft_claim_compaction_component_incompatibilities
+            (incompatibility_ref, workflow_run_id, group_ref,
+             left_component_ref, right_component_ref, source_comparison_ref,
+             created_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+            ON CONFLICT (workflow_run_id, group_ref, left_component_ref, right_component_ref)
+            DO NOTHING
+            """,
+            component_incompatibility_ref(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                left_component_ref=left,
+                right_component_ref=right,
+            ),
+            workflow_run_id,
+            group_ref,
+            left,
+            right,
+            source_comparison_ref,
+            created_at,
+        )
+
+    async def _active_component_refs_for_nodes(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        node_refs: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        refs = []
+        for node_ref in node_refs:
+            refs.append(
+                await self._active_component_ref_for_node(
+                    workflow_run_id=workflow_run_id,
+                    group_ref=group_ref,
+                    node_ref=node_ref,
+                )
+            )
+        return _dedupe_sorted(refs)
+
+    async def _active_component_ref_for_node(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        node_ref: str,
+    ) -> str:
+        row_value = await self._connection.fetchval(
+            """
+            SELECT component_ref
+            FROM draft_claim_compaction_components
+            WHERE workflow_run_id = $1
+              AND group_ref = $2
+              AND representative_node_ref = $3
+              AND active = true
+            ORDER BY updated_at DESC, component_ref
+            LIMIT 1
+            """,
+            workflow_run_id,
+            group_ref,
+            node_ref,
+        )
+        if row_value is None:
+            return component_ref_for_node(node_ref)
+        return str(row_value)
+
+    async def _inherited_incompatible_component_refs(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        component_refs: tuple[str, ...],
+    ) -> tuple[str, ...]:
+        if not component_refs:
+            return ()
+        rows = await self._connection.fetch(
+            """
+            SELECT left_component_ref, right_component_ref
+            FROM draft_claim_compaction_component_incompatibilities
+            WHERE workflow_run_id = $1
+              AND group_ref = $2
+              AND (
+                  left_component_ref = ANY($3::text[])
+                  OR right_component_ref = ANY($3::text[])
+              )
+            ORDER BY left_component_ref, right_component_ref
+            """,
+            workflow_run_id,
+            group_ref,
+            list(component_refs),
+        )
+        inherited: list[str] = []
+        component_set = set(component_refs)
+        for row in rows:
+            left = str(row["left_component_ref"])
+            right = str(row["right_component_ref"])
+            if left in component_set and right not in component_set:
+                inherited.append(right)
+            if right in component_set and left not in component_set:
+                inherited.append(left)
+        return _dedupe_sorted(inherited)
+
     async def seed_initial_planner_state(
         self,
         *,
@@ -683,6 +1090,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     )
                 ):
                     inserted_sources += 1
+
+            await self._upsert_initial_component(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                node=node,
+                created_at=created_at,
+            )
 
         requested_sources = sum(len(node.sources) for node in raw_nodes)
         requested_total = len(raw_nodes) + requested_sources
@@ -1150,3 +1564,71 @@ def _affected(status: object) -> int:
         return int(text.rsplit(" ", 1)[1])
     except (IndexError, ValueError):
         return 0
+
+
+def _component(row: Mapping[str, object]) -> DraftClaimCompactionComponent:
+    return DraftClaimCompactionComponent(
+        component_ref=_str(row, "component_ref"),
+        representative_node_ref=_str(row, "representative_node_ref"),
+        active=_bool(row, "active"),
+        source_claim_refs=_json_text_tuple(
+            row["source_claim_refs"],
+            "source_claim_refs",
+        ),
+        supersedes_component_refs=_json_text_tuple(
+            row["supersedes_component_refs"],
+            "supersedes_component_refs",
+        ),
+    )
+
+
+def _component_incompatibility(
+    row: Mapping[str, object],
+) -> DraftClaimCompactionComponentIncompatibility:
+    return DraftClaimCompactionComponentIncompatibility(
+        left_component_ref=_str(row, "left_component_ref"),
+        right_component_ref=_str(row, "right_component_ref"),
+    )
+
+
+def component_ref_for_node(node_ref: str) -> str:
+    _text(node_ref, "node_ref")
+    return f"component:{node_ref}"
+
+
+def component_incompatibility_ref(
+    *,
+    workflow_run_id: str,
+    group_ref: str,
+    left_component_ref: str,
+    right_component_ref: str,
+) -> str:
+    left, right = ordered_pair(left_component_ref, right_component_ref)
+    return f"component-incompatibility:{workflow_run_id}:{group_ref}:{left}:{right}"
+
+
+def _compacted_claims_merge_compared_nodes(
+    *,
+    compared_node_refs: tuple[str, str],
+    compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
+    workflow_run_id: str,
+    group_ref: str,
+) -> bool:
+    compared_source_sets = tuple(
+        _source_claim_refs_from_node_ref(node_ref) for node_ref in compared_node_refs
+    )
+    union_refs = _dedupe_sorted(
+        source_ref
+        for source_refs in compared_source_sets
+        for source_ref in source_refs
+    )
+    for claim in compacted_claims:
+        if tuple(sorted(claim.source_claim_refs)) == union_refs:
+            return True
+    return False
+
+
+def _source_claim_refs_from_node_ref(node_ref: str) -> tuple[str, ...]:
+    if node_ref.startswith("raw:"):
+        return (node_ref.rsplit(":", 1)[-1],)
+    return ()

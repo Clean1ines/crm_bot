@@ -6,6 +6,8 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionBudgetFitStatus,
     DraftClaimCompactionComparison,
     DraftClaimCompactionComparisonStatus,
+    DraftClaimCompactionComponent,
+    DraftClaimCompactionComponentIncompatibility,
     DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionNode,
     DraftClaimCompactionNodeKind,
@@ -331,3 +333,38 @@ def test_after_two_applied_compactions_compacted_vs_compacted_has_priority() -> 
         is DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
     )
     assert decision.node_refs == ("A", "B")
+
+
+def test_planner_skips_component_pair_when_merge_inherits_not_merge_edge() -> None:
+    state = DraftClaimCompactionPlannerState(
+        cluster_ref="group-1",
+        nodes=(
+            _compacted("node-a5"),
+            _compacted("node-c"),
+        ),
+        components=(
+            DraftClaimCompactionComponent(
+                component_ref="component-a5",
+                representative_node_ref="node-a5",
+                source_claim_refs=("claim-a", "claim-5"),
+                active=True,
+                supersedes_component_refs=("component-a", "component-5"),
+            ),
+            DraftClaimCompactionComponent(
+                component_ref="component-c",
+                representative_node_ref="node-c",
+                source_claim_refs=("claim-c",),
+                active=True,
+            ),
+        ),
+        incompatibilities=(
+            DraftClaimCompactionComponentIncompatibility(
+                left_component_ref="component-a5",
+                right_component_ref="component-c",
+            ),
+        ),
+    )
+
+    decision = DraftClaimCompactionReductionPlannerPolicy().plan_next_step(state)
+
+    assert decision.work_type is DraftClaimCompactionNextWorkItemType.DONE

@@ -34,8 +34,49 @@ class FakeReductionStateConnection:
     comparisons: dict[tuple[str, str, int], dict[str, object]] = field(
         default_factory=dict
     )
+    components: dict[str, dict[str, object]] = field(default_factory=dict)
+    incompatibilities: dict[tuple[str, str], dict[str, object]] = field(
+        default_factory=dict
+    )
 
     async def execute(self, query: str, *args: object) -> object:
+        if "INSERT INTO draft_claim_compaction_components" in query:
+            component_ref = _str_arg(args[0])
+            self.components[component_ref] = {
+                "component_ref": component_ref,
+                "workflow_run_id": _str_arg(args[1]),
+                "group_ref": _str_arg(args[2]),
+                "representative_node_ref": _str_arg(args[3]),
+                "active": _bool_arg(args[4]),
+                "source_claim_refs": json.loads(_str_arg(args[5])),
+                "supersedes_component_refs": json.loads(_str_arg(args[6])),
+            }
+            return "INSERT 0 1"
+
+        if "UPDATE draft_claim_compaction_components" in query:
+            component_refs = tuple(str(item) for item in _sequence_arg(args[3]))
+            updated = 0
+            for component_ref in component_refs:
+                component = self.components.get(component_ref)
+                if component is not None and component["active"] is True:
+                    component["active"] = False
+                    updated += 1
+            return f"UPDATE {updated}"
+
+        if "INSERT INTO draft_claim_compaction_component_incompatibilities" in query:
+            key = (_str_arg(args[3]), _str_arg(args[4]))
+            if key in self.incompatibilities:
+                return "INSERT 0 0"
+            self.incompatibilities[key] = {
+                "incompatibility_ref": _str_arg(args[0]),
+                "workflow_run_id": _str_arg(args[1]),
+                "group_ref": _str_arg(args[2]),
+                "left_component_ref": key[0],
+                "right_component_ref": key[1],
+                "source_comparison_ref": _optional_str_arg(args[5]),
+            }
+            return "INSERT 0 1"
+
         if "INSERT INTO draft_claim_compaction_nodes" in query:
             node_ref = _str_arg(args[0])
             if node_ref in self.nodes:
@@ -117,7 +158,73 @@ class FakeReductionStateConnection:
 
         raise AssertionError(f"unexpected execute query: {query}")
 
+    async def fetchval(self, query: str, *args: object) -> object | None:
+        if "FROM draft_claim_compaction_components" in query:
+            workflow_run_id = _str_arg(args[0])
+            group_ref = _str_arg(args[1])
+            node_ref = _str_arg(args[2])
+            for component in sorted(
+                self.components.values(),
+                key=lambda row: str(row["component_ref"]),
+            ):
+                if (
+                    component["workflow_run_id"] == workflow_run_id
+                    and component["group_ref"] == group_ref
+                    and component["representative_node_ref"] == node_ref
+                    and component["active"] is True
+                ):
+                    return component["component_ref"]
+            return None
+        raise AssertionError(f"unexpected fetchval query: {query}")
+
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
+        if "FROM draft_claim_compaction_components" in query:
+            workflow_run_id = _str_arg(args[0])
+            group_ref = _str_arg(args[1])
+            return [
+                component
+                for component in sorted(
+                    self.components.values(),
+                    key=lambda row: str(row["component_ref"]),
+                )
+                if component["workflow_run_id"] == workflow_run_id
+                and component["group_ref"] == group_ref
+            ]
+
+        if "FROM draft_claim_compaction_component_incompatibilities" in query:
+            workflow_run_id = _str_arg(args[0])
+            group_ref = _str_arg(args[1])
+            if len(args) >= 3:
+                component_refs = set(str(item) for item in _sequence_arg(args[2]))
+                return [
+                    incompatibility
+                    for incompatibility in sorted(
+                        self.incompatibilities.values(),
+                        key=lambda row: (
+                            str(row["left_component_ref"]),
+                            str(row["right_component_ref"]),
+                        ),
+                    )
+                    if incompatibility["workflow_run_id"] == workflow_run_id
+                    and incompatibility["group_ref"] == group_ref
+                    and (
+                        incompatibility["left_component_ref"] in component_refs
+                        or incompatibility["right_component_ref"] in component_refs
+                    )
+                ]
+            return [
+                incompatibility
+                for incompatibility in sorted(
+                    self.incompatibilities.values(),
+                    key=lambda row: (
+                        str(row["left_component_ref"]),
+                        str(row["right_component_ref"]),
+                    ),
+                )
+                if incompatibility["workflow_run_id"] == workflow_run_id
+                and incompatibility["group_ref"] == group_ref
+            ]
+
         if "COUNT(*) FILTER" in query and "FROM draft_claim_compaction_nodes" in query:
             workflow_run_id = _str_arg(args[0])
             rows: list[Mapping[str, object]] = []
@@ -314,6 +421,7 @@ async def test_seeds_raw_nodes_and_sources_idempotently() -> None:
     assert first.requested_source_count == 2
     assert first.inserted_source_count == 2
     assert first.already_exists_count == 0
+    assert len(connection.components) == 2
     assert second.inserted_node_count == 0
     assert second.inserted_source_count == 0
     assert second.already_exists_count == 4
@@ -490,6 +598,7 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
     assert len(connection.nodes) == 3
     assert len(connection.sources) == 4
     assert len(connection.comparisons) == 1
+    assert len(connection.components) == 3
     assert state is not None
     active_nodes = tuple(node for node in state.nodes if node.active)
     inactive_nodes = tuple(node for node in state.nodes if not node.active)
@@ -567,6 +676,7 @@ async def test_apply_reduced_rewrite_result_merges_active_compacted_nodes_idempo
     assert len(connection.nodes) == 3
     assert len(connection.sources) == 2
     assert len(connection.comparisons) == 1
+    assert len(connection.components) >= 1
     assert state is not None
     active_nodes = tuple(node for node in state.nodes if node.active)
     assert len(active_nodes) == 1

@@ -63,6 +63,7 @@ class ApplyDraftClaimCompactionResult:
                 work_item_id=command.work_item_id,
                 round_index=command.round_index,
                 compacted_claims=enriched_output.compacted_claims,
+                compared_node_refs=_compared_node_refs(command.left_node_ref, command.right_node_ref),
                 created_at=command.created_at,
             )
             created_node_refs = tuple(
@@ -166,6 +167,16 @@ class ApplyDraftClaimCompactionResult:
                 observation_refs=source_claim_refs,
             )
         )
+
+
+def _compared_node_refs(
+    left_node_ref: str,
+    right_node_ref: str | None,
+) -> tuple[str, ...]:
+    if right_node_ref is None:
+        return (left_node_ref,)
+    left, right = ordered_pair(left_node_ref, right_node_ref)
+    return left, right
 
 
 def _node_pairs(node_refs: tuple[str, ...]) -> tuple[tuple[str, str], ...]:

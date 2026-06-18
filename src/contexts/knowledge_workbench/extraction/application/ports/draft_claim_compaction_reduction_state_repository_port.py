@@ -101,6 +101,7 @@ class DraftClaimCompactionReductionStateRepositoryPort(Protocol):
         work_item_id: str,
         round_index: int,
         compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
+        compared_node_refs: tuple[str, ...] = (),
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult: ...
 
