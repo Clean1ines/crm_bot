@@ -490,10 +490,15 @@ async def test_distinct_reconcile_commands_create_distinct_prepare_keys_for_next
 
 
 @pytest.mark.asyncio
-async def test_future_deferred_work_appends_prepare_dispatch_batch_later() -> None:
+async def test_future_retryable_work_appends_prepare_dispatch_batch_later() -> None:
     next_due_at = _now() + timedelta(minutes=2)
     result, _, _, workflow_unit_of_work = await _execute(
-        summary=_summary(deferred_count=1, completed_count=2, next_due_at=next_due_at),
+        summary=_summary(
+            retryable_failed_count=1,
+            due_retryable_failed_count=0,
+            completed_count=2,
+            next_due_at=next_due_at,
+        ),
     )
 
     assert result.decision == (
@@ -504,6 +509,23 @@ async def test_future_deferred_work_appends_prepare_dispatch_batch_later() -> No
         KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
     )
     assert next_command.run_after == next_due_at
+
+
+@pytest.mark.asyncio
+async def test_legacy_deferred_work_does_not_schedule_prepare_batch() -> None:
+    result, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(
+            deferred_count=1,
+            due_deferred_count=1,
+            completed_count=2,
+            next_due_at=_now() + timedelta(minutes=2),
+        ),
+    )
+
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_PROGRESS_BLOCKED.value
+    )
+    assert workflow_unit_of_work.command_log.pending_commands == []
 
 
 @pytest.mark.asyncio

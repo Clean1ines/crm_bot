@@ -65,9 +65,7 @@ class WorkItemProgressSummary:
 
     @property
     def due_waiting_count(self) -> int:
-        return (
-            self.ready_count + self.due_deferred_count + self.due_retryable_failed_count
-        )
+        return self.ready_count + self.due_retryable_failed_count
 
     @property
     def terminal_coverage_count(self) -> int:
@@ -81,9 +79,8 @@ class WorkItemProgressSummary:
 
     @property
     def has_future_waiting_work(self) -> bool:
-        future_deferred = self.deferred_count - self.due_deferred_count
         future_retryable = self.retryable_failed_count - self.due_retryable_failed_count
-        return future_deferred + future_retryable > 0
+        return future_retryable > 0
 
     def to_payload(self) -> dict[str, object]:
         return {

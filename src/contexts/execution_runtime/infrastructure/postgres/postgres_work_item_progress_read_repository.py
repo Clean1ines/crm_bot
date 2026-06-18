@@ -42,7 +42,7 @@ class PostgresWorkItemProgressReadRepository(WorkItemProgressReadRepositoryPort)
                 COUNT(*) FILTER (WHERE wi.status = 'user_action_required') AS user_action_required_count,
                 COUNT(*) AS total_count,
                 MIN(wi.next_attempt_at) FILTER (
-                    WHERE wi.status IN ('deferred', 'retryable_failed')
+                    WHERE wi.status = 'retryable_failed'
                       AND wi.next_attempt_at IS NOT NULL
                       AND wi.next_attempt_at > $3
                 ) AS next_due_at,
