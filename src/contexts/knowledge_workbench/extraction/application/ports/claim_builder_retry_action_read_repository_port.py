@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 
 
@@ -15,6 +18,7 @@ class WorkItemRetryActionRecord:
     next_model_strategy: str | None
     requires_source_split: bool
     next_run_after: datetime | None
+    retry_plan: WorkItemRetryPlan | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.work_item_id, "work_item_id")
@@ -26,6 +30,11 @@ class WorkItemRetryActionRecord:
             raise TypeError("requires_source_split must be bool")
         if self.next_run_after is not None:
             _require_timezone_aware(self.next_run_after, "next_run_after")
+        if self.retry_plan is not None and not isinstance(
+            self.retry_plan,
+            WorkItemRetryPlan,
+        ):
+            raise TypeError("retry_plan must be WorkItemRetryPlan when provided")
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +51,7 @@ class WorkItemRetryActionSummary:
     pause_for_daily_limit_reset_count: int
     request_user_low_quality_continue_or_wait_count: int
     next_run_after: datetime | None
+    selected_retry_plan: WorkItemRetryPlan | None = None
     records: tuple[WorkItemRetryActionRecord, ...] = ()
 
     def __post_init__(self) -> None:
@@ -80,6 +90,13 @@ class WorkItemRetryActionSummary:
             _require_non_negative_int(value, field_name)
         if self.next_run_after is not None:
             _require_timezone_aware(self.next_run_after, "next_run_after")
+        if self.selected_retry_plan is not None and not isinstance(
+            self.selected_retry_plan,
+            WorkItemRetryPlan,
+        ):
+            raise TypeError(
+                "selected_retry_plan must be WorkItemRetryPlan when provided"
+            )
         if not isinstance(self.records, tuple):
             raise TypeError("records must be tuple")
         for record in self.records:
@@ -121,6 +138,9 @@ class WorkItemRetryActionSummary:
             ),
             "next_run_after": self.next_run_after.isoformat()
             if self.next_run_after is not None
+            else None,
+            "selected_retry_plan": self.selected_retry_plan.value
+            if self.selected_retry_plan is not None
             else None,
         }
 

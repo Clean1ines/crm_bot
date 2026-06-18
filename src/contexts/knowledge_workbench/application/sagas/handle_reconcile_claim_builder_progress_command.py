@@ -218,7 +218,7 @@ def _decide(
     if retry_action_summary.split_required_count > 0:
         return ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SPLIT_REQUIRED
 
-    if _selected_retry_strategy(retry_action_summary) is not None:
+    if _selected_retry_plan(retry_action_summary) is not None:
         if (
             retry_action_summary.next_run_after is not None
             and retry_action_summary.next_run_after > now
@@ -251,14 +251,14 @@ def _next_command(
     retry_action_summary: WorkItemRetryActionSummary,
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
-    selected_retry_strategy = _selected_retry_strategy(retry_action_summary)
+    selected_retry_plan = _selected_retry_plan(retry_action_summary)
     prepare_suffix_scope = _prepare_command_suffix_scope(
-        selected_retry_strategy=selected_retry_strategy,
+        selected_retry_plan=selected_retry_plan,
         scheduled_work_item_count=summary.total_count,
     )
     causation_scope = (
         None
-        if selected_retry_strategy is not None
+        if selected_retry_plan is not None
         else _prepare_command_causation_scope(workflow_command)
     )
 
@@ -268,7 +268,7 @@ def _next_command(
             workflow_run_id=workflow_run_id,
             summary=summary,
             retry_action_summary=retry_action_summary,
-            selected_retry_strategy=selected_retry_strategy,
+            selected_retry_plan=selected_retry_plan,
             run_after=occurred_at,
             occurred_at=occurred_at,
             suffix=_prepare_command_idempotency_suffix(
@@ -287,7 +287,7 @@ def _next_command(
             workflow_run_id=workflow_run_id,
             summary=summary,
             retry_action_summary=retry_action_summary,
-            selected_retry_strategy=selected_retry_strategy,
+            selected_retry_plan=selected_retry_plan,
             run_after=next_due_at,
             occurred_at=occurred_at,
             suffix=_prepare_command_idempotency_suffix(
@@ -318,10 +318,10 @@ def _next_command(
 
 def _prepare_command_suffix_scope(
     *,
-    selected_retry_strategy: str | None,
+    selected_retry_plan: str | None,
     scheduled_work_item_count: int,
 ) -> str:
-    strategy_scope = selected_retry_strategy or "default"
+    strategy_scope = selected_retry_plan or "default"
     return f"{strategy_scope}:scheduled:{scheduled_work_item_count}"
 
 
@@ -362,7 +362,7 @@ def _prepare_dispatch_batch_command(
     workflow_run_id: str,
     summary: WorkItemProgressSummary,
     retry_action_summary: WorkItemRetryActionSummary,
-    selected_retry_strategy: str | None,
+    selected_retry_plan: str | None,
     run_after: datetime,
     occurred_at: datetime,
     suffix: str,
@@ -373,10 +373,10 @@ def _prepare_dispatch_batch_command(
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "scheduled_work_item_count": summary.total_count,
     }
-    if selected_retry_strategy is not None:
-        command_payload["selected_retry_strategy"] = selected_retry_strategy
-        command_payload["claim_builder_next_model_strategy"] = selected_retry_strategy
-        command_payload["llm_dispatch_preparation_strategy"] = selected_retry_strategy
+    if selected_retry_plan is not None:
+        command_payload["selected_retry_plan"] = selected_retry_plan
+        command_payload["claim_builder_retry_plan"] = selected_retry_plan
+        command_payload["retry_plan"] = selected_retry_plan
     dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
     if dispatch_preparation is not None:
         if not isinstance(dispatch_preparation, Mapping):
@@ -442,7 +442,7 @@ def _progress_reconciled_event(
         "decision": decision.value,
         "summary": summary.to_payload(),
         "retry_action_summary": retry_action_summary.to_payload(),
-        "selected_retry_strategy": _selected_retry_strategy(retry_action_summary),
+        "selected_retry_plan": _selected_retry_plan(retry_action_summary),
         "next_command_type": next_command.command_type if next_command else None,
         "next_run_after": next_run_after,
     }
@@ -561,7 +561,7 @@ def _timeline_entry(
             "decision": decision.value,
             "summary": summary.to_payload(),
             "retry_action_summary": retry_action_summary.to_payload(),
-            "selected_retry_strategy": _selected_retry_strategy(retry_action_summary),
+            "selected_retry_plan": _selected_retry_plan(retry_action_summary),
             "next_command_type": next_command.command_type if next_command else None,
         },
         occurred_at=occurred_at,
@@ -569,24 +569,24 @@ def _timeline_entry(
     )
 
 
-def _selected_retry_strategy(
+def _selected_retry_plan(
     retry_action_summary: WorkItemRetryActionSummary,
 ) -> str | None:
     if retry_action_summary.retry_larger_input_model_count > 0:
-        return "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
+        return "retry_larger_context_model"
     if retry_action_summary.retry_larger_output_model_count > 0:
-        return "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+        return "retry_larger_output_model"
     if _has_retry_strategy(
         retry_action_summary,
-        "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED",
+        "DAILY_LIMIT_retry_daily_fallback_model",
     ):
-        return "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
+        return "DAILY_LIMIT_retry_daily_fallback_model"
     if retry_action_summary.retry_empty_claims_check_model_count > 0:
-        return "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
+        return "retry_special_empty_claims_check_model"
     if retry_action_summary.retry_fallback_model_count > 0:
-        return "FALLBACK_MODEL_REQUIRED"
+        return "retry_daily_fallback_model"
     if retry_action_summary.retry_same_model_count > 0:
-        return "SAME_MODEL"
+        return "retry_same_model"
     return None
 
 
@@ -594,16 +594,13 @@ def _has_retry_strategy(
     retry_action_summary: WorkItemRetryActionSummary,
     strategy: str,
 ) -> bool:
-    return any(
-        record.next_model_strategy == strategy
-        for record in retry_action_summary.records
-    )
+    return any(record.retry_plan == strategy for record in retry_action_summary.records)
 
 
 def _timeline_message(
     retry_action_summary: WorkItemRetryActionSummary,
 ) -> str:
-    if _selected_retry_strategy(retry_action_summary) is not None:
+    if _selected_retry_plan(retry_action_summary) is not None:
         return "Claim builder retry action selected"
     if retry_action_summary.split_required_count > 0:
         return "Claim builder split action required"

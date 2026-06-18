@@ -8,6 +8,9 @@ from datetime import datetime
 
 import asyncpg
 
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
@@ -126,6 +129,7 @@ def _record_from_row(row: Mapping[str, object]) -> WorkItemRetryActionRecord:
             payload,
             "claim_builder_next_run_after",
         ),
+        retry_plan=_retry_plan_from_next_action_payload(payload),
     )
 
 
@@ -212,8 +216,76 @@ def _summary_from_records(
             request_user_low_quality_continue_or_wait_count
         ),
         next_run_after=min(future_run_afters) if future_run_afters else None,
+        selected_retry_plan=_selected_retry_plan_from_records(records),
         records=records,
     )
+
+
+def _retry_plan_from_next_action_payload(
+    payload: Mapping[str, object],
+) -> WorkItemRetryPlan | None:
+    next_action_kind = _required_text(
+        payload,
+        "claim_builder_attempt_next_action_kind",
+    )
+
+    if next_action_kind == ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value:
+        return WorkItemRetryPlan.RETRY_SAME_MODEL
+    if (
+        next_action_kind
+        == ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
+    ):
+        return WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL
+    if (
+        next_action_kind
+        == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value
+    ):
+        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL
+    if (
+        next_action_kind
+        == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
+    ):
+        return WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL
+    if (
+        next_action_kind
+        == ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
+    ):
+        return WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
+    if (
+        next_action_kind
+        == ClaimBuilderAttemptNextActionKind.PAUSE_FOR_DAILY_LIMIT_RESET.value
+    ):
+        return WorkItemRetryPlan.WAIT_DAILY_CAPACITY_RESET
+    if next_action_kind == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value:
+        next_model_strategy = _optional_text(
+            payload,
+            "claim_builder_attempt_next_model_strategy",
+        )
+        if next_model_strategy == "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED":
+            return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL
+        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL
+
+    return None
+
+
+def _selected_retry_plan_from_records(
+    records: tuple[WorkItemRetryActionRecord, ...],
+) -> WorkItemRetryPlan | None:
+    priority = (
+        WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL,
+        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL,
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL,
+        WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL,
+        WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
+        WorkItemRetryPlan.RETRY_SAME_MODEL,
+    )
+    available = {
+        record.retry_plan for record in records if record.retry_plan is not None
+    }
+    for retry_plan in priority:
+        if retry_plan in available:
+            return retry_plan
+    return None
 
 
 def _required_text(payload: Mapping[str, object], key: str) -> str:

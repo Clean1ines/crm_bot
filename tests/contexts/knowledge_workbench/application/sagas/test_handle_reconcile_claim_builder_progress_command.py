@@ -8,6 +8,9 @@ import pytest
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressSummary,
 )
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder_retry_action_read_repository_port import (
     WorkItemRetryActionSummary,
 )
@@ -189,6 +192,7 @@ def _retry_action_summary(
     pause_for_daily_limit_reset_count: int = 0,
     request_user_low_quality_continue_or_wait_count: int = 0,
     next_run_after: datetime | None = None,
+    selected_retry_plan: WorkItemRetryPlan | None = None,
 ) -> WorkItemRetryActionSummary:
     return WorkItemRetryActionSummary(
         workflow_run_id=_workflow_run_id(),
@@ -205,6 +209,7 @@ def _retry_action_summary(
             request_user_low_quality_continue_or_wait_count
         ),
         next_run_after=next_run_after,
+        selected_retry_plan=selected_retry_plan,
     )
 
 
@@ -640,9 +645,7 @@ async def test_reconcile_commands_from_same_prepare_origin_coalesce_next_prepare
 
 
 @pytest.mark.asyncio
-async def test_retry_fallback_model_count_appends_prepare_with_fallback_strategy() -> (
-    None
-):
+async def test_retry_fallback_model_count_appends_prepare_with_retry_plan() -> None:
     result, _, retry_repository, workflow_unit_of_work = await _execute(
         summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
         retry_action_summary=_retry_action_summary(retry_fallback_model_count=1),
@@ -653,21 +656,15 @@ async def test_retry_fallback_model_count_appends_prepare_with_fallback_strategy
     )
     assert retry_repository.calls[0][1] == CLAIM_BUILDER_SECTION_WORK_KIND
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
-    assert next_command.payload["claim_builder_next_model_strategy"] == (
-        "FALLBACK_MODEL_REQUIRED"
-    )
-    assert next_command.payload["llm_dispatch_preparation_strategy"] == (
-        "FALLBACK_MODEL_REQUIRED"
-    )
-    assert next_command.payload["selected_retry_strategy"] == (
-        "FALLBACK_MODEL_REQUIRED"
+    assert next_command.payload["retry_plan"] == (
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL.value
     )
     assert "summary" not in next_command.payload
     assert "retry_action_summary" not in next_command.payload
 
 
 @pytest.mark.asyncio
-async def test_retry_strategy_prepare_key_ignores_reconcile_causation() -> None:
+async def test_retry_plan_prepare_key_ignores_reconcile_causation() -> None:
     _, _, _, first_uow = await _execute(
         workflow_command=_workflow_command(reconcile_ref="work-1-attempt-1"),
         summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
@@ -685,15 +682,13 @@ async def test_retry_strategy_prepare_key_ignores_reconcile_causation() -> None:
     assert first_command.idempotency_key == second_command.idempotency_key
     assert first_command.payload == second_command.payload
     assert first_command.run_after == second_command.run_after
-    assert first_command.payload["selected_retry_strategy"] == (
-        "FALLBACK_MODEL_REQUIRED"
+    assert first_command.payload["retry_plan"] == (
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL.value
     )
 
 
 @pytest.mark.asyncio
-async def test_retry_larger_output_count_appends_prepare_with_larger_output_strategy() -> (
-    None
-):
+async def test_retry_larger_output_count_appends_prepare_with_retry_plan() -> None:
     _, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
         retry_action_summary=_retry_action_summary(
@@ -702,18 +697,13 @@ async def test_retry_larger_output_count_appends_prepare_with_larger_output_stra
     )
 
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
-    assert next_command.payload["claim_builder_next_model_strategy"] == (
-        "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
-    )
-    assert next_command.payload["llm_dispatch_preparation_strategy"] == (
-        "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
+    assert next_command.payload["retry_plan"] == (
+        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL.value
     )
 
 
 @pytest.mark.asyncio
-async def test_retry_larger_input_count_appends_prepare_with_larger_input_strategy() -> (
-    None
-):
+async def test_retry_larger_input_count_appends_prepare_with_retry_plan() -> None:
     _, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
         retry_action_summary=_retry_action_summary(
@@ -722,26 +712,22 @@ async def test_retry_larger_input_count_appends_prepare_with_larger_input_strate
     )
 
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
-    assert next_command.payload["claim_builder_next_model_strategy"] == (
-        "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
-    )
-    assert next_command.payload["llm_dispatch_preparation_strategy"] == (
-        "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
+    assert next_command.payload["retry_plan"] == (
+        WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL.value
     )
 
 
 @pytest.mark.asyncio
-async def test_retry_same_model_count_appends_prepare_with_same_model_strategy() -> (
-    None
-):
+async def test_retry_same_model_count_appends_prepare_with_retry_plan() -> None:
     _, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
         retry_action_summary=_retry_action_summary(retry_same_model_count=1),
     )
 
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
-    assert next_command.payload["claim_builder_next_model_strategy"] == "SAME_MODEL"
-    assert next_command.payload["llm_dispatch_preparation_strategy"] == "SAME_MODEL"
+    assert next_command.payload["retry_plan"] == (
+        WorkItemRetryPlan.RETRY_SAME_MODEL.value
+    )
 
 
 @pytest.mark.asyncio
@@ -772,7 +758,7 @@ async def test_split_required_blocks_without_prepare_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_progress_event_includes_retry_action_summary_and_selected_strategy() -> (
+async def test_progress_event_includes_retry_action_summary_and_selected_retry_plan() -> (
     None
 ):
     _, _, _, workflow_unit_of_work = await _execute(
@@ -781,7 +767,9 @@ async def test_progress_event_includes_retry_action_summary_and_selected_strateg
     )
 
     event_payload = workflow_unit_of_work.outbox.events[0].payload
-    assert event_payload["selected_retry_strategy"] == "FALLBACK_MODEL_REQUIRED"
+    assert event_payload["selected_retry_plan"] == (
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL.value
+    )
     assert event_payload["retry_action_summary"]["retry_fallback_model_count"] == 1
 
     snapshot = workflow_unit_of_work.progress_snapshots.snapshot
