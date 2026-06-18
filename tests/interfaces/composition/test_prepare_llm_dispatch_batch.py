@@ -818,7 +818,7 @@ async def test_non_primary_active_model_deferred_without_tokens_exhausts_local_m
 
     assert result.attempt_result.started_attempts == ()
     assert result.lease_result.llm_capacity_projection.max_projected_items == 0
-    assert result.capacity_retry_at == _now() + timedelta(seconds=60)
+    assert result.capacity_retry_at == _now() + timedelta(seconds=30)
 
 
 @pytest.mark.asyncio
@@ -1203,6 +1203,70 @@ async def test_prepare_skips_expensive_due_item_and_leases_later_item_that_fits_
     assert connection.work_items["work-3"]["status"] == "ready"
     dispatch = next(iter(connection.dispatches.values()))
     assert dispatch["schedule_payload"]["source_unit_ref"] == "unit-2"
+
+
+@pytest.mark.asyncio
+async def test_local_active_model_minute_window_uses_first_observation_reset() -> None:
+    connection = _connection_with_due_items(1)
+    connection.capacity_observations.extend(
+        [
+            {
+                "provider": "groq",
+                "account_ref": "openai_1",
+                "model_ref": "openai/gpt-oss-120b",
+                "remaining_minute_requests": 10,
+                "remaining_minute_tokens": 7000,
+                "remaining_daily_requests": 100,
+                "remaining_daily_tokens": 50000,
+                "minute_reset_at": None,
+                "daily_reset_at": None,
+                "actual_prompt_tokens": 3000,
+                "actual_completion_tokens": 0,
+                "actual_total_tokens": 3000,
+                "outcome_class": "succeeded",
+                "observed_at": _now() - timedelta(seconds=50),
+            },
+            {
+                "provider": "groq",
+                "account_ref": "openai_1",
+                "model_ref": "openai/gpt-oss-120b",
+                "remaining_minute_requests": 10,
+                "remaining_minute_tokens": 7000,
+                "remaining_daily_requests": 100,
+                "remaining_daily_tokens": 50000,
+                "minute_reset_at": None,
+                "daily_reset_at": None,
+                "actual_prompt_tokens": 3000,
+                "actual_completion_tokens": 0,
+                "actual_total_tokens": 3000,
+                "outcome_class": "succeeded",
+                "observed_at": _now() - timedelta(seconds=5),
+            },
+        ],
+    )
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="openai_1",
+                    minute_requests=10,
+                    minute_tokens=7000,
+                    model_ref="openai/gpt-oss-120b",
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            active_model_ref="openai/gpt-oss-120b",
+            requested_items=1,
+            use_local_active_model_tpm_budget=True,
+        ),
+    )
+
+    assert result.attempt_result.started_attempts == ()
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 0
+    assert result.capacity_retry_at == _now() + timedelta(seconds=10)
 
 
 @pytest.mark.asyncio

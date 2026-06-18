@@ -452,9 +452,12 @@ class PrepareLlmDispatchBatch:
                     and due_records
                     and not lease_result.leased
                 ):
-                    next_capacity_retry_at = _local_active_model_capacity_retry_at(
+                    next_capacity_retry_at = await _local_active_model_capacity_retry_at(
+                        capacity_observation_repository=capacity_observation_repository,
+                        provider_account_refs=provider_account_refs,
                         account_capacities=account_capacities,
                         active_model_ref=resolved_active_model_ref,
+                        profile=preparation_profile,
                         now=command.now,
                     )
                 elif attempt_result.started_attempts and next_capacity_retry_at is None:
@@ -832,6 +835,7 @@ async def _preparation_account_capacities(
         return _local_active_model_tpm_account_capacities(
             seed_capacities=seed_capacities,
             observations=observations,
+            now=now,
         )
 
     observations = (
@@ -872,48 +876,76 @@ def _capacity_account_refs_for_observations(
     return provider_account_refs
 
 
+@dataclass(frozen=True, slots=True)
+class _LocalActiveModelMinuteWindow:
+    observations: tuple[LlmAttemptCapacityObservation, ...]
+    reset_at: datetime
+
+
 def _local_active_model_tpm_account_capacities(
     *,
     seed_capacities: tuple[LlmProviderAccountCapacity, ...],
     observations: tuple[LlmAttemptCapacityObservation, ...],
+    now: datetime,
 ) -> tuple[LlmProviderAccountCapacity, ...]:
-    usage_by_account_ref = {
-        seed_capacity.account_ref: _LocalAccountUsage()
-        for seed_capacity in seed_capacities
-    }
+    observations_by_account_ref: dict[
+        str,
+        list[LlmAttemptCapacityObservation],
+    ] = {seed_capacity.account_ref: [] for seed_capacity in seed_capacities}
 
-    for observation in observations:
-        usage = usage_by_account_ref.get(observation.account_ref)
-        if usage is None:
+    for observation in sorted(observations, key=lambda item: item.observed_at):
+        account_bucket = observations_by_account_ref.get(observation.account_ref)
+        if account_bucket is None:
             continue
-
-        if _daily_capacity_exhausted(observation):
-            usage.exhaust_daily()
-
-        actual_token_usage = _actual_token_usage(observation)
-        if observation.outcome_class == "deferred" and actual_token_usage is None:
-            usage.exhaust_minute()
-            continue
-
-        usage.record(token_count=actual_token_usage)
+        account_bucket.append(observation)
 
     capacities: list[LlmProviderAccountCapacity] = []
     for seed_capacity in seed_capacities:
-        usage = usage_by_account_ref[seed_capacity.account_ref]
-        if usage.minute_exhausted:
+        seed_observations = tuple(
+            observations_by_account_ref[seed_capacity.account_ref],
+        )
+        active_window = _active_local_model_minute_window(
+            observations=seed_observations,
+            now=now,
+        )
+
+        minute_exhausted = False
+        minute_request_count = 0
+        minute_token_count = 0
+
+        if active_window is not None:
+            for observation in active_window.observations:
+                actual_token_usage = _actual_token_usage(observation)
+                if (
+                    observation.outcome_class in {"deferred", "retryable_failed"}
+                    and actual_token_usage is None
+                ):
+                    minute_exhausted = True
+                    continue
+                if actual_token_usage is None:
+                    continue
+                minute_request_count += 1
+                minute_token_count += actual_token_usage
+
+        if minute_exhausted:
             remaining_minute_requests = 0
             remaining_minute_tokens = 0
         else:
             remaining_minute_requests = max(
-                seed_capacity.remaining_minute_requests - usage.request_count,
+                seed_capacity.remaining_minute_requests - minute_request_count,
                 0,
             )
             remaining_minute_tokens = max(
-                seed_capacity.remaining_minute_tokens - usage.token_count,
+                seed_capacity.remaining_minute_tokens - minute_token_count,
                 0,
             )
 
-        if usage.daily_exhausted:
+        daily_exhausted = any(
+            _daily_capacity_exhausted(observation)
+            and (observation.daily_reset_at is None or observation.daily_reset_at > now)
+            for observation in seed_observations
+        )
+        if daily_exhausted:
             remaining_daily_requests = 0
             remaining_daily_tokens = 0
         else:
@@ -935,6 +967,42 @@ def _local_active_model_tpm_account_capacities(
     return tuple(capacities)
 
 
+def _active_local_model_minute_window(
+    *,
+    observations: tuple[LlmAttemptCapacityObservation, ...],
+    now: datetime,
+) -> _LocalActiveModelMinuteWindow | None:
+    current_observations: list[LlmAttemptCapacityObservation] = []
+    current_reset_at: datetime | None = None
+
+    for observation in sorted(observations, key=lambda item: item.observed_at):
+        if current_reset_at is None or observation.observed_at >= current_reset_at:
+            current_observations = [observation]
+            current_reset_at = _local_model_minute_reset_at(observation)
+            continue
+
+        current_observations.append(observation)
+
+        if observation.minute_reset_at is not None:
+            current_reset_at = observation.minute_reset_at
+
+    if current_reset_at is None or current_reset_at <= now:
+        return None
+
+    return _LocalActiveModelMinuteWindow(
+        observations=tuple(current_observations),
+        reset_at=current_reset_at,
+    )
+
+
+def _local_model_minute_reset_at(
+    observation: LlmAttemptCapacityObservation,
+) -> datetime:
+    if observation.minute_reset_at is not None:
+        return observation.minute_reset_at
+    return observation.observed_at + timedelta(seconds=60)
+
+
 def _daily_capacity_exhausted(observation: LlmAttemptCapacityObservation) -> bool:
     return (
         observation.remaining_daily_requests == 0
@@ -942,26 +1010,55 @@ def _daily_capacity_exhausted(observation: LlmAttemptCapacityObservation) -> boo
     )
 
 
-def _local_active_model_capacity_retry_at(
+async def _local_active_model_capacity_retry_at(
     *,
+    capacity_observation_repository: PostgresLlmAttemptCapacityObservationRepository,
+    provider_account_refs: tuple[str, ...],
     account_capacities: tuple[LlmProviderAccountCapacity, ...],
     active_model_ref: str,
+    profile: LlmTaskCapacityProfile,
     now: datetime,
 ) -> datetime | None:
-    for capacity in account_capacities:
-        if capacity.model_ref != active_model_ref:
-            continue
-        if (
-            capacity.remaining_daily_requests == 0
-            or capacity.remaining_daily_tokens == 0
-        ):
-            continue
-        if (
+    blocked_accounts = tuple(
+        capacity.account_ref
+        for capacity in account_capacities
+        if capacity.model_ref == active_model_ref
+        and capacity.remaining_daily_requests > 0
+        and capacity.remaining_daily_tokens > 0
+        and (
             capacity.remaining_minute_requests == 0
-            or capacity.remaining_minute_tokens == 0
-        ):
-            return now + timedelta(seconds=60)
-    return None
+            or capacity.remaining_minute_tokens < profile.estimated_prompt_tokens
+        )
+    )
+    if not blocked_accounts:
+        return None
+
+    observations = (
+        await capacity_observation_repository.observations_for_accounts_since(
+            provider="groq",
+            account_refs=blocked_accounts,
+            model_ref=active_model_ref,
+            since=now - timedelta(seconds=60),
+        )
+    )
+
+    retry_candidates: list[datetime] = []
+    for account_ref in blocked_accounts:
+        active_window = _active_local_model_minute_window(
+            observations=tuple(
+                observation
+                for observation in observations
+                if observation.account_ref == account_ref
+            ),
+            now=now,
+        )
+        if active_window is not None:
+            retry_candidates.append(active_window.reset_at)
+
+    if not retry_candidates:
+        return None
+
+    return min(retry_candidates)
 
 
 def _actual_token_usage(observation: LlmAttemptCapacityObservation) -> int | None:
