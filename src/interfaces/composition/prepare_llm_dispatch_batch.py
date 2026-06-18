@@ -33,6 +33,9 @@ from src.contexts.execution_runtime.application.use_cases.lease_admitted_work_it
     LeaseAdmittedWorkItemsResult,
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -127,6 +130,7 @@ class PrepareLlmDispatchBatchCommand:
     account_capacities: tuple[LlmProviderAccountCapacity, ...] = ()
     active_model_ref: str | None = None
     dispatch_preparation_strategy: str | None = None
+    retry_plan: WorkItemRetryPlan | None = None
     use_local_active_model_tpm_budget: bool = False
 
     def __post_init__(self) -> None:
@@ -166,6 +170,11 @@ class PrepareLlmDispatchBatchCommand:
                 self.dispatch_preparation_strategy,
                 field_name="dispatch_preparation_strategy",
             )
+        if self.retry_plan is not None and not isinstance(
+            self.retry_plan,
+            WorkItemRetryPlan,
+        ):
+            raise TypeError("retry_plan must be WorkItemRetryPlan when provided")
         if not isinstance(self.use_local_active_model_tpm_budget, bool):
             raise TypeError("use_local_active_model_tpm_budget must be bool")
         if self.started_at < self.now:
@@ -294,11 +303,15 @@ class PrepareLlmDispatchBatch:
                     now=command.now.isoformat(),
                 )
 
+                dispatch_preparation_strategy = (
+                    _dispatch_preparation_strategy_from_retry_plan(
+                        retry_plan=command.retry_plan,
+                        legacy_strategy=command.dispatch_preparation_strategy,
+                    )
+                )
                 admission_due_records = _admission_lane_due_records(
                     due_records,
-                    dispatch_preparation_strategy=(
-                        command.dispatch_preparation_strategy
-                    ),
+                    dispatch_preparation_strategy=dispatch_preparation_strategy,
                 )
                 preparation_profile = _preparation_profile(
                     command=command,
@@ -312,7 +325,7 @@ class PrepareLlmDispatchBatch:
                 strategy_result = ResolveLlmDispatchPreparationStrategy().execute(
                     ResolveLlmDispatchPreparationStrategyCommand(
                         current_active_model_ref=initial_model_ref,
-                        strategy=command.dispatch_preparation_strategy,
+                        strategy=dispatch_preparation_strategy,
                         route_catalog=self.route_catalog,
                     )
                 )
@@ -568,6 +581,42 @@ class _MutableInputCapacity:
         self.remaining_daily_requests -= 1
         self.remaining_minute_tokens -= estimated_input_tokens
         self.remaining_daily_tokens -= estimated_input_tokens
+
+
+def _dispatch_preparation_strategy_from_retry_plan(
+    *,
+    retry_plan: WorkItemRetryPlan | None,
+    legacy_strategy: str | None,
+) -> str | None:
+    if retry_plan is None:
+        return legacy_strategy
+
+    strategy_by_retry_plan = {
+        WorkItemRetryPlan.RETRY_SAME_MODEL: "RETRY_SAME_MODEL",
+        WorkItemRetryPlan.RETRY_OTHER_ORG: "RETRY_SAME_MODEL",
+        WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW: "RETRY_SAME_MODEL",
+        WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL: (
+            "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
+        ),
+        WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL: (
+            "RETRY_LARGER_INPUT_LIMIT_MODEL"
+        ),
+        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL: (
+            "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
+        ),
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL: (
+            "RETRY_DAILY_LIMIT_FALLBACK_MODEL"
+        ),
+    }
+
+    strategy = strategy_by_retry_plan.get(retry_plan)
+    if strategy is None:
+        raise ValueError(f"retry_plan cannot be prepared for dispatch: {retry_plan}")
+
+    if legacy_strategy is not None and legacy_strategy != strategy:
+        raise ValueError("retry_plan conflicts with dispatch_preparation_strategy")
+
+    return strategy
 
 
 def _admission_lane_due_records(

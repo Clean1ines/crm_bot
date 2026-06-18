@@ -13,6 +13,9 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
     LlmAttemptCapacityObservation,
 )
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -120,7 +123,7 @@ class FakeConnection:
         for row in self.work_items.values():
             if row["work_kind"] != work_kind:
                 continue
-            if row["status"] not in {"ready", "deferred", "retryable_failed"}:
+            if row["status"] not in {"ready", "retryable_failed"}:
                 continue
             next_attempt_at = row["next_attempt_at"]
             if next_attempt_at is not None and _as_datetime(next_attempt_at) > now:
@@ -156,7 +159,7 @@ class FakeConnection:
                 return None
             if row["work_kind"] != work_kind:
                 return None
-            if row["status"] not in {"ready", "deferred", "retryable_failed"}:
+            if row["status"] not in {"ready", "retryable_failed"}:
                 return None
             next_attempt_at = row["next_attempt_at"]
             if next_attempt_at is not None and _as_datetime(next_attempt_at) > now:
@@ -173,7 +176,7 @@ class FakeConnection:
         for row in self.work_items.values():
             if row["work_kind"] != work_kind:
                 continue
-            if row["status"] not in {"ready", "deferred", "retryable_failed"}:
+            if row["status"] not in {"ready", "retryable_failed"}:
                 continue
             next_attempt_at = row["next_attempt_at"]
             if next_attempt_at is not None and _as_datetime(next_attempt_at) > now:
@@ -367,6 +370,7 @@ def _command(
     now: datetime | None = None,
     started_at: datetime | None = None,
     dispatch_preparation_strategy: str | None = None,
+    retry_plan: WorkItemRetryPlan | None = None,
     use_local_active_model_tpm_budget: bool = False,
 ) -> PrepareLlmDispatchBatchCommand:
     return PrepareLlmDispatchBatchCommand(
@@ -381,6 +385,7 @@ def _command(
         now=now or _now(),
         started_at=started_at or _started_at(),
         dispatch_preparation_strategy=dispatch_preparation_strategy,
+        retry_plan=retry_plan,
         use_local_active_model_tpm_budget=use_local_active_model_tpm_budget,
     )
 
@@ -399,8 +404,7 @@ def _runner(pool: FakePool) -> PrepareLlmDispatchBatch:
 def _status_priority(status: str) -> int:
     priority_by_status = {
         WorkItemStatus.RETRYABLE_FAILED.value: 0,
-        WorkItemStatus.DEFERRED.value: 1,
-        WorkItemStatus.READY.value: 2,
+        WorkItemStatus.READY.value: 1,
     }
     return priority_by_status.get(status, 3)
 
@@ -622,6 +626,88 @@ async def test_retryable_status_without_retry_strategy_does_not_block_fresh_admi
     assert {
         str(dispatch["work_item_id"]) for dispatch in connection.dispatches.values()
     } == {"work-fresh-small"}
+
+
+@pytest.mark.asyncio
+async def test_retry_plan_drives_dispatch_strategy_without_legacy_strategy() -> None:
+    catalog = default_groq_llm_model_route_catalog()
+    fallback_model_ref = catalog.automatic_fallback_model_refs()[0]
+    connection = FakeConnection()
+
+    retry_row = _work_item_row("work-empty-check", ordinal=1)
+    retry_row["status"] = WorkItemStatus.RETRYABLE_FAILED.value
+    retry_row["attempt_count"] = 2
+    retry_row["next_attempt_at"] = _now() - timedelta(seconds=1)
+    retry_row["last_error_kind"] = "empty_claims_retry"
+
+    fresh_row = _work_item_row("work-fresh", ordinal=2)
+
+    connection.work_items["work-empty-check"] = retry_row
+    connection.work_items["work-fresh"] = fresh_row
+    connection.schedules["work-empty-check"] = _schedule_payload(
+        source_unit_ref="unit-empty-check",
+    )
+    connection.schedules["work-fresh"] = _schedule_payload(
+        source_unit_ref="unit-fresh",
+    )
+
+    result = await _runner(FakePool(connection=connection)).execute(
+        _command(
+            retry_plan=WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL,
+            account_capacities=(
+                _account(
+                    account_ref="org-fallback",
+                    model_ref=fallback_model_ref,
+                    minute_requests=1,
+                    minute_tokens=7000,
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            requested_items=2,
+        ),
+    )
+
+    assert len(result.lease_result.leased) == 1
+    assert len(result.attempt_result.started_attempts) == 1
+    assert connection.work_items["work-empty-check"]["status"] == "leased"
+    assert connection.work_items["work-fresh"]["status"] == WorkItemStatus.READY.value
+    dispatch = next(iter(connection.dispatches.values()))
+    assert dispatch["llm_allocation_payload"]["model_ref"] == fallback_model_ref
+
+
+@pytest.mark.asyncio
+async def test_legacy_deferred_item_is_not_admitted_for_prepare() -> None:
+    connection = FakeConnection()
+
+    deferred_row = _work_item_row("work-legacy-deferred", ordinal=1)
+    deferred_row["status"] = WorkItemStatus.DEFERRED.value
+    deferred_row["next_attempt_at"] = _now() - timedelta(seconds=1)
+    deferred_row["last_error_kind"] = "legacy_capacity_wait"
+
+    ready_row = _work_item_row("work-ready", ordinal=2)
+
+    connection.work_items["work-legacy-deferred"] = deferred_row
+    connection.work_items["work-ready"] = ready_row
+    connection.schedules["work-legacy-deferred"] = _schedule_payload(
+        source_unit_ref="unit-legacy-deferred",
+    )
+    connection.schedules["work-ready"] = _schedule_payload(
+        source_unit_ref="unit-ready",
+    )
+
+    result = await _runner(FakePool(connection=connection)).execute(
+        _command(requested_items=2),
+    )
+
+    assert len(result.lease_result.leased) == 1
+    assert connection.work_items["work-legacy-deferred"]["status"] == (
+        WorkItemStatus.DEFERRED.value
+    )
+    assert connection.work_items["work-ready"]["status"] == "leased"
+    assert {
+        str(dispatch["work_item_id"]) for dispatch in connection.dispatches.values()
+    } == {"work-ready"}
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Protocol, cast
 
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -342,6 +345,7 @@ def _prepare_llm_dispatch_batch_command(
         dispatch_preparation_strategy=_dispatch_preparation_strategy(
             workflow_command.payload,
         ),
+        retry_plan=_retry_plan_from_payload(workflow_command.payload),
     )
 
 
@@ -441,6 +445,20 @@ def _optional_payload_mapping(
     if not isinstance(value, Mapping):
         raise ValueError(f"workflow command payload {key} must be mapping")
     return value
+
+
+def _retry_plan_from_payload(payload: Mapping[str, object]) -> WorkItemRetryPlan | None:
+    for key in ("retry_plan", "selected_retry_plan", "claim_builder_retry_plan"):
+        value = payload.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"workflow command payload {key} must be non-empty text")
+        try:
+            return WorkItemRetryPlan(value)
+        except ValueError as exc:
+            raise ValueError(f"workflow command payload {key} is unknown") from exc
+    return None
 
 
 def _dispatch_preparation_strategy(

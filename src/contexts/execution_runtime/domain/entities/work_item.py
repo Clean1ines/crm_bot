@@ -5,6 +5,9 @@ from datetime import datetime
 
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -29,6 +32,7 @@ class WorkItem:
     lease_expires_at: datetime | None = None
     next_attempt_at: WaitUntil | None = None
     last_error_kind: str | None = None
+    retry_plan: WorkItemRetryPlan | None = None
 
     def __post_init__(self) -> None:
         if not self.work_item_id or not self.work_item_id.strip():
@@ -72,6 +76,6 @@ class WorkItem:
             raise ValueError("now must be timezone-aware")
         if self.status is WorkItemStatus.READY:
             return True
-        if self.status in {WorkItemStatus.DEFERRED, WorkItemStatus.RETRYABLE_FAILED}:
+        if self.status is WorkItemStatus.RETRYABLE_FAILED:
             return self.next_attempt_at is None or self.next_attempt_at.value <= now
         return False

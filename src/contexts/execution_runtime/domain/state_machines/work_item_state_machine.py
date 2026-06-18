@@ -6,6 +6,9 @@ from datetime import datetime
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -53,6 +56,7 @@ class WorkItemStateMachine:
             lease_expires_at=lease_expires_at,
             next_attempt_at=None,
             last_error_kind=None,
+            retry_plan=None,
         )
 
     @staticmethod
@@ -84,6 +88,7 @@ class WorkItemStateMachine:
             lease_expires_at=None,
             next_attempt_at=wait_until,
             last_error_kind=error_kind,
+            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
         )
 
     @staticmethod
@@ -92,6 +97,7 @@ class WorkItemStateMachine:
         *,
         error_kind: str,
         next_attempt_at: WaitUntil,
+        retry_plan: WorkItemRetryPlan = WorkItemRetryPlan.RETRY_SAME_MODEL,
     ) -> WorkItem:
         WorkItemStateMachine._require_leased(item, "mark retryable failed")
         if not error_kind or not error_kind.strip():
@@ -104,6 +110,7 @@ class WorkItemStateMachine:
             lease_expires_at=None,
             next_attempt_at=next_attempt_at,
             last_error_kind=error_kind,
+            retry_plan=retry_plan,
         )
 
     @staticmethod
@@ -228,6 +235,7 @@ class WorkItemStateMachine:
             lease_expires_at=None,
             next_attempt_at=wait_until,
             last_error_kind=reason,
+            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
         )
 
     @staticmethod

@@ -11,6 +11,9 @@ from src.contexts.execution_runtime.domain.state_machines.work_item_state_machin
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -88,6 +91,19 @@ def test_work_item_statuses_are_canonical_and_business_agnostic() -> None:
     )
 
 
+def test_legacy_deferred_status_is_not_waiting_and_never_due() -> None:
+    legacy_deferred = WorkItem(
+        work_item_id="legacy-deferred-work",
+        work_kind=WorkKind("knowledge_workbench.claim_extraction"),
+        status=WorkItemStatus.DEFERRED,
+        next_attempt_at=WaitUntil(_now() - timedelta(seconds=1)),
+        last_error_kind="legacy_capacity_wait",
+    )
+
+    assert WorkItemStatus.DEFERRED.is_waiting is False
+    assert legacy_deferred.is_due(_now()) is False
+
+
 def test_lease_ready_item_sets_lease_fields_and_increments_attempt_count() -> None:
     now = _now()
     leased = WorkItemStateMachine.lease_ready(
@@ -132,6 +148,7 @@ def test_defer_leased_item_marks_retryable_with_wait_until_and_clears_lease() ->
     assert deferred.status is WorkItemStatus.RETRYABLE_FAILED
     assert deferred.next_attempt_at == wait_until
     assert deferred.last_error_kind == "minute_limit"
+    assert deferred.retry_plan is WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
     assert deferred.leased_by is None
     assert deferred.lease_token is None
     assert not deferred.is_due(_now())
@@ -145,11 +162,13 @@ def test_retryable_and_terminal_failures_are_explicit_transitions() -> None:
         leased,
         error_kind="network_timeout",
         next_attempt_at=WaitUntil(_now() + timedelta(seconds=10)),
+        retry_plan=WorkItemRetryPlan.RETRY_OTHER_ORG,
     )
 
     assert retryable.status is WorkItemStatus.RETRYABLE_FAILED
     assert retryable.last_error_kind == "network_timeout"
     assert retryable.next_attempt_at == WaitUntil(_now() + timedelta(seconds=10))
+    assert retryable.retry_plan is WorkItemRetryPlan.RETRY_OTHER_ORG
 
     terminal = WorkItemStateMachine.fail_leased_terminal(
         leased,
