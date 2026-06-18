@@ -7,9 +7,11 @@ from types import TracebackType
 from typing import Protocol, cast
 
 import asyncpg
-
 import structlog
 
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservation,
+)
 from src.contexts.capacity_runtime.domain.capacity_decision import (
     CapacityAvailability,
     CapacityDecision,
@@ -20,9 +22,15 @@ from src.contexts.capacity_runtime.domain.capacity_decision import (
     CapacityWorkClass,
 )
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
+from src.contexts.capacity_runtime.infrastructure.postgres.postgres_llm_attempt_capacity_observation_repository import (
+    PostgresLlmAttemptCapacityObservationRepository,
+)
 from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
     DueWorkItemRecord,
     WorkItemLeaseRepositoryPort,
+)
+from src.contexts.execution_runtime.application.use_cases.lease_admitted_work_items import (
+    LeaseAdmittedWorkItemsResult,
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
@@ -30,20 +38,11 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_status import
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
-from src.contexts.execution_runtime.application.use_cases.lease_admitted_work_items import (
-    LeaseAdmittedWorkItemsResult,
-)
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_dispatch_repository import (
     PostgresWorkItemAttemptDispatchRepository,
 )
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
     PostgresWorkItemLeaseRepository,
-)
-from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
-    LlmAttemptCapacityObservation,
-)
-from src.contexts.capacity_runtime.infrastructure.postgres.postgres_llm_attempt_capacity_observation_repository import (
-    PostgresLlmAttemptCapacityObservationRepository,
 )
 from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
     ClaimBuilderDispatchPreparationBuilder,
@@ -53,29 +52,22 @@ from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capac
     LlmCapacityProjectionResult,
     zero_llm_capacity_projection,
 )
-from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
-    SelectActiveLlmModelCapacity,
-    SelectActiveLlmModelCapacityResult,
-)
-from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparation_strategy import (
-    ResolveLlmDispatchPreparationStrategy,
-    ResolveLlmDispatchPreparationStrategyCommand,
-)
 from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_input_size_preflight import (
     LlmDispatchInputSizePreflightDecision,
     ResolveLlmDispatchInputSizePreflight,
     ResolveLlmDispatchInputSizePreflightCommand,
     ResolveLlmDispatchInputSizePreflightResult,
 )
+from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparation_strategy import (
+    ResolveLlmDispatchPreparationStrategy,
+    ResolveLlmDispatchPreparationStrategyCommand,
+)
+from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
+    SelectActiveLlmModelCapacity,
+    SelectActiveLlmModelCapacityResult,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelRouteCatalog,
-)
-from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
-from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
-    LlmRuntimeSettings,
-)
-from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
-    build_groq_free_plan_model_profiles,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
@@ -83,9 +75,13 @@ from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity impo
 from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
 )
+from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
+)
 from src.interfaces.composition.lease_llm_admitted_work_items import (
-    LlmAdmittedLeasedWorkItem,
     LeaseLlmAdmittedWorkItemsResult,
+    LlmAdmittedLeasedWorkItem,
 )
 from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
     StartLlmAdmittedWorkItemAttempts,
@@ -140,7 +136,8 @@ class PrepareLlmDispatchBatchCommand:
         if not isinstance(self.worker, WorkerRef):
             raise TypeError("worker must be WorkerRef")
         _require_non_empty_text(
-            self.lease_token_prefix, field_name="lease_token_prefix"
+            self.lease_token_prefix,
+            field_name="lease_token_prefix",
         )
         _require_timezone_aware(self.lease_expires_at, field_name="lease_expires_at")
         _require_timezone_aware(self.now, field_name="now")
@@ -296,9 +293,16 @@ class PrepareLlmDispatchBatch:
                     due_record_count=len(due_records),
                     now=command.now.isoformat(),
                 )
+
+                admission_due_records = _admission_lane_due_records(
+                    due_records,
+                    dispatch_preparation_strategy=(
+                        command.dispatch_preparation_strategy
+                    ),
+                )
                 preparation_profile = _preparation_profile(
                     command=command,
-                    due_records=due_records,
+                    due_records=admission_due_records,
                     builder=self.dispatch_preparation_builder,
                 )
                 initial_model_ref = command.active_model_ref
@@ -323,10 +327,16 @@ class PrepareLlmDispatchBatch:
                     "knowledge_llm_prepare_preflight",
                     work_kind=command.work_kind.value,
                     profile_id=preparation_profile.profile_id,
-                    estimated_prompt_tokens=preparation_profile.estimated_prompt_tokens,
-                    estimated_completion_tokens=preparation_profile.estimated_completion_tokens,
+                    estimated_prompt_tokens=(
+                        preparation_profile.estimated_prompt_tokens
+                    ),
+                    estimated_completion_tokens=(
+                        preparation_profile.estimated_completion_tokens
+                    ),
                     estimated_total_tokens=preparation_profile.estimated_total_tokens,
-                    estimated_tpm_input_tokens=preparation_profile.estimated_prompt_tokens,
+                    estimated_tpm_input_tokens=(
+                        preparation_profile.estimated_prompt_tokens
+                    ),
                     estimated_requests=preparation_profile.estimated_requests,
                     initial_model_ref=initial_model_ref,
                     strategy_active_model_ref=strategy_result.active_model_ref,
@@ -355,7 +365,7 @@ class PrepareLlmDispatchBatch:
                 )
                 account_capacities = await _preparation_account_capacities(
                     command=command,
-                    due_records=due_records,
+                    due_records=admission_due_records,
                     builder=self.dispatch_preparation_builder,
                     active_model_ref=resolved_active_model_ref,
                     provider_account_refs=provider_account_refs,
@@ -375,9 +385,13 @@ class PrepareLlmDispatchBatch:
                             "provider": capacity.provider,
                             "account_ref": capacity.account_ref,
                             "model_ref": capacity.model_ref,
-                            "remaining_minute_requests": capacity.remaining_minute_requests,
+                            "remaining_minute_requests": (
+                                capacity.remaining_minute_requests
+                            ),
                             "remaining_minute_tokens": capacity.remaining_minute_tokens,
-                            "remaining_daily_requests": capacity.remaining_daily_requests,
+                            "remaining_daily_requests": (
+                                capacity.remaining_daily_requests
+                            ),
                             "remaining_daily_tokens": capacity.remaining_daily_tokens,
                         }
                         for capacity in account_capacities
@@ -394,7 +408,7 @@ class PrepareLlmDispatchBatch:
 
                 lease_result = await _lease_input_admitted_work_items(
                     lease_repository=lease_repository,
-                    due_records=due_records,
+                    due_records=admission_due_records,
                     account_capacities=account_capacities,
                     active_model_ref=resolved_active_model_ref,
                     requested_items=command.requested_items,
@@ -409,9 +423,15 @@ class PrepareLlmDispatchBatch:
                     "knowledge_llm_prepare_lease_result",
                     work_kind=command.work_kind.value,
                     active_model_ref=resolved_active_model_ref,
-                    capacity_decision_status=lease_result.lease_result.capacity_decision.status.value,
-                    capacity_decision_reason=lease_result.lease_result.capacity_decision.reason,
-                    max_admissible_items=lease_result.lease_result.capacity_decision.max_admissible_items,
+                    capacity_decision_status=(
+                        lease_result.lease_result.capacity_decision.status.value
+                    ),
+                    capacity_decision_reason=(
+                        lease_result.lease_result.capacity_decision.reason
+                    ),
+                    max_admissible_items=(
+                        lease_result.lease_result.capacity_decision.max_admissible_items
+                    ),
                     leased_count=len(lease_result.leased),
                     selected_accounts=[
                         {
@@ -420,11 +440,15 @@ class PrepareLlmDispatchBatch:
                             "model_ref": account.model_ref,
                             "slot_index": getattr(account, "slot_index", None),
                         }
-                        for account in lease_result.active_model_capacity_selection.selected_accounts
+                        for account in (
+                            lease_result.active_model_capacity_selection.selected_accounts
+                        )
                     ],
-                    capacity_retry_at=capacity_retry_at.isoformat()
-                    if capacity_retry_at is not None
-                    else None,
+                    capacity_retry_at=(
+                        capacity_retry_at.isoformat()
+                        if capacity_retry_at is not None
+                        else None
+                    ),
                 )
 
                 attempt_result = await StartLlmAdmittedWorkItemAttempts(
@@ -449,7 +473,7 @@ class PrepareLlmDispatchBatch:
                 next_capacity_retry_at = capacity_retry_at
                 if (
                     use_local_active_model_tpm_budget
-                    and due_records
+                    and admission_due_records
                     and not lease_result.leased
                 ):
                     next_capacity_retry_at = await _local_active_model_capacity_retry_at(
@@ -468,9 +492,7 @@ class PrepareLlmDispatchBatch:
                     attempt_result=attempt_result,
                     input_size_preflight_decision=preflight_result.decision.value,
                     input_size_preflight_reason=preflight_result.reason,
-                    input_size_preflight_active_model_ref=(
-                        preflight_result.active_model_ref
-                    ),
+                    input_size_preflight_active_model_ref=preflight_result.active_model_ref,
                     source_split_required=False,
                     capacity_retry_at=next_capacity_retry_at,
                 )
@@ -550,7 +572,19 @@ class _MutableInputCapacity:
 
 def _admission_lane_due_records(
     due_records: tuple[DueWorkItemRecord, ...],
+    *,
+    dispatch_preparation_strategy: str | None = None,
 ) -> tuple[DueWorkItemRecord, ...]:
+    if dispatch_preparation_strategy is None:
+        ready_lane = tuple(
+            record
+            for record in due_records
+            if record.work_item.status is WorkItemStatus.READY
+        )
+        if ready_lane:
+            return ready_lane
+        return due_records
+
     retry_lane = tuple(
         record
         for record in due_records
@@ -582,9 +616,8 @@ async def _lease_input_admitted_work_items(
     mutable_accounts = [
         _MutableInputCapacity.from_capacity(account) for account in active_accounts
     ]
-    admission_records = _admission_lane_due_records(due_records)
     candidates = _input_admitted_candidates(
-        due_records=admission_records,
+        due_records=due_records,
         mutable_accounts=mutable_accounts,
         requested_items=requested_items,
     )
@@ -888,10 +921,9 @@ def _local_active_model_tpm_account_capacities(
     observations: tuple[LlmAttemptCapacityObservation, ...],
     now: datetime,
 ) -> tuple[LlmProviderAccountCapacity, ...]:
-    observations_by_account_ref: dict[
-        str,
-        list[LlmAttemptCapacityObservation],
-    ] = {seed_capacity.account_ref: [] for seed_capacity in seed_capacities}
+    observations_by_account_ref: dict[str, list[LlmAttemptCapacityObservation]] = {
+        seed_capacity.account_ref: [] for seed_capacity in seed_capacities
+    }
 
     for observation in sorted(observations, key=lambda item: item.observed_at):
         account_bucket = observations_by_account_ref.get(observation.account_ref)
@@ -1057,20 +1089,62 @@ async def _local_active_model_capacity_retry_at(
 
     if not retry_candidates:
         return None
-
     return min(retry_candidates)
 
 
-def _actual_token_usage(observation: LlmAttemptCapacityObservation) -> int | None:
-    if observation.actual_total_tokens is not None:
-        return observation.actual_total_tokens
+async def _next_capacity_retry_at(
+    *,
+    capacity_observation_repository: PostgresLlmAttemptCapacityObservationRepository,
+    provider_account_refs: tuple[str, ...],
+    model_ref: str,
+    now: datetime,
+) -> datetime | None:
+    if not provider_account_refs:
+        return None
+
+    observations = (
+        await capacity_observation_repository.latest_observations_for_accounts(
+            provider="groq",
+            account_refs=provider_account_refs,
+            model_ref=model_ref,
+        )
+    )
+    retry_candidates = tuple(
+        retry_at
+        for observation in observations
+        if (retry_at := _observation_retry_at(observation=observation, now=now))
+        is not None
+    )
+    if retry_candidates:
+        return min(retry_candidates)
+    return None
+
+
+def _observation_retry_at(
+    *,
+    observation: LlmAttemptCapacityObservation,
+    now: datetime,
+) -> datetime | None:
+    retry_candidates: list[datetime] = []
     if (
-        observation.actual_prompt_tokens is not None
-        and observation.actual_completion_tokens is not None
+        observation.remaining_minute_requests == 0
+        or observation.remaining_minute_tokens == 0
     ):
-        return observation.actual_prompt_tokens + observation.actual_completion_tokens
-    if observation.actual_prompt_tokens is not None:
-        return observation.actual_prompt_tokens
+        if observation.minute_reset_at is not None:
+            retry_candidates.append(observation.minute_reset_at)
+        else:
+            retry_candidates.append(_local_model_minute_reset_at(observation))
+
+    if (
+        observation.remaining_daily_requests == 0
+        or observation.remaining_daily_tokens == 0
+    ):
+        if observation.daily_reset_at is not None:
+            retry_candidates.append(observation.daily_reset_at)
+
+    future_candidates = tuple(item for item in retry_candidates if item > now)
+    if future_candidates:
+        return min(future_candidates)
     return None
 
 
@@ -1082,152 +1156,115 @@ def _capacity_from_latest_observation(
     now: datetime,
 ) -> LlmProviderAccountCapacity:
     if observation is None:
-        return _capacity_with_token_floor(
-            seed_capacity=seed_capacity,
-            profile=profile,
-        )
-
-    remaining_minute_requests = _observed_or_seed(
-        observation.remaining_minute_requests,
-        seed_capacity.remaining_minute_requests,
-    )
-    remaining_minute_tokens = _observed_or_seed(
-        observation.remaining_minute_tokens,
-        seed_capacity.remaining_minute_tokens,
-    )
-    remaining_daily_requests = _observed_or_seed(
-        observation.remaining_daily_requests,
-        seed_capacity.remaining_daily_requests,
-    )
-    remaining_daily_tokens = _observed_or_seed(
-        observation.remaining_daily_tokens,
-        seed_capacity.remaining_daily_tokens,
-    )
-
-    seed_after_reset = _capacity_with_token_floor(
-        seed_capacity=seed_capacity,
-        profile=profile,
-    )
-
-    minute_reset_at = _minute_reset_at_from_observation(observation)
-    if minute_reset_at is not None and minute_reset_at <= now:
-        remaining_minute_requests = seed_after_reset.remaining_minute_requests
-        remaining_minute_tokens = seed_after_reset.remaining_minute_tokens
+        return seed_capacity
 
     if observation.daily_reset_at is not None and observation.daily_reset_at <= now:
-        remaining_daily_requests = seed_after_reset.remaining_daily_requests
-        remaining_daily_tokens = seed_after_reset.remaining_daily_tokens
+        daily_requests = seed_capacity.remaining_daily_requests
+        daily_tokens = seed_capacity.remaining_daily_tokens
+    else:
+        daily_requests = min(
+            seed_capacity.remaining_daily_requests,
+            _observed_capacity_value(
+                observation.remaining_daily_requests,
+                seed_capacity.remaining_daily_requests,
+            ),
+        )
+        daily_tokens = min(
+            seed_capacity.remaining_daily_tokens,
+            _observed_capacity_value(
+                observation.remaining_daily_tokens,
+                seed_capacity.remaining_daily_tokens,
+            ),
+        )
+
+    minute_retry_at = _observation_retry_at(observation=observation, now=now)
+    if minute_retry_at is not None and minute_retry_at > now:
+        minute_requests = 0
+        minute_tokens = 0
+    else:
+        minute_requests = min(
+            seed_capacity.remaining_minute_requests,
+            _observed_capacity_value(
+                observation.remaining_minute_requests,
+                seed_capacity.remaining_minute_requests,
+            ),
+        )
+        minute_tokens = min(
+            seed_capacity.remaining_minute_tokens,
+            _observed_capacity_value(
+                observation.remaining_minute_tokens,
+                seed_capacity.remaining_minute_tokens,
+            ),
+        )
 
     return LlmProviderAccountCapacity(
         provider=seed_capacity.provider,
         account_ref=seed_capacity.account_ref,
         model_ref=seed_capacity.model_ref,
-        remaining_minute_requests=remaining_minute_requests,
-        remaining_minute_tokens=remaining_minute_tokens,
-        remaining_daily_requests=remaining_daily_requests,
-        remaining_daily_tokens=remaining_daily_tokens,
+        remaining_minute_requests=minute_requests,
+        remaining_minute_tokens=minute_tokens,
+        remaining_daily_requests=daily_requests,
+        remaining_daily_tokens=daily_tokens,
     )
 
 
-def _capacity_with_token_floor(
-    *,
-    seed_capacity: LlmProviderAccountCapacity,
-    profile: LlmTaskCapacityProfile,
-) -> LlmProviderAccountCapacity:
-    _ = profile
-    return seed_capacity
-
-
-def _observed_or_seed(observed: int | None, seed: int) -> int:
+def _observed_capacity_value(observed: int | None, seed: int) -> int:
     if observed is None:
         return seed
     return observed
 
 
-def _minute_reset_at_from_observation(
-    observation: LlmAttemptCapacityObservation,
-) -> datetime | None:
-    if observation.minute_reset_at is not None:
-        return observation.minute_reset_at
-
-    if (
-        observation.remaining_minute_requests == 0
-        or observation.remaining_minute_tokens == 0
-        or observation.actual_prompt_tokens is not None
-    ):
-        return observation.observed_at + timedelta(seconds=60)
-
-    return None
-
-
-async def _next_capacity_retry_at(
-    *,
-    capacity_observation_repository: PostgresLlmAttemptCapacityObservationRepository,
-    provider_account_refs: tuple[str, ...],
-    model_ref: str,
-    now: datetime,
-) -> datetime | None:
-    observations = (
-        await capacity_observation_repository.latest_observations_for_accounts(
-            provider="groq",
-            account_refs=provider_account_refs,
-            model_ref=model_ref,
-        )
-    )
-    retry_candidates = tuple(
-        retry_at
-        for observation in observations
-        for retry_at in (_observation_retry_at(observation=observation, now=now),)
-        if retry_at is not None
-    )
-    if not retry_candidates:
+def _actual_token_usage(observation: LlmAttemptCapacityObservation) -> int | None:
+    if observation.actual_total_tokens is not None:
+        return observation.actual_total_tokens
+    if observation.actual_prompt_tokens is None:
         return None
-    return min(retry_candidates)
+    completion_tokens = observation.actual_completion_tokens or 0
+    return observation.actual_prompt_tokens + completion_tokens
 
 
-def _observation_retry_at(
-    *,
-    observation: LlmAttemptCapacityObservation,
-    now: datetime,
-) -> datetime | None:
-    retry_candidates: list[datetime] = []
+def _affected_work_item_refs(records: tuple[DueWorkItemRecord, ...]) -> tuple[str, ...]:
+    return tuple(record.work_item.work_item_id for record in records)
 
-    minute_reset_at = _minute_reset_at_from_observation(observation)
-    if minute_reset_at is not None and minute_reset_at > now:
-        retry_candidates.append(minute_reset_at)
 
-    if (
-        observation.daily_reset_at is not None
-        and observation.daily_reset_at > now
-        and (
-            observation.remaining_daily_requests == 0
-            or observation.remaining_daily_tokens == 0
-        )
-    ):
-        retry_candidates.append(observation.daily_reset_at)
-
-    if not retry_candidates:
-        return None
-    return min(retry_candidates)
+def _source_unit_refs(records: tuple[DueWorkItemRecord, ...]) -> tuple[str, ...]:
+    refs: list[str] = []
+    for record in records:
+        source_unit_ref = record.schedule_payload.get("source_unit_ref")
+        if not isinstance(source_unit_ref, str) or not source_unit_ref.strip():
+            raise ValueError("source_unit_ref is required for source split")
+        refs.append(source_unit_ref)
+    return tuple(refs)
 
 
 def _resolved_provider_account_refs(
-    configured: tuple[str, ...],
+    configured_refs: tuple[str, ...],
 ) -> tuple[str, ...]:
-    if configured:
-        return configured
-    env_config = LlmRuntimeSettings.from_env_mapping(
-        __import__("os").environ
-    ).to_groq_env_config()
-    return tuple(account.account_seed.account_ref for account in env_config.accounts)
+    if configured_refs:
+        return configured_refs
+    return ()
 
 
 def _resolved_model_profiles(
-    configured: tuple[ModelProfile, ...],
+    configured_profiles: tuple[ModelProfile, ...],
 ) -> tuple[ModelProfile, ...]:
-    if configured:
-        return configured
+    if configured_profiles:
+        return configured_profiles
     return build_groq_free_plan_model_profiles()
+
+
+def _require_non_empty_text(value: str, *, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
+    if not value.strip():
+        raise ValueError(f"{field_name} must be non-empty")
+
+
+def _require_non_empty_text_tuple(value: tuple[str, ...], *, field_name: str) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError(f"{field_name} must be tuple")
+    for item in value:
+        _require_non_empty_text(item, field_name=f"{field_name} item")
 
 
 def _require_positive_int(value: int, *, field_name: str) -> None:
@@ -1237,44 +1274,8 @@ def _require_positive_int(value: int, *, field_name: str) -> None:
         raise ValueError(f"{field_name} must be > 0")
 
 
-def _affected_work_item_refs(
-    records: tuple[DueWorkItemRecord, ...],
-) -> tuple[str, ...]:
-    return tuple(record.work_item.work_item_id for record in records)
-
-
-def _source_unit_refs(records: tuple[DueWorkItemRecord, ...]) -> tuple[str, ...]:
-    refs: list[str] = []
-    for record in records:
-        source_unit_ref = record.schedule_payload.get("source_unit_ref")
-        if not isinstance(source_unit_ref, str) or not source_unit_ref.strip():
-            raise ValueError(
-                "source split required schedule payload must include source_unit_ref"
-            )
-        refs.append(source_unit_ref)
-    return tuple(refs)
-
-
 def _require_timezone_aware(value: datetime, *, field_name: str) -> None:
     if not isinstance(value, datetime):
         raise TypeError(f"{field_name} must be datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
-
-
-def _require_non_empty_text_tuple(
-    value: tuple[str, ...],
-    *,
-    field_name: str,
-) -> None:
-    if not isinstance(value, tuple):
-        raise TypeError(f"{field_name} must be tuple")
-    for item in value:
-        _require_non_empty_text(item, field_name=field_name)
-
-
-def _require_non_empty_text(value: str, *, field_name: str) -> None:
-    if not isinstance(value, str):
-        raise TypeError(f"{field_name} must be str")
-    if not value.strip():
-        raise ValueError(f"{field_name} must be non-empty")

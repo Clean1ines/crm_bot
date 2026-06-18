@@ -498,6 +498,7 @@ async def test_retry_lane_blocks_fresh_admission_when_retry_does_not_fit_capacit
 
     result = await _runner(FakePool(connection=connection)).execute(
         _command(
+            dispatch_preparation_strategy="SAME_MODEL",
             account_capacities=(
                 _account(
                     minute_requests=1,
@@ -549,6 +550,7 @@ async def test_retry_lane_admits_retry_only_even_when_fresh_also_fits() -> None:
 
     result = await _runner(FakePool(connection=connection)).execute(
         _command(
+            dispatch_preparation_strategy="SAME_MODEL",
             account_capacities=(
                 _account(
                     minute_requests=2,
@@ -568,6 +570,58 @@ async def test_retry_lane_admits_retry_only_even_when_fresh_also_fits() -> None:
     assert {
         str(dispatch["work_item_id"]) for dispatch in connection.dispatches.values()
     } == {"work-retry"}
+
+
+@pytest.mark.asyncio
+async def test_retryable_status_without_retry_strategy_does_not_block_fresh_admission() -> (
+    None
+):
+    connection = FakeConnection()
+
+    retry_row = _work_item_row("work-retry-large", ordinal=1)
+    retry_row["status"] = WorkItemStatus.RETRYABLE_FAILED.value
+    retry_row["attempt_count"] = 1
+    retry_row["next_attempt_at"] = _now() - timedelta(seconds=1)
+    retry_row["last_error_kind"] = "minute_capacity"
+
+    fresh_row = _work_item_row("work-fresh-small", ordinal=2)
+    fresh_row["status"] = WorkItemStatus.READY.value
+    fresh_row["next_attempt_at"] = None
+
+    connection.work_items["work-retry-large"] = retry_row
+    connection.work_items["work-fresh-small"] = fresh_row
+    connection.schedules["work-retry-large"] = _schedule_payload(
+        source_unit_ref="unit-retry-large",
+        profile=_large_input_profile(9000),
+    )
+    connection.schedules["work-fresh-small"] = _schedule_payload(
+        source_unit_ref="unit-fresh-small",
+        profile=_large_input_profile(1000),
+    )
+
+    result = await _runner(FakePool(connection=connection)).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    minute_requests=1,
+                    minute_tokens=4000,
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            requested_items=2,
+        ),
+    )
+
+    assert len(result.lease_result.leased) == 1
+    assert len(result.attempt_result.started_attempts) == 1
+    assert connection.work_items["work-retry-large"]["status"] == (
+        WorkItemStatus.RETRYABLE_FAILED.value
+    )
+    assert connection.work_items["work-fresh-small"]["status"] == "leased"
+    assert {
+        str(dispatch["work_item_id"]) for dispatch in connection.dispatches.values()
+    } == {"work-fresh-small"}
 
 
 @pytest.mark.asyncio
