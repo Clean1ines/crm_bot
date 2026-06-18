@@ -395,12 +395,6 @@ def _prepare_dispatch_batch_command(
         "scheduled_work_item_count": scheduled_child_work_item_count,
     }
 
-    dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
-    if dispatch_preparation is not None:
-        if not isinstance(dispatch_preparation, Mapping):
-            raise ValueError("llm_dispatch_preparation must be mapping")
-        payload["llm_dispatch_preparation"] = dict(dispatch_preparation)
-
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
         command_type=(

@@ -555,10 +555,21 @@ async def test_emits_split_completed_appends_prepare_and_marks_command_completed
     assert next_command.payload["scheduled_work_item_count"] == len(
         scheduling_repository.saved_work_items
     )
-    assert "llm_dispatch_preparation" in next_command.payload
+    assert "llm_dispatch_preparation" not in next_command.payload
 
     timeline_entry = workflow_unit_of_work.timeline.entries[0]
     assert _parent_ref().value in timeline_entry.timeline_entry_id
+
+
+@pytest.mark.asyncio
+async def test_prepare_follow_up_drops_stale_parent_dispatch_preparation() -> None:
+    _, _, _, _, workflow_unit_of_work = await _execute()
+
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+
+    assert "llm_dispatch_preparation" not in next_command.payload
+    assert next_command.payload["scheduled_work_item_count"] > 0
+    assert next_command.payload["parent_source_unit_ref"] == _parent_ref().value
 
 
 @pytest.mark.asyncio
