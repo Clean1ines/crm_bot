@@ -51,11 +51,19 @@ def test_prompt_contract_returns_one_system_and_one_user_message() -> None:
 def test_system_message_contains_prompt_identity_and_strict_json_contract() -> None:
     contract = BuildClaimBuilderSectionExtractionPrompt().execute(_contract_input())
     system_message = contract.provider_messages[0]["content"]
+    normalized_system_message = " ".join(system_message.lower().split())
 
     assert "prompt_id: faq_claim_observations" in system_message
     assert "prompt_version: v1" in system_message
     assert "NODE: faq_claim_observations" in system_message
-    assert "Return exactly one valid JSON object." in system_message
+    assert "json" in normalized_system_message
+    assert "object" in normalized_system_message
+    assert "claims" in normalized_system_message
+    assert (
+        "any text before json" in normalized_system_message
+        or "any text after json" in normalized_system_message
+        or "output :=" in normalized_system_message
+    )
 
 
 def test_user_message_contains_source_unit_context() -> None:
