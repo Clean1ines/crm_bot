@@ -188,6 +188,32 @@ class FakeReductionStateConnection:
         raise AssertionError(f"unexpected fetchval query: {query}")
 
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
+        if (
+            "COUNT(*) FILTER" in query
+            and "FROM draft_claim_compaction_components" in query
+        ):
+            workflow_run_id = _str_arg(args[0])
+            group_refs = sorted(
+                {
+                    str(component["group_ref"])
+                    for component in self.components.values()
+                    if component["workflow_run_id"] == workflow_run_id
+                }
+            )
+            return [
+                {
+                    "group_ref": group_ref,
+                    "active_component_count": sum(
+                        1
+                        for component in self.components.values()
+                        if component["workflow_run_id"] == workflow_run_id
+                        and component["group_ref"] == group_ref
+                        and component["active"] is True
+                    ),
+                }
+                for group_ref in group_refs
+            ]
+
         if "FROM draft_claim_compaction_components" in query:
             workflow_run_id = _str_arg(args[0])
             group_ref = _str_arg(args[1])
@@ -199,6 +225,31 @@ class FakeReductionStateConnection:
                 )
                 if component["workflow_run_id"] == workflow_run_id
                 and component["group_ref"] == group_ref
+            ]
+
+        if (
+            "COUNT(*) AS component_incompatibility_count" in query
+            and "FROM draft_claim_compaction_component_incompatibilities" in query
+        ):
+            workflow_run_id = _str_arg(args[0])
+            group_refs = sorted(
+                {
+                    str(incompatibility["group_ref"])
+                    for incompatibility in self.incompatibilities.values()
+                    if incompatibility["workflow_run_id"] == workflow_run_id
+                }
+            )
+            return [
+                {
+                    "group_ref": group_ref,
+                    "component_incompatibility_count": sum(
+                        1
+                        for incompatibility in self.incompatibilities.values()
+                        if incompatibility["workflow_run_id"] == workflow_run_id
+                        and incompatibility["group_ref"] == group_ref
+                    ),
+                }
+                for group_ref in group_refs
             ]
 
         if "FROM draft_claim_compaction_component_incompatibilities" in query:
@@ -885,6 +936,68 @@ def _optional_str_arg(value: object) -> str | None:
 
 
 @pytest.mark.asyncio
+async def test_summarize_compaction_progress_exposes_component_incompatibility_visibility() -> (
+    None
+):
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+                estimated_input_tokens=10,
+            ),
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-b",
+                estimated_input_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+
+    raw_a = raw_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        observation_ref="claim-a",
+    )
+    raw_b = raw_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        observation_ref="claim-b",
+    )
+
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(
+            _compacted_claim(("claim-a",)),
+            _compacted_claim(("claim-b",)),
+        ),
+        compared_node_refs=(raw_a, raw_b),
+        created_at=_now(),
+    )
+
+    summary = await repository.summarize_compaction_progress(
+        workflow_run_id="workflow-1",
+    )
+
+    assert summary.active_component_count == 2
+    assert summary.component_incompatibility_count == 1
+    assert summary.to_payload()["active_component_count"] == 2
+    assert summary.to_payload()["component_incompatibility_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_summarize_compaction_progress_counts_done_and_active_groups() -> None:
     connection = FakeReductionStateConnection()
     repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
@@ -940,3 +1053,5 @@ async def test_summarize_compaction_progress_counts_done_and_active_groups() -> 
     assert summary.waiting_user_model_choice_group_count == 0
     assert summary.active_node_count == 2
     assert summary.pending_comparison_count == 0
+    assert summary.active_component_count == 2
+    assert summary.component_incompatibility_count == 0

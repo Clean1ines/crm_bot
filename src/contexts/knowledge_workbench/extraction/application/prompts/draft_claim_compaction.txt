@@ -7,30 +7,27 @@ NEVER output text outside JSON.
 
 INPUT_SCHEMA:
 {
-"claims": [
-{
-"id": "",
-"claim": "",
-"questions": [],
-"exclusion_scope": [],
-"granularity": "atomic"
-}
-]
+  "claims": [
+    {
+      "id": "",
+      "claim": "",
+      "questions": []
+    }
+  ]
 }
 
 OUTPUT_SCHEMA:
 {
-"compacted_claims": [
-{
-"key": "",
-"claim": "",
-"claim_kind": "definition",
-"granularity": "atomic",
-"source_claim_refs": [],
-"triples": [],
-"merge_decision": "merged"
-}
-]
+  "compacted_claims": [
+    {
+      "key": "",
+      "claim": "",
+      "claim_kind": "definition",
+      "source_claim_refs": [],
+      "triples": [],
+      "merge_decision": "merged"
+    }
+  ]
 }
 
 LANG:
@@ -47,10 +44,10 @@ merge_decision ∈ {merged, unmerged}
 
 TRIPLE:
 {
-"subject": "",
-"predicate": "",
-"object": "",
-"qualifiers": []
+  "subject": "",
+  "predicate": "",
+  "object": "",
+  "qualifiers": []
 }
 
 predicate ∈ {
@@ -67,8 +64,12 @@ IF A overlaps B and adds important content -> one richer claim preserving added 
 IF claims describe different facts/values/limitations/rules/processes -> keep separate.
 IF composite claim is one practical answer bundle -> keep composite.
 NEVER create vague mega-claim hiding distinct facts.
+
+FIELD_OWNERSHIP_RULES:
 NEVER output questions.
-NEVER output exclusion_scope.\nNEVER output granularity.
+NEVER output exclusion_scope.
+NEVER output granularity.
+exclusion_scope, evidence, possible questions, and granularity are reconstructed later by code from source claims.
 
 TRACE_RULES:
 Every input claim.id MUST appear exactly once across all source_claim_refs.
@@ -88,9 +89,11 @@ Use triples only if they help represent the claim.
 IF no useful triples -> [].
 Triples MUST be supported by compacted claim.
 Remove duplicate triples.
+
 TRIPLE_LANG:
 subject, object, qualifiers should use the same language as the compacted claim unless they are product names, enum-like technical identifiers, or source terms.
 predicate stays English controlled enum.
+
 EXAMPLE:
 
 INPUT_CLAIMS:
@@ -98,45 +101,42 @@ INPUT_CLAIMS:
 claim_1:
 claim = "The product is a knowledge-base platform."
 questions = ["What is the product?", "What platform is offered?"]
-exclusion_scope = ["Telegram assistant"]
 
 claim_2:
 claim = "The product is a knowledge-base platform for creating a verified AI knowledge base and using it in a Telegram assistant."
 questions = ["What is the product?", "How is the knowledge base used?"]
-exclusion_scope = ["web panel"]
 
 VALID_OUTPUT:
 {
-"compacted_claims": [
-{
-"key": "product_ai_knowledge_base_platform",
-"claim": "The product is a knowledge-base platform for creating a verified AI knowledge base and using it in a Telegram assistant.",
-"claim_kind": "definition",
-"granularity": "atomic",
-"source_claim_refs": ["claim_1", "claim_2"],
-"triples": [
-{
-"subject": "product",
-"predicate": "is_a",
-"object": "knowledge-base platform",
-"qualifiers": []
-},
-{
-"subject": "product",
-"predicate": "used_for",
-"object": "creating a verified AI knowledge base",
-"qualifiers": []
-},
-{
-"subject": "AI knowledge base",
-"predicate": "integrates_with",
-"object": "Telegram assistant",
-"qualifiers": []
-}
-],
-"merge_decision": "merged"
-}
-]
+  "compacted_claims": [
+    {
+      "key": "product_ai_knowledge_base_platform",
+      "claim": "The product is a knowledge-base platform for creating a verified AI knowledge base and using it in a Telegram assistant.",
+      "claim_kind": "definition",
+      "source_claim_refs": ["claim_1", "claim_2"],
+      "triples": [
+        {
+          "subject": "product",
+          "predicate": "is_a",
+          "object": "knowledge-base platform",
+          "qualifiers": []
+        },
+        {
+          "subject": "product",
+          "predicate": "used_for",
+          "object": "creating a verified AI knowledge base",
+          "qualifiers": []
+        },
+        {
+          "subject": "AI knowledge base",
+          "predicate": "integrates_with",
+          "object": "Telegram assistant",
+          "qualifiers": []
+        }
+      ],
+      "merge_decision": "merged"
+    }
+  ]
 }
 
 FINAL_ASSERT:
@@ -148,5 +148,6 @@ every input id appears exactly once.
 no unknown source ids.
 no questions.
 no exclusion_scope.
+no granularity.
 triples use only allowed predicates.
 no text outside JSON.

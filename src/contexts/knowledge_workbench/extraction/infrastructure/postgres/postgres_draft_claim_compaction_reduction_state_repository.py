@@ -78,6 +78,8 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             """,
             workflow_run_id,
         )
+        # Comparisons are an audit log of concrete LLM pair attempts.
+        # Components/incompatibilities below are the semantic reduction state.
         comparison_rows = await self._connection.fetch(
             """
             SELECT group_ref,
@@ -86,6 +88,28 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                        WHERE status = 'waiting_user_model_choice'
                    ) AS waiting_user_model_choice_comparison_count
             FROM draft_claim_compaction_comparisons
+            WHERE workflow_run_id = $1
+            GROUP BY group_ref
+            ORDER BY group_ref
+            """,
+            workflow_run_id,
+        )
+        component_rows = await self._connection.fetch(
+            """
+            SELECT group_ref,
+                   COUNT(*) FILTER (WHERE active = true) AS active_component_count
+            FROM draft_claim_compaction_components
+            WHERE workflow_run_id = $1
+            GROUP BY group_ref
+            ORDER BY group_ref
+            """,
+            workflow_run_id,
+        )
+        incompatibility_rows = await self._connection.fetch(
+            """
+            SELECT group_ref,
+                   COUNT(*) AS component_incompatibility_count
+            FROM draft_claim_compaction_component_incompatibilities
             WHERE workflow_run_id = $1
             GROUP BY group_ref
             ORDER BY group_ref
@@ -136,16 +160,31 @@ class PostgresDraftClaimCompactionReductionStateRepository(
 
         node_counts = {_str(row, "group_ref"): row for row in node_rows}
         comparison_counts = {_str(row, "group_ref"): row for row in comparison_rows}
-        group_refs = tuple(sorted(set(node_counts) | set(comparison_counts)))
+        component_counts = {_str(row, "group_ref"): row for row in component_rows}
+        incompatibility_counts = {
+            _str(row, "group_ref"): row for row in incompatibility_rows
+        }
+        group_refs = tuple(
+            sorted(
+                set(node_counts)
+                | set(comparison_counts)
+                | set(component_counts)
+                | set(incompatibility_counts)
+            )
+        )
 
         done_group_count = 0
         waiting_group_count = 0
         active_node_count = 0
         pending_comparison_count = 0
+        active_component_count = 0
+        component_incompatibility_count = 0
 
         for group_ref in group_refs:
             node_row = node_counts.get(group_ref, {})
             comparison_row = comparison_counts.get(group_ref, {})
+            component_row = component_counts.get(group_ref, {})
+            incompatibility_row = incompatibility_counts.get(group_ref, {})
             group_active_node_count = _optional_int(node_row, "active_node_count")
             group_active_compacted_node_count = _optional_int(
                 node_row,
@@ -159,9 +198,19 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 comparison_row,
                 "waiting_user_model_choice_comparison_count",
             )
+            group_active_component_count = _optional_int(
+                component_row,
+                "active_component_count",
+            )
+            group_component_incompatibility_count = _optional_int(
+                incompatibility_row,
+                "component_incompatibility_count",
+            )
 
             active_node_count += group_active_node_count
             pending_comparison_count += group_pending_comparison_count
+            active_component_count += group_active_component_count
+            component_incompatibility_count += group_component_incompatibility_count
 
             if group_waiting_comparison_count > 0:
                 waiting_group_count += 1
@@ -187,6 +236,8 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             active_group_count=active_group_count,
             active_node_count=active_node_count,
             pending_comparison_count=pending_comparison_count,
+            active_component_count=active_component_count,
+            component_incompatibility_count=component_incompatibility_count,
             active_work_item_count=_optional_int(
                 work_item_counts,
                 "active_work_item_count",

@@ -341,7 +341,7 @@ def _valid_compacted_raw_text() -> str:
     return (
         '{"compacted_claims":[{'
         '"key":"k","claim":"Merged claim","claim_kind":"property",'
-        '"granularity":"atomic","source_claim_refs":["claim-a","claim-b"],'
+        '"source_claim_refs":["claim-a","claim-b"],'
         '"triples":[],"merge_decision":"merged"}]}'
     )
 

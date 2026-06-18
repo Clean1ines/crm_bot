@@ -14,6 +14,8 @@ class DraftClaimCompactionProgressSummary:
     active_group_count: int
     active_node_count: int
     pending_comparison_count: int
+    active_component_count: int = 0
+    component_incompatibility_count: int = 0
     active_work_item_count: int = 0
     completed_work_item_count: int = 0
     failed_work_item_count: int = 0
@@ -36,6 +38,11 @@ class DraftClaimCompactionProgressSummary:
             ("active_group_count", self.active_group_count),
             ("active_node_count", self.active_node_count),
             ("pending_comparison_count", self.pending_comparison_count),
+            ("active_component_count", self.active_component_count),
+            (
+                "component_incompatibility_count",
+                self.component_incompatibility_count,
+            ),
             ("active_work_item_count", self.active_work_item_count),
             ("completed_work_item_count", self.completed_work_item_count),
             ("failed_work_item_count", self.failed_work_item_count),
@@ -87,6 +94,8 @@ class DraftClaimCompactionProgressSummary:
             "active_group_count": self.active_group_count,
             "active_node_count": self.active_node_count,
             "pending_comparison_count": self.pending_comparison_count,
+            "active_component_count": self.active_component_count,
+            "component_incompatibility_count": self.component_incompatibility_count,
             "active_work_item_count": self.active_work_item_count,
             "completed_work_item_count": self.completed_work_item_count,
             "failed_work_item_count": self.failed_work_item_count,
