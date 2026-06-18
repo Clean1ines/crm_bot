@@ -77,7 +77,9 @@ def _resolve_retry_plan(
 
     if retry_plan is WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL:
         return ResolveLlmDispatchPreparationStrategyResult(
-            active_model_ref=_first_automatic_fallback(command.route_catalog),
+            active_model_ref=_special_empty_claims_check_model_ref(
+                command.route_catalog,
+            ),
             strategy_applied=retry_plan.value,
         )
 
@@ -130,7 +132,9 @@ def _resolve_legacy_strategy(
         "RETRY_EMPTY_CLAIMS_CHECK_MODEL",
     }:
         return ResolveLlmDispatchPreparationStrategyResult(
-            active_model_ref=_first_automatic_fallback(command.route_catalog),
+            active_model_ref=_special_empty_claims_check_model_ref(
+                command.route_catalog,
+            ),
             strategy_applied=strategy,
         )
 
@@ -194,6 +198,13 @@ def _first_daily_limit_fallback(route_catalog: LlmModelRouteCatalog) -> str:
     if not fallback_model_refs:
         raise ValueError("route catalog has no daily-limit fallback model refs")
     return fallback_model_refs[0]
+
+
+def _special_empty_claims_check_model_ref(route_catalog: LlmModelRouteCatalog) -> str:
+    gpt_oss_120b = route_catalog.route_for_model_ref("openai/gpt-oss-120b")
+    if gpt_oss_120b is None:
+        raise ValueError("route catalog is missing openai/gpt-oss-120b")
+    return gpt_oss_120b.model_ref
 
 
 def _first_larger_output_fallback(

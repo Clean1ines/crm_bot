@@ -46,21 +46,21 @@ def test_estimated_prompt_fits_active_model_uses_active_model() -> None:
 def test_estimated_prompt_exceeds_active_but_fits_fallback_uses_larger_input_model() -> (
     None
 ):
-    result = _execute(estimated_prompt_tokens=40000)
+    result = _execute(estimated_prompt_tokens=7000)
 
     assert (
         result.decision is LlmDispatchInputSizePreflightDecision.USE_LARGER_INPUT_MODEL
     )
-    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.active_model_ref == "llama-3.3-70b-versatile"
 
 
 def test_chosen_fallback_must_fit_estimated_prompt_tokens() -> None:
-    result = _execute(estimated_prompt_tokens=100000)
+    result = _execute(estimated_prompt_tokens=20_000)
 
     assert (
         result.decision is LlmDispatchInputSizePreflightDecision.USE_LARGER_INPUT_MODEL
     )
-    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.active_model_ref == "meta-llama/llama-4-scout-17b-16e-instruct"
 
 
 def test_estimated_prompt_exceeds_all_routes_requires_source_split() -> None:

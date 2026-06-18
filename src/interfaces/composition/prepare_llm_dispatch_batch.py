@@ -633,13 +633,6 @@ def _admission_lane_due_records(
         return due_records
 
     if dispatch_preparation_strategy is None:
-        ready_lane = tuple(
-            record
-            for record in due_records
-            if record.work_item.status is WorkItemStatus.READY
-        )
-        if ready_lane:
-            return ready_lane
         return due_records
 
     retry_lane = tuple(
@@ -739,28 +732,58 @@ def _input_admitted_candidates(
     requested_items: int,
 ) -> tuple[_InputAdmittedCandidate, ...]:
     candidates: list[_InputAdmittedCandidate] = []
-    for record in due_records:
+    pending_retry_records = [
+        record
+        for record in due_records
+        if record.work_item.status is WorkItemStatus.RETRYABLE_FAILED
+    ]
+    pending_fresh_records = [
+        record
+        for record in due_records
+        if record.work_item.status is WorkItemStatus.READY
+    ]
+
+    for account in mutable_accounts:
         if len(candidates) >= requested_items:
             break
 
-        estimated_input_tokens = _estimated_input_tokens_from_due_record(record)
-        for account in mutable_accounts:
-            if not account.can_admit(estimated_input_tokens=estimated_input_tokens):
-                continue
-
-            account.consume(estimated_input_tokens=estimated_input_tokens)
-            candidates.append(
-                _InputAdmittedCandidate(
-                    record=record,
-                    provider=account.provider,
-                    account_ref=account.account_ref,
-                    model_ref=account.model_ref,
-                    estimated_input_tokens=estimated_input_tokens,
-                ),
+        selected_record = _pop_first_record_that_fits(
+            records=pending_retry_records,
+            account=account,
+        )
+        if selected_record is None:
+            selected_record = _pop_first_record_that_fits(
+                records=pending_fresh_records,
+                account=account,
             )
-            break
+        if selected_record is None:
+            continue
+
+        candidates.append(selected_record)
 
     return tuple(candidates)
+
+
+def _pop_first_record_that_fits(
+    *,
+    records: list[DueWorkItemRecord],
+    account: _MutableInputCapacity,
+) -> _InputAdmittedCandidate | None:
+    for index, record in enumerate(records):
+        estimated_input_tokens = _estimated_input_tokens_from_due_record(record)
+        if not account.can_admit(estimated_input_tokens=estimated_input_tokens):
+            continue
+
+        account.consume(estimated_input_tokens=estimated_input_tokens)
+        records.pop(index)
+        return _InputAdmittedCandidate(
+            record=record,
+            provider=account.provider,
+            account_ref=account.account_ref,
+            model_ref=account.model_ref,
+            estimated_input_tokens=estimated_input_tokens,
+        )
+    return None
 
 
 def _estimated_input_tokens_from_due_record(record: DueWorkItemRecord) -> int:
@@ -913,8 +936,19 @@ async def _preparation_account_capacities(
         provider_account_refs=provider_account_refs,
         seed_capacities=seed_capacities,
     )
+    latest_observations = (
+        await capacity_observation_repository.latest_observations_for_accounts(
+            provider="groq",
+            account_refs=observation_account_refs,
+            model_ref=active_model_ref,
+        )
+    )
+    latest_observations_by_account_ref = {
+        observation.account_ref: observation for observation in latest_observations
+    }
+
     if use_local_active_model_tpm_budget:
-        observations = (
+        recent_observations = (
             await capacity_observation_repository.observations_for_accounts_since(
                 provider="groq",
                 account_refs=observation_account_refs,
@@ -922,31 +956,55 @@ async def _preparation_account_capacities(
                 since=now - timedelta(seconds=60),
             )
         )
-        return _local_active_model_tpm_account_capacities(
-            seed_capacities=seed_capacities,
-            observations=observations,
-            now=now,
+        local_fallback_capacities = {
+            capacity.account_ref: capacity
+            for capacity in _local_active_model_tpm_account_capacities(
+                seed_capacities=seed_capacities,
+                observations=recent_observations,
+                now=now,
+            )
+        }
+        return tuple(
+            _capacity_from_latest_observation(
+                seed_capacity=seed_capacity,
+                observation=latest_observations_by_account_ref.get(
+                    seed_capacity.account_ref
+                ),
+                profile=profile,
+                now=now,
+            )
+            if _observation_has_header_capacity_state(
+                latest_observations_by_account_ref.get(seed_capacity.account_ref),
+            )
+            else local_fallback_capacities[seed_capacity.account_ref]
+            for seed_capacity in seed_capacities
         )
-
-    observations = (
-        await capacity_observation_repository.latest_observations_for_accounts(
-            provider="groq",
-            account_refs=observation_account_refs,
-            model_ref=active_model_ref,
-        )
-    )
-    observations_by_account_ref = {
-        observation.account_ref: observation for observation in observations
-    }
 
     return tuple(
         _capacity_from_latest_observation(
             seed_capacity=seed_capacity,
-            observation=observations_by_account_ref.get(seed_capacity.account_ref),
+            observation=latest_observations_by_account_ref.get(
+                seed_capacity.account_ref
+            ),
             profile=profile,
             now=now,
         )
         for seed_capacity in seed_capacities
+    )
+
+
+def _observation_has_header_capacity_state(
+    observation: LlmAttemptCapacityObservation | None,
+) -> bool:
+    if observation is None:
+        return False
+    return (
+        observation.remaining_minute_requests is not None
+        or observation.remaining_minute_tokens is not None
+        or observation.remaining_daily_requests is not None
+        or observation.remaining_daily_tokens is not None
+        or observation.minute_reset_at is not None
+        or observation.daily_reset_at is not None
     )
 
 
@@ -1234,8 +1292,15 @@ def _capacity_from_latest_observation(
             ),
         )
 
-    minute_retry_at = _observation_retry_at(observation=observation, now=now)
-    if minute_retry_at is not None and minute_retry_at > now:
+    minute_reset_at = observation.minute_reset_at
+    if minute_reset_at is None and _minute_window_exhausted(observation):
+        minute_reset_at = _local_model_minute_reset_at(observation)
+
+    minute_reset_passed = minute_reset_at is not None and minute_reset_at <= now
+    if minute_reset_passed:
+        minute_requests = seed_capacity.remaining_minute_requests
+        minute_tokens = seed_capacity.remaining_minute_tokens
+    elif _minute_window_exhausted(observation):
         minute_requests = 0
         minute_tokens = 0
     else:
@@ -1271,13 +1336,16 @@ def _observed_capacity_value(observed: int | None, seed: int) -> int:
     return observed
 
 
+def _minute_window_exhausted(observation: LlmAttemptCapacityObservation) -> bool:
+    if observation.remaining_minute_requests == 0:
+        return True
+    if observation.remaining_minute_tokens == 0:
+        return True
+    return False
+
+
 def _actual_token_usage(observation: LlmAttemptCapacityObservation) -> int | None:
-    if observation.actual_total_tokens is not None:
-        return observation.actual_total_tokens
-    if observation.actual_prompt_tokens is None:
-        return None
-    completion_tokens = observation.actual_completion_tokens or 0
-    return observation.actual_prompt_tokens + completion_tokens
+    return observation.actual_prompt_tokens
 
 
 def _affected_work_item_refs(records: tuple[DueWorkItemRecord, ...]) -> tuple[str, ...]:

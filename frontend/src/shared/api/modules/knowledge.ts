@@ -287,8 +287,12 @@ export type WorkbenchSectionQueueItemLiveState = {
   status: string;
   attempt_count: number;
   lease_expires_at?: string | null;
+  next_attempt_at?: string | null;
   claimed_by_worker_id?: string | null;
   error_kind?: string | null;
+  retry_plan?: string | null;
+  user_action_required: boolean;
+  blocked_reason?: string | null;
   retry_timer: WorkbenchRetryTimerLiveState;
 };
 
@@ -316,11 +320,22 @@ export type WorkbenchLlmAttemptLiveState = {
   duration_ms?: number | null;
   model_provider?: string | null;
   model_name?: string | null;
+  account_ref?: string | null;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  remaining_minute_requests?: number | null;
+  remaining_minute_tokens?: number | null;
+  minute_reset_at?: string | null;
+  remaining_daily_requests?: number | null;
+  remaining_daily_tokens?: number | null;
+  daily_reset_at?: string | null;
   error_kind?: string | null;
   error_message_user?: string | null;
+  next_attempt_at?: string | null;
+  retry_plan?: string | null;
+  user_action_required: boolean;
+  blocked_reason?: string | null;
 };
 
 export type WorkbenchCurationLiveState = {

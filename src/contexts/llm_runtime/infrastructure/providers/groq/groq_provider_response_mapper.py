@@ -109,7 +109,12 @@ class GroqProviderResponseMapper:
             return None
 
         prompt_tokens = usage.get("prompt_tokens")
+        if not isinstance(prompt_tokens, int):
+            prompt_tokens = usage.get("input_tokens")
+
         completion_tokens = usage.get("completion_tokens")
+        if not isinstance(completion_tokens, int):
+            completion_tokens = usage.get("output_tokens")
 
         if not isinstance(prompt_tokens, int) or not isinstance(completion_tokens, int):
             return None

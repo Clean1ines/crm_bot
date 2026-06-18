@@ -216,33 +216,33 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
                 ),
             ),
             LlmModelRoute(
-                model_ref="openai/gpt-oss-120b",
+                model_ref="llama-3.3-70b-versatile",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=1,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=8_000,
-                    output_token_limit=16384,
-                ),
-            ),
-            LlmModelRoute(
-                model_ref="llama-3.3-70b-versatile",
-                role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
-                order=2,
-                execution_settings=reasoning_disabled,
-                capacity_limits=LlmModelCapacityLimits(
                     input_token_limit=12_000,
-                    output_token_limit=8192,
+                    output_token_limit=32_768,
                 ),
             ),
             LlmModelRoute(
                 model_ref="meta-llama/llama-4-scout-17b-16e-instruct",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
+                order=2,
+                execution_settings=reasoning_disabled,
+                capacity_limits=LlmModelCapacityLimits(
+                    input_token_limit=30_000,
+                    output_token_limit=32_768,
+                ),
+            ),
+            LlmModelRoute(
+                model_ref="openai/gpt-oss-120b",
+                role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=3,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
                     input_token_limit=8_000,
-                    output_token_limit=8192,
+                    output_token_limit=65_536,
                 ),
             ),
             LlmModelRoute(

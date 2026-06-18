@@ -67,6 +67,37 @@ def test_success_response_tolerates_missing_content_and_usage() -> None:
     assert mapped.provider_result.usage is None
 
 
+def test_success_response_supports_responses_api_usage_fields() -> None:
+    mapped = GroqProviderResponseMapper().map_response(
+        response=GroqProviderHttpResponse(
+            status_code=200,
+            headers={
+                "x-ratelimit-reset-tokens": "35s",
+                "x-ratelimit-reset-requests": "6h12m",
+            },
+            body={
+                "choices": [{"message": {"content": '{"ok": true}'}}],
+                "usage": {
+                    "input_tokens": 21,
+                    "output_tokens": 34,
+                },
+            },
+        ),
+        observed_at=_now(),
+    )
+
+    assert isinstance(mapped.provider_result, LlmProviderSuccess)
+    assert mapped.provider_result.usage == TokenUsage(
+        input_tokens=21,
+        output_tokens=34,
+    )
+    assert mapped.quota_snapshot.minute_reset_at == _now() + timedelta(seconds=35)
+    assert mapped.quota_snapshot.daily_reset_at == _now() + timedelta(
+        hours=6,
+        minutes=12,
+    )
+
+
 def test_429_defaults_to_minute_limit_and_uses_retry_after() -> None:
     mapped = GroqProviderResponseMapper().map_response(
         response=GroqProviderHttpResponse(

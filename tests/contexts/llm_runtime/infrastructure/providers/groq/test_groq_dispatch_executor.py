@@ -192,6 +192,37 @@ async def test_minute_limit_with_wait_until_maps_to_retryable_failed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_capacity_observation_keeps_separate_minute_and_daily_resets() -> None:
+    transport = FakeGroqTransport(
+        response=GroqTransportResponse(
+            status_code=200,
+            headers={
+                "x-ratelimit-remaining-requests": "900",
+                "x-ratelimit-remaining-tokens": "4300",
+                "x-ratelimit-reset-tokens": "35s",
+                "x-ratelimit-reset-requests": "6h12m",
+            },
+            body={
+                "choices": [{"message": {"content": '{"ok": true}'}}],
+                "usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 11,
+                },
+            },
+        ),
+    )
+
+    result = await _executor(transport).execute_dispatch(_execution_input())
+
+    assert result.capacity_observation is not None
+    minute_reset_at = result.capacity_observation["minute_reset_at"]
+    daily_reset_at = result.capacity_observation["daily_reset_at"]
+    assert isinstance(minute_reset_at, datetime)
+    assert isinstance(daily_reset_at, datetime)
+    assert minute_reset_at < daily_reset_at
+
+
+@pytest.mark.asyncio
 async def test_auth_error_maps_to_terminal_failed() -> None:
     transport = FakeGroqTransport(
         response=GroqTransportResponse(

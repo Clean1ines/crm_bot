@@ -1,0 +1,5 @@
+
+> mrak-os-v2@0.0.0 type-check
+> tsc --noEmit -
+
+error TS5023: Unknown compiler option '-'.

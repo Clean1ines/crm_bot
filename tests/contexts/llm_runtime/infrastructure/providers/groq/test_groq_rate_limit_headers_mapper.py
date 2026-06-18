@@ -24,6 +24,8 @@ def test_mapper_reads_remaining_requests_and_tokens_from_groq_headers() -> None:
 
     assert snapshot.remaining_requests_day == 14370
     assert snapshot.remaining_tokens_minute == 17997
+    assert snapshot.minute_reset_at is None
+    assert snapshot.daily_reset_at is None
     assert snapshot.unavailable_until is None
 
 
@@ -60,7 +62,21 @@ def test_reset_headers_parse_minutes_and_fractional_seconds() -> None:
         observed_at=_now(),
     )
 
+    assert snapshot.minute_reset_at == _now() + timedelta(seconds=7.66)
+    assert snapshot.daily_reset_at == _now() + timedelta(seconds=179.56)
     assert snapshot.unavailable_until == _now() + timedelta(seconds=7.66)
+
+
+def test_reset_headers_parse_hour_minute_durations() -> None:
+    snapshot = GroqRateLimitHeadersMapper().map_headers(
+        headers={
+            "x-ratelimit-reset-requests": "6h12m",
+        },
+        observed_at=_now(),
+    )
+
+    assert snapshot.minute_reset_at is None
+    assert snapshot.daily_reset_at == _now() + timedelta(hours=6, minutes=12)
 
 
 def test_mapper_ignores_malformed_numeric_headers() -> None:

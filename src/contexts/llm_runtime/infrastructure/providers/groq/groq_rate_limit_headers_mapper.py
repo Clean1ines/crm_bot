@@ -40,6 +40,14 @@ class GroqRateLimitHeadersMapper:
         reset_requests = self._parse_duration_seconds(
             normalized.get("x-ratelimit-reset-requests")
         )
+        minute_reset_at = self._absolute_reset_at(
+            observed_at=observed_at,
+            duration_seconds=reset_tokens,
+        )
+        daily_reset_at = self._absolute_reset_at(
+            observed_at=observed_at,
+            duration_seconds=reset_requests,
+        )
 
         unavailable_until = self._nearest_future_time(
             observed_at=observed_at,
@@ -57,6 +65,8 @@ class GroqRateLimitHeadersMapper:
             remaining_tokens_minute=self._parse_int(
                 normalized.get("x-ratelimit-remaining-tokens"),
             ),
+            minute_reset_at=minute_reset_at,
+            daily_reset_at=daily_reset_at,
             unavailable_until=unavailable_until,
         )
 
@@ -85,16 +95,35 @@ class GroqRateLimitHeadersMapper:
         except ValueError:
             pass
 
-        match = re.fullmatch(r"(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?", text)
-        if match is None:
+        parts = re.findall(r"(\d+(?:\.\d+)?)([hms])", text)
+        if not parts:
             return None
 
-        minutes_raw, seconds_raw = match.groups()
-        minutes = float(minutes_raw) if minutes_raw is not None else 0.0
-        seconds = float(seconds_raw) if seconds_raw is not None else 0.0
-        total = minutes * 60.0 + seconds
+        reconstructed = "".join(f"{value}{unit}" for value, unit in parts)
+        if reconstructed != text:
+            return None
+
+        total = 0.0
+        for value_raw, unit in parts:
+            value_num = float(value_raw)
+            if unit == "h":
+                total += value_num * 3600.0
+            elif unit == "m":
+                total += value_num * 60.0
+            else:
+                total += value_num
 
         return total if total > 0 else None
+
+    def _absolute_reset_at(
+        self,
+        *,
+        observed_at: datetime,
+        duration_seconds: float | None,
+    ) -> datetime | None:
+        if duration_seconds is None:
+            return None
+        return observed_at + timedelta(seconds=duration_seconds)
 
     def _nearest_future_time(
         self,

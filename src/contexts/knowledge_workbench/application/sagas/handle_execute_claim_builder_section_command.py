@@ -18,6 +18,7 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
     ClaimBuilderAttemptDecision,
     ClaimBuilderAttemptDecisionPolicy,
     ClaimBuilderAttemptOutcomeKind,
+    ClaimBuilderNextModelStrategy,
     DecideClaimBuilderAttemptOutcomeCommand,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_attempt_next_action_policy import (
@@ -81,6 +82,10 @@ from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
 LOGGER = structlog.get_logger(__name__)
 
 DAILY_LIMIT_ERROR_KIND = "daily_limit"
+MINUTE_LIMIT_ERROR_KIND = "minute_limit"
+REQUEST_TOO_LARGE_ERROR_KIND = "request_too_large"
+OUTPUT_TOO_LARGE_ERROR_KIND = "output_too_large"
+AUTH_ERROR_KIND = "auth_error"
 DAILY_LIMIT_FALLBACK_MODEL_STRATEGY = "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
 
 
@@ -576,6 +581,7 @@ def _apply_validation_counters(
 
     if decision in {
         ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL.value,
+        ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value,
         ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value,
         ClaimBuilderOutputValidationDecision.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
     }:
@@ -616,12 +622,27 @@ def _apply_next_action_counters(
 
     if action_kind in {
         ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value,
+        ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
+        ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value,
     }:
         domain_counters["claim_builder_retry_action_count"] = (
             domain_counters.get("claim_builder_retry_action_count", 0) + 1
         )
+
+    if (
+        action_kind
+        == ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
+    ):
+        domain_counters["claim_builder_empty_claims_check_retry_required_count"] = (
+            domain_counters.get(
+                "claim_builder_empty_claims_check_retry_required_count",
+                0,
+            )
+            + 1
+        )
+        return
 
     if action_kind == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value:
         domain_counters["claim_builder_fallback_retry_required_count"] = (
@@ -636,6 +657,41 @@ def _apply_next_action_counters(
         domain_counters["claim_builder_larger_output_retry_required_count"] = (
             domain_counters.get(
                 "claim_builder_larger_output_retry_required_count",
+                0,
+            )
+            + 1
+        )
+        return
+
+    if (
+        action_kind
+        == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
+    ):
+        domain_counters["claim_builder_larger_input_retry_required_count"] = (
+            domain_counters.get(
+                "claim_builder_larger_input_retry_required_count",
+                0,
+            )
+            + 1
+        )
+        return
+
+    if (
+        action_kind
+        == ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
+    ):
+        domain_counters["claim_builder_capacity_wait_required_count"] = (
+            domain_counters.get("claim_builder_capacity_wait_required_count", 0) + 1
+        )
+        return
+
+    if (
+        action_kind
+        == ClaimBuilderAttemptNextActionKind.PAUSE_FOR_DAILY_LIMIT_RESET.value
+    ):
+        domain_counters["claim_builder_daily_reset_wait_required_count"] = (
+            domain_counters.get(
+                "claim_builder_daily_reset_wait_required_count",
                 0,
             )
             + 1
@@ -752,36 +808,157 @@ def _attempt_action_metadata(
 ) -> Mapping[str, object] | None:
     if execution_result.validation_metadata is not None:
         return execution_result.validation_metadata
-    return _provider_daily_limit_retry_metadata(execution_result)
+    return _provider_retry_metadata(execution_result)
 
 
-def _provider_daily_limit_retry_metadata(
+def _provider_retry_metadata(
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
 ) -> dict[str, object] | None:
-    if execution_result.llm_result.error_kind != DAILY_LIMIT_ERROR_KIND:
-        return None
-
-    return {
-        "claim_builder_attempt_outcome_kind": (
-            ClaimBuilderAttemptOutcomeKind.RETRY_FALLBACK_MODEL.value
-        ),
-        "claim_builder_attempt_next_action_kind": (
-            ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
-        ),
-        "claim_builder_attempt_next_action_reason": DAILY_LIMIT_ERROR_KIND,
-        "claim_builder_attempt_next_model_strategy": (
-            DAILY_LIMIT_FALLBACK_MODEL_STRATEGY
-        ),
-        "claim_builder_should_persist_claims": False,
-        "claim_builder_should_mark_work_item_completed": False,
-        "claim_builder_requires_source_split": False,
-        "claim_builder_next_run_after": None,
-        "validation_decision": None,
-        "validation_failure_reason": None,
-        "validated_claim_count": 0,
-        "next_model_strategy": DAILY_LIMIT_FALLBACK_MODEL_STRATEGY,
-        "retry_recommended": True,
-    }
+    error_kind = execution_result.llm_result.error_kind
+    next_attempt_at = execution_result.llm_result.next_attempt_at
+    if error_kind == MINUTE_LIMIT_ERROR_KIND:
+        if next_attempt_at is None:
+            return None
+        return {
+            "claim_builder_attempt_outcome_kind": (
+                ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
+            ),
+            "claim_builder_attempt_next_action_reason": MINUTE_LIMIT_ERROR_KIND,
+            "claim_builder_attempt_next_model_strategy": (
+                ClaimBuilderNextModelStrategy.SAME_MODEL.value
+            ),
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": next_attempt_at.isoformat(),
+            "validation_decision": None,
+            "validation_failure_reason": None,
+            "validated_claim_count": 0,
+            "next_model_strategy": ClaimBuilderNextModelStrategy.SAME_MODEL.value,
+            "retry_recommended": True,
+        }
+    if error_kind == DAILY_LIMIT_ERROR_KIND:
+        return {
+            "claim_builder_attempt_outcome_kind": (
+                ClaimBuilderAttemptOutcomeKind.RETRY_FALLBACK_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_reason": DAILY_LIMIT_ERROR_KIND,
+            "claim_builder_attempt_next_model_strategy": (
+                DAILY_LIMIT_FALLBACK_MODEL_STRATEGY
+            ),
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
+            "validation_decision": None,
+            "validation_failure_reason": None,
+            "validated_claim_count": 0,
+            "next_model_strategy": DAILY_LIMIT_FALLBACK_MODEL_STRATEGY,
+            "retry_recommended": True,
+        }
+    if error_kind == REQUEST_TOO_LARGE_ERROR_KIND:
+        return {
+            "claim_builder_attempt_outcome_kind": (
+                ClaimBuilderAttemptOutcomeKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_reason": (REQUEST_TOO_LARGE_ERROR_KIND),
+            "claim_builder_attempt_next_model_strategy": (
+                ClaimBuilderNextModelStrategy.LARGER_INPUT_LIMIT_MODEL_REQUIRED.value
+            ),
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
+            "validation_decision": None,
+            "validation_failure_reason": None,
+            "validated_claim_count": 0,
+            "next_model_strategy": (
+                ClaimBuilderNextModelStrategy.LARGER_INPUT_LIMIT_MODEL_REQUIRED.value
+            ),
+            "retry_recommended": True,
+        }
+    if error_kind == OUTPUT_TOO_LARGE_ERROR_KIND:
+        return {
+            "claim_builder_attempt_outcome_kind": (
+                ClaimBuilderAttemptOutcomeKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_reason": OUTPUT_TOO_LARGE_ERROR_KIND,
+            "claim_builder_attempt_next_model_strategy": (
+                ClaimBuilderNextModelStrategy.LARGER_OUTPUT_LIMIT_MODEL_REQUIRED.value
+            ),
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
+            "validation_decision": None,
+            "validation_failure_reason": None,
+            "validated_claim_count": 0,
+            "next_model_strategy": (
+                ClaimBuilderNextModelStrategy.LARGER_OUTPUT_LIMIT_MODEL_REQUIRED.value
+            ),
+            "retry_recommended": True,
+        }
+    if error_kind in {
+        "invalid_output",
+        "validation_failed",
+        "empty_output",
+        "network_error",
+        "unknown",
+    }:
+        return {
+            "claim_builder_attempt_outcome_kind": (
+                ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value
+            ),
+            "claim_builder_attempt_next_action_reason": error_kind,
+            "claim_builder_attempt_next_model_strategy": (
+                ClaimBuilderNextModelStrategy.SAME_MODEL.value
+            ),
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
+            "validation_decision": None,
+            "validation_failure_reason": None,
+            "validated_claim_count": 0,
+            "next_model_strategy": ClaimBuilderNextModelStrategy.SAME_MODEL.value,
+            "retry_recommended": True,
+        }
+    if error_kind == AUTH_ERROR_KIND:
+        return {
+            "claim_builder_attempt_outcome_kind": (
+                ClaimBuilderAttemptOutcomeKind.TERMINAL_INVALID.value
+            ),
+            "claim_builder_attempt_next_action_kind": (
+                ClaimBuilderAttemptNextActionKind.TERMINAL_FAILURE.value
+            ),
+            "claim_builder_attempt_next_action_reason": AUTH_ERROR_KIND,
+            "claim_builder_attempt_next_model_strategy": None,
+            "claim_builder_should_persist_claims": False,
+            "claim_builder_should_mark_work_item_completed": False,
+            "claim_builder_requires_source_split": False,
+            "claim_builder_next_run_after": None,
+            "validation_decision": None,
+            "validation_failure_reason": None,
+            "validated_claim_count": 0,
+            "next_model_strategy": None,
+            "retry_recommended": False,
+        }
+    return None
 
 
 def _should_persist_claims(

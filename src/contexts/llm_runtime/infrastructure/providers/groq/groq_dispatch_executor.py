@@ -162,6 +162,12 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             quota_remaining_minute_tokens=mapped.quota_snapshot.remaining_tokens_minute,
             quota_remaining_daily_requests=mapped.quota_snapshot.remaining_requests_day,
             quota_remaining_daily_tokens=mapped.quota_snapshot.remaining_tokens_day,
+            quota_minute_reset_at=mapped.quota_snapshot.minute_reset_at.isoformat()
+            if mapped.quota_snapshot.minute_reset_at is not None
+            else None,
+            quota_daily_reset_at=mapped.quota_snapshot.daily_reset_at.isoformat()
+            if mapped.quota_snapshot.daily_reset_at is not None
+            else None,
             quota_unavailable_until=mapped.quota_snapshot.unavailable_until.isoformat()
             if mapped.quota_snapshot.unavailable_until is not None
             else None,
@@ -402,8 +408,8 @@ def _capacity_observation_payload(
         "remaining_minute_tokens": quota.remaining_tokens_minute,
         "remaining_daily_requests": quota.remaining_requests_day,
         "remaining_daily_tokens": quota.remaining_tokens_day,
-        "minute_reset_at": quota.unavailable_until,
-        "daily_reset_at": None,
+        "minute_reset_at": quota.minute_reset_at,
+        "daily_reset_at": quota.daily_reset_at,
         "actual_prompt_tokens": usage.input_tokens if usage is not None else None,
         "actual_completion_tokens": usage.output_tokens if usage is not None else None,
         "actual_total_tokens": usage.total_tokens if usage is not None else None,

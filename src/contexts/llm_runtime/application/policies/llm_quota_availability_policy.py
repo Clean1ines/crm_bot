@@ -37,6 +37,8 @@ class LlmQuotaSnapshot:
     remaining_tokens_day: int | None = None
     remaining_input_tokens_minute: int | None = None
     remaining_output_tokens_minute: int | None = None
+    minute_reset_at: datetime | None = None
+    daily_reset_at: datetime | None = None
     unavailable_until: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -51,12 +53,15 @@ class LlmQuotaSnapshot:
             if value is not None and value < 0:
                 raise ValueError(f"{field_name} must be >= 0 when provided")
 
-        if self.unavailable_until is not None:
-            if (
-                self.unavailable_until.tzinfo is None
-                or self.unavailable_until.utcoffset() is None
-            ):
-                raise ValueError("unavailable_until must be timezone-aware")
+        for field_name, timestamp in (
+            ("minute_reset_at", self.minute_reset_at),
+            ("daily_reset_at", self.daily_reset_at),
+            ("unavailable_until", self.unavailable_until),
+        ):
+            if timestamp is None:
+                continue
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                raise ValueError(f"{field_name} must be timezone-aware")
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +122,7 @@ class LlmQuotaAvailabilityPolicy:
 
         if (
             snapshot.remaining_tokens_minute is not None
-            and snapshot.remaining_tokens_minute < estimated_need.total_tokens
+            and snapshot.remaining_tokens_minute < estimated_need.input_tokens
         ):
             return False
 

@@ -115,24 +115,20 @@ def test_same_model_marker_keeps_active_model_ref() -> None:
 def test_retry_empty_claims_check_model_resolves_first_automatic_fallback_model() -> (
     None
 ):
-    catalog = _catalog()
-
     result = _resolver().execute(_command("RETRY_EMPTY_CLAIMS_CHECK_MODEL"))
 
-    assert result.active_model_ref == catalog.automatic_fallback_model_refs()[0]
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
 
 
 def test_retry_plan_empty_claims_check_resolves_first_automatic_fallback_model() -> (
     None
 ):
-    catalog = _catalog()
-
     result = _resolver().execute(
         _retry_plan_command(WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL),
     )
 
-    assert result.active_model_ref == catalog.automatic_fallback_model_refs()[0]
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == (
         WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL.value
     )
@@ -141,11 +137,9 @@ def test_retry_plan_empty_claims_check_resolves_first_automatic_fallback_model()
 def test_empty_claims_check_required_marker_resolves_first_automatic_fallback_model() -> (
     None
 ):
-    catalog = _catalog()
-
     result = _resolver().execute(_command("EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"))
 
-    assert result.active_model_ref == catalog.automatic_fallback_model_refs()[0]
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
 
 
@@ -166,28 +160,28 @@ def test_fallback_required_marker_resolves_first_automatic_fallback_model() -> N
 def test_retry_larger_output_limit_picks_first_larger_output_fallback() -> None:
     result = _resolver().execute(_command("RETRY_LARGER_OUTPUT_LIMIT_MODEL"))
 
-    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.active_model_ref == "llama-3.3-70b-versatile"
     assert result.strategy_applied == "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
 
 
 def test_larger_output_required_marker_picks_first_larger_output_fallback() -> None:
     result = _resolver().execute(_command("LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"))
 
-    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.active_model_ref == "llama-3.3-70b-versatile"
     assert result.strategy_applied == "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
 
 
 def test_retry_larger_input_limit_picks_first_larger_input_fallback() -> None:
     result = _resolver().execute(_command("RETRY_LARGER_INPUT_LIMIT_MODEL"))
 
-    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.active_model_ref == "llama-3.3-70b-versatile"
     assert result.strategy_applied == "RETRY_LARGER_INPUT_LIMIT_MODEL"
 
 
 def test_larger_input_required_marker_picks_first_larger_input_fallback() -> None:
     result = _resolver().execute(_command("LARGER_INPUT_LIMIT_MODEL_REQUIRED"))
 
-    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.active_model_ref == "llama-3.3-70b-versatile"
     assert result.strategy_applied == "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
 
 

@@ -206,7 +206,9 @@ class WorkbenchWorkflowLiveStateQuery:
                 wi.status,
                 wi.leased_by AS claimed_by_worker_id,
                 wi.lease_expires_at,
+                wi.next_attempt_at,
                 wi.last_error_kind AS error_kind,
+                wi.retry_plan,
                 COALESCE(wi.attempt_count, 0) AS attempt_count
             FROM execution_work_items AS wi
             JOIN execution_work_item_schedules AS s
@@ -265,6 +267,10 @@ class WorkbenchWorkflowLiveStateQuery:
                     d.dispatch_payload #>> '{llm_allocation,provider}'
                 ) AS model_provider,
                 COALESCE(
+                    d.llm_allocation_payload->>'account_ref',
+                    d.dispatch_payload #>> '{llm_allocation,account_ref}'
+                ) AS account_ref,
+                COALESCE(
                     d.llm_allocation_payload->>'model_ref',
                     d.llm_allocation_payload->>'model',
                     d.dispatch_payload #>> '{llm_allocation,model_ref}',
@@ -279,7 +285,16 @@ class WorkbenchWorkflowLiveStateQuery:
                     0
                 )::int AS total_tokens,
                 a.error_kind,
-                wi.last_error_kind AS error_message_user
+                wi.last_error_kind AS error_message_user,
+                wi.next_attempt_at,
+                wi.retry_plan,
+                wi.status AS work_item_status,
+                obs.remaining_minute_requests,
+                obs.remaining_minute_tokens,
+                obs.minute_reset_at,
+                obs.remaining_daily_requests,
+                obs.remaining_daily_tokens,
+                obs.daily_reset_at
             FROM execution_work_item_attempts AS a
             JOIN execution_work_items AS wi
               ON wi.work_item_id = a.work_item_id
@@ -291,7 +306,13 @@ class WorkbenchWorkflowLiveStateQuery:
                 SELECT
                     capacity_obs.actual_prompt_tokens,
                     capacity_obs.actual_completion_tokens,
-                    capacity_obs.actual_total_tokens
+                    capacity_obs.actual_total_tokens,
+                    capacity_obs.remaining_minute_requests,
+                    capacity_obs.remaining_minute_tokens,
+                    capacity_obs.minute_reset_at,
+                    capacity_obs.remaining_daily_requests,
+                    capacity_obs.remaining_daily_tokens,
+                    capacity_obs.daily_reset_at
                 FROM llm_attempt_capacity_observations AS capacity_obs
                 WHERE capacity_obs.provider = COALESCE(
                     d.llm_allocation_payload->>'provider',
@@ -780,23 +801,31 @@ def _actions(
 
 def _queue_item(row: Mapping[str, object]) -> WorkbenchSectionQueueItemLiveView:
     lease_expires_at = _optional_datetime(row, "lease_expires_at")
+    next_attempt_at = _optional_datetime(row, "next_attempt_at")
+    retry_available_at = next_attempt_at or lease_expires_at
     retry_seconds = None
-    if lease_expires_at is not None:
+    if retry_available_at is not None:
         retry_seconds = max(
-            0, int((lease_expires_at - datetime.now(timezone.utc)).total_seconds())
+            0, int((retry_available_at - datetime.now(timezone.utc)).total_seconds())
         )
+    status = _str(row, "status")
+    error_kind = _optional_str(row, "error_kind")
     return WorkbenchSectionQueueItemLiveView(
         queue_item_id=_str(row, "queue_item_id"),
         section_id=_str(row, "section_id"),
         section_index=_int(row, "section_index"),
         section_key=_str(row, "section_key"),
-        status=_str(row, "status"),
+        status=status,
         attempt_count=_int(row, "attempt_count"),
         lease_expires_at=lease_expires_at,
+        next_attempt_at=next_attempt_at,
         claimed_by_worker_id=_optional_str(row, "claimed_by_worker_id"),
-        error_kind=_optional_str(row, "error_kind"),
+        error_kind=error_kind,
+        retry_plan=_optional_str(row, "retry_plan"),
+        user_action_required=status == "user_action_required",
+        blocked_reason=error_kind if status == "user_action_required" else None,
         retry_timer=WorkbenchRetryTimerLiveView(
-            retry_available_at=lease_expires_at,
+            retry_available_at=retry_available_at,
             seconds_until_retry=retry_seconds,
         ),
     )
@@ -871,6 +900,8 @@ def _timeline_entry(
 
 
 def _attempt(row: Mapping[str, object]) -> WorkbenchLlmAttemptLiveView:
+    work_item_status = _optional_str(row, "work_item_status")
+    last_error_kind = _optional_str(row, "error_message_user")
     return WorkbenchLlmAttemptLiveView(
         node_run_id=_str(row, "node_run_id"),
         section_id=_optional_str(row, "section_id"),
@@ -882,11 +913,24 @@ def _attempt(row: Mapping[str, object]) -> WorkbenchLlmAttemptLiveView:
         duration_ms=_optional_int(row, "duration_ms"),
         model_provider=_optional_str(row, "model_provider"),
         model_name=_optional_str(row, "model_name"),
+        account_ref=_optional_str(row, "account_ref"),
         prompt_tokens=_int(row, "prompt_tokens"),
         completion_tokens=_int(row, "completion_tokens"),
         total_tokens=_int(row, "total_tokens"),
+        remaining_minute_requests=_optional_int(row, "remaining_minute_requests"),
+        remaining_minute_tokens=_optional_int(row, "remaining_minute_tokens"),
+        minute_reset_at=_optional_datetime(row, "minute_reset_at"),
+        remaining_daily_requests=_optional_int(row, "remaining_daily_requests"),
+        remaining_daily_tokens=_optional_int(row, "remaining_daily_tokens"),
+        daily_reset_at=_optional_datetime(row, "daily_reset_at"),
         error_kind=_optional_str(row, "error_kind"),
-        error_message_user=_optional_str(row, "error_message_user"),
+        error_message_user=last_error_kind,
+        next_attempt_at=_optional_datetime(row, "next_attempt_at"),
+        retry_plan=_optional_str(row, "retry_plan"),
+        user_action_required=work_item_status == "user_action_required",
+        blocked_reason=last_error_kind
+        if work_item_status == "user_action_required"
+        else None,
     )
 
 

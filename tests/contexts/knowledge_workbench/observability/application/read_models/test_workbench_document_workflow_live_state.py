@@ -91,8 +91,12 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                             status="leased",
                             attempt_count=2,
                             lease_expires_at=_now(),
+                            next_attempt_at=None,
                             claimed_by_worker_id="worker-1",
                             error_kind=None,
+                            retry_plan=None,
+                            user_action_required=False,
+                            blocked_reason=None,
                             retry_timer=WorkbenchRetryTimerLiveView(
                                 retry_available_at=_now(),
                                 seconds_until_retry=60,
@@ -113,11 +117,22 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                     duration_ms=1234,
                     model_provider="groq",
                     model_name="llama",
+                    account_ref="groq_org_primary",
                     prompt_tokens=100,
                     completion_tokens=50,
                     total_tokens=150,
+                    remaining_minute_requests=4,
+                    remaining_minute_tokens=9000,
+                    minute_reset_at=_now(),
+                    remaining_daily_requests=90,
+                    remaining_daily_tokens=900000,
+                    daily_reset_at=_now(),
                     error_kind=None,
                     error_message_user=None,
+                    next_attempt_at=None,
+                    retry_plan=None,
+                    user_action_required=False,
+                    blocked_reason=None,
                 ),
             ),
             timeline=(
@@ -167,6 +182,12 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
         ]
         == 60
     )
+    assert (
+        payload["workflow"]["section_lanes"][0]["items"][0]["user_action_required"]
+        is False
+    )
     assert payload["workflow"]["llm_attempts"][0]["duration_ms"] == 1234
+    assert payload["workflow"]["llm_attempts"][0]["account_ref"] == "groq_org_primary"
+    assert payload["workflow"]["llm_attempts"][0]["remaining_minute_tokens"] == 9000
     assert payload["workflow"]["timeline"][0]["event_type"] == "SourceUnitsCreated"
     assert payload["workflow"]["curation"]["available"] is True

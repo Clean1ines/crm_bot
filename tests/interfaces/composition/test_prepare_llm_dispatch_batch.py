@@ -429,11 +429,11 @@ async def test_commits_lease_and_attempt_start_in_one_transaction() -> None:
     assert pool.released == [connection]
 
     assert connection.work_items["work-1"]["status"] == "leased"
-    assert connection.work_items["work-2"]["status"] == "leased"
-    assert len(connection.attempts) == 2
-    assert len(connection.dispatches) == 2
-    assert len(result.lease_result.leased) == 2
-    assert len(result.attempt_result.started_attempts) == 2
+    assert connection.work_items["work-2"]["status"] == "ready"
+    assert len(connection.attempts) == 1
+    assert len(connection.dispatches) == 1
+    assert len(result.lease_result.leased) == 1
+    assert len(result.attempt_result.started_attempts) == 1
 
 
 @pytest.mark.asyncio
@@ -474,7 +474,7 @@ async def test_rollback_if_attempt_dispatch_insert_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retry_lane_blocks_fresh_admission_when_retry_does_not_fit_capacity() -> (
+async def test_retry_too_large_for_one_window_does_not_block_fresh_item_on_same_pass() -> (
     None
 ):
     connection = FakeConnection()
@@ -493,7 +493,7 @@ async def test_retry_lane_blocks_fresh_admission_when_retry_does_not_fit_capacit
     connection.work_items["work-fresh-small"] = fresh_row
     connection.schedules["work-retry-large"] = _schedule_payload(
         source_unit_ref="unit-retry-large",
-        profile=_large_input_profile(9000),
+        profile=_large_input_profile(5000),
     )
     connection.schedules["work-fresh-small"] = _schedule_payload(
         source_unit_ref="unit-fresh-small",
@@ -502,7 +502,6 @@ async def test_retry_lane_blocks_fresh_admission_when_retry_does_not_fit_capacit
 
     result = await _runner(FakePool(connection=connection)).execute(
         _command(
-            dispatch_preparation_strategy="SAME_MODEL",
             account_capacities=(
                 _account(
                     minute_requests=1,
@@ -515,16 +514,15 @@ async def test_retry_lane_blocks_fresh_admission_when_retry_does_not_fit_capacit
         ),
     )
 
-    assert result.lease_result.leased == ()
-    assert result.attempt_result.started_attempts == ()
-    assert connection.attempts == {}
-    assert connection.dispatches == {}
+    assert len(result.lease_result.leased) == 1
+    assert len(result.attempt_result.started_attempts) == 1
     assert connection.work_items["work-retry-large"]["status"] == (
         WorkItemStatus.RETRYABLE_FAILED.value
     )
-    assert connection.work_items["work-fresh-small"]["status"] == (
-        WorkItemStatus.READY.value
-    )
+    assert connection.work_items["work-fresh-small"]["status"] == "leased"
+    assert {
+        str(dispatch["work_item_id"]) for dispatch in connection.dispatches.values()
+    } == {"work-fresh-small"}
 
 
 @pytest.mark.asyncio
@@ -596,7 +594,7 @@ async def test_retryable_status_without_retry_strategy_does_not_block_fresh_admi
     connection.work_items["work-fresh-small"] = fresh_row
     connection.schedules["work-retry-large"] = _schedule_payload(
         source_unit_ref="unit-retry-large",
-        profile=_large_input_profile(9000),
+        profile=_large_input_profile(5000),
     )
     connection.schedules["work-fresh-small"] = _schedule_payload(
         source_unit_ref="unit-fresh-small",
@@ -630,8 +628,7 @@ async def test_retryable_status_without_retry_strategy_does_not_block_fresh_admi
 
 @pytest.mark.asyncio
 async def test_retry_plan_drives_dispatch_strategy_without_legacy_strategy() -> None:
-    catalog = default_groq_llm_model_route_catalog()
-    fallback_model_ref = catalog.automatic_fallback_model_refs()[0]
+    fallback_model_ref = "openai/gpt-oss-120b"
     connection = FakeConnection()
 
     retry_row = _work_item_row("work-empty-check", ordinal=1)
@@ -790,10 +787,10 @@ async def test_prepare_uses_only_active_qwen_model_capacity() -> None:
         ),
     )
 
-    assert result.lease_result.llm_capacity_projection.max_projected_items == 3
-    assert len(result.lease_result.leased) == 3
-    assert len(result.attempt_result.started_attempts) == 3
-    assert len(connection.dispatches) == 3
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 2
+    assert len(result.lease_result.leased) == 2
+    assert len(result.attempt_result.started_attempts) == 2
+    assert len(connection.dispatches) == 2
     assert {
         dispatch["llm_allocation_payload"]["model_ref"]
         for dispatch in connection.dispatches.values()
@@ -914,7 +911,7 @@ async def test_non_primary_active_model_can_use_local_tpm_budget() -> None:
 
 
 @pytest.mark.asyncio
-async def test_non_primary_active_model_deferred_without_tokens_exhausts_local_minute() -> (
+async def test_non_primary_active_model_prefers_header_capacity_over_local_fallback() -> (
     None
 ):
     connection = _connection_with_due_items(1)
@@ -956,9 +953,8 @@ async def test_non_primary_active_model_deferred_without_tokens_exhausts_local_m
         ),
     )
 
-    assert result.attempt_result.started_attempts == ()
-    assert result.lease_result.llm_capacity_projection.max_projected_items == 0
-    assert result.capacity_retry_at == _now() + timedelta(seconds=30)
+    assert len(result.attempt_result.started_attempts) == 1
+    assert result.lease_result.llm_capacity_projection.max_projected_items == 1
 
 
 @pytest.mark.asyncio
@@ -1037,7 +1033,7 @@ async def test_prepare_resolves_fallback_strategy_to_first_automatic_fallback_mo
         ),
     )
 
-    assert len(result.attempt_result.started_attempts) == 5
+    assert len(result.attempt_result.started_attempts) == 1
     assert {
         dispatch["llm_allocation_payload"]["model_ref"]
         for dispatch in connection.dispatches.values()
@@ -1073,7 +1069,7 @@ async def test_prepare_resolves_larger_output_strategy_to_fallback_for_now() -> 
         ),
     )
 
-    assert len(result.attempt_result.started_attempts) == 5
+    assert len(result.attempt_result.started_attempts) == 1
     assert {
         dispatch["llm_allocation_payload"]["model_ref"]
         for dispatch in connection.dispatches.values()
@@ -1127,7 +1123,7 @@ async def test_prepare_uses_input_preflight_model_ref_before_leasing() -> None:
 
     assert result.input_size_preflight_decision == "USE_LARGER_INPUT_MODEL"
     assert result.input_size_preflight_active_model_ref == fallback_model_ref
-    assert len(result.attempt_result.started_attempts) == 2
+    assert len(result.attempt_result.started_attempts) == 1
     assert {
         dispatch["llm_allocation_payload"]["model_ref"]
         for dispatch in connection.dispatches.values()
@@ -1346,6 +1342,69 @@ async def test_prepare_skips_expensive_due_item_and_leases_later_item_that_fits_
 
 
 @pytest.mark.asyncio
+async def test_prepare_allocates_retry_then_fresh_per_window() -> None:
+    connection = FakeConnection()
+
+    retry_large = _work_item_row("work-retry-large", ordinal=1)
+    retry_large["status"] = WorkItemStatus.RETRYABLE_FAILED.value
+    retry_large["attempt_count"] = 1
+    retry_large["next_attempt_at"] = _now() - timedelta(seconds=1)
+
+    retry_small = _work_item_row("work-retry-small", ordinal=2)
+    retry_small["status"] = WorkItemStatus.RETRYABLE_FAILED.value
+    retry_small["attempt_count"] = 1
+    retry_small["next_attempt_at"] = _now() - timedelta(seconds=1)
+
+    fresh_small = _work_item_row("work-fresh-small", ordinal=3)
+    fresh_large = _work_item_row("work-fresh-large", ordinal=4)
+
+    connection.work_items["work-retry-large"] = retry_large
+    connection.work_items["work-retry-small"] = retry_small
+    connection.work_items["work-fresh-small"] = fresh_small
+    connection.work_items["work-fresh-large"] = fresh_large
+
+    connection.schedules["work-retry-large"] = _schedule_payload(
+        source_unit_ref="unit-retry-large",
+        profile=_large_input_profile(5000),
+    )
+    connection.schedules["work-retry-small"] = _schedule_payload(
+        source_unit_ref="unit-retry-small",
+        profile=_large_input_profile(2500),
+    )
+    connection.schedules["work-fresh-small"] = _schedule_payload(
+        source_unit_ref="unit-fresh-small",
+        profile=_large_input_profile(1700),
+    )
+    connection.schedules["work-fresh-large"] = _schedule_payload(
+        source_unit_ref="unit-fresh-large",
+        profile=_large_input_profile(5200),
+    )
+
+    result = await _runner(FakePool(connection=connection)).execute(
+        _command(
+            account_capacities=(
+                _account(account_ref="org-1", minute_requests=1, minute_tokens=3000),
+                _account(account_ref="org-2", minute_requests=1, minute_tokens=6000),
+                _account(account_ref="org-3", minute_requests=1, minute_tokens=1800),
+                _account(account_ref="org-4", minute_requests=1, minute_tokens=6000),
+            ),
+            requested_items=4,
+        ),
+    )
+
+    assert len(result.attempt_result.started_attempts) == 4
+    assert {
+        str(dispatch["work_item_id"]): dispatch["llm_allocation_payload"]["account_ref"]
+        for dispatch in connection.dispatches.values()
+    } == {
+        "work-retry-small": "org-1",
+        "work-retry-large": "org-2",
+        "work-fresh-small": "org-3",
+        "work-fresh-large": "org-4",
+    }
+
+
+@pytest.mark.asyncio
 async def test_local_active_model_minute_window_uses_first_observation_reset() -> None:
     connection = _connection_with_due_items(1)
     connection.capacity_observations.extend(
@@ -1354,10 +1413,10 @@ async def test_local_active_model_minute_window_uses_first_observation_reset() -
                 "provider": "groq",
                 "account_ref": "openai_1",
                 "model_ref": "openai/gpt-oss-120b",
-                "remaining_minute_requests": 10,
-                "remaining_minute_tokens": 7000,
-                "remaining_daily_requests": 100,
-                "remaining_daily_tokens": 50000,
+                "remaining_minute_requests": None,
+                "remaining_minute_tokens": None,
+                "remaining_daily_requests": None,
+                "remaining_daily_tokens": None,
                 "minute_reset_at": None,
                 "daily_reset_at": None,
                 "actual_prompt_tokens": 3000,
@@ -1370,10 +1429,10 @@ async def test_local_active_model_minute_window_uses_first_observation_reset() -
                 "provider": "groq",
                 "account_ref": "openai_1",
                 "model_ref": "openai/gpt-oss-120b",
-                "remaining_minute_requests": 10,
-                "remaining_minute_tokens": 7000,
-                "remaining_daily_requests": 100,
-                "remaining_daily_tokens": 50000,
+                "remaining_minute_requests": None,
+                "remaining_minute_tokens": None,
+                "remaining_daily_requests": None,
+                "remaining_daily_tokens": None,
                 "minute_reset_at": None,
                 "daily_reset_at": None,
                 "actual_prompt_tokens": 3000,
@@ -1416,7 +1475,7 @@ async def test_prepare_rearms_next_batch_after_started_attempts() -> None:
 
     result = await _runner(pool).execute(_command())
 
-    assert len(result.attempt_result.started_attempts) == 2
+    assert len(result.attempt_result.started_attempts) == 1
     assert result.capacity_retry_at == _now() + timedelta(seconds=60)
 
 

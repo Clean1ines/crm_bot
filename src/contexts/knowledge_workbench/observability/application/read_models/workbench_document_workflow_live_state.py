@@ -144,8 +144,12 @@ class WorkbenchSectionQueueItemLiveView:
     status: str
     attempt_count: int
     lease_expires_at: datetime | None
+    next_attempt_at: datetime | None
     claimed_by_worker_id: str | None
     error_kind: str | None
+    retry_plan: str | None
+    user_action_required: bool
+    blocked_reason: str | None
     retry_timer: WorkbenchRetryTimerLiveView
 
     def to_dict(self) -> JsonDict:
@@ -157,8 +161,12 @@ class WorkbenchSectionQueueItemLiveView:
             "status": self.status,
             "attempt_count": self.attempt_count,
             "lease_expires_at": _dt(self.lease_expires_at),
+            "next_attempt_at": _dt(self.next_attempt_at),
             "claimed_by_worker_id": self.claimed_by_worker_id,
             "error_kind": self.error_kind,
+            "retry_plan": self.retry_plan,
+            "user_action_required": self.user_action_required,
+            "blocked_reason": self.blocked_reason,
             "retry_timer": self.retry_timer.to_dict(),
         }
 
@@ -203,11 +211,22 @@ class WorkbenchLlmAttemptLiveView:
     duration_ms: int | None
     model_provider: str | None
     model_name: str | None
+    account_ref: str | None
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    remaining_minute_requests: int | None
+    remaining_minute_tokens: int | None
+    minute_reset_at: datetime | None
+    remaining_daily_requests: int | None
+    remaining_daily_tokens: int | None
+    daily_reset_at: datetime | None
     error_kind: str | None
     error_message_user: str | None
+    next_attempt_at: datetime | None
+    retry_plan: str | None
+    user_action_required: bool
+    blocked_reason: str | None
 
     def to_dict(self) -> JsonDict:
         return {
@@ -221,11 +240,22 @@ class WorkbenchLlmAttemptLiveView:
             "duration_ms": self.duration_ms,
             "model_provider": self.model_provider,
             "model_name": self.model_name,
+            "account_ref": self.account_ref,
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
+            "remaining_minute_requests": self.remaining_minute_requests,
+            "remaining_minute_tokens": self.remaining_minute_tokens,
+            "minute_reset_at": _dt(self.minute_reset_at),
+            "remaining_daily_requests": self.remaining_daily_requests,
+            "remaining_daily_tokens": self.remaining_daily_tokens,
+            "daily_reset_at": _dt(self.daily_reset_at),
             "error_kind": self.error_kind,
             "error_message_user": self.error_message_user,
+            "next_attempt_at": _dt(self.next_attempt_at),
+            "retry_plan": self.retry_plan,
+            "user_action_required": self.user_action_required,
+            "blocked_reason": self.blocked_reason,
         }
 
 

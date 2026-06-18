@@ -17,6 +17,9 @@ from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_
     WorkItemAttemptOutcomeRepositoryPort,
     WorkItemAttemptOutcomeStatus,
 )
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
     RecordWorkItemAttemptOutcome,
     RecordWorkItemAttemptOutcomeCommand,
@@ -221,6 +224,14 @@ class ExecutePreparedLlmDispatchAttempt:
                 outcome_status=_map_status(llm_result.status),
                 error_kind=llm_result.error_kind,
                 next_attempt_at=llm_result.next_attempt_at,
+                retry_plan=_retry_plan_for_result(
+                    llm_result=llm_result,
+                    validation_metadata=(
+                        validation_result.metadata
+                        if validation_result is not None
+                        else None
+                    ),
+                ),
                 validation_metadata=_recordable_validation_metadata(
                     validation_result.metadata
                     if validation_result is not None
@@ -347,6 +358,60 @@ def _map_status(
     if status is LlmDispatchExecutionStatus.DEFERRED:
         return WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED
     raise ValueError("unsupported LLM dispatch execution status")
+
+
+def _retry_plan_for_result(
+    *,
+    llm_result: LlmDispatchExecutionResult,
+    validation_metadata: Mapping[str, object] | None,
+) -> WorkItemRetryPlan | None:
+    if llm_result.status is LlmDispatchExecutionStatus.SUCCEEDED:
+        return None
+    if llm_result.status is LlmDispatchExecutionStatus.TERMINAL_FAILED:
+        return None
+
+    retry_plan = _retry_plan_from_validation_metadata(validation_metadata)
+    if retry_plan is not None:
+        return retry_plan
+
+    error_kind = llm_result.error_kind
+    if error_kind == "request_too_large":
+        return WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL
+    if error_kind == "output_too_large":
+        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL
+    if error_kind == "daily_limit":
+        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL
+    if error_kind == "minute_limit":
+        return WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
+    return WorkItemRetryPlan.RETRY_SAME_MODEL
+
+
+def _retry_plan_from_validation_metadata(
+    validation_metadata: Mapping[str, object] | None,
+) -> WorkItemRetryPlan | None:
+    if validation_metadata is None:
+        return None
+
+    next_action_kind = validation_metadata.get("claim_builder_attempt_next_action_kind")
+    if next_action_kind == "RETRY_SAME_MODEL":
+        return WorkItemRetryPlan.RETRY_SAME_MODEL
+    if next_action_kind == "RETRY_EMPTY_CLAIMS_CHECK_MODEL":
+        return WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL
+    if next_action_kind == "RETRY_FALLBACK_MODEL":
+        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL
+    if next_action_kind == "RETRY_LARGER_OUTPUT_LIMIT_MODEL":
+        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL
+    if next_action_kind == "RETRY_LARGER_INPUT_LIMIT_MODEL":
+        return WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL
+    if next_action_kind == "DEFER_UNTIL_CAPACITY_RESET":
+        return WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
+    if next_action_kind == "PAUSE_FOR_DAILY_LIMIT_RESET":
+        return WorkItemRetryPlan.WAIT_DAILY_CAPACITY_RESET
+    if next_action_kind == "SPLIT_SOURCE_UNIT":
+        return WorkItemRetryPlan.SPLIT_SOURCE_UNIT
+    if next_action_kind == "TERMINAL_FAILURE":
+        return WorkItemRetryPlan.TERMINAL
+    return None
 
 
 def _require_non_empty_text(value: str, *, field_name: str) -> None:

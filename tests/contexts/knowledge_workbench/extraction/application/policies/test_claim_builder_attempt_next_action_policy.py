@@ -158,6 +158,32 @@ def test_retry_larger_output_limit_model_maps_to_larger_output_action() -> None:
     assert action.should_mark_work_item_completed is False
 
 
+def test_retry_larger_input_limit_model_maps_to_larger_input_action() -> None:
+    action = _action(
+        _decision(
+            outcome_kind=(
+                ClaimBuilderAttemptOutcomeKind.RETRY_LARGER_INPUT_LIMIT_MODEL
+            ),
+            validation_decision=None,
+            validation_failure_reason=(
+                ClaimBuilderOutputValidationFailureReason.CLAIMS_MISSING
+            ),
+            next_model_strategy=(
+                ClaimBuilderNextModelStrategy.LARGER_INPUT_LIMIT_MODEL_REQUIRED
+            ),
+            retry_recommended=True,
+        )
+    )
+
+    assert action.kind is (
+        ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL
+    )
+    assert action.next_model_strategy is (
+        ClaimBuilderNextModelStrategy.LARGER_INPUT_LIMIT_MODEL_REQUIRED
+    )
+    assert action.should_mark_work_item_completed is False
+
+
 def test_terminal_invalid_maps_to_terminal_failure_without_completion() -> None:
     action = _action(
         _decision(

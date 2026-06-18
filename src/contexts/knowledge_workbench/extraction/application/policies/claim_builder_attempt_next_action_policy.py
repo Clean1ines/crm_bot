@@ -131,6 +131,16 @@ class ClaimBuilderAttemptNextActionPolicy:
                 fallback_reason="retry_empty_claims_check_model",
             )
 
+        if (
+            decision.outcome_kind
+            is ClaimBuilderAttemptOutcomeKind.RETRY_LARGER_INPUT_LIMIT_MODEL
+        ):
+            return _retry_action(
+                kind=ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL,
+                decision=decision,
+                fallback_reason="retry_larger_input_limit_model",
+            )
+
         if decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_FALLBACK_MODEL:
             return _retry_action(
                 kind=ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL,

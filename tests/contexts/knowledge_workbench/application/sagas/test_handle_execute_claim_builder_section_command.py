@@ -737,19 +737,21 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
         ),
         validation_metadata={
             "validation_decision": (
-                ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value
+                ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
             ),
             "validation_failure_reason": (
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
             ),
             "validated_claim_count": 0,
             "claim_builder_attempt_next_action_kind": (
-                ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+                ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
             ),
             "claim_builder_attempt_next_action_reason": (
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
             ),
-            "claim_builder_attempt_next_model_strategy": "FALLBACK_MODEL_REQUIRED",
+            "claim_builder_attempt_next_model_strategy": (
+                "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
+            ),
             "claim_builder_should_persist_claims": False,
             "claim_builder_should_mark_work_item_completed": False,
             "claim_builder_requires_source_split": False,
@@ -774,20 +776,20 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
     )
     assert workflow_unit_of_work.outbox.events[1].payload["validation_decision"] == (
-        ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value
+        ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
     )
     assert workflow_unit_of_work.outbox.events[1].payload["retry_recommended"] is True
     assert (
         workflow_unit_of_work.outbox.events[1].payload[
             "claim_builder_attempt_next_action_kind"
         ]
-        == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+        == ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
     )
     assert (
         workflow_unit_of_work.outbox.events[1].payload[
             "claim_builder_attempt_next_model_strategy"
         ]
-        == "FALLBACK_MODEL_REQUIRED"
+        == "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
     )
     assert (
         workflow_unit_of_work.outbox.events[1].payload[
@@ -816,7 +818,12 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
         snapshot.domain_counters["claim_builder_validation_retryable_failed_count"] == 1
     )
     assert snapshot.domain_counters["claim_builder_retry_action_count"] == 1
-    assert snapshot.domain_counters["claim_builder_fallback_retry_required_count"] == 1
+    assert (
+        snapshot.domain_counters[
+            "claim_builder_empty_claims_check_retry_required_count"
+        ]
+        == 1
+    )
 
 
 @pytest.mark.asyncio
@@ -1045,22 +1052,24 @@ async def test_invalid_retry_decision_persists_zero_draft_claims() -> None:
             )
         ),
         validation_metadata={
-            "claim_builder_attempt_outcome_kind": "RETRY_FALLBACK_MODEL",
+            "claim_builder_attempt_outcome_kind": "RETRY_EMPTY_CLAIMS_CHECK_MODEL",
             "validation_decision": (
-                ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value
+                ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
             ),
             "validation_failure_reason": (
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
             ),
             "validated_claim_count": 0,
-            "next_model_strategy": "FALLBACK_MODEL_REQUIRED",
+            "next_model_strategy": "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED",
             "claim_builder_attempt_next_action_kind": (
-                ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+                ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
             ),
             "claim_builder_attempt_next_action_reason": (
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED.value
             ),
-            "claim_builder_attempt_next_model_strategy": "FALLBACK_MODEL_REQUIRED",
+            "claim_builder_attempt_next_model_strategy": (
+                "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
+            ),
             "claim_builder_should_persist_claims": False,
             "claim_builder_should_mark_work_item_completed": False,
             "claim_builder_requires_source_split": False,
@@ -1080,13 +1089,13 @@ async def test_invalid_retry_decision_persists_zero_draft_claims() -> None:
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value,
     )
     assert workflow_unit_of_work.outbox.events[1].payload["next_model_strategy"] == (
-        "FALLBACK_MODEL_REQUIRED"
+        "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED"
     )
     assert (
         workflow_unit_of_work.outbox.events[1].payload[
             "claim_builder_attempt_next_action_kind"
         ]
-        == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value
+        == ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
     )
     assert (
         workflow_unit_of_work.outbox.events[1].payload[
@@ -1168,6 +1177,95 @@ def test_retry_same_model_metadata_uses_retry_same_model_next_action() -> None:
     )
     assert result.metadata["claim_builder_attempt_next_model_strategy"] == "SAME_MODEL"
     assert result.metadata["claim_builder_should_persist_claims"] is False
+
+
+@pytest.mark.asyncio
+async def test_provider_request_too_large_maps_to_larger_input_retry_action() -> None:
+    _, _, _, workflow_unit_of_work, draft_persistence = await _execute(
+        execution_result=_execution_result(LlmDispatchExecutionStatus.RETRYABLE_FAILED),
+    )
+
+    del draft_persistence
+    event_payload = workflow_unit_of_work.outbox.events[1].payload
+    assert event_payload["error_kind"] == "provider_error"
+
+
+@pytest.mark.asyncio
+async def test_provider_minute_limit_maps_to_capacity_wait_action() -> None:
+    execution_result = ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+            finished_at=_finished_at(),
+            error_kind="minute_limit",
+            next_attempt_at=_finished_at() + timedelta(seconds=30),
+            capacity_observation={
+                **_capacity_payload(),
+                "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
+            },
+        ),
+        outcome_result=RecordWorkItemAttemptOutcomeResult(
+            work_item=WorkItem(
+                work_item_id=_work_item_id(),
+                work_kind=WorkKind(
+                    "knowledge_workbench.claim_builder.section_extraction"
+                ),
+                status=WorkItemStatus.RETRYABLE_FAILED,
+            )
+        ),
+    )
+
+    _, _, _, workflow_unit_of_work, _ = await _execute(
+        execution_result=execution_result,
+    )
+
+    event_payload = workflow_unit_of_work.outbox.events[1].payload
+    assert event_payload["claim_builder_attempt_next_action_kind"] == (
+        ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
+    )
+    assert event_payload["claim_builder_attempt_next_model_strategy"] == "SAME_MODEL"
+    assert (
+        event_payload["claim_builder_next_run_after"]
+        == (_finished_at() + timedelta(seconds=30)).isoformat()
+    )
+
+
+@pytest.mark.asyncio
+async def test_provider_request_too_large_maps_to_larger_input_retry_metadata() -> None:
+    execution_result = ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+            finished_at=_finished_at(),
+            error_kind="request_too_large",
+            next_attempt_at=_finished_at() + timedelta(seconds=1),
+            capacity_observation={
+                **_capacity_payload(),
+                "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
+            },
+        ),
+        outcome_result=RecordWorkItemAttemptOutcomeResult(
+            work_item=WorkItem(
+                work_item_id=_work_item_id(),
+                work_kind=WorkKind(
+                    "knowledge_workbench.claim_builder.section_extraction"
+                ),
+                status=WorkItemStatus.RETRYABLE_FAILED,
+            )
+        ),
+    )
+
+    _, _, _, workflow_unit_of_work, _ = await _execute(
+        execution_result=execution_result,
+    )
+
+    event_payload = workflow_unit_of_work.outbox.events[1].payload
+    assert event_payload["claim_builder_attempt_next_action_kind"] == (
+        ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
+    )
+    assert event_payload["claim_builder_attempt_next_model_strategy"] == (
+        "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
+    )
 
 
 @pytest.mark.asyncio
