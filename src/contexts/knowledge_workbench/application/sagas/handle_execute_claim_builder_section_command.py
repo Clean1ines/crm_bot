@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -87,6 +88,7 @@ REQUEST_TOO_LARGE_ERROR_KIND = "request_too_large"
 OUTPUT_TOO_LARGE_ERROR_KIND = "output_too_large"
 AUTH_ERROR_KIND = "auth_error"
 DAILY_LIMIT_FALLBACK_MODEL_STRATEGY = "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
+CLAIM_BUILDER_LOG_INVALID_RAW_OUTPUT_ENV = "CLAIM_BUILDER_LOG_INVALID_RAW_OUTPUT"
 
 
 class ExecutePreparedLlmDispatchAttemptPort(Protocol):
@@ -160,11 +162,47 @@ class ClaimBuilderLlmDispatchOutputValidator:
             )
         )
         next_action = self.next_action_policy.decide_next_action(decision)
+        _log_invalid_raw_output_if_enabled(
+            dispatch_payload=dispatch_payload,
+            raw_output_text=raw_output_text,
+            validation_result=validation_result,
+            decision=decision,
+        )
         return _decision_to_dispatch_result(
             decision=decision,
             next_action=next_action,
             finished_at=finished_at,
         )
+
+
+def _log_invalid_raw_output_if_enabled(
+    *,
+    dispatch_payload: Mapping[str, object],
+    raw_output_text: str | None,
+    validation_result: ClaimBuilderOutputValidationResult,
+    decision: ClaimBuilderAttemptDecision,
+) -> None:
+    if os.environ.get(CLAIM_BUILDER_LOG_INVALID_RAW_OUTPUT_ENV) != "1":
+        return
+    if validation_result.decision is ClaimBuilderOutputValidationDecision.VALID_CLAIMS:
+        return
+    if validation_result.decision is ClaimBuilderOutputValidationDecision.VALID_EMPTY:
+        return
+
+    LOGGER.warning(
+        "knowledge_claim_builder_invalid_raw_output_debug",
+        workflow_run_id=_dispatch_workflow_run_id(dispatch_payload),
+        work_item_id=_dispatch_work_item_id(dispatch_payload),
+        dispatch_attempt_id=_dispatch_attempt_id(dispatch_payload),
+        provider=_dispatch_provider(dispatch_payload),
+        model_ref=_dispatch_model_ref(dispatch_payload),
+        validation_decision=validation_result.decision.value,
+        validation_failure_reason=validation_result.failure_reason.value
+        if validation_result.failure_reason is not None
+        else None,
+        outcome_kind=decision.outcome_kind.value,
+        raw_output_text=raw_output_text,
+    )
 
 
 @dataclass(frozen=True, slots=True)
