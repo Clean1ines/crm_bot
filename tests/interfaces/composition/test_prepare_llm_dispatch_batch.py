@@ -1540,14 +1540,14 @@ async def test_local_active_model_minute_window_uses_first_observation_reset() -
 
 
 @pytest.mark.asyncio
-async def test_prepare_rearms_next_batch_after_started_attempts() -> None:
+async def test_prepare_does_not_rearm_entire_batch_after_started_attempts() -> None:
     connection = _connection_with_due_items(2)
     pool = FakePool(connection=connection)
 
     result = await _runner(pool).execute(_command())
 
     assert len(result.attempt_result.started_attempts) == 1
-    assert result.capacity_retry_at == _now() + timedelta(seconds=60)
+    assert result.capacity_retry_at is None
 
 
 @pytest.mark.asyncio
