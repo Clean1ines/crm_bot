@@ -189,6 +189,7 @@ class HandleGenerateDraftClaimEmbeddingsCommandHandler:
         next_command = _cluster_draft_claims_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
+            embedding_model_id=embedding_model_id,
         )
         await workflow_unit_of_work.command_log.append_pending_command(next_command)
 
@@ -268,6 +269,7 @@ def _cluster_draft_claims_command(
     *,
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
+    embedding_model_id: str,
 ) -> WorkflowCommand:
     idempotency_key = f"cluster-draft-claims:{workflow_run_id}"
     return WorkflowCommand(
@@ -275,7 +277,10 @@ def _cluster_draft_claims_command(
         command_type=KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS.value,
         workflow_run_id=workflow_run_id,
         idempotency_key=WorkflowIdempotencyKey(idempotency_key),
-        payload={"workflow_run_id": workflow_run_id},
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "embedding_model_id": embedding_model_id,
+        },
         status=WorkflowCommandStatus.PENDING,
         run_after=workflow_command.updated_at,
         created_at=workflow_command.updated_at,

@@ -142,9 +142,13 @@ class HandleClusterDraftClaimsCommandHandler:
         if workflow_run_id != workflow_command.workflow_run_id:
             raise ValueError("payload workflow_run_id must match workflow command")
 
+        embedding_model_id = _payload_text(
+            workflow_command.payload,
+            "embedding_model_id",
+        )
         claims = await compaction_plan_repository.list_claims_for_compaction(
             workflow_run_id=workflow_run_id,
-            embedding_model_id=self._batch_budget_policy.model_id,
+            embedding_model_id=embedding_model_id,
         )
         edges = self._similarity_policy.build_edges(claims)
         groups = self._grouping_policy.build_groups(claims, edges)
@@ -259,6 +263,17 @@ class HandleClusterDraftClaimsCommandHandler:
             scheduled_work_item_count=schedule.created_count,
             already_scheduled_work_item_count=schedule.already_exists_count,
         )
+
+
+def _payload_text(
+    payload: Mapping[str, object],
+    key: str,
+    fallback: str | None = None,
+) -> str:
+    value = payload.get(key, fallback)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"workflow command payload must include {key}")
+    return value
 
 
 def _prepare_dispatch_batch_command(
@@ -459,10 +474,3 @@ async def _save_progress_snapshot(
             completed_at=existing.completed_at if existing is not None else None,
         ),
     )
-
-
-def _payload_text(payload: Mapping[str, object], key: str, fallback: str) -> str:
-    value = payload.get(key, fallback)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"workflow command payload must include {key}")
-    return value

@@ -58,6 +58,9 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 )
 
 
+EMBEDDING_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
+
+
 def _now() -> datetime:
     return datetime(2026, 6, 14, 12, 0, tzinfo=timezone.utc)
 
@@ -76,7 +79,10 @@ def _command(
         command_type=command_type.value,
         workflow_run_id=_workflow_run_id(),
         idempotency_key=WorkflowIdempotencyKey(f"{command_type.value}:workflow-1"),
-        payload={"workflow_run_id": _workflow_run_id()},
+        payload={
+            "workflow_run_id": _workflow_run_id(),
+            "embedding_model_id": EMBEDDING_MODEL_ID,
+        },
         status=status,
         run_after=_now(),
         created_at=_now(),
@@ -96,7 +102,7 @@ def _claim(ref: str) -> DraftClaimForCompaction:
         exclusion_scope=(),
         granularity="atomic",
         embedding_text="Product supports refunds",
-        embedding_model_id="openai/gpt-oss-120b",
+        embedding_model_id=EMBEDDING_MODEL_ID,
         dimensions=2,
         vector=(1.0, 0.0),
     )
@@ -116,7 +122,7 @@ class FakeCompactionRepository:
         embedding_model_id: str,
     ) -> tuple[DraftClaimForCompaction, ...]:
         assert workflow_run_id == _workflow_run_id()
-        assert embedding_model_id == "openai/gpt-oss-120b"
+        assert embedding_model_id == EMBEDDING_MODEL_ID
         return self.claims
 
     async def persist_compaction_plan(
