@@ -43,6 +43,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
 )
+from src.contexts.knowledge_workbench.application.sagas.append_capacity_window_prepare_wakeup import (
+    append_capacity_window_prepare_wakeup,
+)
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
 )
@@ -309,6 +312,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
 
         capacity_observation = _capacity_observation_from_result(execution_result)
         appended_event_count = 0
+        capacity_window_wakeup_count = 0
 
         if capacity_observation is not None:
             await capacity_observation_repository.record_observation(
@@ -342,6 +346,18 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                 ),
             )
             appended_event_count += 1
+            wakeup = await append_capacity_window_prepare_wakeup(
+                workflow_unit_of_work=workflow_unit_of_work,
+                source_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                prepare_command_type=(
+                    KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+                ),
+                capacity_observation=capacity_observation,
+                occurred_at=finished_at,
+            )
+            if wakeup is not None:
+                capacity_window_wakeup_count = 1
 
         persisted_draft_claim_count = await _persist_validated_draft_claims(
             persistence=draft_claim_observation_persistence,
@@ -379,6 +395,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             occurred_at=finished_at,
         )
         await workflow_unit_of_work.command_log.append_pending_command(next_command)
+        appended_next_command_count = 1 + capacity_window_wakeup_count
 
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
@@ -416,7 +433,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             work_item_id=work_item_id,
             outcome_status=outcome_status,
             appended_event_count=appended_event_count,
-            appended_next_command_count=1,
+            appended_next_command_count=appended_next_command_count,
         )
 
         return HandleExecuteClaimBuilderSectionResult(
@@ -425,7 +442,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             work_item_id=work_item_id,
             outcome_status=outcome_status,
             appended_event_count=appended_event_count,
-            appended_next_command_count=1,
+            appended_next_command_count=appended_next_command_count,
             completed_command_id=workflow_command.command_id,
         )
 

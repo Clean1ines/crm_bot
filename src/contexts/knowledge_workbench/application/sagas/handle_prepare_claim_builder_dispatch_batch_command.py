@@ -346,7 +346,32 @@ def _prepare_llm_dispatch_batch_command(
             workflow_command.payload,
         ),
         retry_plan=_retry_plan_from_payload(workflow_command.payload),
+        provider_account_refs=_provider_account_refs_from_payload(
+            workflow_command.payload,
+        ),
     )
+
+
+def _provider_account_refs_from_payload(
+    payload: Mapping[str, object],
+) -> tuple[str, ...]:
+    value = payload.get("capacity_window_provider_account_refs")
+    if value is None:
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        raise ValueError(
+            "workflow command payload capacity_window_provider_account_refs "
+            "must be sequence"
+        )
+    refs: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(
+                "workflow command payload capacity_window_provider_account_refs "
+                "must contain non-empty strings"
+            )
+        refs.append(item)
+    return tuple(refs)
 
 
 def _active_model_ref_from_payload(payload: Mapping[str, object]) -> str:
@@ -405,6 +430,9 @@ def _account_capacities_from_dispatch_preparation(
     if dispatch_preparation is None:
         return ()
 
+    raw_account_payloads = dispatch_preparation.get("account_capacities")
+    if raw_account_payloads is None and _provider_account_refs_from_payload(payload):
+        return ()
     account_payloads = _payload_mapping_sequence(
         dispatch_preparation,
         "account_capacities",
@@ -830,6 +858,17 @@ def _execute_claim_builder_section_commands(
                 workflow_command.idempotency_key.value
             ),
         }
+        for copied_key in (
+            "source_document_ref",
+            "scheduled_work_item_count",
+            "active_model_ref",
+            "retry_plan",
+            "selected_retry_plan",
+            "claim_builder_retry_plan",
+        ):
+            copied_value = workflow_command.payload.get(copied_key)
+            if copied_value is not None:
+                command_payload[copied_key] = copied_value
         if dispatch_preparation is not None:
             if not isinstance(dispatch_preparation, Mapping):
                 raise ValueError("llm_dispatch_preparation must be mapping")

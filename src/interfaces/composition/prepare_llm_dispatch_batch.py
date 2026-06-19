@@ -139,6 +139,7 @@ class PrepareLlmDispatchBatchCommand:
     retry_plan: WorkItemRetryPlan | None = None
     use_local_active_model_tpm_budget: bool = False
     allow_automatic_fallbacks: bool = True
+    provider_account_refs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.work_kind, WorkKind):
@@ -186,6 +187,10 @@ class PrepareLlmDispatchBatchCommand:
             raise TypeError("use_local_active_model_tpm_budget must be bool")
         if not isinstance(self.allow_automatic_fallbacks, bool):
             raise TypeError("allow_automatic_fallbacks must be bool")
+        if not isinstance(self.provider_account_refs, tuple):
+            raise TypeError("provider_account_refs must be tuple")
+        for account_ref in self.provider_account_refs:
+            _require_non_empty_text(account_ref, field_name="provider_account_refs")
         if self.started_at < self.now:
             raise ValueError("started_at must be >= now")
 
@@ -384,7 +389,7 @@ class PrepareLlmDispatchBatch:
                     )
 
                 provider_account_refs = _resolved_provider_account_refs(
-                    self.provider_account_refs,
+                    command.provider_account_refs or self.provider_account_refs,
                 )
                 reservation_account_refs = _reservation_account_refs(
                     provider_account_refs=provider_account_refs,
@@ -936,8 +941,9 @@ def _reservation_account_refs(
         for capacity in configured_capacities
         if capacity.provider == "groq" and capacity.model_ref == active_model_ref
     }
-    refs.update(provider_account_refs)
-    return tuple(sorted(refs))
+    if refs:
+        return tuple(sorted(refs))
+    return tuple(sorted(provider_account_refs))
 
 
 def _subtract_active_reservations(

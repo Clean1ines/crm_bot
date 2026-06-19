@@ -273,6 +273,28 @@ def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
         raise ValueError("workflow_command status must be PENDING")
 
 
+def _provider_account_refs_from_payload(
+    payload: Mapping[str, object],
+) -> tuple[str, ...]:
+    value = payload.get("capacity_window_provider_account_refs")
+    if value is None:
+        return ()
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        raise ValueError(
+            "workflow command payload capacity_window_provider_account_refs "
+            "must be sequence"
+        )
+    refs: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(
+                "workflow command payload capacity_window_provider_account_refs "
+                "must contain non-empty strings"
+            )
+        refs.append(item)
+    return tuple(refs)
+
+
 def _active_model_ref_from_payload(payload: Mapping[str, object]) -> str:
     return _payload_text(
         payload,
@@ -323,6 +345,9 @@ def _prepare_llm_dispatch_batch_command(
         ),
         use_local_active_model_tpm_budget=True,
         allow_automatic_fallbacks=False,
+        provider_account_refs=_provider_account_refs_from_payload(
+            workflow_command.payload,
+        ),
     )
 
 
