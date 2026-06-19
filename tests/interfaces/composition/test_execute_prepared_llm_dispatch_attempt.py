@@ -196,7 +196,7 @@ async def test_success_result_maps_to_successful_outcome() -> None:
     assert (
         repository.records[0].outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED
     )
-    assert repository.records[0].error_kind is None
+    assert repository.records[0].llm_output_payload == {"raw_text": "{}"}
 
 
 @pytest.mark.asyncio
@@ -215,6 +215,7 @@ async def test_retryable_failed_maps_to_retryable_outcome() -> None:
         is WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED
     )
     assert repository.records[0].error_kind == "request_too_large"
+    assert repository.records[0].llm_output_payload is None
     assert repository.records[0].next_attempt_at == _next_attempt_at()
     assert (
         repository.records[0].retry_plan is WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL

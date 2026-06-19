@@ -28,6 +28,7 @@ class RecordWorkItemAttemptOutcomeCommand:
     next_attempt_at: datetime | None = None
     retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
+    llm_output_payload: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +55,7 @@ class RecordWorkItemAttemptOutcome:
             next_attempt_at=command.next_attempt_at,
             retry_plan=command.retry_plan,
             validation_metadata=command.validation_metadata,
+            llm_output_payload=command.llm_output_payload,
         )
         work_item = await self.repository.record_attempt_outcome(record)
         return RecordWorkItemAttemptOutcomeResult(work_item=work_item)

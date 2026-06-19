@@ -62,7 +62,8 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 a.finished_at AS recorded_finished_at,
                 a.outcome_status AS recorded_outcome_status,
                 a.error_kind AS recorded_error_kind,
-                a.validation_metadata AS recorded_validation_metadata
+                a.validation_metadata AS recorded_validation_metadata,
+                a.llm_output_payload AS recorded_llm_output_payload
             FROM execution_work_item_attempts a
             JOIN execution_work_items w
               ON w.work_item_id = a.work_item_id
@@ -101,8 +102,13 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 else None
             ),
             next_attempt_at=next_attempt_at,
-            validation_metadata=_validation_metadata_from_row(
+            validation_metadata=_json_object_from_row(
                 row["recorded_validation_metadata"],
+                field_name="validation_metadata",
+            ),
+            llm_output_payload=_json_object_from_row(
+                row["recorded_llm_output_payload"],
+                field_name="llm_output_payload",
             ),
             work_item=_hydrate_work_item(row),
         )
@@ -145,16 +151,18 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 finished_at = $2,
                 outcome_status = $3,
                 error_kind = $4,
-                validation_metadata = $5::jsonb
+                validation_metadata = $5::jsonb,
+                llm_output_payload = $6::jsonb
             WHERE attempt_id = $1
-              AND work_item_id = $6
-              AND attempt_number = $7
+              AND work_item_id = $7
+              AND attempt_number = $8
             """,
             record.attempt_id,
             record.finished_at,
             record.outcome_status.value,
             record.error_kind,
             _jsonb_payload(record.validation_metadata),
+            _jsonb_payload(record.llm_output_payload),
             record.work_item_id,
             record.attempt_number,
         )
@@ -202,7 +210,11 @@ def _jsonb_payload(payload: Mapping[str, object] | None) -> str | None:
     return json.dumps(dict(payload))
 
 
-def _validation_metadata_from_row(value: object) -> dict[str, object] | None:
+def _json_object_from_row(
+    value: object,
+    *,
+    field_name: str,
+) -> dict[str, object] | None:
     if value is None:
         return None
     if isinstance(value, str):
@@ -210,15 +222,15 @@ def _validation_metadata_from_row(value: object) -> dict[str, object] | None:
     elif isinstance(value, Mapping):
         decoded = dict(value)
     else:
-        raise TypeError("validation_metadata must be json object or None")
+        raise TypeError(f"{field_name} must be json object or None")
 
     if not isinstance(decoded, dict):
-        raise TypeError("validation_metadata must decode to object")
+        raise TypeError(f"{field_name} must decode to object")
 
     result: dict[str, object] = {}
     for key, item in decoded.items():
         if not isinstance(key, str):
-            raise TypeError("validation_metadata keys must be text")
+            raise TypeError(f"{field_name} keys must be text")
         result[key] = item
     return result
 

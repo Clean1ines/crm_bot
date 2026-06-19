@@ -237,15 +237,16 @@ class ExecutePreparedLlmDispatchAttempt:
                     if validation_result is not None
                     else None,
                 ),
+                llm_output_payload=provider_llm_result.output_payload,
             ),
         )
-        LOGGER.info(
-            "knowledge_llm_execute_outcome_recorded",
+        _log_recorded_llm_output_payload(
             attempt_id=dispatch.attempt_id,
             work_item_id=dispatch.work_item_id,
             attempt_number=dispatch.attempt_number,
-            effective_status=llm_result.status.value,
-            effective_error_kind=llm_result.error_kind,
+            status=llm_result.status.value,
+            error_kind=llm_result.error_kind,
+            output_payload=provider_llm_result.output_payload,
         )
 
         return ExecutePreparedLlmDispatchAttemptResult(
@@ -306,6 +307,44 @@ def _map_recorded_outcome_status(
     if status is WorkItemAttemptOutcomeStatus.DEFERRED:
         return LlmDispatchExecutionStatus.RETRYABLE_FAILED
     raise ValueError("unsupported recorded attempt outcome status")
+
+
+def _log_recorded_llm_output_payload(
+    *,
+    attempt_id: str,
+    work_item_id: str,
+    attempt_number: int,
+    status: str,
+    error_kind: str | None,
+    output_payload: Mapping[str, object] | None,
+) -> None:
+    raw_text = None
+    if output_payload is not None:
+        raw_text_value = output_payload.get("raw_text")
+        if isinstance(raw_text_value, str):
+            raw_text = raw_text_value
+
+    LOGGER.info(
+        "knowledge_llm_execute_outcome_recorded",
+        attempt_id=attempt_id,
+        work_item_id=work_item_id,
+        attempt_number=attempt_number,
+        effective_status=status,
+        effective_error_kind=error_kind,
+        llm_output_payload_persisted=output_payload is not None,
+        raw_text_char_count=len(raw_text) if raw_text is not None else None,
+    )
+
+    if raw_text is not None:
+        LOGGER.warning(
+            "knowledge_llm_output_payload_persisted_debug",
+            attempt_id=attempt_id,
+            work_item_id=work_item_id,
+            attempt_number=attempt_number,
+            effective_status=status,
+            effective_error_kind=error_kind,
+            raw_text=raw_text,
+        )
 
 
 def _validate_output_if_requested(

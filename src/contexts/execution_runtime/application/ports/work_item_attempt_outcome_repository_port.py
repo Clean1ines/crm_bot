@@ -32,6 +32,7 @@ class WorkItemAttemptOutcomeRecord:
     next_attempt_at: datetime | None = None
     retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
+    llm_output_payload: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.attempt_id, field_name="attempt_id")
@@ -67,6 +68,11 @@ class WorkItemAttemptOutcomeRecord:
             Mapping,
         ):
             raise TypeError("validation_metadata must be Mapping when provided")
+        if self.llm_output_payload is not None and not isinstance(
+            self.llm_output_payload,
+            Mapping,
+        ):
+            raise TypeError("llm_output_payload must be Mapping when provided")
 
         if self.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
             if self.error_kind is not None:
@@ -128,6 +134,7 @@ class RecordedWorkItemAttemptOutcome:
     next_attempt_at: datetime | None = None
     retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
+    llm_output_payload: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.attempt_id, field_name="attempt_id")
@@ -151,6 +158,11 @@ class RecordedWorkItemAttemptOutcome:
             Mapping,
         ):
             raise TypeError("validation_metadata must be Mapping when provided")
+        if self.llm_output_payload is not None and not isinstance(
+            self.llm_output_payload,
+            Mapping,
+        ):
+            raise TypeError("llm_output_payload must be Mapping when provided")
 
         if self.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
             if self.error_kind is not None:

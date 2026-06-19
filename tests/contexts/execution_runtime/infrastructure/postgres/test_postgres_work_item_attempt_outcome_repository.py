@@ -148,6 +148,7 @@ async def test_succeeded_updates_attempt_and_completes_work_item() -> None:
         "succeeded",
         None,
         None,
+        None,
         "work-1",
         1,
     )
@@ -184,6 +185,7 @@ async def test_succeeded_updates_attempt_with_validation_metadata() -> None:
             '{"draft_claim_compaction_validation_decision": "valid_output", '
             '"expected_output_kind": "compacted_claims"}'
         ),
+        None,
         "work-1",
         1,
     )
