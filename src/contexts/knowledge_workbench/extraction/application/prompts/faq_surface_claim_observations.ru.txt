@@ -375,7 +375,10 @@ important separate condition/limitation/result not hidden.
 possible_questions same intent and not broader than evidence.
 possible_questions same language as INPUT fragment body.
 exclusion_scope only literal mentioned-but-not-explained topics, not direct answer parts.
-evidence_block is exact contiguous substring of INPUT.
+evidence_block must be copied as an exact contiguous substring from INPUT.
+Do not shorten a sentence.
+Do not add a period where the source has a comma.
+If the needed evidence is too long, copy the full sentence or choose a shorter exact sentence.
 evidence_block contains no "...".
 evidence_block is not summary.
 evidence_block is not paraphrase.
