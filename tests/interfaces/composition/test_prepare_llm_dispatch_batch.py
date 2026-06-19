@@ -1608,3 +1608,16 @@ async def test_prepare_subtracts_active_route_reservations_before_admission() ->
 
     assert len(result.attempt_result.started_attempts) == 1
     assert len(connection.capacity_reservations) == 2
+
+
+@pytest.mark.asyncio
+async def test_prepare_no_due_records_returns_idle_result() -> None:
+    connection = _connection_with_due_items(0)
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(_command())
+
+    assert result.attempt_result.started_attempts == ()
+    assert result.lease_result.leased == ()
+    assert result.capacity_retry_at is None
+    assert result.input_size_preflight_reason == "no due work items"

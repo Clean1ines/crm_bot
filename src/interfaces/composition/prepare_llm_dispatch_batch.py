@@ -326,14 +326,28 @@ class PrepareLlmDispatchBatch:
                     dispatch_preparation_strategy=dispatch_preparation_strategy,
                     retry_plan=command.retry_plan,
                 )
+                initial_model_ref = command.active_model_ref
+                if initial_model_ref is None:
+                    initial_model_ref = self.route_catalog.primary_model_ref()
+
+                if not admission_due_records:
+                    LOGGER.info(
+                        "knowledge_llm_prepare_no_due_records",
+                        work_kind=command.work_kind.value,
+                        requested_items=command.requested_items,
+                        active_model_ref=initial_model_ref,
+                        now=command.now.isoformat(),
+                    )
+                    return _no_due_work_items_result(
+                        command=command,
+                        active_model_ref=initial_model_ref,
+                    )
+
                 preparation_profile = _preparation_profile(
                     command=command,
                     due_records=admission_due_records,
                     builder=self.dispatch_preparation_builder,
                 )
-                initial_model_ref = command.active_model_ref
-                if initial_model_ref is None:
-                    initial_model_ref = self.route_catalog.primary_model_ref()
 
                 strategy_result = ResolveLlmDispatchPreparationStrategy().execute(
                     ResolveLlmDispatchPreparationStrategyCommand(
@@ -1070,6 +1084,45 @@ def _input_admitted_capacity_decision(*, projected_items: int) -> CapacityDecisi
         max_admissible_items=0,
         blocking_resources=(CapacityResourceKind.EXTERNAL_IO,),
         reason="input token capacity unavailable",
+    )
+
+
+def _no_due_work_items_result(
+    *,
+    command: PrepareLlmDispatchBatchCommand,
+    active_model_ref: str,
+) -> PrepareLlmDispatchBatchResult:
+    projection = zero_llm_capacity_projection(
+        requested_items=command.requested_items,
+    )
+    return PrepareLlmDispatchBatchResult(
+        lease_result=LeaseLlmAdmittedWorkItemsResult(
+            active_model_capacity_selection=SelectActiveLlmModelCapacityResult(
+                active_model_ref=active_model_ref,
+                selected_accounts=(),
+                projection=projection,
+            ),
+            lease_result=LeaseAdmittedWorkItemsResult(
+                capacity_decision=CapacityDecision(
+                    status=CapacityDecisionStatus.REJECT,
+                    work_class=CapacityWorkClass.LLM_BOUND,
+                    max_admissible_items=0,
+                    blocking_resources=(CapacityResourceKind.EXTERNAL_IO,),
+                    reason="no due work items",
+                ),
+                leased=(),
+            ),
+            leased=(),
+        ),
+        attempt_result=StartLlmAdmittedWorkItemAttemptsResult(
+            started_attempts=(),
+        ),
+        input_size_preflight_decision=(
+            LlmDispatchInputSizePreflightDecision.USE_ACTIVE_MODEL.value
+        ),
+        input_size_preflight_reason="no due work items",
+        input_size_preflight_active_model_ref=active_model_ref,
+        capacity_retry_at=None,
     )
 
 

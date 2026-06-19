@@ -249,9 +249,9 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
                 preflight_metadata=preflight_metadata,
                 occurred_at=occurred_at,
             )
-            await workflow_unit_of_work.command_log.mark_command_failed(
+            await workflow_unit_of_work.command_log.mark_command_completed(
                 command_id=workflow_command.command_id,
-                failed_at=occurred_at,
+                completed_at=occurred_at,
             )
             return HandlePrepareClaimBuilderDispatchBatchResult(
                 workflow_run_id=workflow_run_id,
@@ -736,7 +736,7 @@ def _zero_dispatch_after_scheduling_timeline_entry(
         workflow_run_id=workflow_run_id,
         event_type="ClaimBuilderDispatchBatchPreparedZero",
         phase="CLAIM_BUILDER_SECTION_EXTRACTION",
-        severity=WorkflowTimelineSeverity.ERROR,
+        severity=WorkflowTimelineSeverity.INFO,
         message=(
             "Claim builder dispatch batch prepared zero attempts after "
             "scheduled work items"

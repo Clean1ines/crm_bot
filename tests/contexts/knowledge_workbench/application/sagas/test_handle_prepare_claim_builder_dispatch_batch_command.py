@@ -514,9 +514,7 @@ async def test_execute_commands_include_claim_builder_prepare_origin_trace() -> 
 
 
 @pytest.mark.asyncio
-async def test_marks_prepare_failed_when_scheduled_work_prepares_zero_attempts() -> (
-    None
-):
+async def test_marks_prepare_completed_when_scheduled_work_has_no_due_items() -> None:
     result, _, workflow_unit_of_work = await _execute(started_attempts=())
 
     assert result.prepared_dispatch_count == 0
@@ -524,8 +522,8 @@ async def test_marks_prepare_failed_when_scheduled_work_prepares_zero_attempts()
     assert result.appended_next_command_count == 0
     assert workflow_unit_of_work.outbox.events == []
     assert workflow_unit_of_work.command_log.pending_commands == []
-    assert workflow_unit_of_work.command_log.completed_command_ids == []
-    assert workflow_unit_of_work.command_log.failed_command_ids == [
+    assert workflow_unit_of_work.command_log.failed_command_ids == []
+    assert workflow_unit_of_work.command_log.completed_command_ids == [
         _workflow_command().command_id,
     ]
 
@@ -534,7 +532,7 @@ async def test_marks_prepare_failed_when_scheduled_work_prepares_zero_attempts()
     )
     entry = workflow_unit_of_work.timeline.entries[0]
     assert entry.event_type == "ClaimBuilderDispatchBatchPreparedZero"
-    assert entry.severity.value == "ERROR"
+    assert entry.severity.value == "INFO"
     assert entry.payload_summary["scheduled_work_item_count"] == 2
     assert entry.payload_summary["prepared_dispatch_count"] == 0
 
