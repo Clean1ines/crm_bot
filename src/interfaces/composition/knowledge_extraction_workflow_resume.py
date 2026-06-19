@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+import os
 from typing import Protocol, cast
 
 import asyncpg
@@ -114,6 +115,12 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     default_groq_llm_model_route_catalog,
+)
+from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
+    LlmRuntimeSettings,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
 )
 from src.contexts.workflow_runtime.infrastructure.postgres.postgres_workflow_runtime_unit_of_work import (
     PostgresWorkflowRuntimeUnitOfWork,
@@ -548,6 +555,9 @@ def make_knowledge_extraction_workflow_resume(
         )
 
     route_catalog = default_groq_llm_model_route_catalog()
+    groq_env_config = LlmRuntimeSettings.from_env_mapping(
+        os.environ,
+    ).to_groq_env_config()
 
     return RunKnowledgeExtractionWorkflowResume(
         pool=pool,
@@ -558,6 +568,10 @@ def make_knowledge_extraction_workflow_resume(
                 projector=ProjectLlmCapacityToCapacityRuntime(),
             ),
             route_catalog=route_catalog,
+            provider_account_refs=tuple(
+                account.account_seed.account_ref for account in groq_env_config.accounts
+            ),
+            model_profiles=build_groq_free_plan_model_profiles(),
         ),
         execute_prepared_llm_dispatch_attempt=(
             _TransactionalExecutePreparedLlmDispatchAttempt(
