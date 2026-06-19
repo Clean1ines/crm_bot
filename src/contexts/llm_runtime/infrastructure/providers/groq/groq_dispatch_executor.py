@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import os
 from typing import cast
 
 import structlog
@@ -42,6 +43,10 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_transport_port 
 
 
 LOGGER = structlog.get_logger(__name__)
+
+
+GROQ_MAX_COMPLETION_TOKEN_GAP_ENV = "GROQ_MAX_COMPLETION_TOKEN_GAP"
+DEFAULT_GROQ_MAX_COMPLETION_TOKEN_GAP = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -349,7 +354,8 @@ def _resolve_max_completion_tokens(
     parsed: _ParsedGroqDispatchPayload,
     model_profile: ModelProfile,
 ) -> int | None:
-    requested_output_tokens = parsed.reserved_output_tokens
+    completion_gap_tokens = _groq_max_completion_token_gap_from_env()
+    requested_output_tokens = parsed.reserved_output_tokens - completion_gap_tokens
     requested_output_tokens = min(
         requested_output_tokens,
         model_profile.max_output_tokens,
@@ -357,6 +363,21 @@ def _resolve_max_completion_tokens(
     if requested_output_tokens <= 0:
         return None
     return requested_output_tokens
+
+
+def _groq_max_completion_token_gap_from_env() -> int:
+    raw_value = os.environ.get(GROQ_MAX_COMPLETION_TOKEN_GAP_ENV)
+    if raw_value is None or not raw_value.strip():
+        return DEFAULT_GROQ_MAX_COMPLETION_TOKEN_GAP
+    try:
+        parsed_value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{GROQ_MAX_COMPLETION_TOKEN_GAP_ENV} must be an integer",
+        ) from exc
+    if parsed_value < 0:
+        raise ValueError(f"{GROQ_MAX_COMPLETION_TOKEN_GAP_ENV} must be >= 0")
+    return parsed_value
 
 
 def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int:
