@@ -260,12 +260,12 @@ def _transition_work_item(
         raise ValueError("error_kind is required for failed/deferred outcomes")
 
     if record.outcome_status is WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED:
-        if record.next_attempt_at is None:
-            raise ValueError("next_attempt_at is required for retryable failure")
         return WorkItemStateMachine.fail_leased_retryable(
             current,
             error_kind=record.error_kind,
-            next_attempt_at=WaitUntil(record.next_attempt_at),
+            next_attempt_at=WaitUntil(record.next_attempt_at)
+            if record.next_attempt_at is not None
+            else None,
             retry_plan=_required_retry_plan(record.retry_plan),
         )
 

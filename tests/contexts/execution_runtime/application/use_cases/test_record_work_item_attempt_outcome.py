@@ -15,6 +15,9 @@ from src.contexts.execution_runtime.application.use_cases.record_work_item_attem
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 
 
 class FakeRepository:
@@ -57,6 +60,7 @@ def _command(
     ),
     error_kind: str | None = None,
     next_attempt_at: datetime | None = None,
+    retry_plan: WorkItemRetryPlan | None = None,
 ) -> RecordWorkItemAttemptOutcomeCommand:
     return RecordWorkItemAttemptOutcomeCommand(
         attempt_id="attempt-1",
@@ -67,6 +71,7 @@ def _command(
         outcome_status=outcome_status,
         error_kind=error_kind,
         next_attempt_at=next_attempt_at,
+        retry_plan=retry_plan,
     )
 
 
@@ -124,14 +129,30 @@ async def test_rejects_failed_without_error_kind() -> None:
 
 
 @pytest.mark.asyncio
-async def test_rejects_retryable_without_next_attempt_at() -> None:
+async def test_retryable_without_next_attempt_at_is_immediate_retry() -> None:
     repository = FakeRepository(work_item=_work_item())
 
-    with pytest.raises(ValueError, match="next_attempt_at"):
+    result = await RecordWorkItemAttemptOutcome(repository=repository).execute(
+        _command(
+            outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
+            error_kind="validation_failed",
+            retry_plan=WorkItemRetryPlan.RETRY_SAME_MODEL,
+        ),
+    )
+
+    assert result.work_item == repository.work_item
+    assert repository.records[0].next_attempt_at is None
+
+
+@pytest.mark.asyncio
+async def test_rejects_retryable_without_retry_plan() -> None:
+    repository = FakeRepository(work_item=_work_item())
+
+    with pytest.raises(ValueError, match="retry_plan"):
         await RecordWorkItemAttemptOutcome(repository=repository).execute(
             _command(
                 outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
-                error_kind="rate_limit",
+                error_kind="validation_failed",
             ),
         )
 
@@ -159,5 +180,6 @@ async def test_rejects_next_attempt_at_not_after_finished_at() -> None:
                 outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
                 error_kind="rate_limit",
                 next_attempt_at=_finished_at(),
+                retry_plan=WorkItemRetryPlan.RETRY_SAME_MODEL,
             ),
         )

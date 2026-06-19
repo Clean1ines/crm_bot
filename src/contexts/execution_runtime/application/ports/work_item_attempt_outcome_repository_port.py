@@ -98,13 +98,24 @@ class WorkItemAttemptOutcomeRecord:
                 )
             return
 
-        if self.outcome_status in {
-            WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
-            WorkItemAttemptOutcomeStatus.DEFERRED,
-        }:
+        if self.outcome_status is WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED:
+            if self.next_attempt_at is not None:
+                _require_timezone_aware(
+                    self.next_attempt_at,
+                    field_name="next_attempt_at",
+                )
+                if self.next_attempt_at <= self.finished_at:
+                    raise ValueError("next_attempt_at must be after finished_at")
+            if self.retry_plan is None:
+                raise ValueError(
+                    "retry_plan is required for retryable outcomes",
+                )
+            return
+
+        if self.outcome_status is WorkItemAttemptOutcomeStatus.DEFERRED:
             if self.next_attempt_at is None:
                 raise ValueError(
-                    "next_attempt_at is required for retryable/deferred outcomes",
+                    "next_attempt_at is required for deferred outcomes",
                 )
             _require_timezone_aware(
                 self.next_attempt_at,
@@ -114,11 +125,7 @@ class WorkItemAttemptOutcomeRecord:
                 raise ValueError("next_attempt_at must be after finished_at")
             if self.retry_plan is None:
                 raise ValueError(
-                    "retry_plan is required for retryable/deferred outcomes",
-                )
-            if self.retry_plan is None:
-                raise ValueError(
-                    "retry_plan is required for retryable/deferred outcomes",
+                    "retry_plan is required for deferred outcomes",
                 )
 
 
@@ -188,13 +195,20 @@ class RecordedWorkItemAttemptOutcome:
                 )
             return
 
-        if self.outcome_status in {
-            WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
-            WorkItemAttemptOutcomeStatus.DEFERRED,
-        }:
+        if self.outcome_status is WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED:
+            if self.next_attempt_at is not None:
+                _require_timezone_aware(
+                    self.next_attempt_at,
+                    field_name="next_attempt_at",
+                )
+                if self.next_attempt_at <= self.finished_at:
+                    raise ValueError("next_attempt_at must be after finished_at")
+            return
+
+        if self.outcome_status is WorkItemAttemptOutcomeStatus.DEFERRED:
             if self.next_attempt_at is None:
                 raise ValueError(
-                    "next_attempt_at is required for retryable/deferred outcomes",
+                    "next_attempt_at is required for deferred outcomes",
                 )
             _require_timezone_aware(
                 self.next_attempt_at,

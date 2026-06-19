@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Protocol, TypeGuard, cast
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
@@ -159,7 +159,7 @@ class DraftClaimCompactionLlmDispatchOutputValidator:
             return LlmDispatchOutputValidationResult(
                 status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
                 error_kind="draft_claim_compaction_output_validation_failed",
-                next_attempt_at=finished_at + timedelta(seconds=1),
+                next_attempt_at=None,
                 metadata={
                     "draft_claim_compaction_validation_decision": "invalid_output",
                     "expected_output_kind": self.expected_output_kind.value,

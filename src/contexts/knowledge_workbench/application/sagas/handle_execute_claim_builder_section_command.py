@@ -4,7 +4,7 @@ import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TypeGuard
 from typing import Protocol, cast
 
@@ -560,7 +560,7 @@ def _decision_to_dispatch_result(
     return LlmDispatchOutputValidationResult(
         status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
         error_kind="claim_builder_output_validation_failed",
-        next_attempt_at=finished_at + timedelta(seconds=1),
+        next_attempt_at=None,
         metadata=metadata,
     )
 

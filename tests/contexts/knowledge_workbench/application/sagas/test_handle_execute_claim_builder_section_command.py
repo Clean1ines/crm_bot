@@ -719,7 +719,7 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
             finished_at=_finished_at(),
             output_payload={"raw_text": '{"claims":[]}'},
             error_kind="claim_builder_output_validation_failed",
-            next_attempt_at=_finished_at() + timedelta(seconds=1),
+            next_attempt_at=None,
             capacity_observation={
                 **_capacity_payload(),
                 "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
@@ -1035,7 +1035,7 @@ async def test_invalid_retry_decision_persists_zero_draft_claims() -> None:
             finished_at=_finished_at(),
             output_payload={"raw_text": '{"claims":[]}'},
             error_kind="claim_builder_output_validation_failed",
-            next_attempt_at=_finished_at() + timedelta(seconds=1),
+            next_attempt_at=None,
             capacity_observation={
                 **_capacity_payload(),
                 "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
@@ -1237,7 +1237,7 @@ async def test_provider_request_too_large_maps_to_larger_input_retry_metadata() 
             status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
             finished_at=_finished_at(),
             error_kind="request_too_large",
-            next_attempt_at=_finished_at() + timedelta(seconds=1),
+            next_attempt_at=None,
             capacity_observation={
                 **_capacity_payload(),
                 "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,

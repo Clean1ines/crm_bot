@@ -65,14 +65,9 @@ class LlmDispatchOutputValidationResult:
         if self.error_kind is None:
             raise ValueError("error_kind is required for non-succeeded validation")
 
-        if self.status in {
-            LlmDispatchExecutionStatus.RETRYABLE_FAILED,
-            LlmDispatchExecutionStatus.DEFERRED,
-        }:
+        if self.status is LlmDispatchExecutionStatus.DEFERRED:
             if self.next_attempt_at is None:
-                raise ValueError(
-                    "next_attempt_at is required for retryable/deferred validation"
-                )
+                raise ValueError("next_attempt_at is required for deferred validation")
 
 
 class LlmDispatchOutputValidationPort(Protocol):

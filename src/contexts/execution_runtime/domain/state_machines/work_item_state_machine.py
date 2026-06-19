@@ -96,7 +96,7 @@ class WorkItemStateMachine:
         item: WorkItem,
         *,
         error_kind: str,
-        next_attempt_at: WaitUntil,
+        next_attempt_at: WaitUntil | None,
         retry_plan: WorkItemRetryPlan = WorkItemRetryPlan.RETRY_SAME_MODEL,
     ) -> WorkItem:
         WorkItemStateMachine._require_leased(item, "mark retryable failed")
