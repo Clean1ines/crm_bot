@@ -249,11 +249,11 @@ def _validate_claim_item(
             ClaimBuilderOutputValidationFailureReason.EVIDENCE_BLOCK_NOT_SOURCE_EXCERPT,
         )
 
-    latin_result = _validate_latin_tokens_against_evidence(
+    latin_result = _validate_latin_tokens_against_source_unit(
         claim_text=claim_text,
         possible_questions=questions,
         exclusion_scope=exclusion_scope,
-        evidence_block=evidence_block,
+        source_unit_text=source_unit_text,
     )
     if latin_result is not None:
         return latin_result
@@ -328,19 +328,19 @@ def _possible_questions(
     return tuple(questions)
 
 
-def _validate_latin_tokens_against_evidence(
+def _validate_latin_tokens_against_source_unit(
     *,
     claim_text: str,
     possible_questions: tuple[str, ...],
     exclusion_scope: str,
-    evidence_block: str,
+    source_unit_text: str,
 ) -> ClaimBuilderOutputValidationResult | None:
-    evidence_tokens = frozenset(_latin_tokens(evidence_block))
+    source_unit_tokens = frozenset(_latin_tokens(source_unit_text))
     checked_texts = (claim_text, exclusion_scope, *possible_questions)
 
     for text in checked_texts:
         for token in _latin_tokens(text):
-            if token not in evidence_tokens:
+            if token not in source_unit_tokens:
                 return _failure(
                     ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
                     ClaimBuilderOutputValidationFailureReason.LATIN_TEXT_NOT_SUPPORTED_BY_EVIDENCE,

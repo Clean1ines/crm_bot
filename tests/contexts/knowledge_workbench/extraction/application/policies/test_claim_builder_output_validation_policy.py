@@ -257,7 +257,22 @@ def test_latin_in_claim_allowed_when_token_exists_in_evidence_block() -> None:
     assert result.decision is ClaimBuilderOutputValidationDecision.VALID_CLAIMS
 
 
-def test_latin_in_claim_rejected_when_token_absent_in_evidence_block() -> None:
+def test_latin_in_exclusion_scope_allowed_when_token_exists_in_source_unit() -> None:
+    result = _validate(
+        {
+            "claims": [
+                _claim_payload(
+                    exclusion_scope="Onboarding",
+                    evidence_block="Product System turns documents into knowledge.",
+                )
+            ]
+        }
+    )
+
+    assert result.decision is ClaimBuilderOutputValidationDecision.VALID_CLAIMS
+
+
+def test_latin_in_claim_rejected_when_token_absent_in_source_unit() -> None:
     result = _validate(
         {
             "claims": [
@@ -278,7 +293,7 @@ def test_latin_in_claim_rejected_when_token_absent_in_evidence_block() -> None:
     )
 
 
-def test_latin_in_possible_questions_rejected_when_token_absent_in_evidence_block() -> (
+def test_latin_in_possible_questions_rejected_when_token_absent_in_source_unit() -> (
     None
 ):
     result = _validate(
