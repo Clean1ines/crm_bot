@@ -63,7 +63,7 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
         self,
         execution_input: LlmDispatchExecutionInput,
     ) -> LlmDispatchExecutionResult:
-        observed_at = datetime.now(timezone.utc)
+        request_started_at = datetime.now(timezone.utc)
 
         try:
             parsed = _ParsedGroqDispatchPayload.from_execution_input(
@@ -112,7 +112,7 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 attempt_number=execution_input.attempt_number,
                 error=str(exc),
             )
-            return _terminal_invalid_dispatch_payload(finished_at=observed_at)
+            return _terminal_invalid_dispatch_payload(finished_at=request_started_at)
 
         transport = _transport_for_account(
             fallback_transport=self.transport,
@@ -153,6 +153,7 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             response_header_keys=sorted(transport_response.headers.keys()),
             response_body_char_count=len(transport_response.body),
         )
+        observed_at = datetime.now(timezone.utc)
         mapped = self.response_mapper.map_response(
             response=GroqProviderHttpResponse(
                 status_code=transport_response.status_code,

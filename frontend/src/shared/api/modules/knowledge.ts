@@ -881,6 +881,19 @@ export const knowledgeApi = {
       method: 'POST',
     }),
 
+  confirmDegradedFallback: (projectId: string, workflowRunId: string) =>
+    authedJsonRequest<{
+      workflow_run_id: string;
+      status: string;
+      degraded_model_ref: string;
+      appended_command_id: string;
+    }>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/confirm-degraded-fallback`,
+      {
+        method: 'POST',
+      },
+    ),
+
   publishReady: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/${documentId}/publish-ready`, {
       method: 'POST',

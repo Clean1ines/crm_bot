@@ -247,6 +247,7 @@ const liveActionLabel = (action: WorkbenchWorkflowActionLiveState): string => {
     open_curation: 'Открыть проверку',
     publish_ready: 'Опубликовать',
     open_published_surfaces: 'Опубликованное',
+    confirm_degraded_fallback: 'Продолжить на упрощённой модели',
     delete_document: 'Удалить',
   };
   return labels[action.action_id] || action.action_id;
@@ -278,6 +279,10 @@ const liveActionClassName = (action: WorkbenchWorkflowActionLiveState): string =
 
   if (action.action_id === 'open_curation' || action.action_id === 'publish_ready') {
     return `${base} bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20`;
+  }
+
+  if (action.action_id === 'confirm_degraded_fallback') {
+    return `${base} bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300`;
   }
 
   return `${base} bg-[var(--control-bg)] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)]`;

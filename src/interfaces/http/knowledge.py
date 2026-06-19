@@ -78,6 +78,13 @@ from src.interfaces.composition.knowledge_extraction_workflow_pause_resume impor
     make_pause_knowledge_extraction_workflow,
     make_resume_knowledge_extraction_workflow_transition,
 )
+from src.interfaces.composition.knowledge_extraction_degraded_fallback_confirmation import (
+    make_knowledge_extraction_degraded_fallback_confirmation,
+)
+from src.contexts.knowledge_workbench.application.sagas.confirm_draft_claim_compaction_degraded_fallback import (
+    ConfirmDraftClaimCompactionDegradedFallbackCommand,
+    DraftClaimCompactionDegradedFallbackNotPendingError,
+)
 from src.interfaces.composition.knowledge_extraction_workflow_resume import (
     KnowledgeExtractionWorkflowResumeNotFoundError,
     RunKnowledgeExtractionWorkflowResumeCommand,
@@ -2833,4 +2840,47 @@ async def resume_knowledge_extraction_workflow(
         "drained_dispatched_count": drain_result.drained_dispatched_count,
         "blocked_command_type": drain_result.blocked_command_type,
         "blocked_reason": drain_result.blocked_reason,
+    }
+
+
+@router.post("/workflows/{workflow_run_id}/confirm-degraded-fallback")
+async def confirm_knowledge_extraction_degraded_fallback(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.interfaces.http.dependencies import get_current_user_id
+
+    actor_user_id = await get_current_user_id(authorization)
+    runner = make_knowledge_extraction_degraded_fallback_confirmation(pool=pool)
+    try:
+        result = await runner.execute(
+            ConfirmDraftClaimCompactionDegradedFallbackCommand(
+                workflow_run_id=workflow_run_id,
+                project_id=project_id,
+                actor_user_id=actor_user_id,
+                occurred_at=datetime.now(timezone.utc),
+            )
+        )
+    except DraftClaimCompactionDegradedFallbackNotPendingError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="Daily-capacity degraded fallback confirmation is not pending",
+        ) from exc
+
+    return {
+        "workflow_run_id": result.workflow_run_id,
+        "status": "degraded_fallback_confirmed",
+        "degraded_model_ref": result.degraded_model_ref,
+        "appended_command_id": result.appended_command_id.value,
     }

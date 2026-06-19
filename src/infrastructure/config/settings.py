@@ -357,6 +357,34 @@ class Settings(BaseSettings):
         le=120,
         description="Minutes after which processing jobs are considered stale and recoverable",
     )
+    KNOWLEDGE_WORKFLOW_RUNTIME_ENABLED: bool = Field(
+        True,
+        description="Run the durable knowledge workflow pump independently of HTTP polling",
+    )
+    KNOWLEDGE_WORKFLOW_RUNTIME_POLL_SECONDS: float = Field(
+        1.0,
+        gt=0.0,
+        le=30.0,
+        description="Polling interval for due durable knowledge workflow commands",
+    )
+    KNOWLEDGE_WORKFLOW_RUNTIME_BATCH_SIZE: int = Field(
+        8,
+        ge=1,
+        le=100,
+        description="Maximum workflow runs inspected by one runtime pump iteration",
+    )
+    KNOWLEDGE_WORKFLOW_RUNTIME_MAX_DRAIN_COMMANDS: int = Field(
+        25,
+        ge=1,
+        le=500,
+        description="Maximum durable commands drained for one workflow per pump iteration",
+    )
+    KNOWLEDGE_WORKFLOW_RUNTIME_STALE_LEASE_BATCH_SIZE: int = Field(
+        100,
+        ge=1,
+        le=1000,
+        description="Maximum expired Execution Runtime leases reclaimed per pump iteration",
+    )
 
     @field_validator("ADMIN_CHAT_ID")
     def validate_chat_id(cls, v: str) -> str:

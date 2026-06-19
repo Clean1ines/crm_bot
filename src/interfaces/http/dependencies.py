@@ -13,7 +13,6 @@ This module provides centralized dependency injection functions for:
 All dependencies use the global pool from lifespan management.
 """
 
-import os
 from typing import TYPE_CHECKING, Protocol, cast, Callable, Awaitable
 import jwt
 
@@ -29,21 +28,6 @@ from src.application.ports.project_port import (
 from src.application.ports.manager_bot_port import ManagerBotOrchestratorPort
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutorPort,
-)
-from src.contexts.llm_runtime.infrastructure.config.llm_runtime_provider_composition import (
-    LlmRuntimeProviderCompositionFactory,
-)
-from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
-    LlmRuntimeSettings,
-)
-from src.contexts.llm_runtime.infrastructure.providers.groq.groq_dispatch_executor import (
-    GroqDispatchExecutor,
-)
-from src.contexts.llm_runtime.infrastructure.providers.groq.groq_http_transport import (
-    GroqHttpTransport,
-)
-from src.contexts.llm_runtime.infrastructure.providers.groq.groq_httpx_client import (
-    GroqHttpxClient,
 )
 from src.interfaces.composition.project_repositories import (
     build_project_member_repository,
@@ -149,35 +133,17 @@ _LLM_DISPATCH_EXECUTOR_NOT_CONFIGURED_DETAIL = "LLM dispatch executor is not con
 def get_llm_dispatch_executor() -> LlmDispatchExecutorPort:
     """Return the composed LLM dispatch executor for claim-builder drains."""
     try:
-        runtime_settings = LlmRuntimeSettings.from_env_mapping(os.environ)
-        provider_components = LlmRuntimeProviderCompositionFactory(
-            settings=runtime_settings,
-        ).build()
+        from src.interfaces.composition.llm_dispatch_executor import (
+            make_llm_dispatch_executor,
+        )
+
+        return make_llm_dispatch_executor()
     except ValueError as exc:
         logger.warning(_LLM_DISPATCH_EXECUTOR_NOT_CONFIGURED_DETAIL)
         raise HTTPException(
             status_code=503,
             detail=_LLM_DISPATCH_EXECUTOR_NOT_CONFIGURED_DETAIL,
         ) from exc
-
-    groq_components = provider_components.groq
-    groq_env_config = runtime_settings.to_groq_env_config()
-    http_client = GroqHttpxClient()
-    transports_by_account_ref = {
-        account.account_seed.account_ref: GroqHttpTransport(
-            http_client=http_client,
-            api_key=account.api_key,
-            base_url=runtime_settings.groq_base_url,
-            timeout_seconds=runtime_settings.groq_timeout_seconds,
-        )
-        for account in groq_env_config.accounts
-    }
-    primary_account_ref = groq_env_config.accounts[0].account_seed.account_ref
-    return GroqDispatchExecutor(
-        transport=transports_by_account_ref[primary_account_ref],
-        transports_by_account_ref=transports_by_account_ref,
-        model_profiles=groq_components.model_profiles,
-    )
 
 
 def get_project_repo(pool: object = Depends(get_pool)):

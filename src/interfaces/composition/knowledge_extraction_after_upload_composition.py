@@ -45,6 +45,10 @@ from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import 
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
     build_groq_free_plan_model_profiles,
 )
+from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
+    PostgresLlmRouteCapacityReservationRepository,
+    actual_tokens_from_capacity_observation,
+)
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttempt,
@@ -79,7 +83,7 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
                 outcome_repository = PostgresWorkItemAttemptOutcomeRepository(
                     asyncpg_connection,
                 )
-                return await ExecutePreparedLlmDispatchAttempt(
+                result = await ExecutePreparedLlmDispatchAttempt(
                     dispatch_repository=PostgresReadWorkItemAttemptDispatchRepository(
                         asyncpg_connection,
                     ),
@@ -89,6 +93,20 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
                     ),
                     recorded_outcome_reader=outcome_repository,
                 ).execute(command)
+                actual_tokens = actual_tokens_from_capacity_observation(
+                    result.llm_result.capacity_observation
+                )
+                await PostgresLlmRouteCapacityReservationRepository(
+                    asyncpg_connection
+                ).finalize(
+                    attempt_id=result.dispatch.attempt_id,
+                    final_status="committed"
+                    if actual_tokens is not None
+                    else "released",
+                    actual_tokens=actual_tokens,
+                    finalized_at=result.llm_result.finished_at,
+                )
+                return result
         finally:
             await self.pool.release(connection)
 

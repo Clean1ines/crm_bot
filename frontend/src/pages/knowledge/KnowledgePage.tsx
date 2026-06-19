@@ -1269,6 +1269,27 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
+  const confirmDegradedFallbackMutation = useMutation({
+    mutationFn: async (workflowRunId: string) => {
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
+      await knowledgeApi.confirmDegradedFallback(projectId, workflowRunId);
+    },
+    onSuccess: async () => {
+      toast.success("Обработка продолжена на подтверждённой fallback-модели");
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-workflow-live-state", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+    },
+    onError: (err: unknown) => {
+      toast.error(
+        getErrorMessage(err, "Не удалось подтвердить fallback-модель"),
+      );
+    },
+  });
+
   const publishReadyMutation = useMutation({
     mutationFn: async (documentId: string) => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
@@ -1863,6 +1884,17 @@ export const KnowledgePage: React.FC = () => {
                     }
                     if (actionId === "resume_processing") {
                       resumeProcessingMutation.mutate(doc.id);
+                      return;
+                    }
+                    if (actionId === "confirm_degraded_fallback") {
+                      const workflowRunId =
+                        workflowLiveStates[doc.id]?.workflow.workflow_run_id ??
+                        null;
+                      if (workflowRunId) {
+                        confirmDegradedFallbackMutation.mutate(workflowRunId);
+                        return;
+                      }
+                      toast.error("Не удалось определить workflow для продолжения");
                       return;
                     }
                     if (actionId === "publish_ready") {

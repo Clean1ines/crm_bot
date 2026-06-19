@@ -63,6 +63,9 @@ class FakeTransaction:
             "work_items": copy.deepcopy(self.connection.work_items),
             "attempts": copy.deepcopy(self.connection.attempts),
             "dispatches": copy.deepcopy(self.connection.dispatches),
+            "capacity_reservations": copy.deepcopy(
+                self.connection.capacity_reservations
+            ),
         }
         self.connection.transactions.append(self)
         return self
@@ -84,6 +87,9 @@ class FakeTransaction:
         self.connection.work_items = copy.deepcopy(self._snapshot["work_items"])
         self.connection.attempts = copy.deepcopy(self._snapshot["attempts"])
         self.connection.dispatches = copy.deepcopy(self._snapshot["dispatches"])
+        self.connection.capacity_reservations = copy.deepcopy(
+            self._snapshot["capacity_reservations"]
+        )
         return None
 
 
@@ -96,11 +102,46 @@ class FakeConnection:
     transactions: list[FakeTransaction] = field(default_factory=list)
     fail_dispatch_insert: bool = False
     capacity_observations: list[dict[str, object]] = field(default_factory=list)
+    capacity_reservations: list[dict[str, object]] = field(default_factory=list)
 
     def transaction(self) -> FakeTransaction:
         return FakeTransaction(connection=self)
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        if "FROM llm_route_capacity_reservations" in query:
+            provider = str(args[0])
+            account_refs = tuple(str(item) for item in args[1])
+            model_ref = str(args[2])
+            now = _as_datetime(args[3])
+            totals: dict[str, dict[str, object]] = {}
+            for reservation in self.capacity_reservations:
+                if reservation["provider"] != provider:
+                    continue
+                if reservation["account_ref"] not in account_refs:
+                    continue
+                if reservation["model_ref"] != model_ref:
+                    continue
+                if reservation["status"] != "active":
+                    continue
+                if _as_datetime(reservation["expires_at"]) <= now:
+                    continue
+                account_ref = str(reservation["account_ref"])
+                total = totals.setdefault(
+                    account_ref,
+                    {
+                        "provider": provider,
+                        "account_ref": account_ref,
+                        "model_ref": model_ref,
+                        "reserved_requests": 0,
+                        "reserved_tokens": 0,
+                    },
+                )
+                total["reserved_requests"] = int(total["reserved_requests"]) + 1
+                total["reserved_tokens"] = int(total["reserved_tokens"]) + int(
+                    reservation["reserved_tokens"]
+                )
+            return list(totals.values())
+
         if "llm_attempt_capacity_observations" in query:
             provider = str(args[0])
             model_ref = str(args[1])
@@ -199,6 +240,25 @@ class FakeConnection:
         return candidates[0] if candidates else None
 
     async def execute(self, query: str, *args: object) -> str:
+        if "pg_advisory_xact_lock" in query:
+            return "SELECT 1"
+
+        if "INSERT INTO llm_route_capacity_reservations" in query:
+            self.capacity_reservations.append(
+                {
+                    "attempt_id": args[0],
+                    "provider": args[1],
+                    "account_ref": args[2],
+                    "model_ref": args[3],
+                    "reserved_requests": args[4],
+                    "reserved_tokens": args[5],
+                    "status": "active",
+                    "expires_at": args[6],
+                    "created_at": args[7],
+                }
+            )
+            return "INSERT 0 1"
+
         if "UPDATE execution_work_items" in query:
             work_item_id = str(args[0])
             row = self.work_items[work_item_id]
@@ -1511,3 +1571,40 @@ async def test_prepare_does_not_rearm_next_batch_without_started_attempts() -> N
 
     assert result.attempt_result.started_attempts == ()
     assert result.capacity_retry_at is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_subtracts_active_route_reservations_before_admission() -> None:
+    connection = _connection_with_due_items(2)
+    connection.capacity_reservations.append(
+        {
+            "attempt_id": "other-work:attempt:1",
+            "provider": "groq",
+            "account_ref": "qwen_1",
+            "model_ref": "qwen/qwen3-32b",
+            "reserved_requests": 1,
+            "reserved_tokens": 3500,
+            "status": "active",
+            "expires_at": _now() + timedelta(seconds=60),
+            "created_at": _now() - timedelta(seconds=1),
+        }
+    )
+    pool = FakePool(connection=connection)
+
+    result = await _runner(pool).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="qwen_1",
+                    minute_requests=2,
+                    minute_tokens=7000,
+                    daily_requests=10,
+                    daily_tokens=7000,
+                ),
+            ),
+            requested_items=2,
+        ),
+    )
+
+    assert len(result.attempt_result.started_attempts) == 1
+    assert len(connection.capacity_reservations) == 2

@@ -78,6 +78,11 @@ from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity impo
 from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
 )
+from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
+    LlmRouteCapacityReservation,
+    LlmRouteCapacityReservationTotal,
+    PostgresLlmRouteCapacityReservationRepository,
+)
 from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
     build_groq_free_plan_model_profiles,
@@ -90,6 +95,7 @@ from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
     StartLlmAdmittedWorkItemAttempts,
     StartLlmAdmittedWorkItemAttemptsCommand,
     StartLlmAdmittedWorkItemAttemptsResult,
+    StartedLlmAdmittedAttempt,
 )
 
 
@@ -289,6 +295,9 @@ class PrepareLlmDispatchBatch:
                 capacity_observation_repository = (
                     PostgresLlmAttemptCapacityObservationRepository(asyncpg_connection)
                 )
+                capacity_reservation_repository = (
+                    PostgresLlmRouteCapacityReservationRepository(asyncpg_connection)
+                )
 
                 due_records = await lease_repository.peek_due_work_items(
                     work_kind=command.work_kind,
@@ -373,6 +382,17 @@ class PrepareLlmDispatchBatch:
                 provider_account_refs = _resolved_provider_account_refs(
                     self.provider_account_refs,
                 )
+                reservation_account_refs = _reservation_account_refs(
+                    provider_account_refs=provider_account_refs,
+                    configured_capacities=command.account_capacities,
+                    active_model_ref=resolved_active_model_ref,
+                )
+                for account_ref in reservation_account_refs:
+                    await capacity_reservation_repository.lock_route(
+                        provider="groq",
+                        account_ref=account_ref,
+                        model_ref=resolved_active_model_ref,
+                    )
                 account_capacities = await _preparation_account_capacities(
                     command=command,
                     due_records=admission_due_records,
@@ -384,6 +404,18 @@ class PrepareLlmDispatchBatch:
                     profile=preparation_profile,
                     now=command.now,
                     use_local_active_model_tpm_budget=use_local_active_model_tpm_budget,
+                )
+                reservation_totals = (
+                    await capacity_reservation_repository.active_totals(
+                        provider="groq",
+                        account_refs=reservation_account_refs,
+                        model_ref=resolved_active_model_ref,
+                        now=command.now,
+                    )
+                )
+                account_capacities = _subtract_active_reservations(
+                    account_capacities=account_capacities,
+                    reservation_totals=reservation_totals,
                 )
                 LOGGER.info(
                     "knowledge_llm_prepare_account_capacities",
@@ -469,6 +501,14 @@ class PrepareLlmDispatchBatch:
                         started_at=command.started_at,
                     ),
                 )
+                for started_attempt in attempt_result.started_attempts:
+                    await capacity_reservation_repository.reserve(
+                        _capacity_reservation_from_started_attempt(
+                            attempt=started_attempt,
+                            expires_at=command.lease_expires_at,
+                            created_at=command.started_at,
+                        )
+                    )
 
                 LOGGER.info(
                     "knowledge_llm_prepare_attempts_started",
@@ -878,6 +918,106 @@ def _admitted_schedule_payload(
 def _require_int_value(value: object, *, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{field_name} must be int")
+    return value
+
+
+def _reservation_account_refs(
+    *,
+    provider_account_refs: tuple[str, ...],
+    configured_capacities: tuple[LlmProviderAccountCapacity, ...],
+    active_model_ref: str,
+) -> tuple[str, ...]:
+    refs = {
+        capacity.account_ref
+        for capacity in configured_capacities
+        if capacity.provider == "groq" and capacity.model_ref == active_model_ref
+    }
+    refs.update(provider_account_refs)
+    return tuple(sorted(refs))
+
+
+def _subtract_active_reservations(
+    *,
+    account_capacities: tuple[LlmProviderAccountCapacity, ...],
+    reservation_totals: tuple[LlmRouteCapacityReservationTotal, ...],
+) -> tuple[LlmProviderAccountCapacity, ...]:
+    totals_by_route = {
+        (total.provider, total.account_ref, total.model_ref): total
+        for total in reservation_totals
+    }
+    adjusted: list[LlmProviderAccountCapacity] = []
+    for capacity in account_capacities:
+        total = totals_by_route.get(
+            (capacity.provider, capacity.account_ref, capacity.model_ref)
+        )
+        if total is None:
+            adjusted.append(capacity)
+            continue
+        adjusted.append(
+            LlmProviderAccountCapacity(
+                provider=capacity.provider,
+                account_ref=capacity.account_ref,
+                model_ref=capacity.model_ref,
+                remaining_minute_requests=max(
+                    capacity.remaining_minute_requests - total.reserved_requests,
+                    0,
+                ),
+                remaining_minute_tokens=max(
+                    capacity.remaining_minute_tokens - total.reserved_tokens,
+                    0,
+                ),
+                remaining_daily_requests=max(
+                    capacity.remaining_daily_requests - total.reserved_requests,
+                    0,
+                ),
+                remaining_daily_tokens=max(
+                    capacity.remaining_daily_tokens - total.reserved_tokens,
+                    0,
+                ),
+            )
+        )
+    return tuple(adjusted)
+
+
+def _capacity_reservation_from_started_attempt(
+    *,
+    attempt: StartedLlmAdmittedAttempt,
+    expires_at: datetime,
+    created_at: datetime,
+) -> LlmRouteCapacityReservation:
+    allocation = attempt.dispatch_payload.get("llm_allocation")
+    schedule_payload = attempt.dispatch_payload.get("schedule_payload")
+    if not isinstance(allocation, Mapping):
+        raise TypeError("dispatch llm_allocation must be Mapping")
+    if not isinstance(schedule_payload, Mapping):
+        raise TypeError("dispatch schedule_payload must be Mapping")
+    estimate = schedule_payload.get("llm_capacity_estimate")
+    if not isinstance(estimate, Mapping):
+        raise TypeError("dispatch llm_capacity_estimate must be Mapping")
+
+    return LlmRouteCapacityReservation(
+        attempt_id=attempt.attempt_id,
+        provider=_mapping_text(allocation, "provider"),
+        account_ref=_mapping_text(allocation, "account_ref"),
+        model_ref=_mapping_text(allocation, "model_ref"),
+        reserved_requests=1,
+        reserved_tokens=_mapping_positive_int(estimate, "estimated_total_tokens"),
+        expires_at=expires_at,
+        created_at=created_at,
+    )
+
+
+def _mapping_text(payload: Mapping[str, object], key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text")
+    return value
+
+
+def _mapping_positive_int(payload: Mapping[str, object], key: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{key} must be positive int")
     return value
 
 

@@ -254,7 +254,6 @@ def _valid_claim_builder_output_text() -> str:
                     "granularity": "atomic",
                     "possible_questions": ["Body?"],
                     "exclusion_scope": "Body",
-                    "evidence_block": "Body",
                 }
             ]
         }

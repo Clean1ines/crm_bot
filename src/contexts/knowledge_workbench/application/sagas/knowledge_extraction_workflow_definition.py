@@ -78,6 +78,9 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE = (
         "DraftClaimCompactionWaitingUserModelChoice"
     )
+    DRAFT_CLAIM_COMPACTION_USER_MODEL_CHOICE_RESOLVED = (
+        "DraftClaimCompactionUserModelChoiceResolved"
+    )
     DRAFT_CLAIM_COMPACTION_CLUSTER_DONE = "DraftClaimCompactionClusterDone"
     DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED = (
         "DraftClaimCompactionProgressReconciled"

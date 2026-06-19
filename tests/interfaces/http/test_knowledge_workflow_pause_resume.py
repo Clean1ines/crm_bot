@@ -15,6 +15,14 @@ from src.contexts.knowledge_workbench.application.sagas.resume_knowledge_extract
     ResumeKnowledgeExtractionWorkflowCommand,
     ResumeKnowledgeExtractionWorkflowResult,
 )
+from src.contexts.knowledge_workbench.application.sagas.confirm_draft_claim_compaction_degraded_fallback import (
+    ConfirmDraftClaimCompactionDegradedFallbackCommand,
+    ConfirmDraftClaimCompactionDegradedFallbackResult,
+    DraftClaimCompactionDegradedFallbackNotPendingError,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+    WorkflowCommandId,
+)
 from src.interfaces.composition.knowledge_extraction_workflow_resume import (
     RunKnowledgeExtractionWorkflowResumeCommand,
     RunKnowledgeExtractionWorkflowResumeResult,
@@ -132,6 +140,27 @@ class FakeResumeDrainRunner:
 @dataclass(slots=True)
 class FakeLlmExecutor:
     pass
+
+
+@dataclass(slots=True)
+class FakeDegradedFallbackRunner:
+    commands: list[ConfirmDraftClaimCompactionDegradedFallbackCommand] = field(
+        default_factory=list
+    )
+    error: Exception | None = None
+
+    async def execute(
+        self,
+        command: ConfirmDraftClaimCompactionDegradedFallbackCommand,
+    ) -> ConfirmDraftClaimCompactionDegradedFallbackResult:
+        self.commands.append(command)
+        if self.error is not None:
+            raise self.error
+        return ConfirmDraftClaimCompactionDegradedFallbackResult(
+            workflow_run_id=command.workflow_run_id,
+            degraded_model_ref="llama-3.3-70b-versatile",
+            appended_command_id=WorkflowCommandId("workflow-command:degraded"),
+        )
 
 
 async def _fake_current_user_id(authorization: str | None) -> str:
@@ -262,7 +291,6 @@ async def test_resume_endpoint_unpauses_then_drains_existing_workflow(
     assert response["source_document_ref"] == "source-document:project-1:abc"
     assert response["drained_inspected_count"] == 2
     assert response["drained_dispatched_count"] == 1
-
     assert len(transition_runner.commands) == 1
     transition_command = transition_runner.commands[0]
     assert transition_command.workflow_run_id == "workflow-1"
@@ -275,6 +303,65 @@ async def test_resume_endpoint_unpauses_then_drains_existing_workflow(
     assert drain_command.project_id == "project-1"
     assert drain_command.document_id == "workflow-1"
     assert drain_command.max_drain_commands == 7
+
+
+@pytest.mark.asyncio
+async def test_confirm_degraded_fallback_endpoint_appends_resume_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(dependencies, "get_current_user_id", _fake_current_user_id)
+    runner = FakeDegradedFallbackRunner()
+
+    def fake_factory(*, pool: object) -> FakeDegradedFallbackRunner:
+        assert pool == "pool"
+        return runner
+
+    monkeypatch.setattr(
+        knowledge,
+        "make_knowledge_extraction_degraded_fallback_confirmation",
+        fake_factory,
+    )
+
+    response = await knowledge.confirm_knowledge_extraction_degraded_fallback(
+        project_id="project-1",
+        workflow_run_id="workflow-1",
+        authorization="Bearer test",
+        pool="pool",
+        project_repo=FakeProjectRepository(),
+        user_repo=FakeUserRepository(),
+    )
+
+    assert response["status"] == "degraded_fallback_confirmed"
+    assert response["degraded_model_ref"] == "llama-3.3-70b-versatile"
+    assert runner.commands[0].project_id == "project-1"
+    assert runner.commands[0].actor_user_id == "owner-1"
+
+
+@pytest.mark.asyncio
+async def test_confirm_degraded_fallback_endpoint_maps_missing_choice_to_409(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(dependencies, "get_current_user_id", _fake_current_user_id)
+    runner = FakeDegradedFallbackRunner(
+        error=DraftClaimCompactionDegradedFallbackNotPendingError("not pending")
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "make_knowledge_extraction_degraded_fallback_confirmation",
+        lambda *, pool: runner,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.confirm_knowledge_extraction_degraded_fallback(
+            project_id="project-1",
+            workflow_run_id="workflow-1",
+            authorization="Bearer test",
+            pool="pool",
+            project_repo=FakeProjectRepository(),
+            user_repo=FakeUserRepository(),
+        )
+
+    assert exc_info.value.status_code == 409
 
 
 @pytest.mark.asyncio

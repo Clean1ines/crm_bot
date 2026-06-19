@@ -11,7 +11,8 @@ This module wires the concrete application:
 Infrastructure modules must stay generic and must not import src.agent.
 """
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 import asyncpg
 from fastapi import FastAPI
@@ -52,6 +53,8 @@ logger = get_logger(__name__)
 
 pool: asyncpg.Pool | None = None
 orchestrator: ConversationOrchestrator | None = None
+knowledge_workflow_runtime_task: asyncio.Task[None] | None = None
+knowledge_workflow_runtime_shutdown: asyncio.Event | None = None
 
 
 def register_builtin_tools(db_pool: asyncpg.Pool) -> None:
@@ -160,6 +163,7 @@ async def lifespan(app: FastAPI):
     FastAPI startup/shutdown composition boundary.
     """
     global pool, orchestrator
+    global knowledge_workflow_runtime_task, knowledge_workflow_runtime_shutdown
 
     logger.info("Application startup initiated")
 
@@ -168,6 +172,33 @@ async def lifespan(app: FastAPI):
 
     register_builtin_tools(pool)
     orchestrator = build_orchestrator(pool)
+    if settings.KNOWLEDGE_WORKFLOW_RUNTIME_ENABLED:
+        from src.interfaces.composition.knowledge_extraction_workflow_runtime_service import (
+            run_knowledge_extraction_workflow_runtime_loop,
+        )
+        from src.interfaces.composition.llm_dispatch_executor import (
+            make_llm_dispatch_executor,
+        )
+
+        knowledge_workflow_runtime_shutdown = asyncio.Event()
+        knowledge_workflow_runtime_task = asyncio.create_task(
+            run_knowledge_extraction_workflow_runtime_loop(
+                pool=pool,
+                llm_executor=make_llm_dispatch_executor(),
+                shutdown_event=knowledge_workflow_runtime_shutdown,
+                poll_interval_seconds=(
+                    settings.KNOWLEDGE_WORKFLOW_RUNTIME_POLL_SECONDS
+                ),
+                workflow_batch_size=settings.KNOWLEDGE_WORKFLOW_RUNTIME_BATCH_SIZE,
+                max_drain_commands=(
+                    settings.KNOWLEDGE_WORKFLOW_RUNTIME_MAX_DRAIN_COMMANDS
+                ),
+                stale_lease_batch_size=(
+                    settings.KNOWLEDGE_WORKFLOW_RUNTIME_STALE_LEASE_BATCH_SIZE
+                ),
+            ),
+            name="knowledge-extraction-workflow-runtime",
+        )
 
     logger.info("Application startup complete")
 
@@ -175,7 +206,15 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         logger.info("Application shutdown initiated")
+        if knowledge_workflow_runtime_shutdown is not None:
+            knowledge_workflow_runtime_shutdown.set()
+        if knowledge_workflow_runtime_task is not None:
+            knowledge_workflow_runtime_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await knowledge_workflow_runtime_task
         await shutdown_db(pool, logger=logger)
         pool = None
         orchestrator = None
+        knowledge_workflow_runtime_task = None
+        knowledge_workflow_runtime_shutdown = None
         logger.info("Application shutdown complete")

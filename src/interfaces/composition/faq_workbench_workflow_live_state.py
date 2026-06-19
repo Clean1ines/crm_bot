@@ -75,6 +75,11 @@ class WorkbenchWorkflowLiveStateQuery:
             preview_ready=_int(counts, "preview_count") > 0,
             compacted_done=_int(counts, "active_compacted_nodes") > 0,
         )
+        degraded_fallback_confirmation_pending = (
+            await self._degraded_fallback_confirmation_pending(
+                workflow_run_id=workflow_run_id
+            )
+        )
 
         timer = _timer(document_row, timer_events=timer_events)
         usage = WorkbenchWorkflowUsageLiveView(
@@ -106,7 +111,13 @@ class WorkbenchWorkflowLiveStateQuery:
             llm_attempts=attempts,
             timeline=timeline,
             curation=curation,
-            actions=_actions(workflow_status=workflow_status, curation=curation),
+            actions=_actions(
+                workflow_status=workflow_status,
+                curation=curation,
+                degraded_fallback_confirmation_pending=(
+                    degraded_fallback_confirmation_pending
+                ),
+            ),
         )
         return WorkbenchDocumentWorkflowLiveState(
             document_id=_str(document_row, "document_id"),
@@ -116,6 +127,38 @@ class WorkbenchWorkflowLiveStateQuery:
             current_processing_run_id=processing_run_id,
             workflow=workflow,
         )
+
+    async def _degraded_fallback_confirmation_pending(
+        self,
+        *,
+        workflow_run_id: str | None,
+    ) -> bool:
+        if workflow_run_id is None:
+            return False
+        value = await self._connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM workflow_runtime_outbox_events AS waiting
+                WHERE waiting.workflow_run_id = $1
+                  AND waiting.event_type =
+                      'DraftClaimCompactionWaitingUserModelChoice'
+                  AND waiting.payload->>'reason' =
+                      'primary_model_daily_capacity_exhausted'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM workflow_runtime_outbox_events AS resolved
+                      WHERE resolved.workflow_run_id = waiting.workflow_run_id
+                        AND resolved.event_type =
+                            'DraftClaimCompactionUserModelChoiceResolved'
+                        AND resolved.causation_command_id =
+                            waiting.causation_command_id
+                  )
+            )
+            """,
+            workflow_run_id,
+        )
+        return value is True
 
     async def _document_row(
         self,
@@ -767,6 +810,7 @@ def _actions(
     *,
     workflow_status: str | None,
     curation: WorkbenchCurationAvailabilityView,
+    degraded_fallback_confirmation_pending: bool,
 ) -> tuple[WorkbenchWorkflowActionView, ...]:
     status = (workflow_status or "").upper()
     paused = status == "PAUSED"
@@ -795,6 +839,14 @@ def _actions(
             visible=True,
             enabled=not terminal,
             reason_code=None if not terminal else "terminal_workflow",
+        ),
+        WorkbenchWorkflowActionView(
+            action_id="confirm_degraded_fallback",
+            visible=degraded_fallback_confirmation_pending,
+            enabled=degraded_fallback_confirmation_pending and not terminal,
+            reason_code=None
+            if degraded_fallback_confirmation_pending and not terminal
+            else "fallback_confirmation_not_pending",
         ),
     )
 
