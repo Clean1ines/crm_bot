@@ -648,27 +648,26 @@ def _admission_lane_due_records(
     dispatch_preparation_strategy: str | None = None,
     retry_plan: WorkItemRetryPlan | None = None,
 ) -> tuple[DueWorkItemRecord, ...]:
-    if retry_plan is not None:
-        retry_lane = tuple(
-            record
-            for record in due_records
-            if record.work_item.status is WorkItemStatus.RETRYABLE_FAILED
-        )
-        if retry_lane:
-            return retry_lane
-        return due_records
+    if retry_plan is not None or dispatch_preparation_strategy is not None:
+        return _retry_first_due_records(due_records)
 
-    if dispatch_preparation_strategy is None:
-        return due_records
+    return due_records
 
-    retry_lane = tuple(
+
+def _retry_first_due_records(
+    due_records: tuple[DueWorkItemRecord, ...],
+) -> tuple[DueWorkItemRecord, ...]:
+    retry_records = tuple(
         record
         for record in due_records
         if record.work_item.status is WorkItemStatus.RETRYABLE_FAILED
     )
-    if retry_lane:
-        return retry_lane
-    return due_records
+    non_retry_records = tuple(
+        record
+        for record in due_records
+        if record.work_item.status is not WorkItemStatus.RETRYABLE_FAILED
+    )
+    return retry_records + non_retry_records
 
 
 async def _lease_input_admitted_work_items(

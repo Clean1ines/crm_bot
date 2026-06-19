@@ -526,7 +526,7 @@ async def test_retry_too_large_for_one_window_does_not_block_fresh_item_on_same_
 
 
 @pytest.mark.asyncio
-async def test_retry_lane_admits_retry_only_even_when_fresh_also_fits() -> None:
+async def test_retry_strategy_prioritizes_retry_and_fills_with_fresh_work() -> None:
     connection = FakeConnection()
 
     retry_row = _work_item_row("work-retry", ordinal=1)
@@ -555,6 +555,14 @@ async def test_retry_lane_admits_retry_only_even_when_fresh_also_fits() -> None:
             dispatch_preparation_strategy="SAME_MODEL",
             account_capacities=(
                 _account(
+                    account_ref="org-1",
+                    minute_requests=2,
+                    minute_tokens=4000,
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+                _account(
+                    account_ref="org-2",
                     minute_requests=2,
                     minute_tokens=4000,
                     daily_requests=100,
@@ -565,13 +573,13 @@ async def test_retry_lane_admits_retry_only_even_when_fresh_also_fits() -> None:
         ),
     )
 
-    assert len(result.lease_result.leased) == 1
-    assert len(result.attempt_result.started_attempts) == 1
+    assert len(result.lease_result.leased) == 2
+    assert len(result.attempt_result.started_attempts) == 2
     assert connection.work_items["work-retry"]["status"] == "leased"
-    assert connection.work_items["work-fresh"]["status"] == WorkItemStatus.READY.value
+    assert connection.work_items["work-fresh"]["status"] == "leased"
     assert {
         str(dispatch["work_item_id"]) for dispatch in connection.dispatches.values()
-    } == {"work-retry"}
+    } == {"work-retry", "work-fresh"}
 
 
 @pytest.mark.asyncio
