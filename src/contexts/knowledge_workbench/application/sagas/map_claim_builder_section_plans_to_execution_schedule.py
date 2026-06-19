@@ -129,20 +129,10 @@ def _claim_builder_token_estimate(
     estimated_input_tokens = (
         CLAIM_BUILDER_MEASURED_PROMPT_TOKENS + source_unit_token_count
     )
-    available_output_tokens = max(
-        0,
-        CLAIM_BUILDER_MODEL_TPM_TOKENS
-        - estimated_input_tokens
-        - CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS,
-    )
-    reserved_output_tokens = min(
-        4096,
-        estimated_input_tokens,
-        available_output_tokens,
-    )
+    reserved_output_tokens = source_unit_token_count
 
     return {
-        "estimator": "measured_prompt_1953_source_char_div_3_3_tpm_capped_output",
+        "estimator": "measured_prompt_1953_source_char_div_3_3_conservative_section_output",
         "prompt_message_tokens": (CLAIM_BUILDER_MEASURED_PROMPT_TOKENS,),
         "source_unit_token_count": source_unit_token_count,
         "estimated_input_tokens": estimated_input_tokens,

@@ -116,7 +116,7 @@ def _build_dispatch_record(
         attempt_number=work_item.attempt_count,
         lease_token=work_item.lease_token.value,
         worker_ref=work_item.leased_by.value,
-        schedule_payload=item.leased.schedule_payload,
+        schedule_payload=item.admitted_schedule_payload(),
         llm_allocation_payload=llm_allocation_payload,
         dispatch_payload=dispatch_payload,
         started_at=started_at,

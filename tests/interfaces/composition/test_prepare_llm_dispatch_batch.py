@@ -1392,16 +1392,16 @@ async def test_prepare_allocates_retry_then_fresh_per_window() -> None:
         ),
     )
 
-    assert len(result.attempt_result.started_attempts) == 4
+    assert len(result.attempt_result.started_attempts) == 3
     assert {
         str(dispatch["work_item_id"]): dispatch["llm_allocation_payload"]["account_ref"]
         for dispatch in connection.dispatches.values()
     } == {
         "work-retry-small": "org-1",
         "work-retry-large": "org-2",
-        "work-fresh-small": "org-3",
-        "work-fresh-large": "org-4",
+        "work-fresh-small": "org-4",
     }
+    assert connection.work_items["work-fresh-large"]["status"] == WorkItemStatus.READY.value
 
 
 @pytest.mark.asyncio

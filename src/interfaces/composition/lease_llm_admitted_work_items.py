@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -42,6 +43,7 @@ class LlmAdmittedLeasedWorkItem:
     leased: LeasedWorkItemRecord
     allocation: LlmCapacityAllocationSlot
     execution_settings: LlmModelExecutionSettings
+    schedule_payload_override: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.leased, LeasedWorkItemRecord):
@@ -50,11 +52,21 @@ class LlmAdmittedLeasedWorkItem:
             raise TypeError("allocation must be LlmCapacityAllocationSlot")
         if not isinstance(self.execution_settings, LlmModelExecutionSettings):
             raise TypeError("execution_settings must be LlmModelExecutionSettings")
+        if self.schedule_payload_override is not None and not isinstance(
+            self.schedule_payload_override,
+            Mapping,
+        ):
+            raise TypeError("schedule_payload_override must be Mapping when provided")
+
+    def admitted_schedule_payload(self) -> dict[str, object]:
+        if self.schedule_payload_override is None:
+            return dict(self.leased.schedule_payload)
+        return dict(self.schedule_payload_override)
 
     def to_dispatch_payload(self) -> dict[str, object]:
         return {
             "work_item_id": self.leased.work_item.work_item_id,
-            "schedule_payload": dict(self.leased.schedule_payload),
+            "schedule_payload": self.admitted_schedule_payload(),
             "llm_allocation": self.allocation.to_payload(),
             "llm_execution_settings": self.execution_settings.to_provider_options(),
         }

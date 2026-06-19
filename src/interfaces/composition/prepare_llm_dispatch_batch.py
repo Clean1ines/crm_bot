@@ -517,6 +517,7 @@ class _InputAdmittedCandidate:
     account_ref: str
     model_ref: str
     estimated_input_tokens: int
+    reserved_output_tokens: int
 
 
 @dataclass(slots=True)
@@ -563,21 +564,46 @@ class _MutableInputCapacity:
             remaining_daily_tokens=capacity.remaining_daily_tokens,
         )
 
-    def can_admit(self, *, estimated_input_tokens: int) -> bool:
+    def admitted_output_tokens(self, *, estimated_input_tokens: int) -> int:
+        return max(0, self.remaining_minute_tokens - estimated_input_tokens)
+
+    def can_admit(
+        self,
+        *,
+        estimated_input_tokens: int,
+        minimum_output_tokens: int,
+    ) -> bool:
+        admitted_output_tokens = self.admitted_output_tokens(
+            estimated_input_tokens=estimated_input_tokens,
+        )
+        reserved_total_tokens = estimated_input_tokens + admitted_output_tokens
+        minimum_total_tokens = estimated_input_tokens + minimum_output_tokens
         return (
             self.remaining_minute_requests > 0
             and self.remaining_daily_requests > 0
-            and self.remaining_minute_tokens >= estimated_input_tokens
-            and self.remaining_daily_tokens >= estimated_input_tokens
+            and admitted_output_tokens >= minimum_output_tokens
+            and self.remaining_minute_tokens >= minimum_total_tokens
+            and self.remaining_daily_tokens >= minimum_total_tokens
+            and self.remaining_daily_tokens >= reserved_total_tokens
         )
 
-    def consume(self, *, estimated_input_tokens: int) -> None:
-        if not self.can_admit(estimated_input_tokens=estimated_input_tokens):
+    def consume(
+        self,
+        *,
+        estimated_input_tokens: int,
+        reserved_output_tokens: int,
+    ) -> None:
+        minimum_output_tokens = reserved_output_tokens
+        if not self.can_admit(
+            estimated_input_tokens=estimated_input_tokens,
+            minimum_output_tokens=minimum_output_tokens,
+        ):
             raise ValueError("input capacity cannot admit work item")
+        reserved_total_tokens = estimated_input_tokens + reserved_output_tokens
         self.remaining_minute_requests -= 1
         self.remaining_daily_requests -= 1
-        self.remaining_minute_tokens -= estimated_input_tokens
-        self.remaining_daily_tokens -= estimated_input_tokens
+        self.remaining_minute_tokens -= reserved_total_tokens
+        self.remaining_daily_tokens -= reserved_total_tokens
 
 
 def _dispatch_preparation_strategy_from_retry_plan(
@@ -702,6 +728,10 @@ async def _lease_input_admitted_work_items(
                 leased=leased_record,
                 allocation=allocation,
                 execution_settings=execution_settings,
+                schedule_payload_override=_admitted_schedule_payload(
+                    schedule_payload=leased_record.schedule_payload,
+                    reserved_output_tokens=candidate.reserved_output_tokens,
+                ),
             ),
         )
 
@@ -771,10 +801,20 @@ def _pop_first_record_that_fits(
 ) -> _InputAdmittedCandidate | None:
     for index, record in enumerate(records):
         estimated_input_tokens = _estimated_input_tokens_from_due_record(record)
-        if not account.can_admit(estimated_input_tokens=estimated_input_tokens):
+        minimum_output_tokens = _reserved_output_tokens_from_due_record(record)
+        if not account.can_admit(
+            estimated_input_tokens=estimated_input_tokens,
+            minimum_output_tokens=minimum_output_tokens,
+        ):
             continue
 
-        account.consume(estimated_input_tokens=estimated_input_tokens)
+        admitted_output_tokens = account.admitted_output_tokens(
+            estimated_input_tokens=estimated_input_tokens,
+        )
+        account.consume(
+            estimated_input_tokens=estimated_input_tokens,
+            reserved_output_tokens=admitted_output_tokens,
+        )
         records.pop(index)
         return _InputAdmittedCandidate(
             record=record,
@@ -782,6 +822,7 @@ def _pop_first_record_that_fits(
             account_ref=account.account_ref,
             model_ref=account.model_ref,
             estimated_input_tokens=estimated_input_tokens,
+            reserved_output_tokens=admitted_output_tokens,
         )
     return None
 
@@ -796,6 +837,48 @@ def _estimated_input_tokens_from_due_record(record: DueWorkItemRecord) -> int:
         raise TypeError("llm_capacity_estimate.estimated_input_tokens must be int")
     if value <= 0:
         raise ValueError("llm_capacity_estimate.estimated_input_tokens must be > 0")
+    return value
+
+
+def _reserved_output_tokens_from_due_record(record: DueWorkItemRecord) -> int:
+    estimate_payload = record.schedule_payload.get("llm_capacity_estimate")
+    if not isinstance(estimate_payload, Mapping):
+        raise ValueError("schedule_payload.llm_capacity_estimate is required")
+
+    value = estimate_payload.get("reserved_output_tokens")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError("llm_capacity_estimate.reserved_output_tokens must be int")
+    if value < 0:
+        raise ValueError("llm_capacity_estimate.reserved_output_tokens must be >= 0")
+    return value
+
+
+def _admitted_schedule_payload(
+    *,
+    schedule_payload: Mapping[str, object],
+    reserved_output_tokens: int,
+) -> dict[str, object]:
+    estimate_payload = schedule_payload.get("llm_capacity_estimate")
+    if not isinstance(estimate_payload, Mapping):
+        raise ValueError("schedule_payload.llm_capacity_estimate is required")
+    updated_estimate = dict(estimate_payload)
+    updated_estimate["reserved_output_tokens"] = reserved_output_tokens
+    updated_estimate["estimated_total_tokens"] = (
+        _require_int_value(
+            updated_estimate.get("estimated_input_tokens"),
+            field_name="llm_capacity_estimate.estimated_input_tokens",
+        )
+        + reserved_output_tokens
+    )
+
+    updated_payload = dict(schedule_payload)
+    updated_payload["llm_capacity_estimate"] = updated_estimate
+    return updated_payload
+
+
+def _require_int_value(value: object, *, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")
     return value
 
 
@@ -1174,7 +1257,7 @@ async def _local_active_model_capacity_retry_at(
         and capacity.remaining_daily_tokens > 0
         and (
             capacity.remaining_minute_requests == 0
-            or capacity.remaining_minute_tokens < profile.estimated_prompt_tokens
+            or capacity.remaining_minute_tokens < profile.estimated_total_tokens
         )
     )
     if not blocked_accounts:
@@ -1345,6 +1428,13 @@ def _minute_window_exhausted(observation: LlmAttemptCapacityObservation) -> bool
 
 
 def _actual_token_usage(observation: LlmAttemptCapacityObservation) -> int | None:
+    if observation.actual_total_tokens is not None:
+        return observation.actual_total_tokens
+    if (
+        observation.actual_prompt_tokens is not None
+        and observation.actual_completion_tokens is not None
+    ):
+        return observation.actual_prompt_tokens + observation.actual_completion_tokens
     return observation.actual_prompt_tokens
 
 

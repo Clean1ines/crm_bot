@@ -76,6 +76,11 @@ def _dispatch_payload(
                     "content": "Extract claims",
                 },
             ],
+            "llm_capacity_estimate": {
+                "estimated_input_tokens": 1000,
+                "reserved_output_tokens": 1000,
+                "estimated_total_tokens": 2000,
+            },
         },
         "llm_allocation": {
             "provider": "groq",

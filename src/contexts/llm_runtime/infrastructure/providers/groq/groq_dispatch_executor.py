@@ -350,16 +350,6 @@ def _resolve_max_completion_tokens(
     model_profile: ModelProfile,
 ) -> int | None:
     requested_output_tokens = parsed.reserved_output_tokens
-    tpm_limit = model_profile.rate_limits.tokens_per_minute
-    if tpm_limit is not None:
-        input_safety_gap_tokens = 100
-        local_output_budget = (
-            tpm_limit - parsed.estimated_input_tokens - input_safety_gap_tokens
-        )
-        if local_output_budget <= 0:
-            return None
-        requested_output_tokens = min(requested_output_tokens, local_output_budget)
-
     requested_output_tokens = min(
         requested_output_tokens,
         model_profile.max_output_tokens,

@@ -145,7 +145,7 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> N
         .schedule_plans[0]
     )
 
-    assert tuple(schedule.payload) == (
+    assert set(schedule.payload) == {
         "workflow_run_id",
         "source_document_ref",
         "source_unit_ref",
@@ -153,7 +153,8 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> N
         "phase",
         "provider_messages",
         "claim_builder_provenance",
-    )
+        "llm_capacity_estimate",
+    }
     assert "work_item_attempt_id" not in schedule.payload
     assert "llm_task_id" not in schedule.payload
     assert "llm_attempt_id" not in schedule.payload
@@ -170,6 +171,20 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> N
         "prompt_id": "faq_claim_observations",
         "prompt_version": "v1",
     }
+
+    capacity_estimate = schedule.payload["llm_capacity_estimate"]
+    assert isinstance(capacity_estimate, dict)
+    assert capacity_estimate["prompt_message_tokens"] == (1953,)
+    assert capacity_estimate["estimated_input_tokens"] == (
+        1953 + capacity_estimate["source_unit_token_count"]
+    )
+    assert capacity_estimate["reserved_output_tokens"] == capacity_estimate[
+        "source_unit_token_count"
+    ]
+    assert capacity_estimate["estimated_total_tokens"] == (
+        1953 + capacity_estimate["source_unit_token_count"] * 2
+    )
+
 
 
 def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() -> None:
