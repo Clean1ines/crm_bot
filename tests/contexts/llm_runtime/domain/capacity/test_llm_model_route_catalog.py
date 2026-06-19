@@ -109,7 +109,7 @@ def test_catalog_returns_capacity_limits_by_model_ref() -> None:
 
     limits = catalog.capacity_limits_for_model_ref("openai/gpt-oss-120b")
 
-    assert limits.input_token_limit == 8_000
+    assert limits.input_token_limit == 131_072
     assert limits.output_token_limit == 65_536
 
 

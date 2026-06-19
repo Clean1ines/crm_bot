@@ -73,3 +73,19 @@ def test_estimated_prompt_exceeds_all_routes_requires_source_split() -> None:
     assert result.reason == (
         "estimated prompt tokens exceed all automatic fallback input limits"
     )
+
+
+def test_automatic_fallback_can_be_disabled_for_phase_specific_routing() -> None:
+    result = ResolveLlmDispatchInputSizePreflight().execute(
+        ResolveLlmDispatchInputSizePreflightCommand(
+            active_model_ref="qwen/qwen3-32b",
+            profile=_profile(7000),
+            route_catalog=default_groq_llm_model_route_catalog(),
+            allow_automatic_fallbacks=False,
+        )
+    )
+
+    assert (
+        result.decision is LlmDispatchInputSizePreflightDecision.SOURCE_SPLIT_REQUIRED
+    )
+    assert result.active_model_ref == "qwen/qwen3-32b"

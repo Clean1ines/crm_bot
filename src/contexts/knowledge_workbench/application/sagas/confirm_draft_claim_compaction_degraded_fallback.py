@@ -36,13 +36,37 @@ class DraftClaimCompactionDegradedFallbackNotPendingError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class DraftClaimCompactionDegradedFallbackDecision:
     source_command_id: WorkflowCommandId
-    source_command_payload: JsonObject
     degraded_model_ref: str
+    source_command_payload: JsonObject | None = None
+    group_ref: str | None = None
+    node_refs: tuple[str, ...] = ()
+    resume_work_type: str | None = None
+    estimated_prompt_tokens: int | None = None
+    estimated_completion_tokens: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.source_command_id, WorkflowCommandId):
             raise TypeError("source_command_id must be WorkflowCommandId")
         _require_non_empty_text(self.degraded_model_ref, "degraded_model_ref")
+        if self.source_command_payload is None:
+            _require_non_empty_text(self.group_ref or "", "group_ref")
+            _require_non_empty_text(self.resume_work_type or "", "resume_work_type")
+            if not self.node_refs:
+                raise ValueError("node_refs must be non-empty for graph fallback")
+            if (
+                self.estimated_prompt_tokens is None
+                or self.estimated_prompt_tokens <= 0
+            ):
+                raise ValueError("estimated_prompt_tokens must be positive")
+            if (
+                self.estimated_completion_tokens is None
+                or self.estimated_completion_tokens < 0
+            ):
+                raise ValueError("estimated_completion_tokens must be non-negative")
+
+    @property
+    def requires_graph_work_item(self) -> bool:
+        return self.source_command_payload is None
 
 
 class DraftClaimCompactionDegradedFallbackDecisionRepositoryPort(Protocol):
@@ -52,6 +76,16 @@ class DraftClaimCompactionDegradedFallbackDecisionRepositoryPort(Protocol):
         workflow_run_id: str,
         project_id: str,
     ) -> DraftClaimCompactionDegradedFallbackDecision | None: ...
+
+
+class DraftClaimCompactionDegradedFallbackSchedulerPort(Protocol):
+    async def schedule_degraded_work(
+        self,
+        *,
+        workflow_run_id: str,
+        decision: DraftClaimCompactionDegradedFallbackDecision,
+        created_at: datetime,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +114,9 @@ class ConfirmDraftClaimCompactionDegradedFallbackResult:
 class ConfirmDraftClaimCompactionDegradedFallback:
     decision_repository: DraftClaimCompactionDegradedFallbackDecisionRepositoryPort
     workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort
+    degraded_fallback_scheduler: (
+        DraftClaimCompactionDegradedFallbackSchedulerPort | None
+    ) = None
 
     async def execute(
         self,
@@ -92,6 +129,15 @@ class ConfirmDraftClaimCompactionDegradedFallback:
         if decision is None:
             raise DraftClaimCompactionDegradedFallbackNotPendingError(
                 "daily-capacity degraded fallback confirmation is not pending"
+            )
+
+        if decision.requires_graph_work_item:
+            if self.degraded_fallback_scheduler is None:
+                raise RuntimeError("graph degraded fallback scheduler is required")
+            await self.degraded_fallback_scheduler.schedule_degraded_work(
+                workflow_run_id=command.workflow_run_id,
+                decision=decision,
+                created_at=command.occurred_at,
             )
 
         next_command = _degraded_prepare_command(
@@ -120,7 +166,11 @@ def _degraded_prepare_command(
     command: ConfirmDraftClaimCompactionDegradedFallbackCommand,
     decision: DraftClaimCompactionDegradedFallbackDecision,
 ) -> WorkflowCommand:
-    payload = deepcopy(decision.source_command_payload)
+    payload = (
+        deepcopy(decision.source_command_payload)
+        if decision.source_command_payload is not None
+        else _graph_prepare_payload(command=command, decision=decision)
+    )
     payload["active_model_ref"] = decision.degraded_model_ref
     payload["user_confirmed_degraded_fallback"] = True
     payload["confirmed_by_user_id"] = command.actor_user_id
@@ -149,6 +199,37 @@ def _degraded_prepare_command(
         created_at=command.occurred_at,
         updated_at=command.occurred_at,
     )
+
+
+def _graph_prepare_payload(
+    *,
+    command: ConfirmDraftClaimCompactionDegradedFallbackCommand,
+    decision: DraftClaimCompactionDegradedFallbackDecision,
+) -> JsonObject:
+    if decision.estimated_prompt_tokens is None:
+        raise ValueError("estimated_prompt_tokens is required")
+    if decision.estimated_completion_tokens is None:
+        raise ValueError("estimated_completion_tokens is required")
+    return {
+        "workflow_run_id": command.workflow_run_id,
+        "work_kind": "knowledge_workbench.draft_claim_compaction",
+        "scheduled_work_item_count": 1,
+        "active_model_ref": decision.degraded_model_ref,
+        "worker_ref": "knowledge-workbench-draft-claim-compaction-dispatch",
+        "llm_dispatch_preparation": {
+            "profile": {
+                "profile_id": (
+                    f"draft_claim_compaction:user_choice:{decision.source_command_id.value}"
+                ),
+                "estimated_prompt_tokens": decision.estimated_prompt_tokens,
+                "estimated_completion_tokens": decision.estimated_completion_tokens,
+                "estimated_requests": 1,
+            },
+            "active_model_ref": decision.degraded_model_ref,
+            "requested_items": 1,
+            "worker_ref": "knowledge-workbench-draft-claim-compaction-dispatch",
+        },
+    }
 
 
 def _resolved_event(

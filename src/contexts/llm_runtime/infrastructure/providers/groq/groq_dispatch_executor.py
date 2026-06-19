@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-import os
 from typing import cast
 
 import structlog
@@ -45,7 +44,6 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_transport_port 
 LOGGER = structlog.get_logger(__name__)
 
 
-GROQ_MAX_COMPLETION_TOKEN_GAP_ENV = "GROQ_MAX_COMPLETION_TOKEN_GAP"
 DEFAULT_GROQ_MAX_COMPLETION_TOKEN_GAP = 300
 
 
@@ -56,8 +54,13 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
     transports_by_account_ref: Mapping[str, GroqTransportPort] = field(
         default_factory=dict,
     )
+    max_completion_token_gap: int = DEFAULT_GROQ_MAX_COMPLETION_TOKEN_GAP
     request_builder: GroqChatRequestBuilder = GroqChatRequestBuilder()
     response_mapper: GroqProviderResponseMapper = GroqProviderResponseMapper()
+
+    def __post_init__(self) -> None:
+        if self.max_completion_token_gap < 0:
+            raise ValueError("max_completion_token_gap must be >= 0")
 
     async def execute_dispatch(
         self,
@@ -73,6 +76,7 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             max_completion_tokens = _resolve_max_completion_tokens(
                 parsed=parsed,
                 model_profile=model_profile,
+                completion_gap_tokens=self.max_completion_token_gap,
             )
             request = self.request_builder.build(
                 route=parsed.route,
@@ -354,8 +358,8 @@ def _resolve_max_completion_tokens(
     *,
     parsed: _ParsedGroqDispatchPayload,
     model_profile: ModelProfile,
+    completion_gap_tokens: int,
 ) -> int | None:
-    completion_gap_tokens = _groq_max_completion_token_gap_from_env()
     requested_output_tokens = parsed.reserved_output_tokens - completion_gap_tokens
     requested_output_tokens = min(
         requested_output_tokens,
@@ -364,21 +368,6 @@ def _resolve_max_completion_tokens(
     if requested_output_tokens <= 0:
         return None
     return requested_output_tokens
-
-
-def _groq_max_completion_token_gap_from_env() -> int:
-    raw_value = os.environ.get(GROQ_MAX_COMPLETION_TOKEN_GAP_ENV)
-    if raw_value is None or not raw_value.strip():
-        return DEFAULT_GROQ_MAX_COMPLETION_TOKEN_GAP
-    try:
-        parsed_value = int(raw_value)
-    except ValueError as exc:
-        raise ValueError(
-            f"{GROQ_MAX_COMPLETION_TOKEN_GAP_ENV} must be an integer",
-        ) from exc
-    if parsed_value < 0:
-        raise ValueError(f"{GROQ_MAX_COMPLETION_TOKEN_GAP_ENV} must be >= 0")
-    return parsed_value
 
 
 def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int:

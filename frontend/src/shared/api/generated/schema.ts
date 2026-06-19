@@ -4,34 +4,6 @@
  */
 
 export interface paths {
-    "/api/projects/{project_id}/knowledge": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Knowledge Documents
-         * @description Lists FAQ Workbench documents for a project.
-         */
-        get: operations["list_knowledge_documents_api_projects__project_id__knowledge_get"];
-        put?: never;
-        /**
-         * Upload Knowledge
-         * @description Uploads UTF-8 text into the source ingestion first-phase workflow.
-         */
-        post: operations["upload_knowledge_api_projects__project_id__knowledge_post"];
-        /**
-         * Clear Knowledge
-         * @description Clears all Workbench knowledge for a project.
-         */
-        delete: operations["clear_knowledge_api_projects__project_id__knowledge_delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/webhooks/platform": {
         parameters: {
             query?: never;
@@ -112,6 +84,34 @@ export interface paths {
         /** Manager Webhook */
         post: operations["manager_webhook_manager_webhook_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Knowledge Documents
+         * @description Lists FAQ Workbench documents for a project.
+         */
+        get: operations["list_knowledge_documents_api_projects__project_id__knowledge_get"];
+        put?: never;
+        /**
+         * Upload Knowledge
+         * @description Uploads UTF-8 text into the source ingestion first-phase workflow.
+         */
+        post: operations["upload_knowledge_api_projects__project_id__knowledge_post"];
+        /**
+         * Clear Knowledge
+         * @description Hard-clear all Workbench documents and every related upload/workflow trace.
+         */
+        delete: operations["clear_knowledge_api_projects__project_id__knowledge_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -427,7 +427,7 @@ export interface paths {
         };
         /**
          * Knowledge Processing Progress
-         * @description Returns Workbench processing progress for one document.
+         * @description Returns source-ingestion/Workbench processing progress for one document.
          */
         get: operations["knowledge_processing_progress_api_projects__project_id__knowledge__document_id__progress_get"];
         put?: never;
@@ -481,7 +481,7 @@ export interface paths {
         };
         /**
          * Knowledge Source Units
-         * @description Returns Workbench evidence trace/source units for one document.
+         * @description Returns source-ingestion source units for one document.
          */
         get: operations["knowledge_source_units_api_projects__project_id__knowledge__document_id__source_units_get"];
         put?: never;
@@ -501,7 +501,7 @@ export interface paths {
         };
         /**
          * Knowledge Import Quality Report
-         * @description Returns Workbench import quality report for one document.
+         * @description Returns source-ingestion import quality for one Workbench document.
          */
         get: operations["knowledge_import_quality_report_api_projects__project_id__knowledge__document_id__import_quality_get"];
         put?: never;
@@ -651,6 +651,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/knowledge/source-documents/{source_document_ref}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Knowledge Source Document Processing
+         * @description Pause active Workbench processing for a source document without deleting artifacts.
+         */
+        post: operations["stop_knowledge_source_document_processing_api_projects__project_id__knowledge_source_documents__source_document_ref__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/source-documents/{source_document_ref}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Knowledge Source Document Processing
+         * @description Resume paused Workbench processing for a source document.
+         */
+        post: operations["restore_knowledge_source_document_processing_api_projects__project_id__knowledge_source_documents__source_document_ref__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/source-documents/{source_document_ref}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Knowledge Source Document Processing
+         * @description Resume paused Workbench processing for a source document.
+         */
+        post: operations["restore_knowledge_source_document_processing_api_projects__project_id__knowledge_source_documents__source_document_ref__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/knowledge/{document_id}/resume-processing": {
         parameters: {
             query?: never;
@@ -662,7 +722,7 @@ export interface paths {
         put?: never;
         /**
          * Resume Knowledge Processing
-         * @description Resume the current knowledge-extraction workflow command drain.
+         * @description Compatibility alias for the old document-level resume route.
          */
         post: operations["resume_knowledge_processing_api_projects__project_id__knowledge__document_id__resume_processing_post"];
         delete?: never;
@@ -691,6 +751,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/knowledge/source-documents/{source_document_ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Knowledge Source Document
+         * @description Hard-delete one Workbench source document and every upload/workflow trace.
+         */
+        delete: operations["delete_knowledge_source_document_api_projects__project_id__knowledge_source_documents__source_document_ref__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/knowledge/{document_id}": {
         parameters: {
             query?: never;
@@ -703,7 +783,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Knowledge Document
-         * @description Deletes a Workbench document and invalidates document-scoped processing artifacts.
+         * @description Compatibility alias for the old document-level delete route.
          */
         delete: operations["delete_knowledge_document_api_projects__project_id__knowledge__document_id__delete"];
         options?: never;
@@ -739,6 +819,23 @@ export interface paths {
         put?: never;
         /** Resume Knowledge Extraction Workflow */
         post: operations["resume_knowledge_extraction_workflow_api_projects__project_id__knowledge_workflows__workflow_run_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/confirm-degraded-fallback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Knowledge Extraction Degraded Fallback */
+        post: operations["confirm_knowledge_extraction_degraded_fallback_api_projects__project_id__knowledge_workflows__workflow_run_id__confirm_degraded_fallback_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1693,6 +1790,8 @@ export interface components {
             reasoning_effort?: "none" | null;
             /** Reasoning Format */
             reasoning_format?: ("hidden" | "parsed") | null;
+            /** Max Completion Tokens */
+            max_completion_tokens?: number | null;
         };
         /** AiPlaygroundRunResponse */
         AiPlaygroundRunResponse: {
@@ -2192,112 +2291,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    list_knowledge_documents_api_projects__project_id__knowledge_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    upload_knowledge_api_projects__project_id__knowledge_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "multipart/form-data": components["schemas"]["Body_upload_knowledge_api_projects__project_id__knowledge_post"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    clear_knowledge_api_projects__project_id__knowledge_delete: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     platform_webhook_webhooks_platform_post: {
         parameters: {
             query?: never;
@@ -2427,6 +2420,112 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    list_knowledge_documents_api_projects__project_id__knowledge_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_knowledge_api_projects__project_id__knowledge_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_knowledge_api_projects__project_id__knowledge_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_knowledge_api_projects__project_id__knowledge_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3468,9 +3567,121 @@ export interface operations {
             };
         };
     };
-    resume_knowledge_processing_api_projects__project_id__knowledge__document_id__resume_processing_post: {
+    stop_knowledge_source_document_processing_api_projects__project_id__knowledge_source_documents__source_document_ref__stop_post: {
         parameters: {
             query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                source_document_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_knowledge_source_document_processing_api_projects__project_id__knowledge_source_documents__source_document_ref__resume_post: {
+        parameters: {
+            query?: {
+                max_drain_commands?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                source_document_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_knowledge_source_document_processing_api_projects__project_id__knowledge_source_documents__source_document_ref__restore_post: {
+        parameters: {
+            query?: {
+                max_drain_commands?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                source_document_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_knowledge_processing_api_projects__project_id__knowledge__document_id__resume_processing_post: {
+        parameters: {
+            query?: {
+                max_drain_commands?: number;
+            };
             header?: {
                 authorization?: string | null;
             };
@@ -3511,6 +3722,40 @@ export interface operations {
             path: {
                 project_id: string;
                 document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_knowledge_source_document_api_projects__project_id__knowledge_source_documents__source_document_ref__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                source_document_ref: string;
             };
             cookie?: never;
         };
@@ -3613,6 +3858,40 @@ export interface operations {
             query?: {
                 max_drain_commands?: number;
             };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_knowledge_extraction_degraded_fallback_api_projects__project_id__knowledge_workflows__workflow_run_id__confirm_degraded_fallback_post: {
+        parameters: {
+            query?: never;
             header?: {
                 authorization?: string | null;
             };

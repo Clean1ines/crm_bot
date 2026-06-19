@@ -8,7 +8,6 @@ from src.contexts.knowledge_workbench.application.sagas.confirm_draft_claim_comp
     DraftClaimCompactionDegradedFallbackDecisionRepositoryPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
-    KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
 )
 from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
@@ -45,24 +44,22 @@ class PostgresDraftClaimCompactionDegradedFallbackDecisionRepository(
             SELECT
                 waiting.causation_command_id AS source_command_id,
                 command_log.payload AS source_command_payload,
+                waiting.payload AS waiting_payload,
                 waiting.payload->>'degraded_candidate_model_id'
                     AS degraded_model_ref
             FROM workflow_runtime_outbox_events AS waiting
-            JOIN workflow_runtime_command_log AS command_log
+            LEFT JOIN workflow_runtime_command_log AS command_log
               ON command_log.command_id = waiting.causation_command_id
             JOIN knowledge_extraction_workflow_runs AS workflow_run
               ON workflow_run.workflow_run_id = waiting.workflow_run_id
             WHERE waiting.workflow_run_id = $1
               AND workflow_run.project_id = $2
               AND waiting.event_type = $3
-              AND waiting.payload->>'reason' =
-                  'primary_model_daily_capacity_exhausted'
-              AND command_log.command_type = $4
               AND NOT EXISTS (
                   SELECT 1
                   FROM workflow_runtime_outbox_events AS resolved
                   WHERE resolved.workflow_run_id = waiting.workflow_run_id
-                    AND resolved.event_type = $5
+                    AND resolved.event_type = $4
                     AND resolved.causation_command_id =
                         waiting.causation_command_id
               )
@@ -73,21 +70,67 @@ class PostgresDraftClaimCompactionDegradedFallbackDecisionRepository(
             workflow_run_id,
             project_id,
             KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE.value,
-            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value,
             KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_USER_MODEL_CHOICE_RESOLVED.value,
         )
         if row is None:
             return None
 
-        payload = row.get("source_command_payload")
-        if not isinstance(payload, Mapping):
-            raise TypeError("source_command_payload must be object")
+        source_payload_value = row.get("source_command_payload")
+        source_payload = (
+            cast(JsonObject, dict(source_payload_value))
+            if isinstance(source_payload_value, Mapping)
+            and source_payload_value.get("llm_dispatch_preparation") is not None
+            else None
+        )
+        waiting_payload = row.get("waiting_payload")
+        if not isinstance(waiting_payload, Mapping):
+            waiting_payload = {}
         degraded_model_ref = row.get("degraded_model_ref")
         if not isinstance(degraded_model_ref, str) or not degraded_model_ref.strip():
             raise ValueError("waiting event degraded_candidate_model_id is missing")
 
         return DraftClaimCompactionDegradedFallbackDecision(
             source_command_id=WorkflowCommandId(str(row["source_command_id"])),
-            source_command_payload=cast(JsonObject, dict(payload)),
             degraded_model_ref=degraded_model_ref,
+            source_command_payload=source_payload,
+            group_ref=_optional_text(waiting_payload, "group_ref"),
+            node_refs=_text_tuple(waiting_payload.get("node_refs")),
+            resume_work_type=_optional_text(waiting_payload, "resume_work_type"),
+            estimated_prompt_tokens=_optional_int(
+                waiting_payload,
+                "estimated_prompt_tokens",
+            ),
+            estimated_completion_tokens=_optional_int(
+                waiting_payload,
+                "estimated_completion_tokens",
+            ),
         )
+
+
+def _optional_text(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text")
+    return value
+
+
+def _text_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise TypeError("node_refs must be list")
+    result = tuple(item for item in value if isinstance(item, str) and item.strip())
+    if len(result) != len(value):
+        raise ValueError("node_refs must contain non-empty text")
+    return result
+
+
+def _optional_int(payload: Mapping[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{key} must be int")
+    return value

@@ -241,7 +241,7 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
                 order=3,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=8_000,
+                    input_token_limit=131_072,
                     output_token_limit=65_536,
                 ),
             ),

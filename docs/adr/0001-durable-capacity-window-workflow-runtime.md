@@ -25,13 +25,22 @@ waiting after the user accepted degraded execution.
    transaction lock, subtract active reservations during admission, and finalize
    reservations after execution.
 3. Represent manual degraded fallback as an explicit, idempotent workflow
-   transition. Only unresolved `primary_model_daily_capacity_exhausted` events may
+   transition. Unresolved daily-capacity and compaction-graph capacity events may
    create the degraded prepare command. Project ownership is checked in the same
    transaction, and the decision is recorded in the workflow outbox.
 4. Expose the transition through workflow live-state and the Knowledge UI only
    while that exact confirmation remains pending.
 5. Preserve the existing evidence contract: `evidence_block` stores the
    `SourceRef`/source-unit identifier. It is not converted back to source text.
+6. Treat model context and provider throughput as separate limits. GPT-OSS has a
+   131072-token context window, while the configured free-plan route admits at
+   most 8000 tokens per minute. Compaction therefore estimates
+   `prompt + task input + reserved output` before scheduling each dispatch.
+7. Compaction keeps phase-specific routing: GPT-OSS is the primary model,
+   automatic model fallback is disabled, and an oversized graph edge is either
+   bridged through a fitting raw node or paused for explicit degraded-model
+   confirmation. Scheduled work embeds provider messages for draft, enriched,
+   mixed, and reduced-rewrite prompt contracts.
 
 ## Consequences
 
@@ -39,6 +48,9 @@ waiting after the user accepted degraded execution.
 - Concurrent replicas share an atomic capacity budget.
 - Worker crashes can no longer leave leases permanently stranded.
 - User-confirmed degraded execution has an auditable backend and frontend path.
+- GPT-OSS context capacity is no longer confused with its free-plan TPM quota.
+- Compaction graph continuations are executable without reconstructing prompts in
+  the worker.
 - Deployment must apply migration `115_create_llm_route_capacity_reservations.sql`.
 - The current workflow command runner still contains some transactions spanning
   provider I/O; separating execution from persistence remains follow-up work.

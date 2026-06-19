@@ -61,6 +61,24 @@ class FakeWorkflowUnitOfWork:
     outbox: FakeOutbox = field(default_factory=FakeOutbox)
 
 
+@dataclass(slots=True)
+class FakeDegradedFallbackScheduler:
+    calls: list[DraftClaimCompactionDegradedFallbackDecision] = field(
+        default_factory=list
+    )
+
+    async def schedule_degraded_work(
+        self,
+        *,
+        workflow_run_id: str,
+        decision: DraftClaimCompactionDegradedFallbackDecision,
+        created_at: datetime,
+    ) -> None:
+        assert workflow_run_id == "workflow-1"
+        assert created_at == _now()
+        self.calls.append(decision)
+
+
 def _now() -> datetime:
     return datetime(2026, 6, 19, 10, 0, tzinfo=timezone.utc)
 
@@ -127,3 +145,37 @@ async def test_confirmation_rejects_when_capacity_choice_is_not_pending() -> Non
                 occurred_at=_now(),
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_graph_confirmation_schedules_degraded_work_before_prepare() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    scheduler = FakeDegradedFallbackScheduler()
+    decision = DraftClaimCompactionDegradedFallbackDecision(
+        source_command_id=WorkflowCommandId("workflow-command:apply"),
+        degraded_model_ref="llama-3.3-70b-versatile",
+        group_ref="group-1",
+        node_refs=("compacted-a", "compacted-b"),
+        resume_work_type="compacted_vs_compacted",
+        estimated_prompt_tokens=5250,
+        estimated_completion_tokens=3200,
+    )
+
+    result = await ConfirmDraftClaimCompactionDegradedFallback(
+        decision_repository=FakeDecisionRepository(decision),
+        workflow_unit_of_work=workflow_uow,
+        degraded_fallback_scheduler=scheduler,
+    ).execute(
+        ConfirmDraftClaimCompactionDegradedFallbackCommand(
+            workflow_run_id="workflow-1",
+            project_id="project-1",
+            actor_user_id="user-1",
+            occurred_at=_now(),
+        )
+    )
+
+    assert scheduler.calls == [decision]
+    assert result.degraded_model_ref == "llama-3.3-70b-versatile"
+    assert (
+        workflow_uow.command_log.commands[0].payload["scheduled_work_item_count"] == 1
+    )

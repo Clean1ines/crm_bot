@@ -109,7 +109,7 @@ def test_next_work_item_carries_prompt_estimate_from_node_refs() -> None:
         _state(
             nodes=(
                 _compacted("A", estimated_input_tokens=1200),
-                _compacted("B", estimated_input_tokens=3400),
+                _compacted("B", estimated_input_tokens=1400),
                 _raw("X", estimated_input_tokens=999),
             ),
         )
@@ -120,8 +120,26 @@ def test_next_work_item_carries_prompt_estimate_from_node_refs() -> None:
         is DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
     )
     assert decision.node_refs == ("A", "B")
-    assert decision.next_work_item.estimated_prompt_tokens == 6650
-    assert decision.next_work_item.estimated_completion_tokens == 4600
+    assert decision.next_work_item.estimated_prompt_tokens == 4750
+    assert decision.next_work_item.estimated_completion_tokens == 2600
+
+
+def test_compacted_pair_uses_enriched_prompt_for_tpm_boundary() -> None:
+    decision = _plan(
+        _state(
+            nodes=(
+                _compacted("A", estimated_input_tokens=1475),
+                _compacted("B", estimated_input_tokens=1475),
+            ),
+        )
+    )
+
+    assert decision.work_type is (
+        DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
+    )
+    assert decision.node_refs == ("A", "B")
+    assert decision.next_work_item.estimated_prompt_tokens == 5100
+    assert decision.next_work_item.estimated_completion_tokens == 2950
 
 
 def test_known_different_compacted_pair_blocks_raw_bridge_to_other_side() -> None:
@@ -172,6 +190,40 @@ def test_too_large_compacted_pair_uses_pending_raw_as_bridge() -> None:
 
     assert decision.work_type is DraftClaimCompactionNextWorkItemType.MIXED
     assert decision.node_refs == ("A", "X")
+
+
+def test_estimated_tpm_overflow_uses_pending_raw_as_bridge_before_dispatch() -> None:
+    decision = _plan(
+        _state(
+            nodes=(
+                _compacted("A", estimated_input_tokens=1600),
+                _compacted("B", estimated_input_tokens=1600),
+                _raw("X", estimated_input_tokens=100),
+            ),
+        )
+    )
+
+    assert decision.work_type is DraftClaimCompactionNextWorkItemType.MIXED
+    assert decision.node_refs == ("A", "X")
+
+
+def test_estimated_tpm_overflow_without_bridge_waits_for_user_choice() -> None:
+    decision = _plan(
+        _state(
+            nodes=(
+                _compacted("A", estimated_input_tokens=1600),
+                _compacted("B", estimated_input_tokens=1600),
+            ),
+        )
+    )
+
+    assert decision.work_type is (
+        DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
+    )
+    assert decision.node_refs == ("A", "B")
+    assert decision.next_work_item.user_choice_resume_work_type is (
+        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
+    )
 
 
 def test_bridge_when_both_sides_merge_plans_reduced_rewrite() -> None:
@@ -283,7 +335,10 @@ def test_user_choice_boundary_when_reduced_payload_is_too_large() -> None:
     assert decision.work_type is (
         DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
     )
-    assert decision.node_refs == ()
+    assert decision.node_refs == ("A", "B")
+    assert decision.next_work_item.user_choice_resume_work_type is (
+        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
+    )
     assert (
         decision.next_work_item.degraded_model_id
         == DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID

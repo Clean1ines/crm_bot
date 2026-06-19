@@ -532,6 +532,31 @@ async def _handle_back_to_project_callback(
     return await _show_project_menu(chat_id, project_id, pool)
 
 
+def _project_id_from_callback(callback_data: str) -> str | None:
+    if callback_data.startswith("knowledge_mode:"):
+        parts = callback_data.split(":", 2)
+        return parts[1] if len(parts) == 3 else None
+
+    for prefix, _handler in PREFIX_CALLBACK_HANDLERS:
+        if callback_data.startswith(prefix):
+            return _callback_project_id(callback_data)
+    return None
+
+
+async def _telegram_user_can_access_project(
+    *,
+    chat_id: str,
+    project_id: str,
+    pool,
+) -> bool:
+    projects = (
+        await _build_platform_bot_service(pool).list_projects_for_telegram_user(
+            int(chat_id)
+        )
+    ).projects
+    return any(str(project.id) == project_id for project in projects)
+
+
 PREFIX_CALLBACK_HANDLERS = (
     ("project:", _handle_project_callback),
     ("create_client_bot:", _handle_create_client_bot_callback),
@@ -552,6 +577,13 @@ async def handle_admin_callback(
 ) -> AdminResponse:
     logger.info("Callback", extra={"data": callback_data, "chat_id": chat_id})
 
+    if callback_data == "help_token":
+        return (
+            "Создайте нового бота через @BotFather командой /newbot, "
+            "скопируйте выданный токен и отправьте его сюда следующим сообщением.",
+            make_back_keyboard(),
+        )
+
     if callback_data == "newproject":
         return await _handle_new_project_callback(chat_id, pool)
 
@@ -560,6 +592,25 @@ async def handle_admin_callback(
 
     if callback_data == "back_to_main":
         return await _handle_back_to_main_callback(chat_id, pool)
+
+    project_id = _project_id_from_callback(callback_data)
+    if project_id is not None and not await _telegram_user_can_access_project(
+        chat_id=chat_id,
+        project_id=project_id,
+        pool=pool,
+    ):
+        logger.warning(
+            "Denied cross-project admin bot callback",
+            extra={
+                "chat_id": chat_id,
+                "project_id": project_id,
+                "callback_prefix": callback_data.split(":", 1)[0],
+            },
+        )
+        return (
+            "Недостаточно прав для доступа к этому проекту.",
+            make_main_menu_keyboard(),
+        )
 
     for prefix, handler in PREFIX_CALLBACK_HANDLERS:
         if callback_data.startswith(prefix):

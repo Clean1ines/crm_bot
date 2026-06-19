@@ -18,6 +18,7 @@ def test_settings_from_env_mapping_reads_legacy_groq_key_names_without_legacy_se
             "GROQ_API_KEY4": "quaternary",
             "LLM_RUNTIME_GROQ_BASE_URL": "https://example.test/openai/v1",
             "LLM_RUNTIME_GROQ_TIMEOUT_SECONDS": "12.5",
+            "GROQ_MAX_COMPLETION_TOKEN_GAP": "250",
         },
     )
 
@@ -27,6 +28,7 @@ def test_settings_from_env_mapping_reads_legacy_groq_key_names_without_legacy_se
     assert settings.groq_api_key4 == "quaternary"
     assert settings.groq_base_url == "https://example.test/openai/v1"
     assert settings.groq_timeout_seconds == 12.5
+    assert settings.groq_max_completion_token_gap == 250
 
 
 def test_settings_defaults_base_url_and_timeout() -> None:
@@ -38,6 +40,7 @@ def test_settings_defaults_base_url_and_timeout() -> None:
 
     assert settings.groq_base_url == "https://api.groq.com/openai/v1"
     assert settings.groq_timeout_seconds == 60.0
+    assert settings.groq_max_completion_token_gap == 300
 
 
 def test_settings_to_groq_env_config_maps_keys_to_capacity_slots() -> None:
@@ -88,5 +91,12 @@ def test_settings_validates_base_url_and_timeout() -> None:
         LlmRuntimeSettings.from_env_mapping(
             {
                 "LLM_RUNTIME_GROQ_TIMEOUT_SECONDS": "-1",
+            },
+        )
+
+    with pytest.raises(ValueError):
+        LlmRuntimeSettings.from_env_mapping(
+            {
+                "GROQ_MAX_COMPLETION_TOKEN_GAP": "-1",
             },
         )

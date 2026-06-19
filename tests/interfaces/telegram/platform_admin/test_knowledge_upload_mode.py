@@ -25,10 +25,26 @@ async def test_knowledge_callback_asks_for_preprocessing_mode(
     async def fake_clear_admin_state(chat_id: str) -> None:
         assert chat_id == "123"
 
+    async def fake_project_access(
+        *,
+        chat_id: str,
+        project_id: str,
+        pool,
+    ) -> bool:
+        assert chat_id == "123"
+        assert project_id == "project-1"
+        assert pool is None
+        return True
+
     monkeypatch.setattr(
         handlers,
         "clear_admin_state",
         fake_clear_admin_state,
+    )
+    monkeypatch.setattr(
+        handlers,
+        "_telegram_user_can_access_project",
+        fake_project_access,
     )
 
     text, reply_markup = await handlers.handle_admin_callback(

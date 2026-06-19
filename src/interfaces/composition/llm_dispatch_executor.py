@@ -5,7 +5,7 @@ import os
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutorPort,
 )
-from src.contexts.llm_runtime.infrastructure.composition.llm_runtime_provider_composition import (
+from src.contexts.llm_runtime.infrastructure.config.llm_runtime_provider_composition import (
     LlmRuntimeProviderCompositionFactory,
 )
 from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
@@ -44,4 +44,5 @@ def make_llm_dispatch_executor() -> LlmDispatchExecutorPort:
         transport=transports_by_account_ref[primary_account_ref],
         transports_by_account_ref=transports_by_account_ref,
         model_profiles=groq_components.model_profiles,
+        max_completion_token_gap=runtime_settings.groq_max_completion_token_gap,
     )

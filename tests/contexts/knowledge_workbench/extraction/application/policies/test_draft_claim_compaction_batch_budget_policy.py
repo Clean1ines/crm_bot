@@ -55,6 +55,22 @@ def test_small_group_creates_one_draft_vs_draft_batch() -> None:
     assert plan.groups[0].requires_split is False
 
 
+def test_default_batches_fit_one_gpt_oss_free_plan_capacity_window() -> None:
+    claims = (
+        _claim("claim-a", "a" * 5600),
+        _claim("claim-b", "b" * 5600),
+    )
+
+    plan = DraftClaimCompactionBatchBudgetPolicy().build_batches(
+        claims,
+        (_group(("claim-a", "claim-b")),),
+    )
+
+    assert len(plan.batches) == 2
+    for batch in plan.batches:
+        assert 2050 + batch.estimated_input_tokens * 2 <= 8000
+
+
 def test_oversized_group_creates_multiple_deterministic_batches() -> None:
     claims = (
         _claim("claim-a", "a" * 1000),

@@ -20,8 +20,9 @@ class DraftClaimCompactionBudgetPlan:
 class DraftClaimCompactionBatchBudgetPolicy:
     prompt_variant: str = "draft_vs_draft"
     model_id: str = "openai/gpt-oss-120b"
-    max_input_tokens: int = 90000
-    prompt_reserve_tokens: int = 8000
+    max_input_tokens: int = 8000
+    prompt_reserve_tokens: int = 2050
+    input_safety_multiplier: int = 2
 
     def build_batches(
         self,
@@ -29,7 +30,9 @@ class DraftClaimCompactionBatchBudgetPolicy:
         groups: tuple[DraftClaimCompactionGroupCandidate, ...],
     ) -> DraftClaimCompactionBudgetPlan:
         by_ref = {claim.observation_ref: claim for claim in claims}
-        usable = self.max_input_tokens - self.prompt_reserve_tokens
+        usable = (
+            self.max_input_tokens - self.prompt_reserve_tokens
+        ) // self.input_safety_multiplier
         planned_groups: list[DraftClaimCompactionGroupCandidate] = []
         batches: list[DraftClaimCompactionBatchCandidate] = []
         for group in groups:

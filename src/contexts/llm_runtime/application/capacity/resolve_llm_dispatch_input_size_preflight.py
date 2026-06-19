@@ -22,6 +22,7 @@ class ResolveLlmDispatchInputSizePreflightCommand:
     active_model_ref: str
     profile: LlmTaskCapacityProfile
     route_catalog: LlmModelRouteCatalog
+    allow_automatic_fallbacks: bool = True
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.active_model_ref, field_name="active_model_ref")
@@ -29,6 +30,8 @@ class ResolveLlmDispatchInputSizePreflightCommand:
             raise TypeError("profile must be LlmTaskCapacityProfile")
         if not isinstance(self.route_catalog, LlmModelRouteCatalog):
             raise TypeError("route_catalog must be LlmModelRouteCatalog")
+        if not isinstance(self.allow_automatic_fallbacks, bool):
+            raise TypeError("allow_automatic_fallbacks must be bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,11 +64,13 @@ class ResolveLlmDispatchInputSizePreflight:
                 reason="estimated prompt tokens fit active model input limit",
             )
 
-        fallback_model_ref = _first_fallback_that_fits_prompt(
-            estimated_prompt_tokens=estimated_prompt_tokens,
-            current_model_ref=command.active_model_ref,
-            route_catalog=command.route_catalog,
-        )
+        fallback_model_ref = None
+        if command.allow_automatic_fallbacks:
+            fallback_model_ref = _first_fallback_that_fits_prompt(
+                estimated_prompt_tokens=estimated_prompt_tokens,
+                current_model_ref=command.active_model_ref,
+                route_catalog=command.route_catalog,
+            )
         if fallback_model_ref is not None:
             return ResolveLlmDispatchInputSizePreflightResult(
                 decision=LlmDispatchInputSizePreflightDecision.USE_LARGER_INPUT_MODEL,

@@ -238,6 +238,7 @@ class DraftClaimCompactionNextWorkItem:
     node_refs: tuple[str, ...]
     primary_model_id: str = PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID
     degraded_model_id: str | None = None
+    user_choice_resume_work_type: DraftClaimCompactionNextWorkItemType | None = None
     estimated_prompt_tokens: int = 0
     estimated_completion_tokens: int = 4000
     estimated_requests: int = 1
@@ -248,6 +249,23 @@ class DraftClaimCompactionNextWorkItem:
         _text(self.primary_model_id, "primary_model_id")
         if self.degraded_model_id is not None:
             _text(self.degraded_model_id, "degraded_model_id")
+        if self.user_choice_resume_work_type is not None:
+            object.__setattr__(
+                self,
+                "user_choice_resume_work_type",
+                _next_work_item_type(self.user_choice_resume_work_type),
+            )
+            if self.work_type is not (
+                DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
+            ):
+                raise ValueError(
+                    "user_choice_resume_work_type requires wait_for_user_model_choice"
+                )
+            if self.user_choice_resume_work_type in {
+                DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE,
+                DraftClaimCompactionNextWorkItemType.DONE,
+            }:
+                raise ValueError("user choice resume work type must be executable")
         _non_negative_int(
             self.estimated_prompt_tokens,
             "estimated_prompt_tokens",

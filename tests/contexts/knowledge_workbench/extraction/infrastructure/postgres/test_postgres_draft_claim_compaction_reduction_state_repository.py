@@ -668,6 +668,7 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
     assert active_nodes[0].source_claim_refs == ("claim-a", "claim-b")
     assert active_nodes[0].compacted_key == "refund_support"
     assert active_nodes[0].compacted_claim == "Product supports refunds."
+    assert active_nodes[0].estimated_input_tokens > 0
     assert active_nodes[0].compacted_triples == (_triple(),)
     assert active_nodes[0].compacted_claim_kind == "capability"
     assert active_nodes[0].compacted_granularity == "atomic"

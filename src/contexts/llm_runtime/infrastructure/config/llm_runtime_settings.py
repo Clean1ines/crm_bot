@@ -25,12 +25,15 @@ class LlmRuntimeSettings:
     groq_api_key4: str | None = None
     groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_timeout_seconds: float = 60.0
+    groq_max_completion_token_gap: int = 300
 
     def __post_init__(self) -> None:
         if not self.groq_base_url or not self.groq_base_url.strip():
             raise ValueError("groq_base_url must be non-empty")
         if self.groq_timeout_seconds <= 0:
             raise ValueError("groq_timeout_seconds must be > 0")
+        if self.groq_max_completion_token_gap < 0:
+            raise ValueError("groq_max_completion_token_gap must be >= 0")
 
     @classmethod
     def from_env_mapping(cls, env: Mapping[str, str]) -> "LlmRuntimeSettings":
@@ -44,6 +47,10 @@ class LlmRuntimeSettings:
             groq_timeout_seconds=_float_env_value(
                 env.get("LLM_RUNTIME_GROQ_TIMEOUT_SECONDS"),
                 default=60.0,
+            ),
+            groq_max_completion_token_gap=_non_negative_int_env_value(
+                env.get("GROQ_MAX_COMPLETION_TOKEN_GAP"),
+                default=300,
             ),
         )
 
@@ -101,5 +108,20 @@ def _float_env_value(value: str | None, *, default: float) -> float:
 
     if parsed <= 0:
         raise ValueError("Expected positive float env value")
+
+    return parsed
+
+
+def _non_negative_int_env_value(value: str | None, *, default: int) -> int:
+    if value is None or not value.strip():
+        return default
+
+    try:
+        parsed = int(value.strip())
+    except ValueError as exc:
+        raise ValueError("Expected integer env value") from exc
+
+    if parsed < 0:
+        raise ValueError("Expected non-negative integer env value")
 
     return parsed

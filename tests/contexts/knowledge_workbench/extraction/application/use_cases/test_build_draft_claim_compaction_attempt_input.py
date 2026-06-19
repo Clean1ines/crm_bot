@@ -419,6 +419,35 @@ async def test_mixed_builds_payload_from_compacted_node_and_raw_claim_ref() -> N
 
 
 @pytest.mark.asyncio
+async def test_compacted_vs_compacted_uses_enriched_prompt_contract() -> None:
+    batch = DraftClaimCompactionBatchForDispatch(
+        batch_ref="batch-1",
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        prompt_variant="compacted_vs_compacted",
+        model_id="openai/gpt-oss-120b",
+        estimated_input_tokens=100,
+        member_observation_refs=("compacted-a", "compacted-b"),
+    )
+    use_case = BuildDraftClaimCompactionAttemptInput(
+        compaction_plan_repository=FakePlanRepository(batch=batch),
+        reduction_state_repository=FakeReductionStateRepository(),
+    )
+
+    result = await use_case.execute(_work_item())
+
+    assert result.prompt_kind is DraftClaimCompactionPromptKind.MIXED_CLAIM_COMPACTION
+    assert result.prompt_ref.endswith("enriched_claim_compaction.txt")
+    assert result.expected_output_kind is (
+        DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS
+    )
+    assert [claim["id"] for claim in result.payload["claims"]] == [
+        "compacted-a",
+        "compacted-b",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_mixed_rejects_compacted_node_from_another_cluster_state() -> None:
     raw_node_ref = raw_claim_node_ref(
         workflow_run_id="workflow-1",

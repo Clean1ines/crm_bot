@@ -27,9 +27,15 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
     DraftClaimCompactionOutputClaim,
+    DraftClaimCompactionPromptClaim,
+    DraftClaimCompactionPromptPayload,
+    DraftClaimReducedRewriteInputClaim,
+    DraftClaimReducedRewritePayload,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID,
+    DraftClaimCompactionNode,
+    DraftClaimCompactionNodeKind,
     DraftClaimCompactionNextWorkItem,
     DraftClaimCompactionNextWorkItemType,
 )
@@ -44,6 +50,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_o
 )
 from src.contexts.knowledge_workbench.extraction.application.use_cases.apply_draft_claim_compaction_result import (
     ApplyDraftClaimCompactionResult,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_provider_messages import (
+    build_draft_claim_compaction_provider_messages,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -147,6 +156,12 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
             workflow_run_id=apply_command.workflow_run_id,
             group_ref=apply_command.group_ref,
             next_work_item=outcome.next_decision.next_work_item,
+            compaction_reduction_state_repository=(
+                compaction_reduction_state_repository
+            ),
+            draft_claim_observation_read_repository=(
+                draft_claim_observation_read_repository
+            ),
             work_item_scheduling_repository=work_item_scheduling_repository,
         )
         if schedule.conflict_count:
@@ -304,6 +319,10 @@ async def _schedule_next_work(
     workflow_run_id: str,
     group_ref: str,
     next_work_item: DraftClaimCompactionNextWorkItem,
+    compaction_reduction_state_repository: (
+        DraftClaimCompactionReductionStateRepositoryPort
+    ),
+    draft_claim_observation_read_repository: DraftClaimObservationReadRepositoryPort,
     work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
 ) -> EnsureWorkItemsScheduledResult:
     if next_work_item.work_type not in {
@@ -320,6 +339,15 @@ async def _schedule_next_work(
         group_ref=group_ref,
         next_work_item=next_work_item,
     )
+    provider_messages = await _provider_messages_for_next_work_item(
+        workflow_run_id=workflow_run_id,
+        group_ref=group_ref,
+        next_work_item=next_work_item,
+        compaction_reduction_state_repository=(compaction_reduction_state_repository),
+        draft_claim_observation_read_repository=(
+            draft_claim_observation_read_repository
+        ),
+    )
     work_item_id = f"claim-compaction:{workflow_run_id}:{batch_ref}"
     plan = WorkItemSchedulePlan(
         work_item_id=work_item_id,
@@ -331,6 +359,7 @@ async def _schedule_next_work(
             "batch_ref": batch_ref,
             "prompt_variant": next_work_item.work_type.value,
             "model_id": next_work_item.primary_model_id,
+            "provider_messages": list(provider_messages),
             "node_refs": list(next_work_item.node_refs),
             "compacted_node_refs": list(_compacted_node_refs(next_work_item)),
             "raw_claim_refs": list(_raw_claim_refs(next_work_item)),
@@ -345,6 +374,128 @@ async def _schedule_next_work(
     )
     return await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,))
+    )
+
+
+async def _provider_messages_for_next_work_item(
+    *,
+    workflow_run_id: str,
+    group_ref: str,
+    next_work_item: DraftClaimCompactionNextWorkItem,
+    compaction_reduction_state_repository: (
+        DraftClaimCompactionReductionStateRepositoryPort
+    ),
+    draft_claim_observation_read_repository: DraftClaimObservationReadRepositoryPort,
+) -> tuple[dict[str, str], ...]:
+    state = await compaction_reduction_state_repository.load_planner_state(
+        workflow_run_id=workflow_run_id,
+        group_ref=group_ref,
+    )
+    if state is None:
+        raise ValueError("draft claim compaction planner state is unavailable")
+    nodes_by_ref = {node.node_ref: node for node in state.nodes}
+
+    if next_work_item.work_type is DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE:
+        compacted_nodes = tuple(
+            _required_active_compacted_node(nodes_by_ref, node_ref)
+            for node_ref in next_work_item.node_refs
+        )
+        payload = DraftClaimReducedRewritePayload(
+            compacted_claims=tuple(
+                _reduced_rewrite_input_claim(node) for node in compacted_nodes
+            )
+        ).to_json_dict()
+        return build_draft_claim_compaction_provider_messages(
+            prompt_file_name="reduced_claim_rewrite.txt",
+            payload=payload,
+        )
+
+    prompt_claims: list[DraftClaimCompactionPromptClaim] = []
+    raw_claim_refs: list[str] = []
+    for node_ref in next_work_item.node_refs:
+        node = nodes_by_ref.get(node_ref)
+        if node is None:
+            raw_claim_refs.append(_raw_claim_ref_from_node_ref(node_ref) or node_ref)
+            continue
+        if not node.active:
+            raise ValueError("next compaction work must reference active nodes")
+        if node.node_kind is DraftClaimCompactionNodeKind.COMPACTED:
+            prompt_claims.append(_compacted_prompt_claim(node))
+        else:
+            raw_claim_refs.extend(node.source_claim_refs)
+
+    raw_claims = (
+        await draft_claim_observation_read_repository.list_by_observation_refs(
+            observation_refs=tuple(dict.fromkeys(raw_claim_refs)),
+        )
+        if raw_claim_refs
+        else ()
+    )
+    raw_by_ref = {claim.observation_ref: claim for claim in raw_claims}
+    for raw_claim_ref in raw_claim_refs:
+        claim = raw_by_ref.get(raw_claim_ref)
+        if claim is None:
+            raise ValueError(f"draft claim observation is unavailable: {raw_claim_ref}")
+        prompt_claims.append(
+            DraftClaimCompactionPromptClaim(
+                claim_id=claim.observation_ref,
+                claim=claim.claim,
+                questions=claim.possible_questions,
+            )
+        )
+
+    prompt_variant = next_work_item.work_type.value
+    payload = DraftClaimCompactionPromptPayload(
+        claims=tuple(prompt_claims),
+        prompt_variant=prompt_variant,
+    ).to_json_dict()
+    prompt_file_name = (
+        "draft_claim_compaction.txt"
+        if next_work_item.work_type
+        is DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT
+        else "enriched_claim_compaction.txt"
+    )
+    return build_draft_claim_compaction_provider_messages(
+        prompt_file_name=prompt_file_name,
+        payload=payload,
+    )
+
+
+def _required_active_compacted_node(
+    nodes_by_ref: Mapping[str, DraftClaimCompactionNode],
+    node_ref: str,
+) -> DraftClaimCompactionNode:
+    node = nodes_by_ref.get(node_ref)
+    if (
+        node is None
+        or not node.active
+        or node.node_kind is not DraftClaimCompactionNodeKind.COMPACTED
+    ):
+        raise ValueError("reduced rewrite requires active compacted nodes")
+    return node
+
+
+def _compacted_prompt_claim(
+    node: DraftClaimCompactionNode,
+) -> DraftClaimCompactionPromptClaim:
+    if node.compacted_claim is None:
+        raise ValueError("compacted node claim is unavailable")
+    return DraftClaimCompactionPromptClaim(
+        claim_id=node.node_ref,
+        claim=node.compacted_claim,
+        questions=(),
+    )
+
+
+def _reduced_rewrite_input_claim(
+    node: DraftClaimCompactionNode,
+) -> DraftClaimReducedRewriteInputClaim:
+    if node.compacted_key is None or node.compacted_claim is None:
+        raise ValueError("compacted node rewrite payload is unavailable")
+    return DraftClaimReducedRewriteInputClaim(
+        key=node.compacted_key,
+        claim=node.compacted_claim,
+        triples=node.compacted_triples,
     )
 
 
@@ -590,12 +741,26 @@ async def _append_next_event(
         "appended_next_command_count": appended_next_command_count,
     }
     if work_type is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE:
+        resume_work_type = (
+            outcome.next_decision.next_work_item.user_choice_resume_work_type
+        )
+        if resume_work_type is None:
+            raise ValueError("waiting user model choice requires resume work type")
         payload.update(
             {
                 "primary_model_id": outcome.next_decision.next_work_item.primary_model_id,
                 "degraded_candidate_model_id": (
                     outcome.next_decision.next_work_item.degraded_model_id
                     or DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID
+                ),
+                "group_ref": apply_command.group_ref,
+                "node_refs": list(outcome.next_decision.next_work_item.node_refs),
+                "resume_work_type": resume_work_type.value,
+                "estimated_prompt_tokens": (
+                    outcome.next_decision.next_work_item.estimated_prompt_tokens
+                ),
+                "estimated_completion_tokens": (
+                    outcome.next_decision.next_work_item.estimated_completion_tokens
                 ),
             }
         )

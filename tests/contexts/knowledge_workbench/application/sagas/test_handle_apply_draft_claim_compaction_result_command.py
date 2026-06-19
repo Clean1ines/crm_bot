@@ -24,10 +24,16 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionApplyResultOutcome,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionNode,
+    DraftClaimCompactionNodeKind,
     DraftClaimCompactionNextWorkItem,
     DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionPlannerDecision,
     DraftClaimCompactionPlannerState,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
+    DraftClaimCompactionPromptClaim,
+    DraftClaimCompactionPromptPayload,
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionApplyPersistenceResult,
@@ -35,6 +41,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
     DraftClaimObservationReadModel,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_provider_messages import (
+    build_draft_claim_compaction_provider_messages,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
@@ -150,6 +159,7 @@ class FakeApplyResultUseCase:
 @dataclass(slots=True)
 class FakeReductionStateRepository:
     next_decision: DraftClaimCompactionPlannerDecision
+    planner_nodes: tuple[DraftClaimCompactionNode, ...] = ()
     applied_compacted: int = 0
     applied_reduced: int = 0
 
@@ -161,7 +171,10 @@ class FakeReductionStateRepository:
     ) -> DraftClaimCompactionPlannerState | None:
         assert workflow_run_id == _workflow_run_id()
         assert group_ref == "group-1"
-        return DraftClaimCompactionPlannerState(cluster_ref="group-1", nodes=())
+        return DraftClaimCompactionPlannerState(
+            cluster_ref="group-1",
+            nodes=self.planner_nodes,
+        )
 
     async def seed_initial_planner_state(
         self,
@@ -522,7 +535,8 @@ async def test_schedules_next_work_item_for_reduced_rewrite_decision() -> None:
         _decision(
             DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
             node_refs=("compacted-a", "compacted-b"),
-        )
+        ),
+        planner_nodes=(_compacted_node("compacted-a"), _compacted_node("compacted-b")),
     )
 
     apply_use_case = FakeApplyResultUseCase(
@@ -606,6 +620,8 @@ async def test_waiting_user_model_choice_appends_event_without_scheduling() -> N
         == KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE.value
     )
     assert event.payload["degraded_candidate_model_id"] == "llama-3.3-70b-versatile"
+    assert event.payload["node_refs"] == ["compacted-a", "compacted-b"]
+    assert event.payload["resume_work_type"] == "compacted_vs_compacted"
 
 
 @pytest.mark.asyncio
@@ -657,6 +673,12 @@ def _decision(
             if work_type
             is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
             else None,
+            user_choice_resume_work_type=(
+                DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
+                if work_type
+                is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
+                else None
+            ),
             estimated_prompt_tokens=estimated_prompt_tokens,
             estimated_completion_tokens=4000
             if estimated_completion_tokens is None
@@ -756,6 +778,10 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     assert scheduled_payload["raw_claim_refs"] == []
     assert scheduled_payload["estimated_prompt_tokens"] == 1
     assert scheduled_payload["estimated_completion_tokens"] == 4000
+    assert [message["role"] for message in scheduled_payload["provider_messages"]] == [
+        "system",
+        "user",
+    ]
     assert scheduled_payload["estimated_requests"] == 1
     assert scheduled_payload["llm_capacity_estimate"] == {
         "estimated_input_tokens": 1,
@@ -781,7 +807,10 @@ async def test_appends_prepare_command_when_next_work_item_already_exists() -> N
             work_item_id: WorkKind("knowledge_workbench.draft_claim_compaction"),
         },
     )
-    repository = FakeReductionStateRepository(_decision(work_type, node_refs=node_refs))
+    repository = FakeReductionStateRepository(
+        _decision(work_type, node_refs=node_refs),
+        planner_nodes=(_compacted_node("compacted-a"), _compacted_node("compacted-b")),
+    )
     apply_use_case = FakeApplyResultUseCase(_decision(work_type, node_refs=node_refs))
 
     result = await HandleApplyDraftClaimCompactionResultCommandHandler(
@@ -807,12 +836,27 @@ def _expected_next_work_schedule_payload(
     work_type: DraftClaimCompactionNextWorkItemType,
     node_refs: tuple[str, ...],
 ) -> dict[str, object]:
+    provider_messages = build_draft_claim_compaction_provider_messages(
+        prompt_file_name="enriched_claim_compaction.txt",
+        payload=DraftClaimCompactionPromptPayload(
+            claims=tuple(
+                DraftClaimCompactionPromptClaim(
+                    claim_id=node_ref,
+                    claim=f"Compacted claim {node_ref}",
+                    questions=(),
+                )
+                for node_ref in node_refs
+            ),
+            prompt_variant=work_type.value,
+        ).to_json_dict(),
+    )
     return {
         "workflow_run_id": _workflow_run_id(),
         "group_ref": "group-1",
         "batch_ref": f"group-1:{work_type.value}:{'--'.join(node_refs)}",
         "prompt_variant": work_type.value,
         "model_id": "openai/gpt-oss-120b",
+        "provider_messages": list(provider_messages),
         "node_refs": list(node_refs),
         "compacted_node_refs": list(node_refs)
         if work_type
@@ -832,6 +876,16 @@ def _expected_next_work_schedule_payload(
             "reserved_output_tokens": 4000,
         },
     }
+
+
+def _compacted_node(node_ref: str) -> DraftClaimCompactionNode:
+    return DraftClaimCompactionNode(
+        node_ref=node_ref,
+        node_kind=DraftClaimCompactionNodeKind.COMPACTED,
+        source_claim_refs=(f"source-{node_ref}",),
+        compacted_key=f"key-{node_ref}",
+        compacted_claim=f"Compacted claim {node_ref}",
+    )
 
 
 @pytest.mark.asyncio

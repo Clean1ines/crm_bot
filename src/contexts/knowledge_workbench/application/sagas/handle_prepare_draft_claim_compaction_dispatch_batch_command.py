@@ -322,6 +322,7 @@ def _prepare_llm_dispatch_batch_command(
             workflow_command.payload,
         ),
         use_local_active_model_tpm_budget=True,
+        allow_automatic_fallbacks=False,
     )
 
 

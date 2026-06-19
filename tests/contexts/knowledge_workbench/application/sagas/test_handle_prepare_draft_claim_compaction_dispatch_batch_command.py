@@ -315,6 +315,7 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     assert result.appended_next_command_count == 0
     assert prepare.calls[0].work_kind == DRAFT_CLAIM_COMPACTION_WORK_KIND
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
+    assert prepare.calls[0].allow_automatic_fallbacks is False
     assert prepare.calls[0].use_local_active_model_tpm_budget is True
     assert prepare.calls[0].profile is not None
     assert prepare.calls[0].profile.estimated_prompt_tokens == 12345

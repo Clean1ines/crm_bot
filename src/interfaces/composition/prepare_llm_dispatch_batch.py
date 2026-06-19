@@ -138,6 +138,7 @@ class PrepareLlmDispatchBatchCommand:
     dispatch_preparation_strategy: str | None = None
     retry_plan: WorkItemRetryPlan | None = None
     use_local_active_model_tpm_budget: bool = False
+    allow_automatic_fallbacks: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.work_kind, WorkKind):
@@ -183,6 +184,8 @@ class PrepareLlmDispatchBatchCommand:
             raise TypeError("retry_plan must be WorkItemRetryPlan when provided")
         if not isinstance(self.use_local_active_model_tpm_budget, bool):
             raise TypeError("use_local_active_model_tpm_budget must be bool")
+        if not isinstance(self.allow_automatic_fallbacks, bool):
+            raise TypeError("allow_automatic_fallbacks must be bool")
         if self.started_at < self.now:
             raise ValueError("started_at must be >= now")
 
@@ -340,6 +343,7 @@ class PrepareLlmDispatchBatch:
                         active_model_ref=strategy_result.active_model_ref,
                         profile=preparation_profile,
                         route_catalog=self.route_catalog,
+                        allow_automatic_fallbacks=command.allow_automatic_fallbacks,
                     )
                 )
                 LOGGER.info(

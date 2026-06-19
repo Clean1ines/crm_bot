@@ -4,7 +4,7 @@ Canonical FastAPI application assembly for the HTTP interface layer.
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from src.application.errors import ApplicationError
 from src.infrastructure.config.settings import settings
@@ -50,6 +50,20 @@ app.add_middleware(
 app.add_middleware(CorrelationIdMiddleware)
 
 KNOWLEDGE_UPLOAD_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    frontend_url = (settings.FRONTEND_URL or "").rstrip("/")
+    if frontend_url:
+        return RedirectResponse(url=f"{frontend_url}/login", status_code=307)
+    return JSONResponse(
+        {
+            "status": "ok",
+            "message": "CRM Bot API",
+            "login_path": "/login",
+        }
+    )
 
 
 def _is_knowledge_upload_request(request: Request) -> bool:

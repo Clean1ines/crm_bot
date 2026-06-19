@@ -42,6 +42,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
     DraftClaimCompactionReductionStateRepositoryPort,
 )
 from src.domain.project_plane.json_types import JsonObject, JsonValue
+from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
+    estimate_tokens_roughly,
+)
 
 
 class DraftClaimCompactionReductionStateConnectionLike(Protocol):
@@ -450,7 +453,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     True,
                     json.dumps(list(claim.source_claim_refs), sort_keys=True),
                     json.dumps(list(source_node_refs), sort_keys=True),
-                    0,
+                    _estimated_compacted_claim_tokens(claim.to_json_dict()),
                     claim.key,
                     claim.claim,
                     claim.claim_kind.value,
@@ -617,7 +620,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 True,
                 json.dumps(list(union_source_claim_refs), sort_keys=True),
                 json.dumps(list(source_node_refs), sort_keys=True),
-                0,
+                _estimated_compacted_claim_tokens(inherited_claim.to_json_dict()),
                 inherited_claim.key,
                 inherited_claim.claim,
                 inherited_claim.claim_kind.value,
@@ -1292,6 +1295,16 @@ def build_initial_raw_node(
         active=True,
         estimated_input_tokens=estimated_input_tokens,
     )
+
+
+def _estimated_compacted_claim_tokens(payload: JsonObject) -> int:
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return max(1, estimate_tokens_roughly(serialized))
 
 
 def _node(

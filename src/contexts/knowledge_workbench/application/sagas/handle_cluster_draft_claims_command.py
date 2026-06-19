@@ -36,6 +36,12 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_grouping_policy import (
     DraftClaimCompactionGroupingPolicy,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_prompt_payload_builder import (
+    DraftClaimCompactionPromptPayloadBuilder,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_provider_messages import (
+    build_draft_claim_compaction_provider_messages,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_hybrid_similarity_policy import (
     DraftClaimHybridSimilarityPolicy,
 )
@@ -72,7 +78,7 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 
 WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
 DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
-DRAFT_CLAIM_COMPACTION_RESERVED_OUTPUT_TOKENS = 4000
+DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS = 2050
 DRAFT_CLAIM_COMPACTION_WORKER_REF = (
     "knowledge-workbench-draft-claim-compaction-dispatch"
 )
@@ -166,7 +172,12 @@ class HandleClusterDraftClaimsCommandHandler:
         ).execute(
             EnsureWorkItemsScheduledCommand(
                 plans=tuple(
-                    _plan(workflow_run_id, batch) for batch in budget_plan.batches
+                    _plan(
+                        workflow_run_id,
+                        batch,
+                        claims_by_ref=claims_by_ref,
+                    )
+                    for batch in budget_plan.batches
                 )
             )
         )
@@ -344,8 +355,20 @@ def _estimated_raw_claim_tokens(claim: DraftClaimForCompaction) -> int:
     return max(1, len(claim.embedding_text) // 4)
 
 
-def _plan(workflow_run_id: str, batch) -> WorkItemSchedulePlan:
+def _plan(
+    workflow_run_id: str,
+    batch,
+    *,
+    claims_by_ref: Mapping[str, DraftClaimForCompaction],
+) -> WorkItemSchedulePlan:
     work_item_id = f"claim-compaction:{workflow_run_id}:{batch.batch_ref}"
+    prompt_payload = (
+        DraftClaimCompactionPromptPayloadBuilder()
+        .build_draft_vs_draft_payload(
+            tuple(claims_by_ref[ref] for ref in batch.member_observation_refs)
+        )
+        .to_json_dict()
+    )
     return WorkItemSchedulePlan(
         work_item_id=work_item_id,
         work_kind=WORK_KIND,
@@ -357,16 +380,25 @@ def _plan(workflow_run_id: str, batch) -> WorkItemSchedulePlan:
             "prompt_variant": batch.prompt_variant,
             "model_id": batch.model_id,
             "source_claim_refs": list(batch.member_observation_refs),
+            "provider_messages": list(
+                build_draft_claim_compaction_provider_messages(
+                    prompt_file_name="draft_claim_compaction.txt",
+                    payload=prompt_payload,
+                )
+            ),
             "llm_capacity_estimate": _batch_capacity_estimate(batch),
         },
     )
 
 
 def _batch_capacity_estimate(batch) -> dict[str, object]:
-    estimated_input_tokens = max(1, batch.estimated_input_tokens)
-    reserved_output_tokens = DRAFT_CLAIM_COMPACTION_RESERVED_OUTPUT_TOKENS
+    task_input_tokens = max(1, batch.estimated_input_tokens)
+    estimated_input_tokens = DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS + task_input_tokens
+    reserved_output_tokens = task_input_tokens
     return {
         "estimator": "draft_claim_compaction_batch_budget_policy",
+        "prompt_message_tokens": (DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS,),
+        "task_input_tokens": task_input_tokens,
         "estimated_input_tokens": estimated_input_tokens,
         "reserved_output_tokens": reserved_output_tokens,
         "estimated_total_tokens": estimated_input_tokens + reserved_output_tokens,

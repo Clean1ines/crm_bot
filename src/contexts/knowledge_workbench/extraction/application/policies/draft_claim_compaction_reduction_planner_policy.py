@@ -16,6 +16,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 
 DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS = 2_050
 ENRICHED_CLAIM_COMPACTION_PROMPT_TOKENS = 2_150
+GPT_OSS_FREE_PLAN_TPM = 8_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,17 +25,28 @@ class DraftClaimCompactionReductionPlannerPolicy:
         self,
         state: DraftClaimCompactionPlannerState,
     ) -> DraftClaimCompactionPlannerDecision:
+        active_nodes = _ordered_active_nodes(state)
         if state.budget_fit.status is (
             DraftClaimCompactionBudgetFitStatus.TOO_LARGE_EVEN_REDUCED
         ):
+            user_choice = _first_pair_for_user_choice(active_nodes)
+            if user_choice is None:
+                return _decision(
+                    state=state,
+                    work_type=DraftClaimCompactionNextWorkItemType.DONE,
+                    node_refs=(),
+                    reason="no active pair remains for degraded fallback",
+                )
+            node_refs, resume_work_type = user_choice
             return _wait_for_user_model_choice(
                 state,
                 "ordinary comparison and reduced rewrite exceed primary budget",
+                node_refs=node_refs,
+                resume_work_type=resume_work_type,
             )
 
         comparison_index = _ComparisonIndex(state.comparisons)
         component_index = _ComponentIndex.from_state(state)
-        active_nodes = _ordered_active_nodes(state)
         active_compacted = _nodes_by_kind(
             active_nodes,
             DraftClaimCompactionNodeKind.COMPACTED,
@@ -42,6 +54,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
         active_raw = _nodes_by_kind(active_nodes, DraftClaimCompactionNodeKind.RAW)
 
         reduced_rewrite = _find_bridge_rewrite(
+            state=state,
             active_compacted=active_compacted,
             active_raw=active_raw,
             comparison_index=comparison_index,
@@ -57,6 +70,8 @@ class DraftClaimCompactionReductionPlannerPolicy:
 
         compacted_pair = _first_comparable_pair(
             active_compacted,
+            state=state,
+            work_type=DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
             comparison_index=comparison_index,
             component_index=component_index,
         )
@@ -69,6 +84,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             )
 
         bridge_pair = _find_bridge_comparison(
+            state=state,
             active_compacted=active_compacted,
             active_raw=active_raw,
             comparison_index=comparison_index,
@@ -83,6 +99,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             )
 
         mixed_pair = _first_comparable_mixed_pair(
+            state=state,
             active_compacted=active_compacted,
             active_raw=active_raw,
             comparison_index=comparison_index,
@@ -98,6 +115,8 @@ class DraftClaimCompactionReductionPlannerPolicy:
 
         raw_pair = _first_comparable_pair(
             active_raw,
+            state=state,
+            work_type=DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT,
             comparison_index=comparison_index,
             component_index=component_index,
         )
@@ -109,10 +128,18 @@ class DraftClaimCompactionReductionPlannerPolicy:
                 reason="raw-vs-raw is lowest ordinary comparison priority",
             )
 
-        if _has_unresolved_primary_too_large_pair(active_nodes, comparison_index):
+        unresolved_pair = _first_unresolved_primary_too_large_pair(
+            state=state,
+            active_nodes=active_nodes,
+            comparison_index=comparison_index,
+        )
+        if unresolved_pair is not None:
+            node_refs, resume_work_type = unresolved_pair
             return _wait_for_user_model_choice(
                 state,
                 "unresolved comparison is too large for primary model",
+                node_refs=node_refs,
+                resume_work_type=resume_work_type,
             )
 
         return _decision(
@@ -294,14 +321,18 @@ def _nodes_by_kind(
 
 def _find_bridge_rewrite(
     *,
+    state: DraftClaimCompactionPlannerState,
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
     comparison_index: _ComparisonIndex,
     component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(active_compacted):
-        if comparison_index.status(left.node_ref, right.node_ref) is not (
-            DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL
+        if not _primary_pair_is_too_large(
+            state=state,
+            left=left,
+            right=right,
+            comparison_index=comparison_index,
         ):
             continue
         for raw in active_raw:
@@ -323,26 +354,37 @@ def _find_bridge_rewrite(
                 comparison_index,
             ):
                 continue
+            if not _work_item_fits_primary_tpm(
+                state=state,
+                work_type=DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
+                node_refs=_pair_key(left_result, right_result),
+            ):
+                continue
             return _pair_key(left_result, right_result)
     return None
 
 
 def _find_bridge_comparison(
     *,
+    state: DraftClaimCompactionPlannerState,
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
     comparison_index: _ComparisonIndex,
     component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(active_compacted):
-        if comparison_index.status(left.node_ref, right.node_ref) is not (
-            DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL
+        if not _primary_pair_is_too_large(
+            state=state,
+            left=left,
+            right=right,
+            comparison_index=comparison_index,
         ):
             continue
         for raw in active_raw:
             left_pair = _mixed_candidate(
                 left,
                 raw,
+                state=state,
                 comparison_index=comparison_index,
                 component_index=component_index,
             )
@@ -351,6 +393,7 @@ def _find_bridge_comparison(
             right_pair = _mixed_candidate(
                 right,
                 raw,
+                state=state,
                 comparison_index=comparison_index,
                 component_index=component_index,
             )
@@ -361,6 +404,7 @@ def _find_bridge_comparison(
 
 def _first_comparable_mixed_pair(
     *,
+    state: DraftClaimCompactionPlannerState,
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
     comparison_index: _ComparisonIndex,
@@ -371,6 +415,7 @@ def _first_comparable_mixed_pair(
             pair = _mixed_candidate(
                 compacted,
                 raw,
+                state=state,
                 comparison_index=comparison_index,
                 component_index=component_index,
             )
@@ -383,6 +428,7 @@ def _mixed_candidate(
     compacted: DraftClaimCompactionNode,
     raw: DraftClaimCompactionNode,
     *,
+    state: DraftClaimCompactionPlannerState,
     comparison_index: _ComparisonIndex,
     component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
@@ -392,31 +438,107 @@ def _mixed_candidate(
         comparison_index,
     ):
         return None
+    if not _work_item_fits_primary_tpm(
+        state=state,
+        work_type=DraftClaimCompactionNextWorkItemType.MIXED,
+        node_refs=(compacted.node_ref, raw.node_ref),
+    ):
+        return None
     return compacted.node_ref, raw.node_ref
 
 
 def _first_comparable_pair(
     nodes: tuple[DraftClaimCompactionNode, ...],
     *,
+    state: DraftClaimCompactionPlannerState,
+    work_type: DraftClaimCompactionNextWorkItemType,
     comparison_index: _ComparisonIndex,
     component_index: _ComponentIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(nodes):
-        if component_index.can_compare(left.node_ref, right.node_ref, comparison_index):
+        node_refs = (left.node_ref, right.node_ref)
+        if component_index.can_compare(
+            left.node_ref, right.node_ref, comparison_index
+        ) and _work_item_fits_primary_tpm(
+            state=state,
+            work_type=work_type,
+            node_refs=node_refs,
+        ):
             return left.node_ref, right.node_ref
     return None
 
 
-def _has_unresolved_primary_too_large_pair(
+def _first_unresolved_primary_too_large_pair(
+    *,
+    state: DraftClaimCompactionPlannerState,
     active_nodes: tuple[DraftClaimCompactionNode, ...],
     comparison_index: _ComparisonIndex,
-) -> bool:
+) -> tuple[tuple[str, str], DraftClaimCompactionNextWorkItemType] | None:
     for left, right in _node_pairs(active_nodes):
-        if comparison_index.status(left.node_ref, right.node_ref) is (
-            DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL
+        if _primary_pair_is_too_large(
+            state=state,
+            left=left,
+            right=right,
+            comparison_index=comparison_index,
         ):
-            return True
-    return False
+            return (left.node_ref, right.node_ref), _pair_work_type(left, right)
+    return None
+
+
+def _first_pair_for_user_choice(
+    active_nodes: tuple[DraftClaimCompactionNode, ...],
+) -> tuple[tuple[str, str], DraftClaimCompactionNextWorkItemType] | None:
+    pairs = _node_pairs(active_nodes)
+    if not pairs:
+        return None
+    left, right = pairs[0]
+    return (left.node_ref, right.node_ref), _pair_work_type(left, right)
+
+
+def _primary_pair_is_too_large(
+    *,
+    state: DraftClaimCompactionPlannerState,
+    left: DraftClaimCompactionNode,
+    right: DraftClaimCompactionNode,
+    comparison_index: _ComparisonIndex,
+) -> bool:
+    if comparison_index.status(left.node_ref, right.node_ref) is (
+        DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL
+    ):
+        return True
+    return not _work_item_fits_primary_tpm(
+        state=state,
+        work_type=_pair_work_type(left, right),
+        node_refs=(left.node_ref, right.node_ref),
+    )
+
+
+def _pair_work_type(
+    left: DraftClaimCompactionNode,
+    right: DraftClaimCompactionNode,
+) -> DraftClaimCompactionNextWorkItemType:
+    if (
+        left.node_kind is DraftClaimCompactionNodeKind.RAW
+        and right.node_kind is DraftClaimCompactionNodeKind.RAW
+    ):
+        return DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT
+    if (
+        left.node_kind is DraftClaimCompactionNodeKind.COMPACTED
+        and right.node_kind is DraftClaimCompactionNodeKind.COMPACTED
+    ):
+        return DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
+    return DraftClaimCompactionNextWorkItemType.MIXED
+
+
+def _work_item_fits_primary_tpm(
+    *,
+    state: DraftClaimCompactionPlannerState,
+    work_type: DraftClaimCompactionNextWorkItemType,
+    node_refs: tuple[str, ...],
+) -> bool:
+    task_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
+    prompt_tokens = _prompt_tokens_for_work_type(work_type)
+    return prompt_tokens + task_tokens + task_tokens <= GPT_OSS_FREE_PLAN_TPM
 
 
 def _node_pairs(
@@ -479,7 +601,11 @@ def _estimated_task_tokens(
 def _prompt_tokens_for_work_type(
     work_type: DraftClaimCompactionNextWorkItemType,
 ) -> int:
-    if work_type is DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE:
+    if work_type in {
+        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+        DraftClaimCompactionNextWorkItemType.MIXED,
+        DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
+    }:
         return ENRICHED_CLAIM_COMPACTION_PROMPT_TOKENS
     return DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS
 
@@ -487,13 +613,22 @@ def _prompt_tokens_for_work_type(
 def _wait_for_user_model_choice(
     state: DraftClaimCompactionPlannerState,
     reason: str,
+    *,
+    node_refs: tuple[str, ...],
+    resume_work_type: DraftClaimCompactionNextWorkItemType,
 ) -> DraftClaimCompactionPlannerDecision:
+    task_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE,
-            node_refs=(),
+            node_refs=node_refs,
             primary_model_id=state.primary_model_id,
             degraded_model_id=state.degraded_candidate_model_id,
+            user_choice_resume_work_type=resume_work_type,
+            estimated_prompt_tokens=(
+                _prompt_tokens_for_work_type(resume_work_type) + task_tokens
+            ),
+            estimated_completion_tokens=task_tokens,
         ),
         reason=reason,
     )

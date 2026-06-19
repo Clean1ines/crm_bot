@@ -2875,7 +2875,7 @@ async def confirm_knowledge_extraction_degraded_fallback(
     except DraftClaimCompactionDegradedFallbackNotPendingError as exc:
         raise HTTPException(
             status_code=409,
-            detail="Daily-capacity degraded fallback confirmation is not pending",
+            detail="Degraded fallback confirmation is not pending",
         ) from exc
 
     return {

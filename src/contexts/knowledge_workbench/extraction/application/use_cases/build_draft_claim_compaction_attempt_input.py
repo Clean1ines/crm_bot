@@ -101,6 +101,11 @@ class BuildDraftClaimCompactionAttemptInput:
 
         if batch.prompt_variant == "draft_vs_draft":
             return await self._draft_vs_draft(work_item=work_item, batch=batch)
+        if batch.prompt_variant == "compacted_vs_compacted":
+            return await self._compacted_vs_compacted(
+                work_item=work_item,
+                batch=batch,
+            )
         if batch.prompt_variant == "mixed":
             return await self._mixed(work_item=work_item, batch=batch)
         if batch.prompt_variant == "reduced_rewrite":
@@ -216,6 +221,55 @@ class BuildDraftClaimCompactionAttemptInput:
             "raw_claim_refs": list(raw_claim_refs_tuple),
         }
 
+        return DraftClaimCompactionAttemptInput(
+            workflow_run_id=batch.workflow_run_id,
+            group_ref=batch.group_ref,
+            batch_ref=batch.batch_ref,
+            work_item_id=work_item.work_item_id,
+            prompt_kind=DraftClaimCompactionPromptKind.MIXED_CLAIM_COMPACTION,
+            prompt_ref=MIXED_CLAIM_COMPACTION_PROMPT_REF,
+            model_id=batch.model_id,
+            payload=payload,
+            expected_output_kind=(
+                DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS
+            ),
+        )
+
+    async def _compacted_vs_compacted(
+        self,
+        *,
+        work_item: WorkItem,
+        batch: DraftClaimCompactionBatchForDispatch,
+    ) -> DraftClaimCompactionAttemptInput:
+        state = await self.reduction_state_repository.load_planner_state(
+            workflow_run_id=batch.workflow_run_id,
+            group_ref=batch.group_ref,
+        )
+        if state is None:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "draft claim compaction reduction state is unavailable",
+            )
+
+        nodes_by_ref = {node.node_ref: node for node in state.nodes}
+        compacted_nodes: list[DraftClaimCompactionNode] = []
+        for node_ref in batch.member_observation_refs:
+            node = nodes_by_ref.get(node_ref)
+            if (
+                node is None
+                or not node.active
+                or node.node_kind is not DraftClaimCompactionNodeKind.COMPACTED
+            ):
+                raise DraftClaimCompactionPayloadUnavailable(
+                    "compacted-vs-compacted batch must reference active compacted nodes",
+                )
+            compacted_nodes.append(node)
+
+        payload = DraftClaimCompactionPromptPayload(
+            claims=tuple(
+                _mixed_compacted_prompt_claim(node) for node in compacted_nodes
+            ),
+            prompt_variant="compacted_vs_compacted",
+        ).to_json_dict()
         return DraftClaimCompactionAttemptInput(
             workflow_run_id=batch.workflow_run_id,
             group_ref=batch.group_ref,

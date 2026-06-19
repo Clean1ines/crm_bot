@@ -143,8 +143,6 @@ class WorkbenchWorkflowLiveStateQuery:
                 WHERE waiting.workflow_run_id = $1
                   AND waiting.event_type =
                       'DraftClaimCompactionWaitingUserModelChoice'
-                  AND waiting.payload->>'reason' =
-                      'primary_model_daily_capacity_exhausted'
                   AND NOT EXISTS (
                       SELECT 1
                       FROM workflow_runtime_outbox_events AS resolved
