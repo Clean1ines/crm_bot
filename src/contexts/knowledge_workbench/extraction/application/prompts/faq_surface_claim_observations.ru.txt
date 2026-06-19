@@ -12,11 +12,21 @@ TASK := extract `claims`.
 CLAIM := standalone useful answer to one real business-customer intent.
 CUSTOMER_INTENT := understand | choose | buy | order | implement | use | pay | receive | return | configure | verify | evaluate | control product/service/process/result.
 
+SOURCE_LANGUAGE:
+Detect source language from the INPUT fragment body.
+Do NOT infer source language from:
+product names | company names | platform names | acronyms | API names | URLs | code | UI labels | English technical terms.
+
 LANG:
 keys = schema keys exactly.
-values = same language as source.
-do not translate.
-evidence_block = exact source wording.
+values = same language as INPUT fragment body.
+do not translate source language into another language.
+do not answer in English unless INPUT fragment body is English.
+claim MUST use source language.
+possible_questions MUST use source language.
+exclusion_scope MUST use source language.
+Latin product names/acronyms/platform names are allowed only as copied tokens inside source-language sentences.
+evidence_block = exact contiguous source wording copied from INPUT.
 
 SCHEMA:
 {
@@ -41,9 +51,12 @@ evidence_block := string
 
 PROCESS:
 
-1. Detect FRAGMENT_FUNCTION.
-2. Extract by function, not isolated words.
-3. Return JSON only.
+1. Detect SOURCE_LANGUAGE from INPUT fragment body.
+2. Detect FRAGMENT_FUNCTION.
+3. Extract by function, not isolated words.
+4. Build claims only from exact supported evidence.
+5. Run PRE_RETURN_SELF_CHECK.
+6. Return JSON only.
 
 FRAGMENT_FUNCTION ∈ {
 definition, value/result, contents/features/roles/components,
@@ -81,7 +94,7 @@ HEADING:
 heading = intent clue only.
 NEVER heading-only claim.
 IF heading + body/list answer one general question -> composite.
-IF claim uses heading + list -> evidence_block includes heading + relevant list items exactly.
+IF claim uses heading + list -> evidence_block includes heading + relevant adjacent list items exactly.
 
 LIST/TEST/CRITERIA:
 IF fragment contains list/checklist/criteria/control questions/test questions/expected topics/rubric/testing scenarios:
@@ -125,11 +138,15 @@ optionally add atomic important limitations.
 
 CLAIM_RULES:
 claim MUST be ready customer answer, standalone, realistic, useful, evidence-based.
+claim MUST use SOURCE_LANGUAGE.
+claim MAY contain Latin product names/acronyms/platform names only if they appear in INPUT.
 claim MUST NOT be broader than evidence or add absent entities/actions/conditions/conclusions.
 claim MUST NOT be ad fluff or mechanical heading paraphrase.
+claim MUST NOT be English unless INPUT fragment body is English.
 
 QUESTIONS:
 possible_questions := 1..3 natural variants of same intent.
+possible_questions MUST use SOURCE_LANGUAGE.
 All questions expect same answer.
 IF questions need different answers -> split.
 NEVER question broader than claim+evidence.
@@ -137,6 +154,17 @@ NEVER "why" unless evidence gives reason.
 NEVER artificial meta-questions:
 "which fragment/claim/section says", "what information is contained", "what is mentioned in the text".
 IF no natural question -> [] and reconsider claim.
+
+BAD_LANGUAGE:
+INPUT fragment body language = Russian.
+
+BAD:
+claim = "Axole groups similar knowledge fragments to create a comprehensive answer."
+possible_questions = ["How does Axole handle repeated information?"]
+
+GOOD:
+claim = "Axole группирует похожие фрагменты знаний, чтобы сформировать более полный ответ."
+possible_questions = ["Как Axole обрабатывает повторяющуюся информацию?"]
 
 BAD_WHY:
 claim: "Ready-made integrations with CRM/Google Sheets/WhatsApp are not available yet."
@@ -152,17 +180,52 @@ AND claim only mentions/includes T in overview/checklist/criteria/testing/compos
 AND claim does not answer T in detail.
 
 NEVER add absent/synonym/guess/nearby/generalized/direct-answer topics.
+NEVER write exclusion_scope in English unless INPUT fragment body is English.
 IF none -> "".
 
 EVIDENCE:
 evidence_block REQUIRED.
-evidence_block := exact quote from source.
-NEVER paraphrase/summarize/add/replace/fix style.
-IF one sentence -> whole sentence.
-IF adjacent sentences -> all complete.
-IF list/process/checklist/criteria/test questions -> whole supporting block.
-IF heading + list -> heading + relevant list items.
-IF no exact quote supports claim -> no claim.
+evidence_block MUST be copied verbatim from INPUT.
+evidence_block MUST be one contiguous source excerpt.
+NEVER paraphrase.
+NEVER summarize.
+NEVER add words.
+NEVER replace words.
+NEVER fix style.
+NEVER translate.
+NEVER join distant text fragments.
+NEVER insert "...".
+NEVER use ellipsis to skip middle text.
+NEVER compose evidence_block from multiple non-adjacent fragments.
+
+IF one sentence supports claim -> copy whole sentence.
+IF adjacent sentences support claim -> copy all complete adjacent sentences.
+IF list/process/checklist/criteria/test questions support claim -> copy whole supporting contiguous block.
+IF heading + list support claim -> copy heading + relevant adjacent list items exactly.
+IF support requires multiple non-adjacent passages:
+
+* split into separate claims
+  OR
+* use one larger contiguous source block that contains all needed support
+  OR
+* return no claim.
+
+IF no exact contiguous quote supports claim -> no claim.
+
+BAD_EVIDENCE:
+SOURCE:
+"Документы могут быть длинными, плохо структурированными, противоречивыми или устаревшими. Axole нужен, чтобы сделать базу знаний управляемой. Пользователь должен видеть, что именно система извлекла из документов."
+
+BAD:
+evidence_block = "Документы могут быть длинными... Axole нужен... Пользователь должен видеть..."
+
+WHY_BAD:
+evidence_block uses "...".
+evidence_block is stitched/shortened.
+evidence_block is not a contiguous exact source excerpt.
+
+GOOD:
+evidence_block = "Документы могут быть длинными, плохо структурированными, противоречивыми или устаревшими. Axole нужен, чтобы сделать базу знаний управляемой. Пользователь должен видеть, что именно система извлекла из документов."
 
 EXAMPLE_LIMITATIONS:
 SOURCE:
@@ -203,9 +266,31 @@ claim = "The knowledge base can be checked with test questions about the product
 granularity = "composite"
 possible_questions = ["How should the knowledge base be checked?","Which questions should be used to test the knowledge base?","Which topics should the knowledge base check cover?"]
 exclusion_scope = "product; search; expected topic; product positioning; search review; quality evaluation"
+evidence_block = exact contiguous source block containing heading, question groups, and expected topics.
 
 WHY:
 claim is about checking the knowledge base, not product/search facts.
+
+EXAMPLE_RUSSIAN_WITH_LATIN_NAMES:
+SOURCE:
+"## Зачем нужен Axole
+
+Многие AI-боты обещают: “загрузите документы, и бот будет отвечать”. На практике этого часто недостаточно. Документы могут быть длинными, плохо структурированными, противоречивыми или устаревшими.
+
+Axole нужен, чтобы сделать базу знаний управляемой. Пользователь должен видеть, что именно система извлекла из документов."
+
+CORRECT:
+claim = "Axole нужен, чтобы сделать базу знаний управляемой и позволить пользователю видеть, что именно система извлекла из документов."
+granularity = "composite"
+possible_questions = ["Зачем нужен Axole?","Какую проблему решает Axole?","Что Axole позволяет контролировать в базе знаний?"]
+exclusion_scope = "AI-боты; документы"
+evidence_block = "Axole нужен, чтобы сделать базу знаний управляемой. Пользователь должен видеть, что именно система извлекла из документов."
+
+WHY:
+Natural-language values are Russian.
+Latin tokens Axole and AI are allowed because they appear in source.
+evidence_block is exact contiguous source wording.
+No English sentence is generated.
 
 EXCLUSION_EXAMPLES:
 SOURCE:
@@ -228,13 +313,59 @@ SOURCE:
 NEVER exclusion_scope = "CRM; sales automation; integrations"
 WHY: absent from evidence.
 
+PRE_RETURN_SELF_CHECK:
+
+Before returning JSON, validate every claim.
+
+1. LANGUAGE CHECK:
+   claim, possible_questions, exclusion_scope MUST use SOURCE_LANGUAGE.
+   If INPUT fragment body is Russian, English sentences are forbidden.
+   If a value is in the wrong language, rewrite it in SOURCE_LANGUAGE.
+   If unable to rewrite, remove the claim.
+
+2. LATIN TOKEN CHECK:
+   Latin product names/acronyms/platform names are allowed only if copied from INPUT.
+   If a Latin token appears in claim/questions/exclusion_scope and does not appear in INPUT, remove or rewrite the claim.
+
+3. EVIDENCE EXACTNESS CHECK:
+   evidence_block MUST be exact copied text from INPUT.
+   evidence_block MUST be one contiguous substring.
+   If evidence_block contains "...", remove the claim.
+   If evidence_block is paraphrased, remove the claim.
+   If evidence_block is summarized, remove the claim.
+   If evidence_block is stitched from distant passages, remove the claim.
+   If evidence_block is not exact source wording, remove the claim.
+
+4. SUPPORT CHECK:
+   evidence_block must directly support the full claim.
+   If claim is broader than evidence_block, narrow the claim or remove it.
+
+5. QUESTION CHECK:
+   possible_questions must ask the same intent as claim.
+   possible_questions must not be broader than claim+evidence.
+   possible_questions must use SOURCE_LANGUAGE.
+   If invalid, rewrite or remove bad questions.
+   If no valid natural question remains, set possible_questions = [] and reconsider claim.
+
+6. SCHEMA CHECK:
+   No null.
+   No unknown fields.
+   No markdown.
+   No text outside JSON.
+   All claims have exact fields only.
+
+7. EMPTY CHECK:
+   If no valid claims remain, return {"claims":[]}.
+
 FINAL_ASSERT:
 JSON only.
 top-level key == "claims".
 claims is array.
 each claim has exact fields only.
 no null/markdown/text outside JSON.
-language == source.
+language == INPUT fragment body.
+English output forbidden unless INPUT fragment body is English.
+Latin names/acronyms/platform names allowed only if copied from INPUT.
 function considered first.
 testing/evaluation/control -> method claim, not invented product fact.
 composite not micro-split.
@@ -242,6 +373,11 @@ different intents not merged.
 overview mentions not inflated.
 important separate condition/limitation/result not hidden.
 possible_questions same intent and not broader than evidence.
+possible_questions same language as INPUT fragment body.
 exclusion_scope only literal mentioned-but-not-explained topics, not direct answer parts.
-evidence exact.
+evidence_block is exact contiguous substring of INPUT.
+evidence_block contains no "...".
+evidence_block is not summary.
+evidence_block is not paraphrase.
+evidence_block is not stitched from distant fragments.
 claim <= evidence.
