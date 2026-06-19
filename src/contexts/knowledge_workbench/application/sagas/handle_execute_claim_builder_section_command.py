@@ -144,7 +144,7 @@ class ClaimBuilderLlmDispatchOutputValidator:
             validation_result = self.policy.validate(
                 ValidateClaimBuilderOutputCommand(
                     output_payload=decoded_payload,
-                    source_unit_text=_source_unit_text(dispatch_payload),
+                    source_unit_text=_source_context_text(dispatch_payload),
                     source_unit_ref=_source_unit_ref(dispatch_payload),
                     empty_claims_attempt_count=max(attempt_number - 1, 0),
                 )
@@ -160,7 +160,7 @@ class ClaimBuilderLlmDispatchOutputValidator:
                 model_ref=_dispatch_model_ref(dispatch_payload),
                 output_payload=decoded_payload,
                 raw_output_text=raw_output_text,
-                source_unit_text=_source_unit_text(dispatch_payload),
+                source_unit_text=_source_context_text(dispatch_payload),
                 is_output_truncated=_is_output_truncated(output_payload),
                 validation_result=validation_result,
             )
@@ -500,6 +500,34 @@ def _synthetic_validation_failure(
         claims=(),
         failure_reason=failure_reason,
     )
+
+
+def _source_context_text(dispatch_payload: Mapping[str, object]) -> str:
+    full_user_message = _source_user_message_content(dispatch_payload)
+    if full_user_message.strip():
+        return full_user_message
+    return _source_unit_text(dispatch_payload)
+
+
+def _source_user_message_content(dispatch_payload: Mapping[str, object]) -> str:
+    schedule_payload = dispatch_payload.get("schedule_payload")
+    if not isinstance(schedule_payload, Mapping):
+        return ""
+
+    provider_messages = schedule_payload.get("provider_messages")
+    if not isinstance(provider_messages, list):
+        return ""
+
+    for message in provider_messages:
+        if not isinstance(message, Mapping):
+            continue
+
+        role = message.get("role")
+        content = message.get("content")
+        if role == "user" and isinstance(content, str):
+            return content
+
+    return ""
 
 
 def _source_unit_text(dispatch_payload: Mapping[str, object]) -> str:

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from pathlib import Path
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservation,
+    LlmAttemptCapacityObservationRepositoryPort,
 )
 from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_read_repository_port import (
     WorkItemAttemptDispatchForExecution,
@@ -26,6 +28,7 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_bui
     HandleExecuteClaimBuilderSectionCommand,
     HandleExecuteClaimBuilderSectionCommandHandler,
     HandleExecuteClaimBuilderSectionResult,
+    _source_context_text,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationDecision,
@@ -72,6 +75,9 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_consumer_ref im
 )
 from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
     WorkflowIdempotencyKey,
+)
+from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
+    WorkflowRuntimeUnitOfWorkPort,
 )
 from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttemptCommand,
@@ -325,6 +331,23 @@ class FakeCapacityObservationRepository:
     ) -> None:
         self.observations.append(observation)
 
+    async def observations_for_accounts_since(
+        self,
+        *,
+        provider: str,
+        account_refs: tuple[str, ...],
+        model_ref: str,
+        since: datetime,
+    ) -> tuple[LlmAttemptCapacityObservation, ...]:
+        del since
+        return tuple(
+            observation
+            for observation in self.observations
+            if observation.provider == provider
+            and observation.account_ref in account_refs
+            and observation.model_ref == model_ref
+        )
+
 
 @dataclass(slots=True)
 class FakeCommandLogRepository:
@@ -514,10 +537,16 @@ async def _execute(
             workflow_command=workflow_command or _workflow_command(),
         ),
         execute_prepared_llm_dispatch_attempt=executor,
-        capacity_observation_repository=capacity_repository,
+        capacity_observation_repository=cast(
+            LlmAttemptCapacityObservationRepositoryPort,
+            capacity_repository,
+        ),
         claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
         draft_claim_observation_persistence=draft_persistence,
-        workflow_unit_of_work=workflow_unit_of_work,
+        workflow_unit_of_work=cast(
+            WorkflowRuntimeUnitOfWorkPort,
+            workflow_unit_of_work,
+        ),
     )
     return (
         result,
@@ -1346,3 +1375,30 @@ def test_execute_retry_after_recorded_outcome_is_guarded_before_llm_call() -> No
     assert "recorded_outcome_reader=outcome_repository" in Path(
         "src/interfaces/composition/knowledge_extraction_after_upload_composition.py",
     ).read_text(encoding="utf-8")
+
+
+def test_source_context_text_keeps_heading_path_for_validation() -> None:
+    dispatch_payload = {
+        "schedule_payload": {
+            "provider_messages": [
+                {
+                    "role": "system",
+                    "content": "system prompt",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "source_unit_ref: section-1\n"
+                        "heading_path: ProductName: docs / Клиентский Telegram-бот\n\n"
+                        "## Клиентский Telegram-бот\n\n"
+                        "Клиентский Telegram-бот нужен для первого контакта."
+                    ),
+                },
+            ],
+        },
+    }
+
+    assert "ProductName" in _source_context_text(dispatch_payload)
+    assert "Клиентский Telegram-бот нужен для первого контакта" in _source_context_text(
+        dispatch_payload,
+    )

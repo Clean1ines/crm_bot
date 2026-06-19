@@ -361,3 +361,32 @@ def test_validation_result_invariants(
             claims=claims,
             failure_reason=failure_reason,
         )
+
+
+def test_latin_token_from_heading_context_is_allowed_without_hardcoded_name() -> None:
+    result = _validate(
+        {
+            "claims": [
+                _claim_payload(
+                    claim=(
+                        "Клиентский Telegram-бот ProductName нужен для первого "
+                        "контакта клиентов с бизнесом."
+                    ),
+                    possible_questions=[
+                        "Зачем нужен клиентский Telegram-бот ProductName?"
+                    ],
+                    exclusion_scope="менеджерский бот",
+                )
+            ]
+        },
+        source_unit_text=(
+            "source_unit_ref: section-1\n"
+            "heading_path: ProductName: справка о продукте / "
+            "Клиентский Telegram-бот\n\n"
+            "## Клиентский Telegram-бот\n\n"
+            "Клиентский Telegram-бот — это бот, в который пишет клиент бизнеса. "
+            "Он нужен для первого контакта."
+        ),
+    )
+
+    assert result.decision is ClaimBuilderOutputValidationDecision.VALID_CLAIMS
