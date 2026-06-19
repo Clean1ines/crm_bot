@@ -120,7 +120,8 @@ def test_next_work_item_carries_prompt_estimate_from_node_refs() -> None:
         is DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
     )
     assert decision.node_refs == ("A", "B")
-    assert decision.next_work_item.estimated_prompt_tokens == 4600
+    assert decision.next_work_item.estimated_prompt_tokens == 6650
+    assert decision.next_work_item.estimated_completion_tokens == 4600
 
 
 def test_known_different_compacted_pair_blocks_raw_bridge_to_other_side() -> None:

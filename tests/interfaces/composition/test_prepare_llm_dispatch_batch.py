@@ -1215,7 +1215,7 @@ async def test_source_split_required_raises_when_due_payload_has_no_source_unit_
         )
 
 
-def test_tpm_admission_uses_prompt_tokens_not_reserved_output_tokens() -> None:
+def test_tpm_admission_uses_prompt_and_reserved_output_tokens() -> None:
     profile = LlmTaskCapacityProfile(
         profile_id="prompt-a",
         estimated_prompt_tokens=3000,
@@ -1228,7 +1228,7 @@ def test_tpm_admission_uses_prompt_tokens_not_reserved_output_tokens() -> None:
         daily_tokens=3000,
     )
 
-    assert capacity.max_items_for(profile) == 1
+    assert capacity.max_items_for(profile) == 0
 
 
 def test_groq_missing_minute_reset_uses_local_sixty_second_timer() -> None:
@@ -1401,7 +1401,10 @@ async def test_prepare_allocates_retry_then_fresh_per_window() -> None:
         "work-retry-large": "org-2",
         "work-fresh-small": "org-4",
     }
-    assert connection.work_items["work-fresh-large"]["status"] == WorkItemStatus.READY.value
+    assert (
+        connection.work_items["work-fresh-large"]["status"]
+        == WorkItemStatus.READY.value
+    )
 
 
 @pytest.mark.asyncio

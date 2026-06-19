@@ -185,13 +185,13 @@ def test_sufficient_limits_keep_route_available() -> None:
     assert availability[route].daily_capacity_available
 
 
-def test_minute_token_budget_ignores_reserved_output_tokens() -> None:
+def test_combined_minute_token_budget_uses_input_and_reserved_output_tokens() -> None:
     route = _route()
 
     availability = LlmQuotaAvailabilityPolicy(
         snapshots_by_route={
             route: LlmQuotaSnapshot(
-                remaining_tokens_minute=1_000,
+                remaining_tokens_minute=2_999,
             ),
         },
     ).build_availability_by_route(
@@ -199,7 +199,7 @@ def test_minute_token_budget_ignores_reserved_output_tokens() -> None:
         estimated_need=_need(),
     )
 
-    assert availability[route].minute_capacity_available
+    assert not availability[route].minute_capacity_available
 
 
 def test_estimated_token_need_validates_non_negative_values() -> None:

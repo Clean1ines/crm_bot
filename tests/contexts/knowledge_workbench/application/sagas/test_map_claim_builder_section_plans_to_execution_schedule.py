@@ -178,13 +178,13 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> N
     assert capacity_estimate["estimated_input_tokens"] == (
         1953 + capacity_estimate["source_unit_token_count"]
     )
-    assert capacity_estimate["reserved_output_tokens"] == capacity_estimate[
-        "source_unit_token_count"
-    ]
+    assert (
+        capacity_estimate["reserved_output_tokens"]
+        == capacity_estimate["source_unit_token_count"]
+    )
     assert capacity_estimate["estimated_total_tokens"] == (
         1953 + capacity_estimate["source_unit_token_count"] * 2
     )
-
 
 
 def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() -> None:

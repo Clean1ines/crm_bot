@@ -14,6 +14,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionPlannerState,
 )
 
+DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS = 2_050
+ENRICHED_CLAIM_COMPACTION_PROMPT_TOKENS = 2_150
+
 
 @dataclass(frozen=True, slots=True)
 class DraftClaimCompactionReductionPlannerPolicy:
@@ -438,21 +441,24 @@ def _decision(
     node_refs: tuple[str, ...],
     reason: str,
 ) -> DraftClaimCompactionPlannerDecision:
+    task_tokens = _estimated_task_tokens(
+        state=state,
+        node_refs=node_refs,
+    )
+    prompt_tokens = _prompt_tokens_for_work_type(work_type)
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=work_type,
             node_refs=node_refs,
             primary_model_id=state.primary_model_id,
-            estimated_prompt_tokens=_estimated_prompt_tokens(
-                state=state,
-                node_refs=node_refs,
-            ),
+            estimated_prompt_tokens=prompt_tokens + task_tokens,
+            estimated_completion_tokens=task_tokens,
         ),
         reason=reason,
     )
 
 
-def _estimated_prompt_tokens(
+def _estimated_task_tokens(
     *,
     state: DraftClaimCompactionPlannerState,
     node_refs: tuple[str, ...],
@@ -468,6 +474,14 @@ def _estimated_prompt_tokens(
     if node_refs and total <= 0:
         return 1
     return total
+
+
+def _prompt_tokens_for_work_type(
+    work_type: DraftClaimCompactionNextWorkItemType,
+) -> int:
+    if work_type is DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE:
+        return ENRICHED_CLAIM_COMPACTION_PROMPT_TOKENS
+    return DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS
 
 
 def _wait_for_user_model_choice(

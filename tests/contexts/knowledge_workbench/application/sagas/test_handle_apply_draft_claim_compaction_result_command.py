@@ -100,7 +100,6 @@ def _command(
                 "key": "refund_support",
                 "claim": "Product supports refunds.",
                 "claim_kind": "capability",
-                "granularity": "atomic",
                 "source_claim_refs": ["claim-a", "claim-b"],
                 "triples": [_triple_json()],
                 "merge_decision": "merged",
@@ -183,6 +182,7 @@ class FakeReductionStateRepository:
         batch_ref: str,
         work_item_id: str,
         round_index: int,
+        compared_node_refs,
         compacted_claims,
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
@@ -191,6 +191,10 @@ class FakeReductionStateRepository:
         assert batch_ref == "batch-1"
         assert work_item_id == "work-item-1"
         assert round_index == 0
+        assert tuple(compared_node_refs) == (
+            "raw:workflow-1:group-1:claim-a",
+            "raw:workflow-1:group-1:claim-b",
+        )
         assert created_at == _now()
         assert compacted_claims[0].source_claim_refs == ("claim-a", "claim-b")
         assert compacted_claims[0].possible_questions == ("Q claim-a", "Q claim-b")
@@ -643,6 +647,7 @@ def _decision(
     *,
     node_refs: tuple[str, ...] = (),
     estimated_prompt_tokens: int = 1,
+    estimated_completion_tokens: int | None = None,
 ) -> DraftClaimCompactionPlannerDecision:
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
@@ -653,6 +658,9 @@ def _decision(
             is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
             else None,
             estimated_prompt_tokens=estimated_prompt_tokens,
+            estimated_completion_tokens=4000
+            if estimated_completion_tokens is None
+            else estimated_completion_tokens,
         ),
         reason="test decision",
     )
