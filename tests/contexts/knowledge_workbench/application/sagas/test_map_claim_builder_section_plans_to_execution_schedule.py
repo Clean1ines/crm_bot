@@ -56,7 +56,10 @@ def _command(
     return MapClaimBuilderSectionPlansToExecutionScheduleCommand(plans=plans)
 
 
-def test_maps_one_workbench_plan_to_execution_schedule_plan() -> None:
+def test_maps_one_workbench_plan_to_execution_schedule_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CLAIM_BUILDER_PROMPT_TOKENS", raising=False)
     plan = _plan()
 
     result = MapClaimBuilderSectionPlansToExecutionSchedule().execute(
@@ -135,7 +138,10 @@ def test_payload_hash_is_stable_through_execution_runtime_helper() -> None:
     ) == work_item_schedule_payload_hash(second.payload)
 
 
-def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> None:
+def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CLAIM_BUILDER_PROMPT_TOKENS", raising=False)
     plan = _plan()
     schedule = (
         MapClaimBuilderSectionPlansToExecutionSchedule()
@@ -185,6 +191,31 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids() -> N
     assert capacity_estimate["estimated_total_tokens"] == (
         1953 + capacity_estimate["source_unit_token_count"] * 2
     )
+
+
+def test_prompt_token_count_can_be_overridden_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAIM_BUILDER_PROMPT_TOKENS", "4200")
+    plan = _plan()
+
+    schedule = (
+        MapClaimBuilderSectionPlansToExecutionSchedule()
+        .execute(
+            _command((plan,)),
+        )
+        .schedule_plans[0]
+    )
+
+    capacity_estimate = schedule.payload["llm_capacity_estimate"]
+    assert capacity_estimate["prompt_message_tokens"] == (4200,)
+    assert capacity_estimate["estimated_input_tokens"] == (
+        4200 + capacity_estimate["source_unit_token_count"]
+    )
+    assert capacity_estimate["estimated_total_tokens"] == (
+        4200 + capacity_estimate["source_unit_token_count"] * 2
+    )
+    assert capacity_estimate["estimator"].startswith("measured_prompt_4200_")
 
 
 def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() -> None:

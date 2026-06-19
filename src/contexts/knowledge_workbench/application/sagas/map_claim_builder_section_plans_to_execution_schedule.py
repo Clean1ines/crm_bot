@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     WorkItemSchedulePlan,
@@ -19,7 +20,8 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
     ClaimBuilderSectionExtractionPromptInput,
 )
 
-CLAIM_BUILDER_MEASURED_PROMPT_TOKENS = 1_953
+CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 1_953
+CLAIM_BUILDER_PROMPT_TOKENS_ENV = "CLAIM_BUILDER_PROMPT_TOKENS"
 CLAIM_BUILDER_MODEL_TPM_TOKENS = 6_000
 CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS = 100
 
@@ -125,20 +127,37 @@ def _claim_builder_token_estimate(
     prompt_contract: ClaimBuilderSectionExtractionPromptContract,
 ) -> dict[str, object]:
     del prompt_contract
+    prompt_token_count = _claim_builder_prompt_tokens_from_env()
     source_unit_token_count = max(1, estimate_tokens_roughly(plan.source_unit_text))
-    estimated_input_tokens = (
-        CLAIM_BUILDER_MEASURED_PROMPT_TOKENS + source_unit_token_count
-    )
+    estimated_input_tokens = prompt_token_count + source_unit_token_count
     reserved_output_tokens = source_unit_token_count
 
     return {
-        "estimator": "measured_prompt_1953_source_char_div_3_3_conservative_section_output",
-        "prompt_message_tokens": (CLAIM_BUILDER_MEASURED_PROMPT_TOKENS,),
+        "estimator": (
+            f"measured_prompt_{prompt_token_count}_"
+            "source_char_div_3_3_conservative_section_output"
+        ),
+        "prompt_message_tokens": (prompt_token_count,),
         "source_unit_token_count": source_unit_token_count,
         "estimated_input_tokens": estimated_input_tokens,
         "reserved_output_tokens": reserved_output_tokens,
         "estimated_total_tokens": estimated_input_tokens + reserved_output_tokens,
     }
+
+
+def _claim_builder_prompt_tokens_from_env() -> int:
+    raw_value = os.environ.get(CLAIM_BUILDER_PROMPT_TOKENS_ENV)
+    if raw_value is None or not raw_value.strip():
+        return CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS
+    try:
+        prompt_tokens = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{CLAIM_BUILDER_PROMPT_TOKENS_ENV} must be an integer",
+        ) from exc
+    if prompt_tokens <= 0:
+        raise ValueError(f"{CLAIM_BUILDER_PROMPT_TOKENS_ENV} must be > 0")
+    return prompt_tokens
 
 
 def _claim_builder_provenance(
