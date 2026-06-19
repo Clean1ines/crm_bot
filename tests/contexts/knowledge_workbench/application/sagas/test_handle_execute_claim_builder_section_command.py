@@ -238,8 +238,7 @@ def _execution_result(
                     '{"claims":[{"claim":"Product System turns documents into '
                     'knowledge.","granularity":"atomic","possible_questions":'
                     '["Что делает Product System?"],"exclusion_scope":"Цены не '
-                    'описаны.","evidence_block":"Product System turns documents '
-                    'into knowledge."}]}'
+                    'описаны."}]}'
                 )
             },
             capacity_observation=_capacity_payload(),

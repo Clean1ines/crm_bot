@@ -16,7 +16,6 @@ _CLAIM_FIELDS = frozenset(
         "granularity",
         "possible_questions",
         "exclusion_scope",
-        "evidence_block",
     }
 )
 _LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
@@ -56,11 +55,16 @@ class ClaimBuilderOutputValidationFailureReason(Enum):
 class ValidateClaimBuilderOutputCommand:
     output_payload: JsonInputValue
     source_unit_text: str
+    source_unit_ref: str
     empty_claims_attempt_count: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.source_unit_text, str):
             raise TypeError("source_unit_text must be str")
+        if not isinstance(self.source_unit_ref, str):
+            raise TypeError("source_unit_ref must be str")
+        if not self.source_unit_ref.strip():
+            raise ValueError("source_unit_ref must be non-empty")
         if not isinstance(self.empty_claims_attempt_count, int):
             raise TypeError("empty_claims_attempt_count must be int")
         if self.empty_claims_attempt_count < 0:
@@ -176,6 +180,7 @@ class ClaimBuilderOutputValidationPolicy:
             claim_result = _validate_claim_item(
                 claim_value=claim_value,
                 source_unit_text=command.source_unit_text,
+                source_unit_ref=command.source_unit_ref,
             )
             if isinstance(claim_result, ClaimBuilderOutputValidationResult):
                 return claim_result
@@ -192,6 +197,7 @@ def _validate_claim_item(
     *,
     claim_value: JsonInputValue,
     source_unit_text: str,
+    source_unit_ref: str,
 ) -> ValidatedClaimBuilderClaim | ClaimBuilderOutputValidationResult:
     if not isinstance(claim_value, Mapping):
         return _failure(
@@ -235,19 +241,7 @@ def _validate_claim_item(
     if isinstance(exclusion_scope, ClaimBuilderOutputValidationResult):
         return exclusion_scope
 
-    evidence_block = _non_empty_string(
-        claim_mapping["evidence_block"],
-        ClaimBuilderOutputValidationFailureReason.EVIDENCE_BLOCK_EMPTY,
-    )
-    if isinstance(evidence_block, ClaimBuilderOutputValidationResult):
-        return evidence_block
-
-    evidence_excerpt = evidence_block.strip()
-    if evidence_excerpt not in source_unit_text:
-        return _failure(
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
-            ClaimBuilderOutputValidationFailureReason.EVIDENCE_BLOCK_NOT_SOURCE_EXCERPT,
-        )
+    evidence_block = source_unit_ref
 
     latin_result = _validate_latin_tokens_against_source_unit(
         claim_text=claim_text,

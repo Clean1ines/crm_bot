@@ -29,14 +29,12 @@ def _claim_payload(
     granularity: JsonInputValue = "atomic",
     possible_questions: JsonInputValue = ["Что делает Product System?"],
     exclusion_scope: JsonInputValue = "Цены не описаны.",
-    evidence_block: JsonInputValue = "Product System turns documents into knowledge.",
 ) -> dict[str, JsonInputValue]:
     return {
         "claim": claim,
         "granularity": granularity,
         "possible_questions": possible_questions,
         "exclusion_scope": exclusion_scope,
-        "evidence_block": evidence_block,
     }
 
 
@@ -44,12 +42,14 @@ def _validate(
     output_payload: JsonInputValue,
     *,
     source_unit_text: str = SOURCE_UNIT_TEXT,
+    source_unit_ref: str = "source-unit:test",
     empty_claims_attempt_count: int = 0,
 ) -> ClaimBuilderOutputValidationResult:
     return ClaimBuilderOutputValidationPolicy().validate(
         ValidateClaimBuilderOutputCommand(
             output_payload=output_payload,
             source_unit_text=source_unit_text,
+            source_unit_ref=source_unit_ref,
             empty_claims_attempt_count=empty_claims_attempt_count,
         )
     )
@@ -79,7 +79,7 @@ def test_valid_single_atomic_claim_returns_valid_claims() -> None:
             granularity=DraftClaimGranularity.ATOMIC,
             possible_questions=("Что делает Product System?",),
             exclusion_scope="Цены не описаны.",
-            evidence_block="Product System turns documents into knowledge.",
+            evidence_block="source-unit:test",
         ),
     )
 
@@ -102,7 +102,6 @@ def test_valid_multiple_claims_returns_valid_claims() -> None:
                     granularity="composite",
                     possible_questions=["Что включает Onboarding?"],
                     exclusion_scope="Цены не описаны.",
-                    evidence_block="Onboarding includes setup and import steps.",
                 ),
             ]
         }
@@ -193,7 +192,7 @@ def test_claim_item_not_object_invalid() -> None:
 
 def test_missing_field_invalid() -> None:
     claim = _claim_payload()
-    del claim["evidence_block"]
+    del claim["exclusion_scope"]
 
     result = _validate({"claims": [claim]})
 
@@ -223,32 +222,14 @@ def test_empty_claim_invalid() -> None:
     )
 
 
-def test_empty_evidence_invalid() -> None:
-    result = _validate({"claims": [_claim_payload(evidence_block="  ")]})
-
-    _assert_failure(
-        result,
-        failure_reason=ClaimBuilderOutputValidationFailureReason.EVIDENCE_BLOCK_EMPTY,
-    )
-
-
-def test_evidence_block_not_exact_source_excerpt_invalid() -> None:
+def test_valid_claim_persists_source_unit_ref_as_evidence_block() -> None:
     result = _validate(
-        {
-            "claims": [
-                _claim_payload(
-                    evidence_block="Product System almost turns documents into knowledge."
-                )
-            ]
-        }
+        {"claims": [_claim_payload()]},
+        source_unit_ref="source-unit:custom",
     )
 
-    _assert_failure(
-        result,
-        failure_reason=(
-            ClaimBuilderOutputValidationFailureReason.EVIDENCE_BLOCK_NOT_SOURCE_EXCERPT
-        ),
-    )
+    assert result.decision is ClaimBuilderOutputValidationDecision.VALID_CLAIMS
+    assert result.claims[0].evidence_block == "source-unit:custom"
 
 
 def test_latin_in_claim_allowed_when_token_exists_in_evidence_block() -> None:
@@ -263,7 +244,6 @@ def test_latin_in_exclusion_scope_allowed_when_token_exists_in_source_unit() -> 
             "claims": [
                 _claim_payload(
                     exclusion_scope="Onboarding",
-                    evidence_block="Product System turns documents into knowledge.",
                 )
             ]
         }
@@ -278,7 +258,6 @@ def test_latin_in_claim_rejected_when_token_absent_in_source_unit() -> None:
             "claims": [
                 _claim_payload(
                     claim="Product System uses OpenAI.",
-                    evidence_block="Product System turns documents into knowledge.",
                     possible_questions=["Что делает Product System?"],
                 )
             ]
@@ -301,7 +280,6 @@ def test_latin_in_possible_questions_rejected_when_token_absent_in_source_unit()
             "claims": [
                 _claim_payload(
                     possible_questions=["Does Product System use OpenAI?"],
-                    evidence_block="Product System turns documents into knowledge.",
                 )
             ]
         }
@@ -360,7 +338,7 @@ def test_invalid_granularity_invalid() -> None:
                     granularity=DraftClaimGranularity.ATOMIC,
                     possible_questions=("Что делает Product System?",),
                     exclusion_scope="Цены не описаны.",
-                    evidence_block="Product System turns documents into knowledge.",
+                    evidence_block="source-unit:test",
                 ),
             ),
             None,

@@ -142,6 +142,7 @@ class ClaimBuilderLlmDispatchOutputValidator:
                 ValidateClaimBuilderOutputCommand(
                     output_payload=decoded_payload,
                     source_unit_text=_source_unit_text(dispatch_payload),
+                    source_unit_ref=_source_unit_ref(dispatch_payload),
                     empty_claims_attempt_count=max(attempt_number - 1, 0),
                 )
             )
