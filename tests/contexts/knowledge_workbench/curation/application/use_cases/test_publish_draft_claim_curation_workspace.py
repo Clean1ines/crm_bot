@@ -89,7 +89,9 @@ def _item(*, excluded: bool = False) -> DraftClaimCurationWorkspaceItem:
 
 
 def _snapshot(
-    *, items: tuple[DraftClaimCurationWorkspaceItem, ...]
+    *,
+    items: tuple[DraftClaimCurationWorkspaceItem, ...],
+    status: DraftClaimCurationWorkspaceStatus = DraftClaimCurationWorkspaceStatus.DRAFT,
 ) -> DraftClaimCurationWorkspaceSnapshot:
     return DraftClaimCurationWorkspaceSnapshot(
         workspace=DraftClaimCurationWorkspace(
@@ -97,7 +99,7 @@ def _snapshot(
             workflow_run_id="workflow-1",
             project_id="11111111-1111-1111-1111-111111111111",
             source_document_ref="source-document:project-1:abc",
-            status=DraftClaimCurationWorkspaceStatus.DRAFT,
+            status=status,
             created_at=_now(),
             updated_at=_now(),
         ),
@@ -207,6 +209,31 @@ async def test_publish_skips_excluded_items() -> None:
 
     assert result.published_item_count == 1
     assert result.excluded_item_count == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_replay_returns_existing_result_without_reembedding() -> None:
+    embedding_port = FakeEmbeddingPort()
+    publication_repo = FakePublicationRepository()
+
+    result = await PublishDraftClaimCurationWorkspace(
+        curation_workspace_repository=FakeWorkspaceRepository(
+            snapshot=_snapshot(
+                items=(_item(), _item(excluded=True)),
+                status=DraftClaimCurationWorkspaceStatus.PUBLISHED,
+            )
+        ),
+        curation_publication_repository=publication_repo,
+        embedding_generation_port=embedding_port,
+        embedding_model_id="test-model",
+        embedding_dimensions=384,
+    ).execute(workflow_run_id="workflow-1", published_at=_now())
+
+    assert result.publication_id == "draft-claim-curation-publication:workflow-1"
+    assert result.published_item_count == 1
+    assert result.excluded_item_count == 1
+    assert embedding_port.requests == []
+    assert publication_repo.candidate is None
 
 
 @pytest.mark.asyncio

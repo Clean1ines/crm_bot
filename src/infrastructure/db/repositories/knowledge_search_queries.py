@@ -64,6 +64,8 @@ SELECT
 {_RUNTIME_ENTRY_FROM}
 {_RUNTIME_ENTRY_WHERE}
   AND $4::text[] IS NOT NULL
+  AND emb.embedding_model_id = $5
+  AND emb.dimensions = $6
 ORDER BY emb.embedding <=> $1::vector
 LIMIT $3
 """
@@ -83,6 +85,8 @@ base AS (
 {_RUNTIME_ENTRY_FROM}
 {_RUNTIME_ENTRY_WHERE.replace("$2::uuid", "$3::uuid")}
       AND $6::text[] IS NOT NULL
+      AND emb.embedding_model_id = $7
+      AND emb.dimensions = $8
 ),
 vector_candidates AS (
     SELECT

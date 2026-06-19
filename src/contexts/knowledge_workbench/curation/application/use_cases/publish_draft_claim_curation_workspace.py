@@ -16,6 +16,7 @@ from src.contexts.knowledge_workbench.curation.application.models.draft_claim_cu
 )
 from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
     DraftClaimCurationWorkspaceItem,
+    DraftClaimCurationWorkspaceSnapshot,
     DraftClaimCurationWorkspaceStatus,
 )
 from src.contexts.knowledge_workbench.curation.application.policies.curated_claim_embedding_input_builder import (
@@ -81,8 +82,9 @@ class PublishDraftClaimCurationWorkspace:
                 "curation workspace not found"
             )
         if snapshot.workspace.status is DraftClaimCurationWorkspaceStatus.PUBLISHED:
-            raise DraftClaimCurationPublicationAlreadyPublishedError(
-                "curation workspace already published"
+            return _published_replay_result(
+                workflow_run_id=workflow_run_id,
+                snapshot=snapshot,
             )
 
         project_id = snapshot.workspace.project_id
@@ -191,6 +193,34 @@ def _publication_item(
 
 def _publication_id(workflow_run_id: str) -> str:
     return f"draft-claim-curation-publication:{workflow_run_id}"
+
+
+def _published_replay_result(
+    *,
+    workflow_run_id: str,
+    snapshot: DraftClaimCurationWorkspaceSnapshot,
+) -> DraftClaimCurationPublicationResult:
+    project_id = snapshot.workspace.project_id
+    source_document_ref = snapshot.workspace.source_document_ref
+    if project_id is None or source_document_ref is None:
+        raise ValueError(
+            "published curation workspace must have project/source ownership"
+        )
+    publishable_item_count = sum(not item.excluded for item in snapshot.items)
+    return DraftClaimCurationPublicationResult(
+        status="published",
+        publication_id=_publication_id(workflow_run_id),
+        workflow_run_id=workflow_run_id,
+        project_id=project_id,
+        source_document_ref=source_document_ref,
+        published_item_count=publishable_item_count,
+        excluded_item_count=len(snapshot.items) - publishable_item_count,
+        runtime_entry_count=publishable_item_count,
+        embedding_count=publishable_item_count,
+        deleted_draft_embedding_count=0,
+        automatic_processing_elapsed_seconds=None,
+        published_at=snapshot.workspace.updated_at,
+    )
 
 
 def _fact_registry_id(workflow_run_id: str) -> str:

@@ -13,6 +13,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Protocol, cast
 from uuid import UUID
+import asyncpg
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -108,6 +109,22 @@ from src.contexts.knowledge_workbench.source_management.application.ports.source
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_ports import (
     KnowledgeExtractionSagaStateRepositoryPort,
+)
+from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
+    KnowledgeExtractionCanonicalCommandType,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_command import (
+    WorkflowCommand,
+    WorkflowCommandStatus,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+    WorkflowCommandId,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
+    WorkflowIdempotencyKey,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_workflow_runtime_unit_of_work import (
+    PostgresWorkflowRuntimeUnitOfWork,
 )
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     AsyncSourceManagementConnectionLike,
@@ -1392,9 +1409,31 @@ async def publish_draft_claim_curation_workspace(
         PostgresDraftClaimCurationPublicationRepository,
     )
 
-    embedding_settings = load_embedding_runtime_settings()
-
     try:
+        await _enqueue_draft_claim_curation_publication(
+            pool=cast(AsyncPool, pool),
+            workflow_run_id=workflow_run_id,
+            requested_at=datetime.now(timezone.utc),
+        )
+        drain_result = await make_knowledge_extraction_workflow_resume(
+            pool=cast(AsyncPool, pool),
+        ).execute(
+            RunKnowledgeExtractionWorkflowResumeCommand(
+                project_id=project_id,
+                document_id=workflow_run_id,
+                max_drain_commands=10,
+            )
+        )
+        if drain_result.blocked_command_type is not None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Curation publication remains pending: "
+                    f"{drain_result.blocked_reason}"
+                ),
+            )
+
+        embedding_settings = load_embedding_runtime_settings()
         result = await PublishDraftClaimCurationWorkspace(
             curation_workspace_repository=curation_repository,
             curation_publication_repository=PostgresDraftClaimCurationPublicationRepository(
@@ -1427,6 +1466,42 @@ async def publish_draft_claim_curation_workspace(
         ) from exc
 
     return result.to_json_dict()
+
+
+async def _enqueue_draft_claim_curation_publication(
+    *,
+    pool: AsyncPool,
+    workflow_run_id: str,
+    requested_at: datetime,
+) -> None:
+    connection = await pool.acquire()
+    workflow_unit_of_work = PostgresWorkflowRuntimeUnitOfWork(
+        cast(asyncpg.Connection, connection)
+    )
+    await workflow_unit_of_work.start()
+    idempotency_key = f"draft-claim-curation-publish:{workflow_run_id}"
+    try:
+        await workflow_unit_of_work.command_log.append_pending_command(
+            WorkflowCommand(
+                command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+                command_type=(
+                    KnowledgeExtractionCanonicalCommandType.PUBLISH_DRAFT_CLAIM_CURATION_WORKSPACE.value
+                ),
+                workflow_run_id=workflow_run_id,
+                idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+                payload={"workflow_run_id": workflow_run_id},
+                status=WorkflowCommandStatus.PENDING,
+                run_after=requested_at,
+                created_at=requested_at,
+                updated_at=requested_at,
+            )
+        )
+        await workflow_unit_of_work.commit()
+    except Exception:
+        await workflow_unit_of_work.rollback()
+        raise
+    finally:
+        await pool.release(connection)
 
 
 @router.post("/rag-eval/workbench/run")

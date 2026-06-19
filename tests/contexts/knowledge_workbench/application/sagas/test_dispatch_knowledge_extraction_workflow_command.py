@@ -1065,6 +1065,30 @@ async def test_build_cluster_preview_requires_preview_repository() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command_type",
+    (
+        KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE,
+        KnowledgeExtractionCanonicalCommandType.PUBLISH_DRAFT_CLAIM_CURATION_WORKSPACE,
+    ),
+)
+async def test_curation_commands_block_without_required_dependencies(
+    command_type: KnowledgeExtractionCanonicalCommandType,
+) -> None:
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(command_type)
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
+
+
+@pytest.mark.asyncio
 async def test_dispatch_repairs_claim_builder_prepare_command_without_dispatch_preparation() -> (
     None
 ):

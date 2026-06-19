@@ -42,6 +42,12 @@ from src.contexts.execution_runtime.application.ports.work_item_split_supersede_
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_ports import (
     KnowledgeExtractionSagaStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.curation.application.ports.draft_claim_curation_workspace_repository_port import (
+    DraftClaimCurationWorkspaceRepositoryPort,
+)
+from src.contexts.knowledge_workbench.curation.application.ports.draft_claim_curation_publication_repository_port import (
+    DraftClaimCurationPublicationRepositoryPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionWorkflowStatus,
 )
@@ -175,6 +181,10 @@ class DrainKnowledgeExtractionWorkflowCommands:
         ) = None,
         cluster_preview_repository: DraftClaimClusterPreviewRepositoryPort
         | None = None,
+        curation_workspace_repository: DraftClaimCurationWorkspaceRepositoryPort
+        | None = None,
+        curation_publication_repository: DraftClaimCurationPublicationRepositoryPort
+        | None = None,
         draft_claim_compaction_output_validator: (
             DraftClaimCompactionOutputValidator | None
         ) = None,
@@ -260,6 +270,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                     draft_claim_compaction_reduction_state_repository
                 ),
                 cluster_preview_repository=cluster_preview_repository,
+                curation_workspace_repository=curation_workspace_repository,
+                curation_publication_repository=curation_publication_repository,
+                workflow_state_repository=workflow_state_repository,
                 draft_claim_compaction_output_validator=(
                     draft_claim_compaction_output_validator
                 ),

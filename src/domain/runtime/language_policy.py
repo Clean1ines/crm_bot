@@ -83,7 +83,10 @@ class LanguagePolicyDecision:
 
 def normalize_project_language(value: str | None) -> LanguageHint:
     normalized = (value or "").strip().lower()
-    return normalized if normalized in SUPPORTED_LANGUAGES else "unknown"
+    for language in SUPPORTED_LANGUAGES:
+        if normalized == language:
+            return language
+    return "unknown"
 
 
 def _token_signal_counts(tokens: list[str]) -> tuple[int, int, int]:

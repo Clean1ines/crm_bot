@@ -56,10 +56,11 @@ class _Connection:
     def __init__(self, rows: list[dict[str, object]]) -> None:
         self.rows = rows
         self.queries: list[str] = []
+        self.calls: list[tuple[str, tuple[object, ...]]] = []
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
-        del args
         self.queries.append(query)
+        self.calls.append((query, args))
         return self.rows
 
 
@@ -123,6 +124,9 @@ async def test_search_maps_workbench_claim_to_public_result_content() -> None:
     assert results[0].source_refs[0].quote == "quote from source claim"
     assert results[0].method in {"hybrid", "vector", "fts"}
     assert "knowledge_workbench_runtime_retrieval_entries" in connection.queries[0]
+    assert "emb.embedding_model_id = $7" in connection.queries[0]
+    assert "emb.dimensions = $8" in connection.queries[0]
+    assert connection.calls[0][1][-2:] == ("test-embedding-model", 384)
 
 
 @pytest.mark.asyncio

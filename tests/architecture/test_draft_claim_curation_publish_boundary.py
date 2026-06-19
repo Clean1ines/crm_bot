@@ -21,3 +21,9 @@ def test_curation_publish_endpoint_is_workflow_scoped() -> None:
     )
     assert "_ensure_curation_workflow_project" in source
     assert "PublishDraftClaimCurationWorkspace" in source
+    assert "_enqueue_draft_claim_curation_publication" in source
+    assert (
+        "KnowledgeExtractionCanonicalCommandType."
+        "PUBLISH_DRAFT_CLAIM_CURATION_WORKSPACE.value" in source
+    )
+    assert "make_knowledge_extraction_workflow_resume" in source

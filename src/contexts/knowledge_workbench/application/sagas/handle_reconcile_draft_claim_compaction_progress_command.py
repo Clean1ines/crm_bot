@@ -219,10 +219,12 @@ def _next_command(
     if decision is not DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED:
         return None
 
-    idempotency_key = f"build-cluster-preview:{workflow_run_id}:after-compaction"
+    idempotency_key = f"draft-claim-curation-open:{workflow_run_id}"
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
-        command_type=KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW.value,
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE.value
+        ),
         workflow_run_id=workflow_run_id,
         idempotency_key=WorkflowIdempotencyKey(idempotency_key),
         payload={

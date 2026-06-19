@@ -99,3 +99,18 @@ def test_execute_draft_claim_compaction_handler_is_registered() -> None:
         )
         == "HandleExecuteDraftClaimCompactionCommandHandler"
     )
+
+
+def test_curation_and_publication_handlers_are_registered() -> None:
+    assert (
+        implemented_handler_name_for(
+            KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE
+        )
+        == "HandleOpenDraftClaimCurationWorkspaceCommandHandler"
+    )
+    assert (
+        implemented_handler_name_for(
+            KnowledgeExtractionCanonicalCommandType.PUBLISH_DRAFT_CLAIM_CURATION_WORKSPACE
+        )
+        == "HandlePublishDraftClaimCurationWorkspaceCommandHandler"
+    )

@@ -41,6 +41,13 @@ waiting after the user accepted degraded execution.
    bridged through a fitting raw node or paused for explicit degraded-model
    confirmation. Scheduled work embeds provider messages for draft, enriched,
    mixed, and reduced-rewrite prompt contracts.
+8. Continue the durable workflow after clustering through claim compaction,
+   manual curation, publication, and completion. Cluster preview remains an
+   optional diagnostic projection, not the terminal workflow contract.
+   Completion of compaction enqueues an idempotent curation-open command.
+   Publication is requested through the command log and atomically writes the
+   canonical facts, runtime retrieval entries, and passage embeddings before the
+   workflow is marked completed.
 
 ## Consequences
 
@@ -51,6 +58,9 @@ waiting after the user accepted degraded execution.
 - GPT-OSS context capacity is no longer confused with its free-plan TPM quota.
 - Compaction graph continuations are executable without reconstructing prompts in
   the worker.
+- A crash or retry cannot duplicate the curation workspace or publication.
+- The production answer path only compares query vectors with published passage
+  embeddings from the configured model and dimensions.
 - Deployment must apply migration `115_create_llm_route_capacity_reservations.sql`.
 - The current workflow command runner still contains some transactions spanning
   provider I/O; separating execution from persistence remains follow-up work.

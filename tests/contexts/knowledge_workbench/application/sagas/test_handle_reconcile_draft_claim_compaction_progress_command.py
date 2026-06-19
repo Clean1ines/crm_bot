@@ -274,7 +274,7 @@ async def test_active_due_work_items_appends_prepare_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_all_groups_done_appends_done_event_and_preview_command() -> None:
+async def test_all_groups_done_appends_done_event_and_curation_command() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     repository = FakeReductionStateRepository(
         _summary(group_count=2, done_group_count=2, active_group_count=0)
@@ -294,7 +294,7 @@ async def test_all_groups_done_appends_done_event_and_preview_command() -> None:
     assert len(workflow_uow.command_log.pending_commands) == 1
     assert (
         workflow_uow.command_log.pending_commands[0].command_type
-        == KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW.value
+        == KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE.value
     )
     assert workflow_uow.command_log.completed == [_command().command_id]
 

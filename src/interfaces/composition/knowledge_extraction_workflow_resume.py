@@ -72,6 +72,13 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
     DraftClaimClusterPreviewConnectionLike,
     PostgresDraftClaimClusterPreviewRepository,
 )
+from src.contexts.knowledge_workbench.curation.infrastructure.postgres.postgres_draft_claim_curation_workspace_repository import (
+    DraftClaimCurationWorkspaceConnectionLike,
+    PostgresDraftClaimCurationWorkspaceRepository,
+)
+from src.contexts.knowledge_workbench.curation.infrastructure.postgres.postgres_draft_claim_curation_publication_repository import (
+    PostgresDraftClaimCurationPublicationRepository,
+)
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
     DrainKnowledgeExtractionWorkflowCommands,
     DrainKnowledgeExtractionWorkflowCommandsCommand,
@@ -480,6 +487,14 @@ class RunKnowledgeExtractionWorkflowResume:
                     draft_claim_compaction_reduction_state_repository
                 ),
                 cluster_preview_repository=cluster_preview_repository,
+                curation_workspace_repository=(
+                    PostgresDraftClaimCurationWorkspaceRepository(
+                        cast(DraftClaimCurationWorkspaceConnectionLike, connection)
+                    )
+                ),
+                curation_publication_repository=(
+                    PostgresDraftClaimCurationPublicationRepository(connection)
+                ),
                 draft_claim_compaction_output_validator=(
                     self._draft_claim_compaction_output_validator
                 ),

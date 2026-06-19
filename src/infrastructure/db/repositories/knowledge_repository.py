@@ -216,6 +216,8 @@ class KnowledgeRepository:
                     project_uuid,
                     limit,
                     list(ANSWERABLE_KNOWLEDGE_ENTRY_KINDS),
+                    self._embedding_runtime_settings.local_model,
+                    self._embedding_runtime_settings.vector_dimensions,
                 )
             else:
                 rows = await conn.fetch(
@@ -226,6 +228,8 @@ class KnowledgeRepository:
                     candidate_limit,
                     candidate_limit,
                     list(ANSWERABLE_KNOWLEDGE_ENTRY_KINDS),
+                    self._embedding_runtime_settings.local_model,
+                    self._embedding_runtime_settings.vector_dimensions,
                 )
 
         results: list[KnowledgeSearchResultView] = []

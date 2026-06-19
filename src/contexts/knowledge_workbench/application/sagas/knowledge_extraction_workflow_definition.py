@@ -16,6 +16,9 @@ class KnowledgeExtractionCanonicalPhase(StrEnum):
     DRAFT_CLAIM_EMBEDDING = "DRAFT_CLAIM_EMBEDDING"
     DRAFT_CLAIM_CLUSTERING = "DRAFT_CLAIM_CLUSTERING"
     CLUSTER_PREVIEW_READY = "CLUSTER_PREVIEW_READY"
+    DRAFT_CLAIM_CURATION = "DRAFT_CLAIM_CURATION"
+    PUBLICATION = "PUBLICATION"
+    COMPLETED = "COMPLETED"
 
 
 class KnowledgeExtractionCanonicalCommandType(StrEnum):
@@ -34,6 +37,8 @@ class KnowledgeExtractionCanonicalCommandType(StrEnum):
     EXECUTE_DRAFT_CLAIM_COMPACTION = "ExecuteDraftClaimCompaction"
     APPLY_DRAFT_CLAIM_COMPACTION_RESULT = "ApplyDraftClaimCompactionResult"
     RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS = "ReconcileDraftClaimCompactionProgress"
+    OPEN_DRAFT_CLAIM_CURATION_WORKSPACE = "OpenDraftClaimCurationWorkspace"
+    PUBLISH_DRAFT_CLAIM_CURATION_WORKSPACE = "PublishDraftClaimCurationWorkspace"
     BUILD_CLUSTER_PREVIEW = "BuildClusterPreview"
     PAUSE_FOR_CLUSTER_CONTRACT_REVIEW = "PauseForClusterContractReview"
 
@@ -88,6 +93,9 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     DRAFT_CLAIM_COMPACTION_ALL_GROUPS_COMPACTED = (
         "DraftClaimCompactionAllGroupsCompacted"
     )
+    DRAFT_CLAIM_CURATION_WORKSPACE_OPENED = "DraftClaimCurationWorkspaceOpened"
+    DRAFT_CLAIM_CURATION_REVIEW_REQUIRED = "DraftClaimCurationReviewRequired"
+    DRAFT_CLAIM_CURATION_WORKSPACE_PUBLISHED = "DraftClaimCurationWorkspacePublished"
     CLUSTER_PREVIEW_READY = "ClusterPreviewReady"
     CLUSTER_CONTRACT_REVIEW_REQUIRED = "ClusterContractReviewRequired"
     WORKFLOW_MANUALLY_PAUSED = "WorkflowManuallyPaused"
@@ -112,6 +120,8 @@ class KnowledgeExtractionRecoveryScope(StrEnum):
     EMBEDDING_BATCH = "embedding_batch"
     CLUSTER_BUILD = "cluster_build"
     CLUSTER_PREVIEW = "cluster_preview"
+    CURATION_WORKSPACE = "curation_workspace"
+    PUBLICATION = "publication"
 
 
 def _require_non_empty(value: str, field_name: str) -> None:
@@ -179,7 +189,7 @@ class KnowledgeExtractionLegacyPhaseMapping:
 
 
 DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowContract(
-    terminal_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
+    terminal_phase=KnowledgeExtractionCanonicalPhase.COMPLETED,
     operations=(
         KnowledgeExtractionOperationContract(
             operation_key="start_knowledge_extraction_workflow",
@@ -595,7 +605,7 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
                 KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE,
             ),
             next_command_types=(
-                KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW,
+                KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE,
             ),
             affected_read_models=(
                 KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
@@ -605,6 +615,59 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             recovery_scopes=(
                 KnowledgeExtractionRecoveryScope.CLUSTER_BUILD,
                 KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
+            ),
+            frontend_visibility=True,
+        ),
+        KnowledgeExtractionOperationContract(
+            operation_key="open_draft_claim_curation_workspace",
+            phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CURATION,
+            command_type=(
+                KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE
+            ),
+            owner_contexts=("knowledge_workbench", "workflow_runtime"),
+            unit_of_work_name="DraftClaimCurationWorkspaceOpenUnitOfWork",
+            idempotency_key_template="draft-claim-curation-open:{workflow_run_id}",
+            success_event_type=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CURATION_WORKSPACE_OPENED
+            ),
+            intermediate_event_types=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CURATION_REVIEW_REQUIRED,
+            ),
+            next_command_types=(),
+            affected_read_models=(
+                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+                KnowledgeExtractionReadModelName.TIMELINE,
+            ),
+            recovery_scopes=(
+                KnowledgeExtractionRecoveryScope.WORKFLOW,
+                KnowledgeExtractionRecoveryScope.CURATION_WORKSPACE,
+            ),
+            frontend_visibility=True,
+        ),
+        KnowledgeExtractionOperationContract(
+            operation_key="publish_draft_claim_curation_workspace",
+            phase=KnowledgeExtractionCanonicalPhase.PUBLICATION,
+            command_type=(
+                KnowledgeExtractionCanonicalCommandType.PUBLISH_DRAFT_CLAIM_CURATION_WORKSPACE
+            ),
+            owner_contexts=(
+                "knowledge_workbench",
+                "embedding_runtime",
+                "workflow_runtime",
+            ),
+            unit_of_work_name="DraftClaimCurationPublicationUnitOfWork",
+            idempotency_key_template="draft-claim-curation-publish:{workflow_run_id}",
+            success_event_type=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CURATION_WORKSPACE_PUBLISHED
+            ),
+            next_command_types=(),
+            affected_read_models=(
+                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+                KnowledgeExtractionReadModelName.TIMELINE,
+            ),
+            recovery_scopes=(
+                KnowledgeExtractionRecoveryScope.WORKFLOW,
+                KnowledgeExtractionRecoveryScope.PUBLICATION,
             ),
             frontend_visibility=True,
         ),
@@ -706,9 +769,9 @@ LEGACY_PHASE_MIGRATION_MAP = (
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.WAITING_FOR_REVIEW.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
+        canonical_phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CURATION,
         migration_status="current_contract",
-        replacement_reason="Review waits at the cluster preview cutoff.",
+        replacement_reason="Review waits in the draft claim curation phase.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.PROMPT_B_WORK_SCHEDULED.value,
@@ -736,15 +799,15 @@ LEGACY_PHASE_MIGRATION_MAP = (
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.PUBLISHED.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
-        migration_status="out_of_current_contract",
-        replacement_reason="Publication is outside this contract cutoff.",
+        canonical_phase=KnowledgeExtractionCanonicalPhase.PUBLICATION,
+        migration_status="current_contract",
+        replacement_reason="Publication is the durable runtime projection phase.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.RETRIEVAL_EMBEDDINGS_BUILT.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
-        migration_status="out_of_current_contract",
-        replacement_reason="Retrieval embeddings are outside this contract cutoff.",
+        canonical_phase=KnowledgeExtractionCanonicalPhase.PUBLICATION,
+        migration_status="current_contract",
+        replacement_reason="Retrieval embeddings are built atomically during publication.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.INTERMEDIATE_ARTIFACTS_CLEANED.value,
@@ -754,9 +817,9 @@ LEGACY_PHASE_MIGRATION_MAP = (
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.DONE.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
-        migration_status="out_of_current_contract",
-        replacement_reason="Done is outside this contract cutoff.",
+        canonical_phase=KnowledgeExtractionCanonicalPhase.COMPLETED,
+        migration_status="current_contract",
+        replacement_reason="Done is the completed durable workflow state.",
     ),
 )
 

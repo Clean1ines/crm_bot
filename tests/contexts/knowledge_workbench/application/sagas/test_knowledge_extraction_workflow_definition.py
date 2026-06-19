@@ -27,10 +27,10 @@ def _operation(operation_key: str) -> KnowledgeExtractionOperationContract:
     raise AssertionError(f"operation not found: {operation_key}")
 
 
-def test_contract_terminal_phase_is_cluster_preview_ready() -> None:
+def test_contract_terminal_phase_is_completed() -> None:
     assert (
         DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT.terminal_phase
-        is KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY
+        is KnowledgeExtractionCanonicalPhase.COMPLETED
     )
 
 
@@ -324,28 +324,40 @@ def test_legacy_prompt_a_phases_map_to_claim_builder_phases() -> None:
     )
 
 
-def test_late_phases_are_out_of_current_contract() -> None:
-    late_phase_keys = {
+def test_only_superseded_late_phases_are_out_of_current_contract() -> None:
+    superseded_phase_keys = {
         KnowledgeExtractionPhaseKey.PROMPT_B_WORK_SCHEDULED.value,
         KnowledgeExtractionPhaseKey.PROMPT_B_WORK_COMPLETED.value,
         KnowledgeExtractionPhaseKey.FINAL_KNOWLEDGE_PREPARED.value,
         KnowledgeExtractionPhaseKey.REVIEW_COMPLETED.value,
-        KnowledgeExtractionPhaseKey.PUBLISHED.value,
-        KnowledgeExtractionPhaseKey.RETRIEVAL_EMBEDDINGS_BUILT.value,
         KnowledgeExtractionPhaseKey.INTERMEDIATE_ARTIFACTS_CLEANED.value,
-        KnowledgeExtractionPhaseKey.DONE.value,
     }
     mapping_by_key = {
         mapping.legacy_phase_key: mapping for mapping in LEGACY_PHASE_MIGRATION_MAP
     }
 
-    for legacy_phase_key in late_phase_keys:
+    for legacy_phase_key in superseded_phase_keys:
         mapping = mapping_by_key[legacy_phase_key]
         assert (
             mapping.canonical_phase
             is KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY
         )
         assert mapping.migration_status == "out_of_current_contract"
+
+    assert (
+        mapping_by_key[KnowledgeExtractionPhaseKey.PUBLISHED.value].canonical_phase
+        is KnowledgeExtractionCanonicalPhase.PUBLICATION
+    )
+    assert (
+        mapping_by_key[
+            KnowledgeExtractionPhaseKey.RETRIEVAL_EMBEDDINGS_BUILT.value
+        ].canonical_phase
+        is KnowledgeExtractionCanonicalPhase.PUBLICATION
+    )
+    assert (
+        mapping_by_key[KnowledgeExtractionPhaseKey.DONE.value].canonical_phase
+        is KnowledgeExtractionCanonicalPhase.COMPLETED
+    )
 
 
 def test_prepare_dispatch_batch_can_route_source_unit_split_required() -> None:
@@ -435,7 +447,7 @@ def test_reconcile_draft_claim_compaction_progress_operation_contract() -> None:
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE,
     )
     assert operation.next_command_types == (
-        KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW,
+        KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE,
     )
     assert operation.owner_contexts == (
         "knowledge_workbench",
