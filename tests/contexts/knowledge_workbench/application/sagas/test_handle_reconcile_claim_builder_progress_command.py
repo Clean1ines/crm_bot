@@ -109,6 +109,7 @@ def _workflow_command(
         ),
         payload={
             "workflow_run_id": payload_workflow_run_id or workflow_run_id,
+            "source_document_ref": "source-document:project-1:abc",
             "dispatch_attempt_id": "work-1:attempt:1",
             "work_item_id": "work-1",
             "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
@@ -546,6 +547,9 @@ async def test_all_completed_appends_generate_draft_claim_embeddings() -> None:
     assert next_command.command_type == (
         KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS.value
     )
+    assert next_command.payload["source_document_ref"] == (
+        "source-document:project-1:abc"
+    )
 
 
 @pytest.mark.asyncio
@@ -796,4 +800,34 @@ async def test_completed_path_to_embeddings_still_works_without_retry_actions() 
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
     assert next_command.command_type == (
         KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_completed_derives_source_document_ref_for_legacy_reconcile_payload() -> (
+    None
+):
+    workflow_command = _workflow_command()
+    payload = dict(workflow_command.payload)
+    del payload["source_document_ref"]
+    workflow_command = WorkflowCommand(
+        command_id=workflow_command.command_id,
+        command_type=workflow_command.command_type,
+        workflow_run_id=workflow_command.workflow_run_id,
+        idempotency_key=workflow_command.idempotency_key,
+        payload=payload,
+        status=workflow_command.status,
+        run_after=workflow_command.run_after,
+        created_at=workflow_command.created_at,
+        updated_at=workflow_command.updated_at,
+    )
+
+    _, _, _, workflow_unit_of_work = await _execute(
+        workflow_command=workflow_command,
+        summary=_summary(completed_count=3),
+    )
+
+    next_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert next_command.payload["source_document_ref"] == (
+        "source-document:project-1:abc"
     )

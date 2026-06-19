@@ -307,6 +307,7 @@ def _next_command(
         is ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED
     ):
         return _generate_draft_claim_embeddings_command(
+            workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
             retry_action_summary=retry_action_summary,
             summary=summary,
@@ -400,11 +401,16 @@ def _prepare_dispatch_batch_command(
 
 def _generate_draft_claim_embeddings_command(
     *,
+    workflow_command: WorkflowCommand,
     workflow_run_id: str,
     summary: WorkItemProgressSummary,
     retry_action_summary: WorkItemRetryActionSummary,
     occurred_at: datetime,
 ) -> WorkflowCommand:
+    source_document_ref = _source_document_ref(
+        workflow_command=workflow_command,
+        workflow_run_id=workflow_run_id,
+    )
     idempotency_key = f"generate-draft-claim-embeddings:{workflow_run_id}"
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
@@ -415,6 +421,7 @@ def _generate_draft_claim_embeddings_command(
         idempotency_key=WorkflowIdempotencyKey(idempotency_key),
         payload={
             "workflow_run_id": workflow_run_id,
+            "source_document_ref": source_document_ref,
             "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
             "summary": summary.to_payload(),
         },
@@ -423,6 +430,29 @@ def _generate_draft_claim_embeddings_command(
         created_at=occurred_at,
         updated_at=occurred_at,
     )
+
+
+def _source_document_ref(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+) -> str:
+    payload_value = _optional_payload_text(
+        workflow_command.payload,
+        "source_document_ref",
+    )
+    if payload_value is not None:
+        return payload_value
+
+    prefix = "knowledge-extraction:"
+    if not workflow_run_id.startswith(prefix):
+        raise ValueError("workflow_run_id must include source document ref")
+
+    source_document_ref = workflow_run_id[len(prefix) :]
+    if not source_document_ref.strip():
+        raise ValueError("source_document_ref must be non-empty")
+
+    return source_document_ref
 
 
 def _progress_reconciled_event(
