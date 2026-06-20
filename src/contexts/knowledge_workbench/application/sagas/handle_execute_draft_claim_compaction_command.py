@@ -294,6 +294,7 @@ class HandleExecuteDraftClaimCompactionCommandHandler:
             round_index=round_index,
             expected_output_kind=expected_output_kind,
             execution_result=execution_result,
+            dispatch_payload=execution_result.dispatch.dispatch_payload,
             occurred_at=finished_at,
         )
         await workflow_unit_of_work.command_log.append_pending_command(next_command)
@@ -453,6 +454,7 @@ def _next_command(
     round_index: int,
     expected_output_kind: DraftClaimCompactionExpectedOutputKind,
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
+    dispatch_payload: Mapping[str, object],
     occurred_at: datetime,
 ) -> WorkflowCommand:
     if execution_result.llm_result.status is LlmDispatchExecutionStatus.SUCCEEDED:
@@ -466,6 +468,7 @@ def _next_command(
             round_index=round_index,
             expected_output_kind=expected_output_kind,
             validation_metadata=_required_validation_metadata(execution_result),
+            dispatch_payload=dispatch_payload,
             occurred_at=occurred_at,
         )
     return _reconcile_progress_command(
@@ -488,6 +491,7 @@ def _apply_result_command(
     round_index: int,
     expected_output_kind: DraftClaimCompactionExpectedOutputKind,
     validation_metadata: Mapping[str, object],
+    dispatch_payload: Mapping[str, object],
     occurred_at: datetime,
 ) -> WorkflowCommand:
     idempotency_key = (
@@ -503,6 +507,7 @@ def _apply_result_command(
         round_index=round_index,
         expected_output_kind=expected_output_kind,
         validation_metadata=validation_metadata,
+        dispatch_payload=dispatch_payload,
     )
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
@@ -529,11 +534,13 @@ def _apply_result_payload(
     round_index: int,
     expected_output_kind: DraftClaimCompactionExpectedOutputKind,
     validation_metadata: Mapping[str, object],
+    dispatch_payload: Mapping[str, object],
 ) -> JsonObject:
     compared_node_refs = _derived_compared_node_refs(
         workflow_run_id,
         group_ref,
         workflow_command.payload,
+        dispatch_payload,
     )
 
     if expected_output_kind is DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS:
@@ -621,36 +628,98 @@ def _derived_compared_node_refs(
     workflow_run_id: str,
     group_ref: str,
     payload: Mapping[str, object],
+    dispatch_payload: Mapping[str, object],
+) -> tuple[str, ...]:
+    payload_refs = _compared_node_refs_from_payload(
+        workflow_run_id,
+        group_ref,
+        payload,
+    )
+    if payload_refs:
+        return payload_refs
+
+    schedule_payload = _dispatch_schedule_payload(dispatch_payload)
+    schedule_refs = _compared_node_refs_from_payload(
+        workflow_run_id,
+        group_ref,
+        schedule_payload,
+    )
+    if schedule_refs:
+        return schedule_refs
+
+    nested_payload = schedule_payload.get("payload")
+    if isinstance(nested_payload, Mapping):
+        nested_refs = _compared_node_refs_from_payload(
+            workflow_run_id,
+            group_ref,
+            nested_payload,
+        )
+        if nested_refs:
+            return nested_refs
+        nested_claim_refs = _claim_refs_from_claim_objects(nested_payload.get("claims"))
+        if nested_claim_refs:
+            return _raw_node_refs_for_claim_refs(
+                workflow_run_id,
+                group_ref,
+                nested_claim_refs,
+            )
+
+    raise ValueError("compared node refs are required")
+
+
+def _compared_node_refs_from_payload(
+    workflow_run_id: str,
+    group_ref: str,
+    payload: Mapping[str, object],
 ) -> tuple[str, ...]:
     compared_node_refs = _payload_text_tuple(
         payload, "compared_node_refs", allow_missing=True
     )
     if compared_node_refs:
         return compared_node_refs
+
+    node_refs = _payload_text_tuple(payload, "node_refs", allow_missing=True)
+    if node_refs:
+        return node_refs
+
     source_node_refs = _payload_text_tuple(
         payload, "source_node_refs", allow_missing=True
     )
     if source_node_refs:
         return source_node_refs
+
     source_claim_refs = _payload_text_tuple(
         payload, "source_claim_refs", allow_missing=True
     )
     if source_claim_refs:
-        return tuple(
-            raw_claim_node_ref(
-                workflow_run_id=workflow_run_id,
-                group_ref=group_ref,
-                observation_ref=source_claim_ref,
-            )
-            for source_claim_ref in source_claim_refs
+        return _raw_node_refs_for_claim_refs(
+            workflow_run_id,
+            group_ref,
+            source_claim_refs,
         )
+
     left_node_ref = _payload_optional_text(payload, "left_node_ref")
     right_node_ref = _payload_optional_text(payload, "right_node_ref")
     if left_node_ref is None:
-        raise ValueError("compared node refs are required")
+        return ()
     if right_node_ref is None:
         return (left_node_ref,)
     return tuple(sorted((left_node_ref, right_node_ref)))
+
+
+def _raw_node_refs_for_claim_refs(
+    workflow_run_id: str,
+    group_ref: str,
+    source_claim_refs: tuple[str, ...],
+) -> tuple[str, ...]:
+    return tuple(
+        raw_claim_node_ref(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            observation_ref=source_claim_ref,
+        )
+        for source_claim_ref in source_claim_refs
+    )
 
 
 def _capacity_observation_from_result(
