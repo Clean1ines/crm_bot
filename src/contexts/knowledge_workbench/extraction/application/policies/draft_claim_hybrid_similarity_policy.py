@@ -16,6 +16,13 @@ _TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9]+")
 @dataclass(frozen=True, slots=True)
 class DraftClaimHybridSimilarityPolicy:
     threshold: float = 0.78
+    strong_vector_threshold: float = 0.87
+    supported_vector_threshold: float = 0.85
+    weak_vector_threshold: float = 0.82
+    weak_support_threshold: float = 0.05
+    strong_question_threshold: float = 0.16
+    strong_lexical_threshold: float = 0.18
+    strong_exclusion_threshold: float = 0.20
 
     def build_edges(
         self,
@@ -49,12 +56,23 @@ class DraftClaimHybridSimilarityPolicy:
         if not left.exclusion_scope and not right.exclusion_scope:
             exclusion_score = 0.5
         granularity_score = 1.0 if left.granularity == right.granularity else 0.5
-        combined = _clamp(
+        weighted_score = _clamp(
             vector_score * 0.62
             + lexical_score * 0.16
             + question_score * 0.16
             + exclusion_score * 0.04
             + granularity_score * 0.02
+        )
+        admission = self._admission_decision(
+            vector_score=vector_score,
+            lexical_score=lexical_score,
+            question_score=question_score,
+            exclusion_score=exclusion_score,
+        )
+        combined = (
+            max(weighted_score, self.threshold)
+            if admission.edge_kind is not None
+            else weighted_score
         )
         return DraftClaimCompactionEdgeCandidate(
             edge_ref=_ref(
@@ -76,15 +94,74 @@ class DraftClaimHybridSimilarityPolicy:
             granularity_score=granularity_score,
             combined_score=combined,
             signals={
-                "algorithm": "hybrid_draft_claim_similarity_v1",
+                "algorithm": "draft_claim_compaction_candidate_similarity_v2",
                 "vector_score": vector_score,
                 "lexical_score": lexical_score,
                 "question_overlap_score": question_score,
                 "exclusion_scope_score": exclusion_score,
                 "granularity_score": granularity_score,
+                "weighted_score": weighted_score,
                 "combined_score": combined,
+                "admitted_by_policy": admission.edge_kind is not None,
+                "edge_kind": admission.edge_kind or "not_admitted",
+                "admission_reason": admission.reason,
+                "threshold": self.threshold,
+                "strong_vector_threshold": self.strong_vector_threshold,
+                "supported_vector_threshold": self.supported_vector_threshold,
+                "weak_vector_threshold": self.weak_vector_threshold,
+                "weak_support_threshold": self.weak_support_threshold,
+                "strong_question_threshold": self.strong_question_threshold,
+                "strong_lexical_threshold": self.strong_lexical_threshold,
+                "strong_exclusion_threshold": self.strong_exclusion_threshold,
             },
         )
+
+    def _admission_decision(
+        self,
+        *,
+        vector_score: float,
+        lexical_score: float,
+        question_score: float,
+        exclusion_score: float,
+    ) -> "_AdmissionDecision":
+        if vector_score >= self.strong_vector_threshold:
+            return _AdmissionDecision(
+                edge_kind="strong_vector_candidate",
+                reason="vector score is high enough for compaction candidate clustering",
+            )
+
+        weak_support = (
+            lexical_score >= self.weak_support_threshold
+            or question_score >= self.weak_support_threshold
+            or exclusion_score >= self.weak_support_threshold
+        )
+        if vector_score >= self.supported_vector_threshold and weak_support:
+            return _AdmissionDecision(
+                edge_kind="supported_vector_candidate",
+                reason="vector score is high and at least one surface signal supports the edge",
+            )
+
+        strong_support = (
+            lexical_score >= self.strong_lexical_threshold
+            or question_score >= self.strong_question_threshold
+            or exclusion_score >= self.strong_exclusion_threshold
+        )
+        if vector_score >= self.weak_vector_threshold and strong_support:
+            return _AdmissionDecision(
+                edge_kind="surface_supported_candidate",
+                reason="vector score is medium and a surface signal strongly supports the edge",
+            )
+
+        return _AdmissionDecision(
+            edge_kind=None,
+            reason="insufficient vector/surface support for automatic compaction candidate edge",
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _AdmissionDecision:
+    edge_kind: str | None
+    reason: str
 
 
 def _tokens(values: tuple[str, ...]) -> frozenset[str]:
