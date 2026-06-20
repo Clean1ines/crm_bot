@@ -9,11 +9,9 @@ import {
   type WorkbenchWorkflowActionLiveState,
   type WorkbenchWorkflowLiveStateResponse,
   type WorkbenchWorkflowStageLiveState,
-  type WorkbenchWorkflowTimelineEntryLiveState,
   type WorkbenchSectionQueueItemLiveState,
   type WorkbenchLlmAttemptLiveState,
   type WorkbenchClaimClusterClaimLiveState,
-  type WorkbenchClaimCompactionComparisonLiveState,
 } from '@shared/api/modules/knowledge';
 
 type DocCardDocument = {
@@ -148,6 +146,87 @@ const stageStatusLabel = (stage: WorkbenchWorkflowStageLiveState): string => {
   return labels[stage.status] || 'состояние уточняется';
 };
 
+const stageStatusTone = (stage: WorkbenchWorkflowStageLiveState): string => {
+  const status = normalize(stage.status);
+  if (status === 'completed') {
+    return 'border-emerald-500/25 bg-emerald-500/10';
+  }
+  if (status === 'running') {
+    return 'border-sky-500/25 bg-sky-500/10';
+  }
+  if (status === 'paused' || status === 'deferred' || status === 'pending' || status === 'unknown') {
+    return 'border-[var(--border-subtle)] bg-[var(--surface-elevated)]';
+  }
+  if (status === 'blocked') {
+    return 'border-amber-500/30 bg-amber-500/10';
+  }
+  if (status === 'failed') {
+    return 'border-rose-500/30 bg-rose-500/10';
+  }
+  return 'border-[var(--border-subtle)] bg-[var(--surface-elevated)]';
+};
+
+const statusPillTone = (status: string): string => {
+  const value = normalize(status);
+  if (value === 'completed' || value === 'ready' || value === 'succeeded' || value === 'claim_observations_persisted') {
+    return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300';
+  }
+  if (value === 'running' || value === 'leased') {
+    return 'bg-sky-500/10 text-sky-700 dark:text-sky-300';
+  }
+  if (value === 'paused' || value === 'deferred' || value === 'pending' || value === 'unknown') {
+    return 'bg-[var(--control-bg)] text-[var(--text-secondary)]';
+  }
+  if (value === 'retryable_failed' || value === 'blocked' || value === 'user_action_required') {
+    return 'bg-amber-500/10 text-amber-700 dark:text-amber-300';
+  }
+  if (value === 'terminal_failed' || value === 'failed') {
+    return 'bg-rose-500/10 text-rose-700 dark:text-rose-300';
+  }
+  return 'bg-[var(--control-bg)] text-[var(--text-secondary)]';
+};
+
+const queueRowTone = (status: string): string => {
+  const value = normalize(status);
+  if (value === 'completed' || value === 'claim_observations_persisted') {
+    return 'border-emerald-500/25 bg-emerald-500/10';
+  }
+  if (value === 'leased') {
+    return 'border-sky-500/25 bg-sky-500/10';
+  }
+  if (value === 'ready' || value === 'deferred') {
+    return 'border-[var(--border-subtle)] bg-[var(--surface-elevated)]';
+  }
+  if (value === 'retryable_failed' || value === 'user_action_required') {
+    return 'border-amber-500/30 bg-amber-500/10';
+  }
+  if (value === 'terminal_failed' || value === 'failed') {
+    return 'border-rose-500/30 bg-rose-500/10';
+  }
+  return 'border-[var(--border-subtle)] bg-[var(--surface-elevated)]';
+};
+
+const attemptRowTone = (status: string): string => {
+  const value = normalize(status);
+  if (value === 'succeeded' || value === 'completed') {
+    return 'border-emerald-500/25 bg-emerald-500/10';
+  }
+  if (value === 'leased' || value === 'running') {
+    return 'border-sky-500/25 bg-sky-500/10';
+  }
+  if (value === 'ready') {
+    return 'border-[var(--border-subtle)] bg-[var(--surface-elevated)]';
+  }
+  if (value === 'retryable_failed') {
+    return 'border-amber-500/30 bg-amber-500/10';
+  }
+  if (value === 'terminal_failed' || value === 'failed') {
+    return 'border-rose-500/30 bg-rose-500/10';
+  }
+  return 'border-[var(--border-subtle)] bg-[var(--surface-elevated)]';
+};
+
+
 const queueStatusLabel = (status: string): string => {
   const value = normalize(status);
   const labels: Record<string, string> = {
@@ -269,19 +348,6 @@ const embeddingStatusLabel = (status: string): string => {
 const nodeActivityLabel = (claim: WorkbenchClaimClusterClaimLiveState): string =>
   claim.node_active ? 'активен' : 'неактивен';
 
-const comparisonStatusLabel = (
-  comparison: WorkbenchClaimCompactionComparisonLiveState,
-): string => {
-  const labels: Record<string, string> = {
-    pending: 'ожидает сравнения',
-    merged: 'объединены',
-    not_merged: 'оставлены раздельно',
-    too_large_for_primary_model: 'не помещается в основную модель',
-    waiting_user_model_choice: 'ожидает выбора модели',
-    superseded: 'заменено следующим сравнением',
-  };
-  return labels[normalize(comparison.status)] || comparison.status;
-};
 
 const userErrorLabel = (errorKind: string | null | undefined): string => {
   const value = normalize(errorKind);
@@ -299,40 +365,7 @@ const userErrorLabel = (errorKind: string | null | undefined): string => {
   return labels[value] || (errorKind ? 'Нужна повторная обработка' : '—');
 };
 
-const timelineLabel = (entry: WorkbenchWorkflowTimelineEntryLiveState): string => {
-  const labels: Record<string, string> = {
-    SourceDocumentPersisted: 'Документ сохранён',
-    SourceUnitsCreated: 'Документ разбит на разделы',
-    ScheduleClaimBuilderSectionWork: 'Запланирована обработка разделов',
-    ClaimBuilderSectionWorkScheduled: 'Разделы поставлены в очередь',
-    PrepareClaimBuilderDispatchBatch: 'Подготовлен запуск ИИ',
-    ClaimBuilderSectionExtracted: 'Утверждения извлечены из раздела',
-    ClaimBuilderSectionExtractionRetryableFailed:
-      'Ответ ИИ отклонён проверкой, нужна повторная попытка',
-    ClaimBuilderSectionExtractionTerminalFailed:
-      'Раздел не удалось обработать автоматически',
-    WorkflowManuallyPaused: 'Обработка поставлена на паузу',
-    WorkflowManuallyResumed: 'Обработка возобновлена',
-  };
-  return labels[entry.event_type] || 'Событие обработки';
-};
 
-const timelineMessage = (entry: WorkbenchWorkflowTimelineEntryLiveState): string => {
-  const event = entry.event_type;
-  if (event === 'ClaimBuilderSectionExtracted') {
-    return 'Секция обработана, результат сохранён.';
-  }
-  if (event === 'ClaimBuilderSectionExtractionRetryableFailed') {
-    return 'Ответ модели не прошёл строгую проверку. Секция останется в очереди на повторную попытку.';
-  }
-  if (event === 'WorkflowManuallyPaused') {
-    return 'Обработка остановлена пользователем. Уже полученные результаты сохранены.';
-  }
-  if (event === 'WorkflowManuallyResumed') {
-    return 'Обработка продолжена с текущего места.';
-  }
-  return entry.message || 'Событие записано.';
-};
 
 const liveActionLabel = (action: WorkbenchWorkflowActionLiveState): string => {
   const labels: Record<string, string> = {
@@ -387,9 +420,6 @@ const sourceUnitTitle = (unit: KnowledgeSourceUnit | null): string =>
   unit?.title?.trim() || 'Без заголовка';
 
 const sectionDisplayNumber = (index: number): string => formatNumber(index + 1);
-
-const technicalId = (value: string | null | undefined): string =>
-  value && value.trim() ? value : '—';
 
 
 type DraftClaimRecord = Record<string, unknown>;
@@ -537,7 +567,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const stages = workflow?.stages ?? [];
   const lanes = workflow?.section_lanes ?? [];
   const attempts = workflow?.llm_attempts ?? [];
-  const timeline = workflow?.timeline ?? [];
   const actions = workflow?.actions ?? [];
   const hasClaimClusters = Array.isArray(workflow?.claim_clusters);
   const claimClusters = workflow?.claim_clusters ?? [];
@@ -963,7 +992,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           </div>
         )}
 
-        <div className="grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
+        <div className="grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
           <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
               <Clock3 className="h-3.5 w-3.5" />
@@ -1124,27 +1153,43 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
             <div className="mt-3 space-y-3">
               <section>
-                <div className="mb-1 font-medium text-[var(--text-primary)]">Этапы</div>
-                <div className="grid gap-1 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
-                  {stages.map((stage) => {
+                <div className="mb-2 font-medium text-[var(--text-primary)]">
+                  Этапы обработки
+                </div>
+                <div className="space-y-1.5">
+                  {stages.map((stage, stageIndex) => {
                     const stageCounts = displayedStageCounts(stage);
                     return (
-                      <div
+                      <details
                         key={stage.id}
-                        className="rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
+                        className={`rounded-lg border px-3 py-2 ${stageStatusTone(stage)}`}
                       >
-                        <div className="font-medium text-[var(--text-primary)]">
-                          {liveStageLabel(stage)}
-                        </div>
-                        <div className="text-[var(--text-muted)]">
-                          {stageStatusLabel(stage)}
-                          {stageCounts.total > 0 && stage.id !== 'cluster_preview'
-                            ? ` · ${formatNumber(stageCounts.current)} / ${formatNumber(
-                                stageCounts.total,
-                              )}`
-                            : ''}
-                        </div>
-                      </div>
+                        <summary className="cursor-pointer list-none">
+                          <span className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="min-w-0">
+                              <span className="font-semibold text-[var(--text-primary)]">
+                                {formatNumber(stageIndex + 1)}. {liveStageLabel(stage)}
+                              </span>
+                              <span className="ml-2 text-[var(--text-muted)]">
+                                {stageStatusLabel(stage)}
+                                {stageCounts.total > 0 && stage.id !== 'cluster_preview'
+                                  ? ` · ${formatNumber(stageCounts.current)} / ${formatNumber(
+                                      stageCounts.total,
+                                    )}`
+                                  : ''}
+                              </span>
+                            </span>
+                            <span className={`rounded-full px-2.5 py-1 font-medium ${statusPillTone(stage.status)}`}>
+                              {stageStatusLabel(stage)}
+                            </span>
+                          </span>
+                        </summary>
+                        {stage.message && (
+                          <div className="mt-2 text-[var(--text-secondary)]">
+                            {stage.message}
+                          </div>
+                        )}
+                      </details>
                     );
                   })}
                 </div>
@@ -1294,42 +1339,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                 </details>
               )}
 
-              {hasCompactionComparisons && (
-                <details className="rounded-lg bg-[var(--surface-elevated)] p-2">
-                  <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                    Технические сравнения: {formatNumber(compactionComparisons.length)}
-                  </summary>
-                  <div className="mt-2 space-y-1">
-                    {compactionComparisons.length === 0 && (
-                      <div className="text-[var(--text-muted)]">
-                        Сравнения ещё не запускались.
-                      </div>
-                    )}
-                    {compactionComparisons.map((comparison) => (
-                      <details
-                        key={comparison.comparison_ref}
-                        className="rounded bg-[var(--control-bg)] px-2 py-1"
-                      >
-                        <summary className="cursor-pointer list-none">
-                          <span className="font-medium text-[var(--text-primary)]">
-                            Раунд {formatNumber(comparison.round_index + 1)}
-                          </span>
-                          <span className="ml-2 text-[var(--text-muted)]">
-                            {comparisonStatusLabel(comparison)}
-                          </span>
-                        </summary>
-                        <div className="mt-1 space-y-1 font-mono text-[11px] text-[var(--text-muted)]">
-                          <div>cluster: {comparison.cluster_ref}</div>
-                          <div>left: {comparison.left_node_ref}</div>
-                          <div>right: {comparison.right_node_ref}</div>
-                          <div>result: {technicalId(comparison.result_node_ref)}</div>
-                        </div>
-                      </details>
-                    ))}
-                  </div>
-                </details>
-              )}
-
               {sectionItems.length > 0 && (
                 <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
                   <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
@@ -1342,7 +1351,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                       return (
                         <details
                           key={item.queue_item_id}
-                          className="rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
+                          className={`rounded-lg border px-3 py-2 ${queueRowTone(item.status)}`}
                         >
                           <summary className="cursor-pointer list-none">
                             <span className="font-medium text-[var(--text-primary)]">
@@ -1443,16 +1452,23 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                       return (
                         <details
                           key={attempt.node_run_id}
-                          className="rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
+                          className={`rounded-lg border px-3 py-2 ${attemptRowTone(attempt.status)}`}
                         >
                           <summary className="cursor-pointer list-none">
-                            <span className="font-medium text-[var(--text-primary)]">
-                              {sectionIndex !== null
-                                ? `Раздел ${sectionDisplayNumber(sectionIndex)}`
-                                : 'Раздел не определён'}
-                            </span>
-                            <span className="ml-2 text-[var(--text-muted)]">
-                              {attempt.model_name || attempt.model_provider || 'модель не определена'} · {attemptStatusLabel(attempt.status)}
+                            <span className="flex flex-wrap items-center justify-between gap-2">
+                              <span>
+                                <span className="font-semibold text-[var(--text-primary)]">
+                                  {sectionIndex !== null
+                                    ? `Раздел ${sectionDisplayNumber(sectionIndex)}`
+                                    : 'Раздел не определён'}
+                                </span>
+                                <span className="ml-2 text-[var(--text-muted)]">
+                                  {attempt.model_name || attempt.model_provider || 'модель не определена'}
+                                </span>
+                              </span>
+                              <span className={`rounded-full px-2.5 py-1 font-medium ${statusPillTone(attempt.status)}`}>
+                                {attemptStatusLabel(attempt.status)}
+                              </span>
                             </span>
                           </summary>
                           <div className="mt-1 text-[var(--text-muted)]">
@@ -1473,47 +1489,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                   </details>
                 </section>
               )}
-
-              {timeline.length > 0 && (
-                <section>
-                  <div className="mb-1 font-medium text-[var(--text-primary)]">
-                    Хронология обработки
-                  </div>
-                  <div className="space-y-1">
-                    {timeline.map((entry) => (
-                      <details
-                        key={entry.timeline_entry_id}
-                        className="rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
-                      >
-                        <summary className="cursor-pointer list-none font-medium text-[var(--text-primary)]">
-                          {timelineLabel(entry)}
-                        </summary>
-                        <div className="mt-1 text-[var(--text-muted)]">
-                          {timelineMessage(entry)}
-                        </div>
-                      </details>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              <details className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-2">
-                <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                  Технические детали
-                </summary>
-                <div className="mt-2 space-y-2 font-mono text-[11px] text-[var(--text-muted)]">
-                  <div>workflow: {technicalId(workflow.workflow_run_id)}</div>
-                  <div>phase: {technicalId(workflow.current_phase)}</div>
-                  <div>status: {technicalId(workflow.workflow_status)}</div>
-                  {timeline.slice(0, 8).map((entry) => (
-                    <div key={`tech:${entry.timeline_entry_id}`} className="rounded bg-[var(--control-bg)] p-2">
-                      <div>{entry.event_type} · {entry.phase}</div>
-                      <div>work_item: {technicalId(entry.work_item_id)}</div>
-                      <div>attempt: {technicalId(entry.attempt_id)}</div>
-                    </div>
-                  ))}
-                </div>
-              </details>
 
               {actions.filter((action) => action.visible).length > 0 && (
                 <div className="flex flex-wrap gap-2 pt-1">
