@@ -476,7 +476,19 @@ class FakePrepareLlmDispatchBatch:
                         attempt_id="work-1:attempt:1",
                         work_item_id="work-1",
                         attempt_number=1,
-                        dispatch_payload={"work_item_id": "work-1"},
+                        dispatch_payload={
+                            "work_item_id": "work-1",
+                            "schedule_payload": {
+                                "workflow_run_id": _workflow_run_id(),
+                                "group_ref": "group-1",
+                                "batch_ref": "batch-1",
+                                "round_index": 0,
+                                "expected_output_kind": "compacted_claims",
+                                "source_claim_refs": ["claim-a", "claim-b"],
+                                "left_node_ref": "raw:workflow-1:group-1:claim-a",
+                                "right_node_ref": "raw:workflow-1:group-1:claim-b",
+                            },
+                        },
                     ),
                 ),
             ),
@@ -614,10 +626,11 @@ class FakeDraftClaimCompactionReductionStateRepository:
         work_item_id: str,
         round_index: int,
         compacted_claims,
+        compared_node_refs,
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
         del workflow_run_id, group_ref, batch_ref, work_item_id
-        del round_index, created_at
+        del round_index, compared_node_refs, created_at
         self.applied_compacted_claims.append(compacted_claims)
         return _apply_persistence_result()
 
@@ -782,7 +795,6 @@ def _apply_result_payload() -> dict[str, object]:
                 "key": "refund_support",
                 "claim": "Product supports refunds.",
                 "claim_kind": "capability",
-                "granularity": "atomic",
                 "source_claim_refs": ["claim-a", "claim-b"],
                 "triples": [
                     {

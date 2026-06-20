@@ -156,8 +156,10 @@ class FakePrepareLlmDispatchBatch:
 @dataclass(slots=True)
 class FakeCommandLog:
     completed: list[WorkflowCommandId] = field(default_factory=list)
+    pending_commands: list[WorkflowCommand] = field(default_factory=list)
 
     async def append_pending_command(self, command: WorkflowCommand) -> WorkflowCommand:
+        self.pending_commands.append(command)
         return command
 
     async def mark_command_completed(
@@ -294,7 +296,17 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
                 attempt_id="attempt-1",
                 work_item_id="work-item-1",
                 attempt_number=1,
-                dispatch_payload={"work_item_id": "work-item-1"},
+                dispatch_payload={
+                    "work_item_id": "work-item-1",
+                    "schedule_payload": {
+                        "workflow_run_id": _workflow_run_id(),
+                        "group_ref": "group-1",
+                        "batch_ref": "batch-1",
+                        "round_index": 0,
+                        "expected_output_kind": "compacted_claims",
+                        "source_claim_refs": ["claim-a", "claim-b"],
+                    },
+                },
             ),
         )
     )
@@ -312,7 +324,7 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
 
     assert result.prepared_dispatch_count == 1
     assert result.appended_event_count == 1
-    assert result.appended_next_command_count == 0
+    assert result.appended_next_command_count == 1
     assert prepare.calls[0].work_kind == DRAFT_CLAIM_COMPACTION_WORK_KIND
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
     assert prepare.calls[0].allow_automatic_fallbacks is False
@@ -328,6 +340,20 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     assert workflow_uow.timeline.entries[0].message == (
         "Draft claim compaction dispatch batch prepared"
     )
+    assert workflow_uow.timeline.entries[1].message == (
+        "Execute draft claim compaction requested"
+    )
+    assert len(workflow_uow.command_log.pending_commands) == 1
+    execute_command = workflow_uow.command_log.pending_commands[0]
+    assert execute_command.command_type == (
+        KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value
+    )
+    assert execute_command.payload["dispatch_attempt_id"] == "attempt-1"
+    assert execute_command.payload["work_item_id"] == "work-item-1"
+    assert execute_command.payload["group_ref"] == "group-1"
+    assert execute_command.payload["batch_ref"] == "batch-1"
+    assert execute_command.payload["expected_output_kind"] == "compacted_claims"
+    assert execute_command.payload["source_claim_refs"] == ["claim-a", "claim-b"]
     assert workflow_uow.command_log.completed == [_command().command_id]
 
 

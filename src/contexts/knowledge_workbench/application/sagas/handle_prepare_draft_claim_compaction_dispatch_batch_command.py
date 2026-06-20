@@ -36,6 +36,9 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id impo
 from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
     WorkflowEventId,
 )
+from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
+    WorkflowIdempotencyKey,
+)
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
     PrepareLlmDispatchBatchResult,
@@ -130,6 +133,7 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
             )
 
         appended_event_count = 0
+        appended_next_command_count = 0
         if (
             prepared_dispatch_count == 0
             and typed_prepare_result is not None
@@ -165,7 +169,7 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
                 workflow_run_id=workflow_run_id,
                 prepared_dispatch_count=prepared_dispatch_count,
                 appended_event_count=appended_event_count,
-                appended_next_command_count=0,
+                appended_next_command_count=appended_next_command_count,
                 completed_command_id=workflow_command.command_id,
             )
 
@@ -230,14 +234,26 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
             )
             await workflow_unit_of_work.outbox.append_event(prepared_event)
             appended_event_count = 1
-            await workflow_unit_of_work.timeline.append_entry(
-                _timeline_entry(
-                    workflow_command=workflow_command,
-                    prepared_event=prepared_event,
-                    started_attempts=started_attempts,
-                    occurred_at=occurred_at,
-                )
+
+            next_commands = _execute_draft_claim_compaction_commands(
+                workflow_run_id=workflow_run_id,
+                started_attempts=started_attempts,
+                occurred_at=occurred_at,
             )
+            for next_command in next_commands:
+                await workflow_unit_of_work.command_log.append_pending_command(
+                    next_command
+                )
+            appended_next_command_count = len(next_commands)
+
+            for timeline_entry in _timeline_entries(
+                workflow_command=workflow_command,
+                prepared_event=prepared_event,
+                started_attempts=started_attempts,
+                next_commands=next_commands,
+                occurred_at=occurred_at,
+            ):
+                await workflow_unit_of_work.timeline.append_entry(timeline_entry)
 
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
@@ -255,7 +271,7 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
             workflow_run_id=workflow_run_id,
             prepared_dispatch_count=prepared_dispatch_count,
             appended_event_count=appended_event_count,
-            appended_next_command_count=0,
+            appended_next_command_count=appended_next_command_count,
             completed_command_id=workflow_command.command_id,
         )
 
@@ -493,33 +509,177 @@ async def _save_progress_snapshot(
     )
 
 
-def _timeline_entry(
+def _execute_draft_claim_compaction_commands(
+    *,
+    workflow_run_id: str,
+    started_attempts: Sequence[object],
+    occurred_at: datetime,
+) -> tuple[WorkflowCommand, ...]:
+    commands: list[WorkflowCommand] = []
+    for attempt in started_attempts:
+        dispatch_attempt_id = _attempt_text(attempt, "attempt_id")
+        work_item_id = _attempt_text(attempt, "work_item_id")
+        schedule_payload = _attempt_schedule_payload(attempt)
+
+        command_payload: dict[str, object] = {
+            "workflow_run_id": workflow_run_id,
+            "dispatch_attempt_id": dispatch_attempt_id,
+            "work_item_id": work_item_id,
+            "group_ref": _mapping_text(schedule_payload, "group_ref"),
+            "batch_ref": _mapping_text(schedule_payload, "batch_ref"),
+            "round_index": _mapping_int(schedule_payload, "round_index", fallback=0),
+            "expected_output_kind": _mapping_text(
+                schedule_payload,
+                "expected_output_kind",
+                fallback="compacted_claims",
+            ),
+        }
+
+        for copied_key in (
+            "source_claim_refs",
+            "source_node_refs",
+        ):
+            copied_value = schedule_payload.get(copied_key)
+            if copied_value is not None:
+                command_payload[copied_key] = _mapping_text_list(
+                    schedule_payload,
+                    copied_key,
+                )
+
+        for copied_key in (
+            "left_node_ref",
+            "right_node_ref",
+        ):
+            copied_value = schedule_payload.get(copied_key)
+            if copied_value is not None:
+                command_payload[copied_key] = _mapping_text(
+                    schedule_payload,
+                    copied_key,
+                )
+
+        idempotency_key = (
+            f"execute-draft-claim-compaction:{workflow_run_id}:{dispatch_attempt_id}"
+        )
+        commands.append(
+            WorkflowCommand(
+                command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+                command_type=(
+                    KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value
+                ),
+                workflow_run_id=workflow_run_id,
+                idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+                payload=command_payload,
+                status=WorkflowCommandStatus.PENDING,
+                run_after=occurred_at,
+                created_at=occurred_at,
+                updated_at=occurred_at,
+            )
+        )
+    return tuple(commands)
+
+
+def _attempt_schedule_payload(attempt: object) -> Mapping[str, object]:
+    dispatch_payload = getattr(attempt, "dispatch_payload", None)
+    if not isinstance(dispatch_payload, Mapping):
+        raise ValueError("started attempt dispatch_payload must be mapping")
+
+    schedule_payload = dispatch_payload.get("schedule_payload")
+    if isinstance(schedule_payload, Mapping):
+        return schedule_payload
+
+    return dispatch_payload
+
+
+def _mapping_text(
+    payload: Mapping[str, object],
+    key: str,
+    *,
+    fallback: str | None = None,
+) -> str:
+    value = payload.get(key, fallback)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"mapping payload must include non-empty text {key}")
+    return value
+
+
+def _mapping_int(
+    payload: Mapping[str, object],
+    key: str,
+    *,
+    fallback: int | None = None,
+) -> int:
+    value = payload.get(key, fallback)
+    if not isinstance(value, int):
+        raise ValueError(f"mapping payload must include integer {key}")
+    return value
+
+
+def _mapping_text_list(
+    payload: Mapping[str, object],
+    key: str,
+) -> list[str]:
+    value = payload.get(key)
+    if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+        raise ValueError(f"mapping payload must include sequence {key}")
+
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"mapping payload {key} must contain non-empty text")
+        result.append(item)
+    return result
+
+
+def _timeline_entries(
     *,
     workflow_command: WorkflowCommand,
     prepared_event: WorkflowEvent,
     started_attempts: Sequence[object],
+    next_commands: Sequence[WorkflowCommand],
     occurred_at: datetime,
-) -> WorkflowTimelineEntry:
+) -> tuple[WorkflowTimelineEntry, ...]:
     payload_summary = {
         "workflow_run_id": workflow_command.workflow_run_id,
         "work_kind": DRAFT_CLAIM_COMPACTION_WORK_KIND.value,
         "prepared_dispatch_count": len(started_attempts),
         "dispatch_attempt_ids": _dispatch_attempt_ids(started_attempts),
         "work_item_ids": _work_item_ids(started_attempts),
-    }
-    return WorkflowTimelineEntry(
-        timeline_entry_id=(
-            f"workflow-timeline:{workflow_command.workflow_run_id}:"
-            "DraftClaimCompactionDispatchBatchPrepared"
+        "next_command_count": len(next_commands),
+        "next_command_type": (
+            KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value
         ),
-        workflow_run_id=workflow_command.workflow_run_id,
-        event_type=prepared_event.event_type,
-        phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
-        severity=WorkflowTimelineSeverity.INFO,
-        message="Draft claim compaction dispatch batch prepared",
-        payload_summary=payload_summary,
-        occurred_at=occurred_at,
-        source_ref=DRAFT_CLAIM_COMPACTION_WORK_KIND.value,
+    }
+    return (
+        WorkflowTimelineEntry(
+            timeline_entry_id=(
+                f"workflow-timeline:{workflow_command.workflow_run_id}:"
+                "DraftClaimCompactionDispatchBatchPrepared"
+            ),
+            workflow_run_id=workflow_command.workflow_run_id,
+            event_type=prepared_event.event_type,
+            phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
+            severity=WorkflowTimelineSeverity.INFO,
+            message="Draft claim compaction dispatch batch prepared",
+            payload_summary=payload_summary,
+            occurred_at=occurred_at,
+            source_ref=DRAFT_CLAIM_COMPACTION_WORK_KIND.value,
+        ),
+        WorkflowTimelineEntry(
+            timeline_entry_id=(
+                f"workflow-timeline:{workflow_command.workflow_run_id}:"
+                "ExecuteDraftClaimCompaction:requested"
+            ),
+            workflow_run_id=workflow_command.workflow_run_id,
+            event_type=(
+                KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value
+            ),
+            phase=KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value,
+            severity=WorkflowTimelineSeverity.INFO,
+            message="Execute draft claim compaction requested",
+            payload_summary=payload_summary,
+            occurred_at=occurred_at,
+            source_ref=DRAFT_CLAIM_COMPACTION_WORK_KIND.value,
+        ),
     )
 
 
