@@ -915,32 +915,37 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             <div className="mt-1 text-[var(--text-muted)]">{sectionProgressPercent}%</div>
           </div>
 
-          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 font-medium text-[var(--text-primary)]">Объединение знаний</div>
-            <div className="text-[var(--text-muted)]">
-              {compactionSummaryText}
-              {claimClusters.length > 0
-                ? ` Готово: ${formatNumber(compactedClusterCount)} из ${formatNumber(
-                    claimClusters.length,
-                  )}.`
-                : ''}
-              {compactedClaimPreviewCount > 0
-                ? ` Уже получено результатов: ${formatNumber(compactedClaimPreviewCount)}.`
-                : ''}
+          {claimClusters.length > 0 ? (
+            <div className="min-w-0 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-secondary)] p-3">
+              <div className="mb-1 font-medium text-[var(--text-primary)]">
+                Объединение знаний · кластеры: {formatNumber(claimClusters.length)}
+              </div>
+              <div className="text-[var(--text-muted)]">
+                {compactionSummaryText}
+                {' '}Готово кластеров: {formatNumber(compactedClusterCount)} из{' '}
+                {formatNumber(claimClusters.length)}.
+                {' '}Итоговых утверждений: {formatNumber(compactedClaimPreviewCount)}.
+              </div>
+              <div className="mt-1 text-[var(--text-muted)]">
+                Очередь: {formatNumber(compactionReady)}
+                {' · '}в работе: {formatNumber(compactionLeased)}
+                {' · '}завершено задач: {formatNumber(compactionDone)}
+                {' · '}повторить: {formatNumber(compactionRetry)}
+                {' · '}ошибок: {formatNumber(compactionFailed)}
+                {' · '}нужно решение: {formatNumber(compactionNeedsDecision)}
+              </div>
+              <div className="mt-1 text-[var(--text-muted)]">
+                Запросов ИИ: {formatNumber(compactionLlmAttempts.length)}
+                {compactionSucceededAttempts > 0
+                  ? ` · успешно ${formatNumber(compactionSucceededAttempts)}`
+                  : ''}
+                {compactionRunningAttempts > 0
+                  ? ` · выполняется ${formatNumber(compactionRunningAttempts)}`
+                  : ''}
+                {compactionTokens > 0 ? ` · ${formatNumber(compactionTokens)} токенов` : ''}
+              </div>
             </div>
-            <div className="mt-1 text-[var(--text-muted)]">
-              Запросов ИИ: {formatNumber(compactionLlmAttempts.length)}
-              {compactionSucceededAttempts > 0
-                ? ` · успешно ${formatNumber(compactionSucceededAttempts)}`
-                : ''}
-              {compactionRunningAttempts > 0
-                ? ` · выполняется ${formatNumber(compactionRunningAttempts)}`
-                : ''}
-              {compactionRetry > 0 ? ` · повторить ${formatNumber(compactionRetry)}` : ''}
-              {compactionFailed > 0 ? ` · ошибок ${formatNumber(compactionFailed)}` : ''}
-              {compactionTokens > 0 ? ` · ${formatNumber(compactionTokens)} токенов` : ''}
-            </div>
-          </div>
+          ) : null}
 
           <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 font-medium text-[var(--text-primary)]">Итог</div>
