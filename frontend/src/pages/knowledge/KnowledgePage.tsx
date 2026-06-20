@@ -619,10 +619,11 @@ export const KnowledgePage: React.FC = () => {
     },
     enabled: !!projectId,
     retry: false,
-    refetchInterval: projectId ? 1500 : false,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
-    staleTime: 0,
+    refetchInterval: false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: 30_000,
   });
 
   const baseDocuments = Array.isArray(documentsQuery.data)
@@ -668,12 +669,68 @@ export const KnowledgePage: React.FC = () => {
     },
     enabled: !!projectId && workflowLiveStateDocumentIds.length > 0,
     retry: false,
-    refetchInterval:
-      projectId && workflowLiveStateDocumentIds.length > 0 ? 1500 : false,
-    refetchIntervalInBackground: true,
-    staleTime: 0,
+    refetchInterval: false,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    staleTime: 30_000,
   });
   const workflowLiveStates = workflowLiveStateQuery.data || {};
+  const workflowLiveStateSubscriptionKey = workflowLiveStateDocumentIds.join(",");
+
+  useEffect(() => {
+    if (!projectId || workflowLiveStateDocumentIds.length === 0) return undefined;
+
+    const queryKey = [
+      "knowledge-workflow-live-state",
+      projectId,
+      workflowLiveStateSubscriptionKey,
+    ];
+
+    const stops = workflowLiveStateDocumentIds.map((documentId) =>
+      knowledgeApi.streamWorkflowLiveState(
+        projectId,
+        documentId,
+        (payload) => {
+          queryClient.setQueryData<KnowledgeWorkflowLiveStateByDocument>(
+            queryKey,
+            (previous) => ({
+              ...(previous || {}),
+              [documentId]: payload,
+            }),
+          );
+
+          queryClient.setQueryData<Document[]>(
+            ["knowledge-documents", projectId],
+            (previous) => {
+              if (!Array.isArray(previous)) return previous;
+
+              return previous.map((doc) => {
+                if (doc.id !== documentId) return doc;
+
+                return {
+                  ...doc,
+                  status: payload.document_status || doc.status,
+                  current_processing_run_id:
+                    payload.current_processing_run_id ??
+                    doc.current_processing_run_id,
+                };
+              });
+            },
+          );
+        },
+      ),
+    );
+
+    return () => {
+      stops.forEach((stop) => stop());
+    };
+  }, [
+    projectId,
+    queryClient,
+    workflowLiveStateSubscriptionKey,
+  ]);
+
 
   const reportableDocuments = documents.filter(
     (doc) =>

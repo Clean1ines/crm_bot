@@ -60,13 +60,37 @@ class PostgresOutboxRepository(OutboxRepositoryPort):
             event.correlation_id,
         )
         if row is not None:
-            return _hydrate_event(row)
+            inserted = _hydrate_event(row)
+            await self._notify_workflow_live_state_changed(inserted)
+            return inserted
 
         existing = await self._load_by_event_id(event.event_id)
         if existing is None:
             raise RuntimeError("event_id conflict did not return existing event")
         _assert_idempotent_event_is_same(event, existing)
         return existing
+
+    async def _notify_workflow_live_state_changed(
+        self,
+        event: WorkflowEvent,
+    ) -> None:
+        payload = json.dumps(
+            {
+                "sequence_number": event.sequence_number,
+                "event_id": event.event_id.value,
+                "event_type": event.event_type,
+                "workflow_run_id": event.workflow_run_id,
+                "occurred_at": event.occurred_at.isoformat(),
+            },
+            default=str,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        await self._connection.execute(
+            "SELECT pg_notify($1, $2)",
+            "workflow_live_state_changed",
+            payload,
+        )
 
     async def list_events_after(
         self,

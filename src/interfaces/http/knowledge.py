@@ -8,6 +8,7 @@ vertical. Queue-based FAQ Workbench document upload is retired.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
@@ -24,8 +25,10 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Request,
     UploadFile,
 )
+from starlette.responses import StreamingResponse
 
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.json_types import JsonObject
@@ -2411,6 +2414,117 @@ async def restore_knowledge_source_document_processing(
         project_repo=project_repo,
         user_repo=user_repo,
         llm_executor=llm_executor,
+    )
+
+
+def _workflow_run_id_from_live_state(payload: Mapping[str, object]) -> str | None:
+    workflow = payload.get("workflow")
+    if not isinstance(workflow, Mapping):
+        return None
+
+    workflow_run_id = workflow.get("workflow_run_id")
+    if isinstance(workflow_run_id, str) and workflow_run_id.strip():
+        return workflow_run_id
+
+    return None
+
+
+def _sse_json_event(event_name: str, payload: Mapping[str, object]) -> str:
+    return (
+        f"event: {event_name}\n"
+        f"data: {json.dumps(dict(payload), ensure_ascii=False, default=str)}\n\n"
+    )
+
+
+@router.get("/{document_id}/workflow-live-state/events")
+async def stream_knowledge_workflow_live_state_events(
+    project_id: str,
+    document_id: str,
+    request: Request,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Push Workbench card live-state changes to the frontend.
+
+    No polling. The endpoint emits:
+    - one initial snapshot;
+    - a new snapshot only after workflow_runtime outbox publishes a
+      workflow_live_state_changed notification for this workflow.
+    """
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    async def event_stream():
+        initial_state = await fetch_workbench_workflow_live_state(
+            pool=pool,
+            project_id=project_id,
+            document_id=document_id,
+        )
+        workflow_run_id = _workflow_run_id_from_live_state(initial_state)
+        yield _sse_json_event("workflow_live_state", initial_state)
+
+        if workflow_run_id is None:
+            return
+
+        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
+
+        def listener(
+            _connection,
+            _pid: int,
+            _channel: str,
+            payload: str,
+        ) -> None:
+            try:
+                queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                pass
+
+        async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
+            connection = cast(asyncpg.Connection, raw_connection)
+            await connection.add_listener("workflow_live_state_changed", listener)
+            try:
+                while not await request.is_disconnected():
+                    try:
+                        raw_event = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    try:
+                        event_payload = json.loads(raw_event)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if event_payload.get("workflow_run_id") != workflow_run_id:
+                        continue
+
+                    next_state = await fetch_workbench_workflow_live_state(
+                        pool=pool,
+                        project_id=project_id,
+                        document_id=document_id,
+                    )
+                    yield _sse_json_event("workflow_live_state", next_state)
+            finally:
+                await connection.remove_listener(
+                    "workflow_live_state_changed",
+                    listener,
+                )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

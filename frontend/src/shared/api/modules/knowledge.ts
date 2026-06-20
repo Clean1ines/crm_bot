@@ -1,5 +1,6 @@
 import { t } from '../../i18n';
-import { authedJsonRequest, authedMultipartRequest } from '../core/http';
+import { API_BASE_URL } from '../core/config';
+import { authedJsonRequest, authedMultipartRequest, createAuthHeaders } from '../core/http';
 
 export type KnowledgePreprocessingMode = 'faq' | 'price_list';
 export type KnowledgePreviewRetrievalMode = 'runtime_equivalent' | 'lexical_debug';
@@ -449,6 +450,80 @@ export type WorkbenchWorkflowLiveStateResponse = {
   current_processing_run_id?: string | null;
   workflow: WorkbenchWorkflowLiveState;
 };
+
+export type WorkflowLiveStateStreamStop = () => void;
+
+export type WorkflowLiveStateStreamMessageHandler = (
+  payload: WorkbenchWorkflowLiveStateResponse,
+) => void;
+
+export type WorkflowLiveStateStreamErrorHandler = (error: unknown) => void;
+
+const parseSsePayloads = (buffer: string): { payloads: string[]; rest: string } => {
+  const chunks = buffer.split("\n\n");
+  const rest = chunks.pop() || "";
+  const payloads = chunks
+    .map((chunk) =>
+      chunk
+        .split("\n")
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice("data:".length).trimStart())
+        .join("\n"),
+    )
+    .filter((payload) => payload.trim() !== "");
+
+  return { payloads, rest };
+};
+
+const streamWorkflowLiveState = (
+  projectId: string,
+  documentId: string,
+  onMessage: WorkflowLiveStateStreamMessageHandler,
+  onError?: WorkflowLiveStateStreamErrorHandler,
+): WorkflowLiveStateStreamStop => {
+  const controller = new AbortController();
+
+  void (async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/projects/${projectId}/knowledge/${encodeURIComponent(documentId)}/workflow-live-state/events`,
+        {
+          method: "GET",
+          headers: createAuthHeaders(null),
+          signal: controller.signal,
+        },
+      );
+
+      if (!response.ok || !response.body) {
+        throw new Error(`Workflow live-state stream failed: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parsed = parseSsePayloads(buffer);
+        buffer = parsed.rest;
+
+        for (const payload of parsed.payloads) {
+          onMessage(JSON.parse(payload) as WorkbenchWorkflowLiveStateResponse);
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        onError?.(error);
+      }
+    }
+  })();
+
+  return () => controller.abort();
+};
+
 
 
 export type DraftClaimCurationEditablePayload = {
@@ -1032,6 +1107,8 @@ export const knowledgeApi = {
         method: 'GET',
       },
     ),
+
+  streamWorkflowLiveState,
 
   progress: (projectId: string, documentId: string) =>
     authedJsonRequest<KnowledgeProcessingReport>(
