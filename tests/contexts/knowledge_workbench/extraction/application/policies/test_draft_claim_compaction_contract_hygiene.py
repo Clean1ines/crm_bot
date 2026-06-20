@@ -16,6 +16,8 @@ def test_compaction_llm_prompts_do_not_request_granularity_or_exclusion_scope() 
         / "src/contexts/knowledge_workbench/extraction/application/prompts/draft_claim_compaction.txt",
         ROOT
         / "src/contexts/knowledge_workbench/extraction/application/prompts/enriched_claim_compaction.txt",
+        ROOT
+        / "src/contexts/knowledge_workbench/extraction/application/prompts/single_draft_claim_enrichment.txt",
     )
 
     for prompt_path in prompt_paths:

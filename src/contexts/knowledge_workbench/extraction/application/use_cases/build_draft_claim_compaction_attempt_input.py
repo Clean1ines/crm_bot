@@ -40,6 +40,10 @@ DRAFT_CLAIM_COMPACTION_PROMPT_REF = (
     "src/contexts/knowledge_workbench/extraction/application/prompts/"
     "draft_claim_compaction.txt"
 )
+SINGLE_DRAFT_CLAIM_ENRICHMENT_PROMPT_REF = (
+    "src/contexts/knowledge_workbench/extraction/application/prompts/"
+    "single_draft_claim_enrichment.txt"
+)
 MIXED_CLAIM_COMPACTION_PROMPT_REF = (
     "src/contexts/knowledge_workbench/extraction/application/prompts/"
     "enriched_claim_compaction.txt"
@@ -99,6 +103,11 @@ class BuildDraftClaimCompactionAttemptInput:
                 "work_item workflow_run_id does not match compaction batch",
             )
 
+        if batch.prompt_variant == "single_draft_claim_enrichment":
+            return await self._single_draft_claim_enrichment(
+                work_item=work_item,
+                batch=batch,
+            )
         if batch.prompt_variant == "draft_vs_draft":
             return await self._draft_vs_draft(work_item=work_item, batch=batch)
         if batch.prompt_variant == "compacted_vs_compacted":
@@ -112,6 +121,48 @@ class BuildDraftClaimCompactionAttemptInput:
             return await self._reduced_rewrite(work_item=work_item, batch=batch)
         raise UnsupportedDraftClaimCompactionPromptVariant(
             f"unsupported draft claim compaction prompt_variant: {batch.prompt_variant}",
+        )
+
+    async def _single_draft_claim_enrichment(
+        self,
+        *,
+        work_item: WorkItem,
+        batch: DraftClaimCompactionBatchForDispatch,
+    ) -> DraftClaimCompactionAttemptInput:
+        if len(batch.member_observation_refs) != 1:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "single draft claim enrichment batch must contain exactly one claim",
+            )
+        claims = await self.compaction_plan_repository.list_claims_for_compaction_batch(
+            batch_ref=batch.batch_ref,
+        )
+        claims_by_ref = {claim.observation_ref: claim for claim in claims}
+        missing_refs = tuple(
+            ref for ref in batch.member_observation_refs if ref not in claims_by_ref
+        )
+        if missing_refs:
+            raise DraftClaimCompactionPayloadUnavailable(
+                "single draft claim enrichment batch claims are unavailable: "
+                + ", ".join(missing_refs),
+            )
+        ordered_claims = tuple(
+            claims_by_ref[ref] for ref in batch.member_observation_refs
+        )
+        payload = self.payload_builder.build_single_draft_claim_enrichment_payload(
+            ordered_claims,
+        ).to_json_dict()
+        return DraftClaimCompactionAttemptInput(
+            workflow_run_id=batch.workflow_run_id,
+            group_ref=batch.group_ref,
+            batch_ref=batch.batch_ref,
+            work_item_id=work_item.work_item_id,
+            prompt_kind=DraftClaimCompactionPromptKind.SINGLE_DRAFT_CLAIM_ENRICHMENT,
+            prompt_ref=SINGLE_DRAFT_CLAIM_ENRICHMENT_PROMPT_REF,
+            model_id=batch.model_id,
+            payload=payload,
+            expected_output_kind=(
+                DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS
+            ),
         )
 
     async def _draft_vs_draft(

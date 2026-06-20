@@ -9,6 +9,7 @@ from src.domain.project_plane.json_types import JsonObject
 
 
 class DraftClaimCompactionPromptKind(StrEnum):
+    SINGLE_DRAFT_CLAIM_ENRICHMENT = "single_draft_claim_enrichment"
     DRAFT_CLAIM_COMPACTION = "draft_claim_compaction"
     MIXED_CLAIM_COMPACTION = "mixed_claim_compaction"
     REDUCED_CLAIM_REWRITE = "reduced_claim_rewrite"

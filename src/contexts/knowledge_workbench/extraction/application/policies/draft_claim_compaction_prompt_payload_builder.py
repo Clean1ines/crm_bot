@@ -37,6 +37,27 @@ class DraftClaimCompactionPromptPayloadBuilder:
             prompt_variant="draft_vs_draft",
         )
 
+    def build_single_draft_claim_enrichment_payload(
+        self,
+        claims: tuple[DraftClaimForCompaction, ...],
+    ) -> DraftClaimCompactionPromptPayload:
+        if not isinstance(claims, tuple):
+            raise TypeError("claims must be tuple")
+        if len(claims) != 1:
+            raise ValueError("single draft claim enrichment requires exactly one claim")
+
+        return DraftClaimCompactionPromptPayload(
+            claims=tuple(
+                DraftClaimCompactionPromptClaim(
+                    claim_id=claim.observation_ref,
+                    claim=claim.claim,
+                    questions=_dedupe_texts(claim.possible_questions),
+                )
+                for claim in claims
+            ),
+            prompt_variant="single_draft_claim_enrichment",
+        )
+
     def build_reduced_rewrite_payload(
         self,
         compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...],

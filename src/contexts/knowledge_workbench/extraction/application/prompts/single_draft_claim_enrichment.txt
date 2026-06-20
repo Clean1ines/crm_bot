@@ -1,0 +1,161 @@
+NODE: single_draft_claim_enrichment
+
+INPUT := one JSON object.
+TASK := enrich exactly one raw draft claim into one compacted/enriched claim.
+OUTPUT := exactly one JSON object.
+NEVER output text outside JSON.
+
+INPUT_SCHEMA:
+{
+  "claims": [
+    {
+      "id": "",
+      "claim": "",
+      "questions": []
+    }
+  ]
+}
+
+OUTPUT_SCHEMA:
+{
+  "compacted_claims": [
+    {
+      "key": "",
+      "claim": "",
+      "claim_kind": "definition",
+      "source_claim_refs": [],
+      "triples": [],
+      "merge_decision": "unmerged"
+    }
+  ]
+}
+
+LANG:
+
+* write `claim` in same language as input claim
+* keep enum values in English
+
+claim_kind ∈ {
+definition, property, capability, limitation, rule, condition, process, list,
+comparison, criterion, example_set, value, exception, other
+}
+
+merge_decision ∈ {merged, unmerged}
+
+TRIPLE:
+{
+  "subject": "",
+  "predicate": "",
+  "object": "",
+  "qualifiers": []
+}
+
+predicate ∈ {
+is_a, has_capability, has_property, has_value, has_limitation,
+requires, supports, integrates_with, used_for, handles, transfers_to,
+provides, improves, checks, removes, creates, connects_to
+}
+
+SINGLE_CLAIM_RULES:
+There is exactly one input claim.
+Do not compare it with other claims.
+Do not invent missing context.
+Do not split it into several claims unless the input claim itself clearly contains a practical composite answer bundle that must remain understandable.
+Prefer one enriched output claim.
+Preserve limitations, conditions, exceptions, negations, uncertainty, and product boundaries.
+Make the claim clearer only if clarity is improved without changing meaning.
+If the original claim is already clear, keep its meaning and wording close to source.
+
+FIELD_OWNERSHIP_RULES:
+NEVER output questions.
+NEVER output exclusion_scope.
+NEVER output granularity.
+exclusion_scope, evidence, possible questions, and granularity are reconstructed later by code from source claims.
+
+TRACE_RULES:
+There MUST be exactly one output item.
+The single input claim.id MUST appear exactly once in source_claim_refs.
+source_claim_refs MUST contain only the input claim id.
+source_claim_refs MUST have length 1.
+merge_decision MUST be "unmerged".
+
+KEY_RULES:
+key := stable snake_case based on enriched claim meaning.
+Do not include source ids in key.
+Prefer concise semantic key.
+The key should be useful for future registry lookup and dedupe.
+
+CLASSIFICATION_RULES:
+claim_kind := kind of the enriched claim.
+Choose the most specific valid kind.
+Use limitation for unavailable features, unsupported channels, constraints, or negative capability statements.
+Use process for workflows or ordered operational behavior.
+Use capability for what the product can do.
+Use property for stable product attributes.
+Use rule or condition for requirements, handoff rules, policies, and decision criteria.
+Use comparison when the claim primarily contrasts two things.
+Use example_set when the claim is mainly a set of examples.
+
+TRIPLE_RULES:
+Build triples only if they help represent the claim.
+If no useful triples -> [].
+Triples MUST be supported by the claim.
+Do not add unsupported facts.
+Remove duplicate triples.
+Prefer 1-4 precise triples over many weak triples.
+Preserve negative/limitation meaning with has_limitation when appropriate.
+
+TRIPLE_LANG:
+subject, object, qualifiers should use the same language as the enriched claim unless they are product names, enum-like technical identifiers, or source terms.
+predicate stays English controlled enum.
+
+EXAMPLE:
+
+INPUT_CLAIM:
+{
+  "id": "claim_1",
+  "claim": "The client web widget is not a ready feature; the primary client channel is Telegram.",
+  "questions": ["Is there a web widget?", "What client channel is ready?"]
+}
+
+VALID_OUTPUT:
+{
+  "compacted_claims": [
+    {
+      "key": "client_channel_telegram_web_widget_limitation",
+      "claim": "The primary ready client channel is Telegram; a client web widget is not currently a ready feature.",
+      "claim_kind": "limitation",
+      "source_claim_refs": ["claim_1"],
+      "triples": [
+        {
+          "subject": "primary client channel",
+          "predicate": "has_value",
+          "object": "Telegram",
+          "qualifiers": ["ready feature"]
+        },
+        {
+          "subject": "client web widget",
+          "predicate": "has_limitation",
+          "object": "not currently a ready feature",
+          "qualifiers": []
+        }
+      ],
+      "merge_decision": "unmerged"
+    }
+  ]
+}
+
+FINAL_ASSERT:
+valid JSON only.
+top-level key == "compacted_claims".
+compacted_claims length == 1.
+the single item has exactly:
+key, claim, claim_kind, source_claim_refs, triples, merge_decision.
+source_claim_refs length == 1.
+source_claim_refs[0] == input claims[0].id.
+merge_decision == "unmerged".
+no questions.
+no exclusion_scope.
+no granularity.
+triples use only allowed predicates.
+no text outside JSON.

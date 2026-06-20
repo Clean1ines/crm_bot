@@ -226,6 +226,58 @@ async def test_builds_draft_vs_draft_attempt_input_without_kind_or_compacted_cla
 
 
 @pytest.mark.asyncio
+async def test_builds_single_draft_claim_enrichment_attempt_input() -> None:
+    batch = DraftClaimCompactionBatchForDispatch(
+        batch_ref="batch-1",
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        prompt_variant="single_draft_claim_enrichment",
+        model_id="openai/gpt-oss-120b",
+        estimated_input_tokens=100,
+        member_observation_refs=("claim-a",),
+    )
+    use_case = BuildDraftClaimCompactionAttemptInput(
+        compaction_plan_repository=FakePlanRepository(
+            batch=batch,
+            claims=(_claim("claim-a"),),
+        ),
+        reduction_state_repository=FakeReductionStateRepository(),
+    )
+
+    result = await use_case.execute(_work_item())
+
+    assert result.prompt_kind is (
+        DraftClaimCompactionPromptKind.SINGLE_DRAFT_CLAIM_ENRICHMENT
+    )
+    assert result.prompt_ref.endswith("single_draft_claim_enrichment.txt")
+    assert result.expected_output_kind is (
+        DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS
+    )
+    assert result.payload.keys() == {"claims"}
+    assert result.payload["claims"] == [
+        {
+            "id": "claim-a",
+            "claim": "Claim claim-a",
+            "questions": ["Question claim-a?"],
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_single_draft_claim_enrichment_rejects_non_singleton_batch() -> None:
+    use_case = BuildDraftClaimCompactionAttemptInput(
+        compaction_plan_repository=FakePlanRepository(
+            batch=_batch("single_draft_claim_enrichment"),
+            claims=(_claim("claim-a"), _claim("claim-b")),
+        ),
+        reduction_state_repository=FakeReductionStateRepository(),
+    )
+
+    with pytest.raises(DraftClaimCompactionPayloadUnavailable, match="exactly one"):
+        await use_case.execute(_work_item())
+
+
+@pytest.mark.asyncio
 async def test_rejects_unknown_prompt_variant_with_typed_failure() -> None:
     use_case = BuildDraftClaimCompactionAttemptInput(
         compaction_plan_repository=FakePlanRepository(batch=_batch("unknown")),

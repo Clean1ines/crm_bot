@@ -57,7 +57,10 @@ class DraftClaimCompactionBatchBudgetPolicy:
                         ),
                         workflow_run_id=group.workflow_run_id,
                         group_ref=group.group_ref,
-                        prompt_variant=self.prompt_variant,
+                        prompt_variant=_prompt_variant_for_batch(
+                            group=group,
+                            fallback=self.prompt_variant,
+                        ),
                         model_id=self.model_id,
                         estimated_input_tokens=sum(
                             _estimate(by_ref[ref]) for ref in refs
@@ -66,6 +69,16 @@ class DraftClaimCompactionBatchBudgetPolicy:
                     )
                 )
         return DraftClaimCompactionBudgetPlan(tuple(planned_groups), tuple(batches))
+
+
+def _prompt_variant_for_batch(
+    *,
+    group: DraftClaimCompactionGroupCandidate,
+    fallback: str,
+) -> str:
+    if group.member_count == 1:
+        return "single_draft_claim_enrichment"
+    return fallback
 
 
 def _estimate(claim: DraftClaimForCompaction) -> int:
