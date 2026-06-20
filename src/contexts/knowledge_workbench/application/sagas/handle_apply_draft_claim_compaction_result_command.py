@@ -24,6 +24,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionApplyOutputKind,
     DraftClaimCompactionApplyResultCommand,
     DraftClaimCompactionApplyResultOutcome,
+    ordered_pair,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
     DraftClaimCompactionOutputClaim,
@@ -305,8 +306,7 @@ def _apply_command_from_payload(
         batch_ref=_payload_text(payload, "batch_ref"),
         work_item_id=_payload_text(payload, "work_item_id"),
         round_index=_payload_int(payload, "round_index"),
-        left_node_ref=_payload_text(payload, "left_node_ref"),
-        right_node_ref=_payload_optional_text(payload, "right_node_ref"),
+        compared_node_refs=_compared_node_refs_from_payload(payload),
         output_kind=output_kind,
         compacted_claims=compacted_claims,
         reduced_rewrite=reduced_rewrite,
@@ -360,7 +360,7 @@ async def _schedule_next_work(
             "prompt_variant": next_work_item.work_type.value,
             "model_id": next_work_item.primary_model_id,
             "provider_messages": list(provider_messages),
-            "node_refs": list(next_work_item.node_refs),
+            "source_node_refs": list(next_work_item.node_refs),
             "compacted_node_refs": list(_compacted_node_refs(next_work_item)),
             "raw_claim_refs": list(_raw_claim_refs(next_work_item)),
             "estimated_prompt_tokens": next_work_item.estimated_prompt_tokens,
@@ -947,6 +947,26 @@ def _payload_optional_text(payload: Mapping[str, object], key: str) -> str | Non
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"workflow command payload {key} must be non-empty text")
     return value
+
+
+def _compared_node_refs_from_payload(
+    payload: Mapping[str, object],
+) -> tuple[str, ...]:
+    for key in ("compared_node_refs", "source_node_refs"):
+        value = payload.get(key)
+        if isinstance(value, list) and value:
+            refs = tuple(value)
+            if all(isinstance(ref, str) and ref.strip() for ref in refs):
+                return refs
+            raise ValueError(f"{key} must contain non-empty strings")
+
+    left = _payload_optional_text(payload, "left_node_ref")
+    right = _payload_optional_text(payload, "right_node_ref")
+    if left is None:
+        raise ValueError("compared_node_refs are required")
+    if right is None:
+        return (left,)
+    return ordered_pair(left, right)
 
 
 def _payload_int(payload: Mapping[str, object], key: str) -> int:

@@ -46,7 +46,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             )
 
         comparison_index = _ComparisonIndex(state.comparisons)
-        component_index = _ComponentIndex.from_state(state)
+        lineage_index = _LineageComparisonIndex.from_state(state)
         active_compacted = _nodes_by_kind(
             active_nodes,
             DraftClaimCompactionNodeKind.COMPACTED,
@@ -58,7 +58,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             active_compacted=active_compacted,
             active_raw=active_raw,
             comparison_index=comparison_index,
-            component_index=component_index,
+            lineage_index=lineage_index,
         )
         if reduced_rewrite is not None:
             return _decision(
@@ -73,7 +73,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             state=state,
             work_type=DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
             comparison_index=comparison_index,
-            component_index=component_index,
+            lineage_index=lineage_index,
         )
         if compacted_pair is not None:
             return _decision(
@@ -88,7 +88,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             active_compacted=active_compacted,
             active_raw=active_raw,
             comparison_index=comparison_index,
-            component_index=component_index,
+            lineage_index=lineage_index,
         )
         if bridge_pair is not None:
             return _decision(
@@ -103,7 +103,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             active_compacted=active_compacted,
             active_raw=active_raw,
             comparison_index=comparison_index,
-            component_index=component_index,
+            lineage_index=lineage_index,
         )
         if mixed_pair is not None:
             return _decision(
@@ -118,7 +118,7 @@ class DraftClaimCompactionReductionPlannerPolicy:
             state=state,
             work_type=DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT,
             comparison_index=comparison_index,
-            component_index=component_index,
+            lineage_index=lineage_index,
         )
         if raw_pair is not None:
             return _decision(
@@ -187,97 +187,85 @@ class _ComparisonIndex:
 
 
 @dataclass(frozen=True, slots=True)
-class _ComponentIndex:
-    component_by_node_ref: dict[str, str]
-    incompatible_pairs: frozenset[tuple[str, str]]
+class _LineageComparisonIndex:
+    source_claim_refs_by_node_ref: dict[str, frozenset[str]]
+    incompatible_source_pairs: tuple[tuple[frozenset[str], frozenset[str]], ...]
 
     @classmethod
-    def from_state(cls, state: DraftClaimCompactionPlannerState) -> _ComponentIndex:
-        if state.components:
-            return cls._from_persisted_state(state)
-        return cls._from_legacy_state(state)
-
-    @classmethod
-    def _from_persisted_state(
+    def from_state(
         cls,
         state: DraftClaimCompactionPlannerState,
-    ) -> _ComponentIndex:
-        component_by_node_ref: dict[str, str] = {}
-        for component in state.components:
-            if not component.active:
-                continue
-            component_by_node_ref[component.representative_node_ref] = (
-                component.component_ref
-            )
+    ) -> _LineageComparisonIndex:
+        raw_source_claim_refs_by_node_ref = {
+            node.node_ref: frozenset(node.source_claim_refs) for node in state.nodes
+        }
+        all_source_refs = {
+            source_ref
+            for source_refs in raw_source_claim_refs_by_node_ref.values()
+            for source_ref in source_refs
+        }
+        parents = {source_ref: source_ref for source_ref in all_source_refs}
 
-        incompatible_pairs = frozenset(
-            incompatibility.pair_key
-            for incompatibility in state.incompatibilities
-            if incompatibility.left_component_ref in set(component_by_node_ref.values())
-            and incompatibility.right_component_ref
-            in set(component_by_node_ref.values())
-        )
-        return cls(
-            component_by_node_ref=component_by_node_ref,
-            incompatible_pairs=incompatible_pairs,
-        )
+        def find(source_ref: str) -> str:
+            parent = parents[source_ref]
+            if parent != source_ref:
+                parents[source_ref] = find(parent)
+            return parents[source_ref]
 
-    @classmethod
-    def _from_legacy_state(
-        cls,
-        state: DraftClaimCompactionPlannerState,
-    ) -> _ComponentIndex:
-        active_nodes = state.active_nodes()
-        active_refs = {node.node_ref for node in active_nodes}
-        parents = {node_ref: node_ref for node_ref in active_refs}
-
-        def find(node_ref: str) -> str:
-            parent = parents[node_ref]
-            if parent != node_ref:
-                parents[node_ref] = find(parent)
-            return parents[node_ref]
-
-        def union(left: str, right: str) -> None:
-            left_root = find(left)
-            right_root = find(right)
-            if left_root == right_root:
+        def union_source_refs(source_refs: frozenset[str]) -> None:
+            ordered = tuple(sorted(source_refs))
+            if not ordered:
                 return
-            new_root = min(left_root, right_root)
-            old_root = max(left_root, right_root)
-            parents[old_root] = new_root
+            root = find(ordered[0])
+            for source_ref in ordered[1:]:
+                other_root = find(source_ref)
+                if root == other_root:
+                    continue
+                new_root = min(root, other_root)
+                parents[max(root, other_root)] = new_root
+                root = new_root
 
         for comparison in state.comparisons:
             if comparison.status is not DraftClaimCompactionComparisonStatus.MERGED:
                 continue
-            if (
-                comparison.left_node_ref not in active_refs
-                or comparison.right_node_ref not in active_refs
-            ):
-                continue
-            union(comparison.left_node_ref, comparison.right_node_ref)
+            left_sources = raw_source_claim_refs_by_node_ref.get(
+                comparison.left_node_ref,
+                frozenset(),
+            )
+            right_sources = raw_source_claim_refs_by_node_ref.get(
+                comparison.right_node_ref,
+                frozenset(),
+            )
+            merged_sources = left_sources | right_sources
+            union_source_refs(merged_sources)
+            if comparison.result_node_ref is not None and merged_sources:
+                raw_source_claim_refs_by_node_ref.setdefault(
+                    comparison.result_node_ref,
+                    merged_sources,
+                )
 
-        component_by_node_ref = {
-            node_ref: find(node_ref) for node_ref in sorted(active_refs)
+        source_claim_refs_by_node_ref = {
+            node_ref: frozenset(find(source_ref) for source_ref in source_refs)
+            for node_ref, source_refs in raw_source_claim_refs_by_node_ref.items()
         }
-
-        incompatible_pairs: set[tuple[str, str]] = set()
+        incompatible_source_pairs: list[tuple[frozenset[str], frozenset[str]]] = []
         for comparison in state.comparisons:
             if comparison.status is not DraftClaimCompactionComparisonStatus.NOT_MERGED:
                 continue
-            if (
-                comparison.left_node_ref not in active_refs
-                or comparison.right_node_ref not in active_refs
-            ):
+            incompatible_left_sources = source_claim_refs_by_node_ref.get(
+                comparison.left_node_ref
+            )
+            incompatible_right_sources = source_claim_refs_by_node_ref.get(
+                comparison.right_node_ref
+            )
+            if incompatible_left_sources is None or incompatible_right_sources is None:
                 continue
-            left_component = find(comparison.left_node_ref)
-            right_component = find(comparison.right_node_ref)
-            if left_component == right_component:
-                continue
-            incompatible_pairs.add(_pair_key(left_component, right_component))
-
+            incompatible_source_pairs.append(
+                (incompatible_left_sources, incompatible_right_sources)
+            )
         return cls(
-            component_by_node_ref=component_by_node_ref,
-            incompatible_pairs=frozenset(incompatible_pairs),
+            source_claim_refs_by_node_ref=source_claim_refs_by_node_ref,
+            incompatible_source_pairs=tuple(incompatible_source_pairs),
         )
 
     def can_compare(
@@ -286,24 +274,25 @@ class _ComponentIndex:
         right_node_ref: str,
         comparison_index: _ComparisonIndex,
     ) -> bool:
-        left_component_ref = self.component_by_node_ref.get(
-            left_node_ref, left_node_ref
-        )
-        right_component_ref = self.component_by_node_ref.get(
-            right_node_ref,
-            right_node_ref,
-        )
-        if left_component_ref == right_component_ref:
+        left_sources = self.source_claim_refs_by_node_ref.get(left_node_ref)
+        right_sources = self.source_claim_refs_by_node_ref.get(right_node_ref)
+        if left_sources is None or right_sources is None:
             return False
-        if (
-            _pair_key(left_component_ref, right_component_ref)
-            in self.incompatible_pairs
-        ):
+        if left_sources & right_sources:
             return False
         status = comparison_index.status(left_node_ref, right_node_ref)
         if status is DraftClaimCompactionComparisonStatus.TOO_LARGE_FOR_PRIMARY_MODEL:
             return False
-        return status is None
+        if status is not None:
+            return False
+        return not any(
+            (known_left.issubset(left_sources) and known_right.issubset(right_sources))
+            or (
+                known_left.issubset(right_sources)
+                and known_right.issubset(left_sources)
+            )
+            for known_left, known_right in self.incompatible_source_pairs
+        )
 
 
 def _ordered_active_nodes(
@@ -325,7 +314,7 @@ def _find_bridge_rewrite(
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
     comparison_index: _ComparisonIndex,
-    component_index: _ComponentIndex,
+    lineage_index: _LineageComparisonIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(active_compacted):
         if not _primary_pair_is_too_large(
@@ -348,11 +337,7 @@ def _find_bridge_rewrite(
             )
             if left_result is None or right_result is None:
                 continue
-            if not component_index.can_compare(
-                left_result,
-                right_result,
-                comparison_index,
-            ):
+            if comparison_index.status(left_result, right_result) is not None:
                 continue
             if not _work_item_fits_primary_tpm(
                 state=state,
@@ -370,7 +355,7 @@ def _find_bridge_comparison(
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
     comparison_index: _ComparisonIndex,
-    component_index: _ComponentIndex,
+    lineage_index: _LineageComparisonIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(active_compacted):
         if not _primary_pair_is_too_large(
@@ -386,7 +371,7 @@ def _find_bridge_comparison(
                 raw,
                 state=state,
                 comparison_index=comparison_index,
-                component_index=component_index,
+                lineage_index=lineage_index,
             )
             if left_pair is not None:
                 return left_pair
@@ -395,7 +380,7 @@ def _find_bridge_comparison(
                 raw,
                 state=state,
                 comparison_index=comparison_index,
-                component_index=component_index,
+                lineage_index=lineage_index,
             )
             if right_pair is not None:
                 return right_pair
@@ -408,7 +393,7 @@ def _first_comparable_mixed_pair(
     active_compacted: tuple[DraftClaimCompactionNode, ...],
     active_raw: tuple[DraftClaimCompactionNode, ...],
     comparison_index: _ComparisonIndex,
-    component_index: _ComponentIndex,
+    lineage_index: _LineageComparisonIndex,
 ) -> tuple[str, str] | None:
     for compacted in active_compacted:
         for raw in active_raw:
@@ -417,7 +402,7 @@ def _first_comparable_mixed_pair(
                 raw,
                 state=state,
                 comparison_index=comparison_index,
-                component_index=component_index,
+                lineage_index=lineage_index,
             )
             if pair is not None:
                 return pair
@@ -430,9 +415,9 @@ def _mixed_candidate(
     *,
     state: DraftClaimCompactionPlannerState,
     comparison_index: _ComparisonIndex,
-    component_index: _ComponentIndex,
+    lineage_index: _LineageComparisonIndex,
 ) -> tuple[str, str] | None:
-    if not component_index.can_compare(
+    if not lineage_index.can_compare(
         compacted.node_ref,
         raw.node_ref,
         comparison_index,
@@ -453,11 +438,11 @@ def _first_comparable_pair(
     state: DraftClaimCompactionPlannerState,
     work_type: DraftClaimCompactionNextWorkItemType,
     comparison_index: _ComparisonIndex,
-    component_index: _ComponentIndex,
+    lineage_index: _LineageComparisonIndex,
 ) -> tuple[str, str] | None:
     for left, right in _node_pairs(nodes):
         node_refs = (left.node_ref, right.node_ref)
-        if component_index.can_compare(
+        if lineage_index.can_compare(
             left.node_ref, right.node_ref, comparison_index
         ) and _work_item_fits_primary_tpm(
             state=state,

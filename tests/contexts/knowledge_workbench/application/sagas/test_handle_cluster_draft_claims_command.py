@@ -468,6 +468,31 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
 
 
 @pytest.mark.asyncio
+async def test_singleton_group_uses_single_claim_enrichment_prompt() -> None:
+    repository = FakeCompactionRepository((_claim("claim-a"),))
+    scheduling = FakeWorkItemSchedulingRepository()
+
+    await HandleClusterDraftClaimsCommandHandler().execute(
+        HandleClusterDraftClaimsCommand(
+            workflow_command=_command(
+                KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
+            )
+        ),
+        compaction_plan_repository=repository,
+        work_item_scheduling_repository=scheduling,
+        workflow_unit_of_work=FakeWorkflowUnitOfWork(),
+        compaction_reduction_state_repository=FakeReductionStateRepository(),
+    )
+
+    assert len(scheduling.saved_payloads) == 1
+    payload = scheduling.saved_payloads[0]
+    assert payload["prompt_variant"] == "single_draft_claim_enrichment"
+    provider_messages = payload["provider_messages"]
+    assert isinstance(provider_messages, list)
+    assert "NODE: single_draft_claim_enrichment" in provider_messages[0]["content"]
+
+
+@pytest.mark.asyncio
 async def test_changed_existing_plan_raises_controlled_conflict_before_outbox() -> None:
     repository = FakeCompactionRepository(
         (_claim("claim-a"), _claim("claim-b")),

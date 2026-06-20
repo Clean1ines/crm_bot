@@ -530,14 +530,11 @@ def _apply_result_payload(
     expected_output_kind: DraftClaimCompactionExpectedOutputKind,
     validation_metadata: Mapping[str, object],
 ) -> JsonObject:
-    left_node_ref = _payload_text(
+    compared_node_refs = _derived_compared_node_refs(
+        workflow_run_id,
+        group_ref,
         workflow_command.payload,
-        "left_node_ref",
-        fallback=_derived_left_node_ref(
-            workflow_run_id, group_ref, workflow_command.payload
-        ),
     )
-    right_node_ref = _payload_optional_text(workflow_command.payload, "right_node_ref")
 
     if expected_output_kind is DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS:
         compacted_claims = _metadata_payload_list(
@@ -551,19 +548,13 @@ def _apply_result_payload(
             "work_item_id": work_item_id,
             "round_index": round_index,
             "output_kind": DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS.value,
-            "left_node_ref": left_node_ref,
-            "right_node_ref": right_node_ref,
+            "compared_node_refs": list(compared_node_refs),
             "compacted_claims": compacted_claims,
             "reduced_rewrite": None,
         }
 
-    source_node_refs = _payload_text_tuple(
-        workflow_command.payload,
-        "source_node_refs",
-        allow_missing=True,
-    )
-    if right_node_ref is None:
-        right_node_ref = _derived_right_node_ref(source_node_refs)
+    if len(compared_node_refs) != 2:
+        raise ValueError("reduced rewrite requires exactly two compared node refs")
     return {
         "workflow_run_id": workflow_run_id,
         "group_ref": group_ref,
@@ -571,9 +562,8 @@ def _apply_result_payload(
         "work_item_id": work_item_id,
         "round_index": round_index,
         "output_kind": DraftClaimCompactionExpectedOutputKind.REDUCED_REWRITE.value,
-        "left_node_ref": left_node_ref,
-        "right_node_ref": right_node_ref,
-        "source_node_refs": list(source_node_refs),
+        "compared_node_refs": list(compared_node_refs),
+        "source_node_refs": list(compared_node_refs),
         "compacted_claims": [],
         "reduced_rewrite": _metadata_payload_mapping(
             validation_metadata,
@@ -627,32 +617,40 @@ def _reconcile_progress_command(
     )
 
 
-def _derived_left_node_ref(
+def _derived_compared_node_refs(
     workflow_run_id: str,
     group_ref: str,
     payload: Mapping[str, object],
-) -> str | None:
+) -> tuple[str, ...]:
+    compared_node_refs = _payload_text_tuple(
+        payload, "compared_node_refs", allow_missing=True
+    )
+    if compared_node_refs:
+        return compared_node_refs
     source_node_refs = _payload_text_tuple(
         payload, "source_node_refs", allow_missing=True
     )
     if source_node_refs:
-        return source_node_refs[0]
+        return source_node_refs
     source_claim_refs = _payload_text_tuple(
         payload, "source_claim_refs", allow_missing=True
     )
     if source_claim_refs:
-        return raw_claim_node_ref(
-            workflow_run_id=workflow_run_id,
-            group_ref=group_ref,
-            observation_ref=source_claim_refs[0],
+        return tuple(
+            raw_claim_node_ref(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                observation_ref=source_claim_ref,
+            )
+            for source_claim_ref in source_claim_refs
         )
-    return None
-
-
-def _derived_right_node_ref(source_node_refs: tuple[str, ...]) -> str | None:
-    if len(source_node_refs) > 1:
-        return source_node_refs[1]
-    return None
+    left_node_ref = _payload_optional_text(payload, "left_node_ref")
+    right_node_ref = _payload_optional_text(payload, "right_node_ref")
+    if left_node_ref is None:
+        raise ValueError("compared node refs are required")
+    if right_node_ref is None:
+        return (left_node_ref,)
+    return tuple(sorted((left_node_ref, right_node_ref)))
 
 
 def _capacity_observation_from_result(

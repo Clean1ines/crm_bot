@@ -4,6 +4,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import combinations
 
 import pytest
 
@@ -15,6 +16,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.enriched_dra
     EnrichedDraftClaimCompactionOutputClaim,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionComparisonStatus,
     DraftClaimCompactionNodeKind,
 )
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
@@ -683,7 +685,65 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
 
 
 @pytest.mark.asyncio
-async def test_component_incompatibility_survives_reload_after_mixed_merge() -> None:
+async def test_apply_compacted_claims_result_marks_distinct_outputs_not_merged() -> (
+    None
+):
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    raw_nodes = tuple(
+        build_initial_raw_node(
+            workflow_run_id="workflow-1",
+            group_ref="group-1",
+            observation_ref=claim_ref,
+            estimated_input_tokens=10,
+        )
+        for claim_ref in ("claim-1", "claim-2", "claim-3", "claim-4")
+    )
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=raw_nodes,
+        created_at=_now(),
+    )
+
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(
+            _compacted_claim(("claim-1",)),
+            _compacted_claim(("claim-2",)),
+            _compacted_claim(("claim-3", "claim-4")),
+        ),
+        compared_node_refs=tuple(node.node_ref for node in raw_nodes),
+        created_at=_now(),
+    )
+
+    state = await repository.load_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+    )
+
+    assert state is not None
+    active_nodes = state.active_nodes()
+    assert len(active_nodes) == 3
+    active_refs = {node.node_ref for node in active_nodes}
+    not_merged_pairs = {
+        comparison.pair_key
+        for comparison in state.comparisons
+        if comparison.status is DraftClaimCompactionComparisonStatus.NOT_MERGED
+    }
+    assert not_merged_pairs == {
+        tuple(sorted(pair)) for pair in combinations(active_refs, 2)
+    }
+    decision = DraftClaimCompactionReductionPlannerPolicy().plan_next_step(state)
+    assert decision.work_type is DraftClaimCompactionNextWorkItemType.DONE
+
+
+@pytest.mark.asyncio
+async def test_not_merged_lineage_survives_reload_after_mixed_merge() -> None:
     connection = FakeReductionStateConnection()
     repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
 
@@ -779,7 +839,10 @@ async def test_component_incompatibility_survives_reload_after_mixed_merge() -> 
             source_claim_refs=("claim-c",),
         ),
     }
-    assert state.incompatibilities
+    assert any(
+        comparison.status is DraftClaimCompactionComparisonStatus.NOT_MERGED
+        for comparison in state.comparisons
+    )
 
     decision = DraftClaimCompactionReductionPlannerPolicy().plan_next_step(state)
 
@@ -937,7 +1000,7 @@ def _optional_str_arg(value: object) -> str | None:
 
 
 @pytest.mark.asyncio
-async def test_summarize_compaction_progress_exposes_component_incompatibility_visibility() -> (
+async def test_summarize_compaction_progress_completes_from_lineage_comparisons() -> (
     None
 ):
     connection = FakeReductionStateConnection()
@@ -993,9 +1056,10 @@ async def test_summarize_compaction_progress_exposes_component_incompatibility_v
     )
 
     assert summary.active_component_count == 2
-    assert summary.component_incompatibility_count == 1
+    assert summary.component_incompatibility_count == 0
+    assert summary.done_group_count == 1
     assert summary.to_payload()["active_component_count"] == 2
-    assert summary.to_payload()["component_incompatibility_count"] == 1
+    assert summary.to_payload()["component_incompatibility_count"] == 0
 
 
 @pytest.mark.asyncio

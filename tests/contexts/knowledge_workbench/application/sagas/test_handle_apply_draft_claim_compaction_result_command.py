@@ -102,8 +102,10 @@ def _command(
         "work_item_id": "work-item-1",
         "round_index": 0,
         "output_kind": output_kind,
-        "left_node_ref": "raw:workflow-1:group-1:claim-a",
-        "right_node_ref": "raw:workflow-1:group-1:claim-b",
+        "compared_node_refs": [
+            "raw:workflow-1:group-1:claim-a",
+            "raw:workflow-1:group-1:claim-b",
+        ],
         "compacted_claims": [
             {
                 "key": "refund_support",
@@ -117,8 +119,7 @@ def _command(
         "reduced_rewrite": None,
     }
     if output_kind == "reduced_rewrite":
-        payload["right_node_ref"] = "compacted-b"
-        payload["left_node_ref"] = "compacted-a"
+        payload["compared_node_refs"] = ["compacted-a", "compacted-b"]
         payload["compacted_claims"] = []
         payload["reduced_rewrite"] = {
             "key": "refund_support",
@@ -560,7 +561,7 @@ async def test_schedules_next_work_item_for_reduced_rewrite_decision() -> None:
     payload = scheduling.saved_payloads[0]
     assert isinstance(payload, dict)
     assert payload["prompt_variant"] == "reduced_rewrite"
-    assert payload["node_refs"] == ["compacted-a", "compacted-b"]
+    assert payload["source_node_refs"] == ["compacted-a", "compacted-b"]
     assert "source_claim_refs" not in payload
     assert (
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED.value
@@ -857,7 +858,7 @@ def _expected_next_work_schedule_payload(
         "prompt_variant": work_type.value,
         "model_id": "openai/gpt-oss-120b",
         "provider_messages": list(provider_messages),
-        "node_refs": list(node_refs),
+        "source_node_refs": list(node_refs),
         "compacted_node_refs": list(node_refs)
         if work_type
         in {

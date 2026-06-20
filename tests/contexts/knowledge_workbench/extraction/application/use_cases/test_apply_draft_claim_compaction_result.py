@@ -158,15 +158,17 @@ async def test_apply_compacted_output_reloads_state_and_returns_next_decision() 
         batch_ref="batch-1",
         work_item_id="work-item-1",
         round_index=0,
-        left_node_ref=raw_claim_node_ref(
-            workflow_run_id="workflow-1",
-            group_ref="group-1",
-            observation_ref="claim-a",
-        ),
-        right_node_ref=raw_claim_node_ref(
-            workflow_run_id="workflow-1",
-            group_ref="group-1",
-            observation_ref="claim-b",
+        compared_node_refs=(
+            raw_claim_node_ref(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+            ),
+            raw_claim_node_ref(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-b",
+            ),
         ),
         output_kind=DraftClaimCompactionApplyOutputKind.COMPACTED_CLAIMS,
         compacted_claims=(_compacted_claim(("claim-a", "claim-b")),),

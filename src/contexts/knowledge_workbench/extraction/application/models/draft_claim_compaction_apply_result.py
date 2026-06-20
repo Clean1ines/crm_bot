@@ -43,8 +43,7 @@ class DraftClaimCompactionApplyResultCommand:
     batch_ref: str
     work_item_id: str
     round_index: int
-    left_node_ref: str
-    right_node_ref: str | None
+    compared_node_refs: tuple[str, ...]
     output_kind: DraftClaimCompactionApplyOutputKind
     compacted_claims: tuple[DraftClaimCompactionOutputClaim, ...]
     reduced_rewrite: DraftClaimReducedRewriteOutput | None
@@ -57,9 +56,11 @@ class DraftClaimCompactionApplyResultCommand:
         _text(self.work_item_id, "work_item_id")
         if self.round_index < 0:
             raise ValueError("round_index must be >= 0")
-        _text(self.left_node_ref, "left_node_ref")
-        if self.right_node_ref is not None:
-            _text(self.right_node_ref, "right_node_ref")
+        _text_tuple(
+            self.compared_node_refs,
+            "compared_node_refs",
+            allow_empty=False,
+        )
         object.__setattr__(
             self,
             "output_kind",
@@ -84,8 +85,10 @@ class DraftClaimCompactionApplyResultCommand:
             if self.reduced_rewrite is not None:
                 raise ValueError("compacted_claims output cannot include rewrite")
         if self.output_kind is DraftClaimCompactionApplyOutputKind.REDUCED_REWRITE:
-            if self.right_node_ref is None:
-                raise ValueError("reduced_rewrite output requires right_node_ref")
+            if len(self.compared_node_refs) != 2:
+                raise ValueError(
+                    "reduced_rewrite output requires exactly two compared_node_refs"
+                )
             if self.reduced_rewrite is None:
                 raise ValueError("reduced_rewrite output requires rewrite")
             if self.compacted_claims:

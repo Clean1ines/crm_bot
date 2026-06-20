@@ -397,13 +397,18 @@ def _plan(
     claims_by_ref: Mapping[str, DraftClaimForCompaction],
 ) -> WorkItemSchedulePlan:
     work_item_id = f"claim-compaction:{workflow_run_id}:{batch.batch_ref}"
-    prompt_payload = (
-        DraftClaimCompactionPromptPayloadBuilder()
-        .build_draft_vs_draft_payload(
-            tuple(claims_by_ref[ref] for ref in batch.member_observation_refs)
-        )
-        .to_json_dict()
-    )
+    claims = tuple(claims_by_ref[ref] for ref in batch.member_observation_refs)
+    payload_builder = DraftClaimCompactionPromptPayloadBuilder()
+    if batch.prompt_variant == "single_draft_claim_enrichment":
+        prompt_payload = payload_builder.build_single_draft_claim_enrichment_payload(
+            claims
+        ).to_json_dict()
+        prompt_file_name = "single_draft_claim_enrichment.txt"
+    else:
+        prompt_payload = payload_builder.build_draft_vs_draft_payload(
+            claims
+        ).to_json_dict()
+        prompt_file_name = "draft_claim_compaction.txt"
     return WorkItemSchedulePlan(
         work_item_id=work_item_id,
         work_kind=WORK_KIND,
@@ -417,7 +422,7 @@ def _plan(
             "source_claim_refs": list(batch.member_observation_refs),
             "provider_messages": list(
                 build_draft_claim_compaction_provider_messages(
-                    prompt_file_name="draft_claim_compaction.txt",
+                    prompt_file_name=prompt_file_name,
                     payload=prompt_payload,
                 )
             ),

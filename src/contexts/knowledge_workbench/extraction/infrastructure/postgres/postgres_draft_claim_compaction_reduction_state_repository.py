@@ -440,7 +440,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         requested_nodes = len(compacted_claims)
         requested_sources = 0
         requested_comparisons = 0
-        output_component_refs_by_source_set: dict[tuple[str, ...], str] = {}
+        output_node_refs: list[str] = []
 
         for claim in compacted_claims:
             node_ref = compacted_claim_node_ref(
@@ -448,6 +448,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 group_ref=group_ref,
                 source_claim_refs=claim.source_claim_refs,
             )
+            output_node_refs.append(node_ref)
             fallback_raw_node_refs = tuple(
                 raw_claim_node_ref(
                     workflow_run_id=workflow_run_id,
@@ -533,10 +534,6 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 source_claim_refs=claim.source_claim_refs,
                 created_at=created_at,
             )
-            output_component_refs_by_source_set[
-                tuple(sorted(claim.source_claim_refs))
-            ] = component_ref_for_node(node_ref)
-
             for left, right in _node_ref_pairs(source_node_refs):
                 requested_comparisons += 1
                 if await self._insert_merged_comparison(
@@ -550,35 +547,17 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 ):
                     inserted_comparisons += 1
 
-        if len(compared_node_refs) == 2:
-            left_compared, right_compared = ordered_pair(
-                compared_node_refs[0],
-                compared_node_refs[1],
-            )
-            compared_pair_merged = _compacted_claims_merge_compared_source_sets(
-                compared_source_sets=compared_source_sets,
-                compacted_claims=compacted_claims,
-            )
-            if not compared_pair_merged:
-                requested_comparisons += 1
-                if await self._insert_not_merged_comparison(
-                    workflow_run_id=workflow_run_id,
-                    group_ref=group_ref,
-                    round_index=round_index,
-                    left_node_ref=left_compared,
-                    right_node_ref=right_compared,
-                    created_at=created_at,
-                ):
-                    inserted_comparisons += 1
-                await self._insert_component_incompatibility_for_output_sides(
-                    workflow_run_id=workflow_run_id,
-                    group_ref=group_ref,
-                    left_node_ref=left_compared,
-                    right_node_ref=right_compared,
-                    compared_source_sets=compared_source_sets,
-                    output_component_refs_by_source_set=output_component_refs_by_source_set,
-                    created_at=created_at,
-                )
+        for left_output, right_output in _node_ref_pairs(tuple(output_node_refs)):
+            requested_comparisons += 1
+            if await self._insert_not_merged_comparison(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                round_index=round_index,
+                left_node_ref=left_output,
+                right_node_ref=right_output,
+                created_at=created_at,
+            ):
+                inserted_comparisons += 1
 
         requested_total = requested_nodes + requested_sources + requested_comparisons
         inserted_total = inserted_nodes + inserted_sources + inserted_comparisons
@@ -960,81 +939,6 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 source_comparison_ref=None,
                 created_at=created_at,
             )
-
-    async def _insert_component_incompatibility_for_nodes(
-        self,
-        *,
-        workflow_run_id: str,
-        group_ref: str,
-        left_node_ref: str,
-        right_node_ref: str,
-        round_index: int,
-        created_at: datetime,
-    ) -> None:
-        left_component_ref = await self._active_component_ref_for_node(
-            workflow_run_id=workflow_run_id,
-            group_ref=group_ref,
-            node_ref=left_node_ref,
-        )
-        right_component_ref = await self._active_component_ref_for_node(
-            workflow_run_id=workflow_run_id,
-            group_ref=group_ref,
-            node_ref=right_node_ref,
-        )
-        await self._insert_component_incompatibility(
-            workflow_run_id=workflow_run_id,
-            group_ref=group_ref,
-            left_component_ref=left_component_ref,
-            right_component_ref=right_component_ref,
-            source_comparison_ref=comparison_ref(
-                workflow_run_id=workflow_run_id,
-                group_ref=group_ref,
-                round_index=round_index,
-                left_node_ref=left_node_ref,
-                right_node_ref=right_node_ref,
-            ),
-            created_at=created_at,
-        )
-
-    async def _insert_component_incompatibility_for_output_sides(
-        self,
-        *,
-        workflow_run_id: str,
-        group_ref: str,
-        left_node_ref: str,
-        right_node_ref: str,
-        compared_source_sets: Mapping[str, tuple[str, ...]],
-        output_component_refs_by_source_set: Mapping[tuple[str, ...], str],
-        created_at: datetime,
-    ) -> None:
-        left_component_ref = _output_component_ref_for_compared_node(
-            node_ref=left_node_ref,
-            compared_source_sets=compared_source_sets,
-            output_component_refs_by_source_set=output_component_refs_by_source_set,
-        )
-        right_component_ref = _output_component_ref_for_compared_node(
-            node_ref=right_node_ref,
-            compared_source_sets=compared_source_sets,
-            output_component_refs_by_source_set=output_component_refs_by_source_set,
-        )
-        if left_component_ref is None or right_component_ref is None:
-            await self._insert_component_incompatibility_for_nodes(
-                workflow_run_id=workflow_run_id,
-                group_ref=group_ref,
-                left_node_ref=left_node_ref,
-                right_node_ref=right_node_ref,
-                round_index=0,
-                created_at=created_at,
-            )
-            return
-        await self._insert_component_incompatibility(
-            workflow_run_id=workflow_run_id,
-            group_ref=group_ref,
-            left_component_ref=left_component_ref,
-            right_component_ref=right_component_ref,
-            source_comparison_ref=None,
-            created_at=created_at,
-        )
 
     async def _insert_component_incompatibility(
         self,
@@ -1714,36 +1618,6 @@ def _matched_source_node_refs_for_claim(
     if matched_refs:
         return matched_refs
     return fallback_raw_node_refs
-
-
-def _compacted_claims_merge_compared_source_sets(
-    *,
-    compared_source_sets: Mapping[str, tuple[str, ...]],
-    compacted_claims: tuple[EnrichedDraftClaimCompactionOutputClaim, ...],
-) -> bool:
-    if len(compared_source_sets) != 2:
-        return False
-    union_source_claim_refs = _dedupe_sorted(
-        source_claim_ref
-        for source_claim_refs in compared_source_sets.values()
-        for source_claim_ref in source_claim_refs
-    )
-    for claim in compacted_claims:
-        if tuple(sorted(claim.source_claim_refs)) == union_source_claim_refs:
-            return True
-    return False
-
-
-def _output_component_ref_for_compared_node(
-    *,
-    node_ref: str,
-    compared_source_sets: Mapping[str, tuple[str, ...]],
-    output_component_refs_by_source_set: Mapping[tuple[str, ...], str],
-) -> str | None:
-    source_claim_refs = compared_source_sets.get(node_ref)
-    if source_claim_refs is None:
-        return None
-    return output_component_refs_by_source_set.get(tuple(sorted(source_claim_refs)))
 
 
 def _component(row: Mapping[str, object]) -> DraftClaimCompactionComponent:

@@ -204,6 +204,34 @@ const clusterStatusLabel = (status: string): string => {
   return labels[normalize(status)] || status || 'состояние уточняется';
 };
 
+const clusterStatusTitle = (status: string): string => {
+  const label = clusterStatusLabel(status);
+  return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+};
+
+const clusterStatusTone = (status: string): string => {
+  const normalizedStatus = normalize(status);
+  if (normalizedStatus === 'compacted') {
+    return 'border-emerald-500/30 bg-emerald-500/10';
+  }
+  if (normalizedStatus === 'failed') {
+    return 'border-rose-500/30 bg-rose-500/10';
+  }
+  if (
+    normalizedStatus === 'blocked' ||
+    normalizedStatus === 'waiting_user_model_choice'
+  ) {
+    return 'border-amber-500/30 bg-amber-500/10';
+  }
+  if (
+    normalizedStatus === 'comparing' ||
+    normalizedStatus === 'partially_compacted'
+  ) {
+    return 'border-sky-500/30 bg-sky-500/10';
+  }
+  return 'border-[var(--border-subtle)] bg-[var(--control-bg)]';
+};
+
 const clusterHumanState = (
   cluster: {
     status: string;
@@ -641,6 +669,69 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     (total, cluster) => total + (cluster.compacted_claims?.length ?? 0),
     0,
   );
+  const extractedFacts = Array.from(
+    new Map(
+      (clusteredClaims.length > 0
+        ? clusteredClaims.map((claim) => ({
+            key: claim.observation_ref,
+            text: claim.claim,
+          }))
+        : draftClaims.map((claim, index) => ({
+            key: draftClaimKey(claim, index),
+            text: draftClaimText(claim),
+          }))
+      )
+        .filter((fact) => fact.text.trim().length > 0)
+        .map((fact) => [fact.key, fact]),
+    ).values(),
+  );
+  const finalCompactedFacts = claimClusters.flatMap((cluster) =>
+    (cluster.compacted_claims ?? [])
+      .filter((claim) => claim.active)
+      .map((claim) => ({
+        ...claim,
+        cluster_ref: cluster.cluster_ref,
+      })),
+  );
+  const compactionProgressPercent =
+    claimClusters.length > 0
+      ? Math.round((compactedClusterCount / claimClusters.length) * 100)
+      : 0;
+  const compactionAttention =
+    compactionRetry + compactionFailed + compactionNeedsDecision;
+  const compactionIsComplete =
+    claimClusters.length > 0 && compactedClusterCount === claimClusters.length;
+  const compactionPanelTone =
+    workflow?.curation.available || compactionIsComplete
+      ? 'border-emerald-500/30 bg-emerald-500/10'
+      : compactionFailed > 0
+        ? 'border-rose-500/30 bg-rose-500/10'
+        : compactionAttention > 0
+          ? 'border-amber-500/30 bg-amber-500/10'
+          : compactionLeased > 0
+            ? 'border-sky-500/30 bg-sky-500/10'
+            : 'border-[var(--border-strong)] bg-[var(--surface-secondary)]';
+  const compactionSummaryText =
+    compactionLeased > 0
+      ? `Сейчас ИИ объединяет ${formatNumber(compactionLeased)} кластер(а).`
+      : compactionReady > 0
+        ? `Ждут объединения ${formatNumber(compactionReady)} кластер(а).`
+        : compactedClusterCount === claimClusters.length && claimClusters.length > 0
+          ? 'Все кластеры объединены.'
+          : 'Состояние объединения уточняется.';
+  const compactionUserSummary = workflow?.curation.available
+    ? 'Объединение завершено — знания готовы к ручной проверке.'
+    : compactionFailed > 0
+      ? 'Часть кластеров завершилась с ошибкой.'
+      : compactionNeedsDecision > 0
+        ? 'Для продолжения нужно решение пользователя.'
+        : compactionLeased > 0
+          ? 'ИИ сейчас объединяет связанные факты.'
+          : compactionReady > 0
+            ? 'Кластеры ждут своей очереди на объединение.'
+            : compactionIsComplete
+              ? 'Все кластеры объединены.'
+              : compactionSummaryText;
   const compactionLlmAttempts = attempts.filter(
     (attempt) => attempt.node_name === 'knowledge_workbench.draft_claim_compaction',
   );
@@ -654,14 +745,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     (total, attempt) => total + Math.max(0, attempt.total_tokens || 0),
     0,
   );
-  const compactionSummaryText =
-    compactionLeased > 0
-      ? `Сейчас ИИ объединяет ${formatNumber(compactionLeased)} кластер(а).`
-      : compactionReady > 0
-        ? `Ждут объединения ${formatNumber(compactionReady)} кластер(а).`
-        : compactedClusterCount === claimClusters.length && claimClusters.length > 0
-          ? 'Все кластеры объединены.'
-          : 'Состояние объединения уточняется.';
 
   const displayedStageCounts = (
     stage: WorkbenchWorkflowStageLiveState,
@@ -916,26 +999,103 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           </div>
 
           {claimClusters.length > 0 ? (
-            <div className="min-w-0 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-secondary)] p-3">
-              <div className="mb-1 font-medium text-[var(--text-primary)]">
-                Объединение знаний · кластеры: {formatNumber(claimClusters.length)}
+            <div className={`min-w-0 rounded-xl border p-3 ${compactionPanelTone}`}>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="font-medium text-[var(--text-primary)]">
+                    Объединение знаний
+                  </div>
+                  <div className="mt-1 text-[var(--text-secondary)]">
+                    {compactionUserSummary}
+                  </div>
+                </div>
+                <div className="rounded-full bg-[var(--surface-elevated)] px-2.5 py-1 font-medium text-[var(--text-primary)]">
+                  {formatNumber(compactionProgressPercent)}% кластеров готово
+                </div>
               </div>
-              <div className="text-[var(--text-muted)]">
-                {compactionSummaryText}
-                {' '}Готово кластеров: {formatNumber(compactedClusterCount)} из{' '}
-                {formatNumber(claimClusters.length)}.
-                {' '}Итоговых утверждений: {formatNumber(compactedClaimPreviewCount)}.
+
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--surface-elevated)]">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-[width]"
+                  style={{ width: `${compactionProgressPercent}%` }}
+                />
               </div>
-              <div className="mt-1 text-[var(--text-muted)]">
-                Очередь: {formatNumber(compactionReady)}
-                {' · '}в работе: {formatNumber(compactionLeased)}
+
+              <div className="mt-3 grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
+                {[
+                  ['В очереди', compactionReady, 'text-slate-600 dark:text-slate-300'],
+                  ['Обрабатывается', compactionLeased, 'text-sky-700 dark:text-sky-300'],
+                  ['Готово', compactedClusterCount, 'text-emerald-700 dark:text-emerald-300'],
+                  ['Нужно внимание', compactionAttention, 'text-amber-700 dark:text-amber-300'],
+                ].map(([label, value, tone]) => (
+                  <div
+                    key={String(label)}
+                    className="rounded-lg bg-[var(--surface-elevated)] px-2.5 py-2"
+                  >
+                    <div className={`font-medium ${String(tone)}`}>{label}</div>
+                    <div className="mt-0.5 text-lg font-semibold text-[var(--text-primary)]">
+                      {formatNumber(Number(value))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {extractedFacts.length > 0 && (
+                <section className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3">
+                  <div className="font-medium text-[var(--text-primary)]">
+                    Извлечённые факты: {formatNumber(extractedFacts.length)}
+                  </div>
+                  <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-1">
+                    {extractedFacts.map((fact, index) => (
+                      <div
+                        key={fact.key}
+                        className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] px-3 py-2 text-[var(--text-secondary)]"
+                      >
+                        <span className="mr-2 text-[var(--text-muted)]">
+                          {formatNumber(index + 1)}.
+                        </span>
+                        {fact.text}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {finalCompactedFacts.length > 0 && (
+                <section className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+                  <div className="font-medium text-[var(--text-primary)]">
+                    Итоговые факты: {formatNumber(finalCompactedFacts.length)}
+                  </div>
+                  <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-1">
+                    {finalCompactedFacts.map((fact, index) => (
+                      <div
+                        key={`${fact.cluster_ref}:${fact.node_ref}`}
+                        className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2"
+                      >
+                        <div className="text-[var(--text-primary)]">
+                          <span className="mr-2 text-emerald-700 dark:text-emerald-300">
+                            {formatNumber(index + 1)}.
+                          </span>
+                          {fact.claim}
+                        </div>
+                        <div className="mt-1 text-[11px] text-[var(--text-muted)]">
+                          {fact.source_claim_refs.length > 1
+                            ? `Объединено из ${formatNumber(fact.source_claim_refs.length)} фактов`
+                            : 'Сохранён как отдельный факт'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <div className="mt-3 text-[11px] text-[var(--text-muted)]">
+                Кластеров: {formatNumber(claimClusters.length)}
                 {' · '}завершено задач: {formatNumber(compactionDone)}
-                {' · '}повторить: {formatNumber(compactionRetry)}
-                {' · '}ошибок: {formatNumber(compactionFailed)}
-                {' · '}нужно решение: {formatNumber(compactionNeedsDecision)}
-              </div>
-              <div className="mt-1 text-[var(--text-muted)]">
-                Запросов ИИ: {formatNumber(compactionLlmAttempts.length)}
+                {' · '}итоговых фактов: {formatNumber(compactedClaimPreviewCount)}
+                {compactionLlmAttempts.length > 0
+                  ? ` · запросов ИИ: ${formatNumber(compactionLlmAttempts.length)}`
+                  : ''}
                 {compactionSucceededAttempts > 0
                   ? ` · успешно ${formatNumber(compactionSucceededAttempts)}`
                   : ''}
@@ -1004,15 +1164,22 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                     {claimClusters.map((cluster, clusterIndex) => (
                       <details
                         key={cluster.cluster_ref}
-                        className="rounded-lg bg-[var(--control-bg)] p-2"
+                        className={`rounded-lg border p-2 ${clusterStatusTone(cluster.status)}`}
                       >
                         <summary className="cursor-pointer list-none">
-                          <span className="font-medium text-[var(--text-primary)]">
-                            Кластер {formatNumber(clusterIndex + 1)}
-                          </span>
-                          <span className="ml-2 text-[var(--text-muted)]">
-                            {clusterStatusLabel(cluster.status)} · {clusterHumanState(cluster)} ·{' '}
-                            утверждений: {formatNumber(cluster.member_count)}
+                          <span className="flex flex-wrap items-center justify-between gap-2">
+                            <span>
+                              <span className="font-medium text-[var(--text-primary)]">
+                                Кластер {formatNumber(clusterIndex + 1)}
+                              </span>
+                              <span className="ml-2 text-[var(--text-muted)]">
+                                {clusterHumanState(cluster)} · утверждений:{' '}
+                                {formatNumber(cluster.member_count)}
+                              </span>
+                            </span>
+                            <span className="rounded-full bg-[var(--surface-elevated)] px-2 py-1 font-medium text-[var(--text-primary)]">
+                              {clusterStatusTitle(cluster.status)}
+                            </span>
                           </span>
                         </summary>
                         <div className="mt-2 grid gap-1 text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">
@@ -1130,7 +1297,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               {hasCompactionComparisons && (
                 <details className="rounded-lg bg-[var(--surface-elevated)] p-2">
                   <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                    Сравнения compaction: {formatNumber(compactionComparisons.length)}
+                    Технические сравнения: {formatNumber(compactionComparisons.length)}
                   </summary>
                   <div className="mt-2 space-y-1">
                     {compactionComparisons.length === 0 && (

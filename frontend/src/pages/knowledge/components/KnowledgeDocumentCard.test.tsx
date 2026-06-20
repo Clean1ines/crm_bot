@@ -72,6 +72,12 @@ const workflowLiveState: WorkbenchWorkflowLiveStateResponse = {
         comparison_count: 2,
         pending_comparison_count: 1,
         work_item_count: 2,
+        ready_work_item_count: 1,
+        leased_work_item_count: 1,
+        completed_work_item_count: 2,
+        retryable_failed_work_item_count: 0,
+        terminal_failed_work_item_count: 0,
+        user_action_required_work_item_count: 0,
         members: [
           {
             observation_ref: 'claim-1',
@@ -233,7 +239,7 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
     expect(normalizedMarkup).toContain('завершено · 1 / 1');
     expect(normalizedMarkup).toContain('идёт · 0 / 1');
     expect(normalizedMarkup).toContain('Кластеры утверждений: 1');
-    expect(normalizedMarkup).toContain('Сравнения compaction: 2');
+    expect(normalizedMarkup).toContain('Технические сравнения: 2');
     expect(normalizedMarkup).toContain('<details');
     expect(normalizedMarkup).toContain('Кластер 1');
     expect(normalizedMarkup).toContain('Поддержка отвечает круглосуточно.');
@@ -244,5 +250,96 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
       'text-embedding-3-small · 1 536 изм. · готов',
     );
     expect(normalizedMarkup).toContain('raw · активен · active');
+    expect(normalizedMarkup).toContain('Объединение знаний');
+    expect(normalizedMarkup).toContain('0% кластеров готово');
+    expect(normalizedMarkup).toContain('В очереди');
+    expect(normalizedMarkup).toContain('Обрабатывается');
+    expect(normalizedMarkup).toContain('Готово');
+    expect(normalizedMarkup).toContain('Нужно внимание');
+    expect(normalizedMarkup).toContain('Кластер 1');
+    expect(normalizedMarkup).toContain('Частично готов');
+    expect(normalizedMarkup).toContain('bg-sky-500/10');
+    expect(normalizedMarkup).toContain('Технические сравнения');
+    expect(normalizedMarkup).toContain('Извлечённые факты: 2');
+    expect(normalizedMarkup).toContain('Поддержка отвечает круглосуточно.');
+    expect(normalizedMarkup).toContain('Оператор подключается по запросу.');
+  });
+
+  it('shows a clear review-ready completion state', () => {
+    const completedState: WorkbenchWorkflowLiveStateResponse = {
+      ...workflowLiveState,
+      workflow: {
+        ...workflowLiveState.workflow,
+        current_phase: 'WAITING_FOR_REVIEW',
+        stages: workflowLiveState.workflow.stages.map((stage) =>
+          stage.id === 'draft_claim_compaction'
+            ? { ...stage, status: 'completed', current: 1, total: 1 }
+            : stage,
+        ),
+        claim_clusters: workflowLiveState.workflow.claim_clusters?.map((cluster) => ({
+          ...cluster,
+          status: 'compacted',
+          active_compacted_node_count: 2,
+          ready_work_item_count: 0,
+          leased_work_item_count: 0,
+          completed_work_item_count: 3,
+          pending_comparison_count: 0,
+          compacted_claims: [
+            {
+              node_ref: 'compacted-1',
+              claim: 'Поддержка доступна круглосуточно без перерывов.',
+              claim_kind: 'property',
+              merge_decision: 'unmerged',
+              source_claim_refs: ['claim-1'],
+              active: true,
+            },
+            {
+              node_ref: 'compacted-2',
+              claim: 'Оператор подключается после запроса клиента.',
+              claim_kind: 'process',
+              merge_decision: 'unmerged',
+              source_claim_refs: ['claim-2'],
+              active: true,
+            },
+          ],
+        })),
+        curation: {
+          available: true,
+          reason_code: 'ready',
+          workflow_run_id: 'workflow-1',
+          workspace_ref: 'workspace-1',
+          workspace_status: 'draft',
+          item_count: 2,
+          excluded_item_count: 0,
+        },
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <KnowledgeDocumentCard
+        doc={{
+          id: 'document-1',
+          file_name: 'knowledge.md',
+          file_size: 1024,
+          preprocessing_mode: 'faq',
+        }}
+        isDeletePending={false}
+        onRequestDelete={vi.fn()}
+        onCardAction={vi.fn()}
+        onOpenCuration={vi.fn()}
+        workflowLiveState={completedState}
+        onStopProcessing={vi.fn()}
+        formatSize={() => '1 КБ'}
+        knowledgeProcessingModeLabel={() => 'FAQ'}
+      />,
+    );
+
+    expect(markup).toContain('100% кластеров готово');
+    expect(markup).toContain('Объединение завершено — знания готовы к ручной проверке.');
+    expect(markup).toContain('bg-emerald-500/10');
+    expect(markup).toContain('Извлечённые факты: 2');
+    expect(markup).toContain('Итоговые факты: 2');
+    expect(markup).toContain('Поддержка доступна круглосуточно без перерывов.');
+    expect(markup).toContain('Оператор подключается после запроса клиента.');
   });
 });

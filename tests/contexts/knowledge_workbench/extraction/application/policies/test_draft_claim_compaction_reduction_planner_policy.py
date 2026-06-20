@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+from itertools import combinations
+
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID,
     DraftClaimCompactionBudgetFit,
     DraftClaimCompactionBudgetFitStatus,
     DraftClaimCompactionComparison,
     DraftClaimCompactionComparisonStatus,
-    DraftClaimCompactionComponent,
-    DraftClaimCompactionComponentIncompatibility,
     DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionNode,
     DraftClaimCompactionNodeKind,
@@ -38,11 +38,12 @@ def _compacted(
     *,
     active: bool = True,
     estimated_input_tokens: int = 1,
+    source_claim_refs: tuple[str, ...] | None = None,
 ) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
         node_ref=ref,
         node_kind=DraftClaimCompactionNodeKind.COMPACTED,
-        source_claim_refs=(f"source-{ref}",),
+        source_claim_refs=source_claim_refs or (f"source-{ref}",),
         active=active,
         estimated_input_tokens=estimated_input_tokens,
     )
@@ -366,6 +367,26 @@ def test_done_when_active_nodes_are_pairwise_known_different() -> None:
     assert decision.node_refs == ()
 
 
+def test_done_for_five_pairwise_known_different_outputs() -> None:
+    node_refs = ("1-prime", "2-prime", "3-prime", "4-prime", "5")
+    decision = _plan(
+        _state(
+            nodes=tuple(_compacted(node_ref) for node_ref in node_refs),
+            comparisons=tuple(
+                _comparison(
+                    left,
+                    right,
+                    DraftClaimCompactionComparisonStatus.NOT_MERGED,
+                )
+                for left, right in combinations(node_refs, 2)
+            ),
+        )
+    )
+
+    assert decision.work_type is DraftClaimCompactionNextWorkItemType.DONE
+    assert decision.node_refs == ()
+
+
 def test_done_when_only_single_active_node_remains() -> None:
     decision = _plan(_state(nodes=(_compacted("A"),)))
 
@@ -391,32 +412,29 @@ def test_after_two_applied_compactions_compacted_vs_compacted_has_priority() -> 
     assert decision.node_refs == ("A", "B")
 
 
-def test_planner_skips_component_pair_when_merge_inherits_not_merge_edge() -> None:
+def test_planner_skips_pair_when_lineage_inherits_not_merge_edge() -> None:
     state = DraftClaimCompactionPlannerState(
         cluster_ref="group-1",
         nodes=(
-            _compacted("node-a5"),
-            _compacted("node-c"),
-        ),
-        components=(
-            DraftClaimCompactionComponent(
-                component_ref="component-a5",
-                representative_node_ref="node-a5",
-                source_claim_refs=("claim-a", "claim-5"),
-                active=True,
-                supersedes_component_refs=("component-a", "component-5"),
+            _compacted(
+                "node-a",
+                active=False,
+                source_claim_refs=("claim-a",),
             ),
-            DraftClaimCompactionComponent(
-                component_ref="component-c",
-                representative_node_ref="node-c",
+            _compacted(
+                "node-c",
                 source_claim_refs=("claim-c",),
-                active=True,
+            ),
+            _compacted(
+                "node-a5",
+                source_claim_refs=("claim-a", "claim-5"),
             ),
         ),
-        incompatibilities=(
-            DraftClaimCompactionComponentIncompatibility(
-                left_component_ref="component-a5",
-                right_component_ref="component-c",
+        comparisons=(
+            _comparison(
+                "node-a",
+                "node-c",
+                DraftClaimCompactionComparisonStatus.NOT_MERGED,
             ),
         ),
     )

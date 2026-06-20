@@ -63,9 +63,7 @@ class ApplyDraftClaimCompactionResult:
                 work_item_id=command.work_item_id,
                 round_index=command.round_index,
                 compacted_claims=enriched_output.compacted_claims,
-                compared_node_refs=_compared_node_refs(
-                    command.left_node_ref, command.right_node_ref
-                ),
+                compared_node_refs=command.compared_node_refs,
                 created_at=command.created_at,
             )
             created_node_refs = tuple(
@@ -106,13 +104,11 @@ class ApplyDraftClaimCompactionResult:
                 )
             )
         else:
-            if command.right_node_ref is None or command.reduced_rewrite is None:
+            if len(command.compared_node_refs) != 2 or command.reduced_rewrite is None:
                 raise DraftClaimCompactionApplyResultError(
                     "reduced rewrite command is incomplete",
                 )
-            source_node_refs = ordered_pair(
-                command.left_node_ref, command.right_node_ref
-            )
+            source_node_refs = ordered_pair(*command.compared_node_refs)
             await self.reduction_state_repository.apply_reduced_rewrite_result(
                 workflow_run_id=command.workflow_run_id,
                 group_ref=command.group_ref,
@@ -169,16 +165,6 @@ class ApplyDraftClaimCompactionResult:
                 observation_refs=source_claim_refs,
             )
         )
-
-
-def _compared_node_refs(
-    left_node_ref: str,
-    right_node_ref: str | None,
-) -> tuple[str, ...]:
-    if right_node_ref is None:
-        return (left_node_ref,)
-    left, right = ordered_pair(left_node_ref, right_node_ref)
-    return left, right
 
 
 def _node_pairs(node_refs: tuple[str, ...]) -> tuple[tuple[str, str], ...]:

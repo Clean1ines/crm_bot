@@ -91,12 +91,6 @@ def _command(
         "expected_output_kind": expected_output_kind,
         "source_claim_refs": ["claim-a", "claim-b"],
         "source_node_refs": list(source_node_refs),
-        "left_node_ref": source_node_refs[0]
-        if source_node_refs
-        else "raw:workflow-1:group-1:claim-a",
-        "right_node_ref": source_node_refs[1]
-        if len(source_node_refs) > 1
-        else "raw:workflow-1:group-1:claim-b",
     }
     return WorkflowCommand(
         command_id=WorkflowCommandId("workflow-command:ExecuteDraftClaimCompaction"),
@@ -448,6 +442,12 @@ async def test_handler_success_creates_apply_command_and_records_capacity() -> N
     assert workflow_uow.command_log.pending_commands[0].command_type == (
         KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT.value
     )
+    assert workflow_uow.command_log.pending_commands[0].payload[
+        "compared_node_refs"
+    ] == [
+        "raw:workflow-1:group-1:claim-a",
+        "raw:workflow-1:group-1:claim-b",
+    ]
     assert workflow_uow.progress_snapshots.snapshot is not None
     assert len(workflow_uow.timeline.entries) == 1
     assert workflow_uow.command_log.completed == [_command().command_id]
