@@ -42,7 +42,7 @@ def _unit_vector_with_raw_cosine(raw_cosine: float) -> tuple[float, float]:
     return (raw_cosine, math.sqrt(1.0 - raw_cosine * raw_cosine))
 
 
-def test_raw_085_is_candidate_edge_for_llm_compaction() -> None:
+def test_raw_088_is_candidate_edge_for_llm_compaction() -> None:
     edges = DraftClaimHybridSimilarityPolicy().build_edges(
         (
             _claim(
@@ -54,21 +54,21 @@ def test_raw_085_is_candidate_edge_for_llm_compaction() -> None:
             _claim(
                 "claim-b",
                 "Axole помогает бизнесу запустить Telegram AI-поддержку по своим документам.",
-                _unit_vector_with_raw_cosine(0.85),
+                _unit_vector_with_raw_cosine(0.88),
                 question="Как Axole помогает бизнесу?",
             ),
         )
     )
 
     assert len(edges) == 1
-    assert edges[0].signals["policy_version"] == "simple_candidate_clustering_v1"
+    assert edges[0].signals["policy_version"] == "conservative_candidate_clustering_v1"
     assert edges[0].signals["score_space"] == "affine_normalized_cosine_v1"
-    assert edges[0].signals["raw_cosine_score"] == pytest.approx(0.85)
+    assert edges[0].signals["raw_cosine_score"] == pytest.approx(0.88)
     assert edges[0].signals["admitted_by_policy"] is True
     assert edges[0].signals["edge_kind"] == "vector_candidate"
 
 
-def test_raw_082_with_surface_support_is_candidate_edge() -> None:
+def test_raw_085_with_question_support_is_candidate_edge() -> None:
     edges = DraftClaimHybridSimilarityPolicy().build_edges(
         (
             _claim(
@@ -81,7 +81,7 @@ def test_raw_082_with_surface_support_is_candidate_edge() -> None:
             _claim(
                 "claim-b",
                 "Черновые знания требуют группировки и курации перед публикацией.",
-                _unit_vector_with_raw_cosine(0.82),
+                _unit_vector_with_raw_cosine(0.85),
                 question="Для чего нужна курация знаний?",
                 granularity="composite",
             ),
@@ -89,11 +89,32 @@ def test_raw_082_with_surface_support_is_candidate_edge() -> None:
     )
 
     assert len(edges) == 1
-    assert edges[0].signals["raw_cosine_score"] == pytest.approx(0.82)
+    assert edges[0].signals["raw_cosine_score"] == pytest.approx(0.85)
     assert edges[0].signals["edge_kind"] == "surface_supported_vector_candidate"
 
 
-def test_raw_080_with_strong_surface_support_is_review_candidate_edge() -> None:
+def test_raw_085_without_question_or_lexical_support_is_not_candidate_edge() -> None:
+    edges = DraftClaimHybridSimilarityPolicy().build_edges(
+        (
+            _claim(
+                "claim-a",
+                "Axole запускает AI-поддержку в Telegram.",
+                (1.0, 0.0),
+                question="Что такое Axole?",
+            ),
+            _claim(
+                "claim-b",
+                "Стоимость зависит от объёма базы знаний и числа менеджеров.",
+                _unit_vector_with_raw_cosine(0.85),
+                question="Сколько стоит сервис?",
+            ),
+        )
+    )
+
+    assert edges == ()
+
+
+def test_raw_080_with_surface_support_is_not_candidate_edge() -> None:
     edges = DraftClaimHybridSimilarityPolicy().build_edges(
         (
             _claim(
@@ -113,9 +134,7 @@ def test_raw_080_with_strong_surface_support_is_review_candidate_edge() -> None:
         )
     )
 
-    assert len(edges) == 1
-    assert edges[0].signals["raw_cosine_score"] == pytest.approx(0.80)
-    assert edges[0].signals["edge_kind"] == "review_candidate"
+    assert edges == ()
 
 
 def test_unrelated_vectors_and_text_are_not_candidate_edges() -> None:
@@ -136,7 +155,7 @@ def test_admitted_edge_keeps_diagnostic_score_instead_of_threshold_floor() -> No
         _claim(
             "claim-b",
             "Beta",
-            _unit_vector_with_raw_cosine(0.85),
+            _unit_vector_with_raw_cosine(0.88),
             question="Beta?",
         ),
     )

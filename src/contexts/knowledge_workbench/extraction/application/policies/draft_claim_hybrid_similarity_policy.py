@@ -16,24 +16,27 @@ _EPSILON = 1e-9
 
 @dataclass(frozen=True, slots=True)
 class DraftClaimHybridSimilarityPolicy:
-    """Recall-oriented pre-LLM candidate edge policy.
+    """Conservative pre-LLM candidate edge policy.
 
-    This stage only finds draft claims that are similar enough to compare in the
-    following LLM compaction phase. It does not assign final topics and does not
-    decide canonical entries.
+    This stage only finds claims similar enough to be compared by the next
+    automatic compaction phase. It does not assign topics and does not create
+    manual review items.
 
     Vector score is affine-normalized cosine:
         normalized = (raw_cosine + 1.0) / 2.0
+
+    Admission rules:
+        raw >= 0.88:
+            admit by vector similarity
+        raw >= 0.85 and question/lexical surface support:
+            admit as supported vector candidate
     """
 
     threshold: float = 0.78
-    strong_vector_threshold: float = 0.925
-    supported_vector_threshold: float = 0.910
-    review_vector_threshold: float = 0.900
-    weak_support_threshold: float = 0.05
+    strong_vector_threshold: float = 0.940
+    supported_vector_threshold: float = 0.925
     question_bridge_threshold: float = 0.10
     lexical_bridge_threshold: float = 0.15
-    strong_exclusion_threshold: float = 0.20
 
     def build_edges(
         self,
@@ -62,7 +65,8 @@ class DraftClaimHybridSimilarityPolicy:
             _tokens(right.possible_questions),
         )
         exclusion_score = _jaccard(
-            _tokens(left.exclusion_scope), _tokens(right.exclusion_scope)
+            _tokens(left.exclusion_scope),
+            _tokens(right.exclusion_scope),
         )
         granularity_score = 1.0 if left.granularity == right.granularity else 0.5
         weighted_score = _clamp(
@@ -76,7 +80,6 @@ class DraftClaimHybridSimilarityPolicy:
             vector_score=vector_score,
             lexical_score=lexical_score,
             question_score=question_score,
-            exclusion_score=exclusion_score,
         )
         combined = (
             max(weighted_score, vector_score) if admission.admitted else weighted_score
@@ -101,8 +104,8 @@ class DraftClaimHybridSimilarityPolicy:
             granularity_score=granularity_score,
             combined_score=combined,
             signals={
-                "algorithm": "draft_claim_compaction_candidate_similarity_v3",
-                "policy_version": "simple_candidate_clustering_v1",
+                "algorithm": "draft_claim_compaction_candidate_similarity_v4",
+                "policy_version": "conservative_candidate_clustering_v1",
                 "score_space": "affine_normalized_cosine_v1",
                 "raw_cosine_score": _raw_cosine_from_normalized(vector_score),
                 "normalized_vector_score": vector_score,
@@ -119,11 +122,8 @@ class DraftClaimHybridSimilarityPolicy:
                 "threshold": self.threshold,
                 "strong_vector_threshold": self.strong_vector_threshold,
                 "supported_vector_threshold": self.supported_vector_threshold,
-                "review_vector_threshold": self.review_vector_threshold,
-                "weak_support_threshold": self.weak_support_threshold,
                 "question_bridge_threshold": self.question_bridge_threshold,
                 "lexical_bridge_threshold": self.lexical_bridge_threshold,
-                "strong_exclusion_threshold": self.strong_exclusion_threshold,
             },
         )
 
@@ -133,49 +133,35 @@ class DraftClaimHybridSimilarityPolicy:
         vector_score: float,
         lexical_score: float,
         question_score: float,
-        exclusion_score: float,
     ) -> "_AdmissionDecision":
         if _meets_threshold(vector_score, self.strong_vector_threshold):
             return _AdmissionDecision(
                 admitted=True,
                 edge_kind="vector_candidate",
-                reason="vector similarity is high enough for candidate compaction clustering",
+                reason="raw cosine is high enough for automatic candidate clustering",
             )
 
-        weak_support = (
-            lexical_score >= self.weak_support_threshold
-            or question_score >= self.weak_support_threshold
-            or exclusion_score >= self.weak_support_threshold
+        has_surface_bridge = (
+            question_score >= self.question_bridge_threshold
+            or lexical_score >= self.lexical_bridge_threshold
         )
         if (
             _meets_threshold(vector_score, self.supported_vector_threshold)
-            and weak_support
+            and has_surface_bridge
         ):
             return _AdmissionDecision(
                 admitted=True,
                 edge_kind="surface_supported_vector_candidate",
-                reason="vector similarity is good and at least one surface signal supports the edge",
-            )
-
-        strong_support = (
-            lexical_score >= self.lexical_bridge_threshold
-            or question_score >= self.question_bridge_threshold
-            or exclusion_score >= self.strong_exclusion_threshold
-        )
-        if (
-            _meets_threshold(vector_score, self.review_vector_threshold)
-            and strong_support
-        ):
-            return _AdmissionDecision(
-                admitted=True,
-                edge_kind="review_candidate",
-                reason="vector similarity is review-level but surface overlap is strong enough for LLM comparison",
+                reason=(
+                    "raw cosine is candidate-level and question/lexical overlap "
+                    "supports automatic comparison"
+                ),
             )
 
         return _AdmissionDecision(
             admitted=False,
             edge_kind="not_admitted",
-            reason="insufficient vector/surface support for candidate compaction clustering",
+            reason="insufficient similarity for automatic candidate clustering",
         )
 
 
