@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimForCompaction,
 )
@@ -28,31 +32,94 @@ def _claim(
         exclusion_scope=exclusion_scope,
         granularity=granularity,
         embedding_text=claim,
-        embedding_model_id="openai/gpt-oss-120b",
+        embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
         dimensions=len(vector),
         vector=vector,
     )
 
 
-def test_identical_vectors_and_overlapping_questions_get_high_score() -> None:
-    edges = DraftClaimHybridSimilarityPolicy(threshold=0.78).build_edges(
+def _unit_vector_with_raw_cosine(raw_cosine: float) -> tuple[float, float]:
+    return (raw_cosine, math.sqrt(1.0 - raw_cosine * raw_cosine))
+
+
+def test_raw_085_is_candidate_edge_for_llm_compaction() -> None:
+    edges = DraftClaimHybridSimilarityPolicy().build_edges(
         (
-            _claim("claim-a", "Product supports refunds", (1.0, 0.0)),
-            _claim("claim-b", "Product supports refunds", (1.0, 0.0)),
+            _claim(
+                "claim-a",
+                "Axole запускает AI-поддержку в Telegram на основе документов бизнеса.",
+                (1.0, 0.0),
+                question="Что такое Axole?",
+            ),
+            _claim(
+                "claim-b",
+                "Axole помогает бизнесу запустить Telegram AI-поддержку по своим документам.",
+                _unit_vector_with_raw_cosine(0.85),
+                question="Как Axole помогает бизнесу?",
+            ),
         )
     )
 
     assert len(edges) == 1
-    assert edges[0].combined_score >= 0.78
-    assert edges[0].signals["vector_score"] == 1.0
-    assert "question_overlap_score" in edges[0].signals
-    assert "lexical_score" in edges[0].signals
-    assert "granularity_score" in edges[0].signals
-    assert "exclusion_scope_score" in edges[0].signals
+    assert edges[0].signals["policy_version"] == "simple_candidate_clustering_v1"
+    assert edges[0].signals["score_space"] == "affine_normalized_cosine_v1"
+    assert edges[0].signals["raw_cosine_score"] == pytest.approx(0.85)
+    assert edges[0].signals["admitted_by_policy"] is True
+    assert edges[0].signals["edge_kind"] == "vector_candidate"
 
 
-def test_unrelated_vectors_and_text_get_below_threshold() -> None:
-    edges = DraftClaimHybridSimilarityPolicy(threshold=0.78).build_edges(
+def test_raw_082_with_surface_support_is_candidate_edge() -> None:
+    edges = DraftClaimHybridSimilarityPolicy().build_edges(
+        (
+            _claim(
+                "claim-a",
+                "Курация знаний помогает проверить черновые знания перед публикацией.",
+                (1.0, 0.0),
+                question="Зачем нужна курация знаний?",
+                granularity="composite",
+            ),
+            _claim(
+                "claim-b",
+                "Черновые знания требуют группировки и курации перед публикацией.",
+                _unit_vector_with_raw_cosine(0.82),
+                question="Для чего нужна курация знаний?",
+                granularity="composite",
+            ),
+        )
+    )
+
+    assert len(edges) == 1
+    assert edges[0].signals["raw_cosine_score"] == pytest.approx(0.82)
+    assert edges[0].signals["edge_kind"] == "surface_supported_vector_candidate"
+
+
+def test_raw_080_with_strong_surface_support_is_review_candidate_edge() -> None:
+    edges = DraftClaimHybridSimilarityPolicy().build_edges(
+        (
+            _claim(
+                "claim-a",
+                "В Axole есть веб-панель для команды бизнеса.",
+                (1.0, 0.0),
+                question="Есть ли веб-панель?",
+                exclusion_scope=("веб-панель", "web-widget", "команда бизнеса"),
+            ),
+            _claim(
+                "claim-b",
+                "Клиентский web-widget для сайта пока не является готовой функцией.",
+                _unit_vector_with_raw_cosine(0.80),
+                question="Есть ли web-widget для сайта?",
+                exclusion_scope=("web-widget", "сайт", "будущее"),
+            ),
+        )
+    )
+
+    assert len(edges) == 1
+    assert edges[0].signals["raw_cosine_score"] == pytest.approx(0.80)
+    assert edges[0].signals["edge_kind"] == "review_candidate"
+
+
+def test_unrelated_vectors_and_text_are_not_candidate_edges() -> None:
+    edges = DraftClaimHybridSimilarityPolicy().build_edges(
         (
             _claim("claim-a", "Refund policy", (1.0, 0.0), question="Refunds?"),
             _claim("claim-b", "Warehouse schedule", (0.0, 1.0), question="Delivery?"),
@@ -62,125 +129,18 @@ def test_unrelated_vectors_and_text_get_below_threshold() -> None:
     assert edges == ()
 
 
-def test_pair_ref_is_deterministic_independent_of_input_order() -> None:
-    policy = DraftClaimHybridSimilarityPolicy(threshold=0.0)
-    left = _claim("claim-a", "Refund policy", (1.0, 0.0))
-    right = _claim("claim-b", "Refund policy", (1.0, 0.0))
-
-    forward = policy.build_edges((left, right))
-    reverse = policy.build_edges((right, left))
-
-    assert forward[0].edge_ref == reverse[0].edge_ref
-    assert forward[0].left_observation_ref == "claim-a"
-    assert forward[0].right_observation_ref == "claim-b"
-
-
-def _unit_vector_with_raw_cosine(raw_cosine: float) -> tuple[float, float]:
-    import math
-
-    return (raw_cosine, math.sqrt(1.0 - raw_cosine * raw_cosine))
-
-
-def test_strong_vector_axole_claims_are_compaction_candidates() -> None:
-    edges = DraftClaimHybridSimilarityPolicy(threshold=0.78).build_edges(
-        (
-            _claim(
-                "claim-a",
-                "Axole — это система для запуска AI-поддержки в Telegram на основе документов бизнеса.",
-                (1.0, 0.0),
-                question="Что такое Axole?",
-                granularity="atomic",
-                exclusion_scope=("Telegram", "AI-поддержка", "база знаний"),
-            ),
-            _claim(
-                "claim-b",
-                "Axole позволяет бизнесу запустить AI-поддержку в Telegram по своим документам без ручного написания FAQ-сценариев.",
-                _unit_vector_with_raw_cosine(0.82),
-                question="Как Axole помогает бизнесу?",
-                granularity="composite",
-                exclusion_scope=("Telegram-ассистент", "FAQ-сценарии"),
-            ),
-        )
+def test_admitted_edge_keeps_diagnostic_score_instead_of_threshold_floor() -> None:
+    policy = DraftClaimHybridSimilarityPolicy(threshold=0.99)
+    edge = policy._build_edge(
+        _claim("claim-a", "Alpha", (1.0, 0.0), question="Alpha?"),
+        _claim(
+            "claim-b",
+            "Beta",
+            _unit_vector_with_raw_cosine(0.85),
+            question="Beta?",
+        ),
     )
 
-    assert len(edges) == 1
-    assert edges[0].vector_score >= 0.87
-    assert edges[0].combined_score >= 0.78
-    assert edges[0].signals["edge_kind"] == "strong_vector_candidate"
-
-
-def test_medium_vector_claims_need_surface_support() -> None:
-    edges = DraftClaimHybridSimilarityPolicy(threshold=0.78).build_edges(
-        (
-            _claim(
-                "claim-a",
-                "Курация знаний помогает проверить черновые знания перед публикацией.",
-                (1.0, 0.0),
-                question="Что такое курация знаний?",
-                granularity="composite",
-            ),
-            _claim(
-                "claim-b",
-                "Черновые знания требуют группировки и курации перед публикацией.",
-                _unit_vector_with_raw_cosine(0.70),
-                question="Зачем нужна курация знаний?",
-                granularity="composite",
-            ),
-        )
-    )
-
-    assert len(edges) == 1
-    assert 0.85 <= edges[0].vector_score < 0.87
-    assert edges[0].signals["edge_kind"] == "supported_vector_candidate"
-
-
-def test_weak_vector_claims_need_strong_surface_support() -> None:
-    edges = DraftClaimHybridSimilarityPolicy(threshold=0.78).build_edges(
-        (
-            _claim(
-                "claim-a",
-                "Axole не является полноценной CRM, но содержит CRM-like слой.",
-                (1.0, 0.0),
-                question="Является ли Axole CRM?",
-                granularity="atomic",
-                exclusion_scope=("CRM", "AmoCRM", "HubSpot"),
-            ),
-            _claim(
-                "claim-b",
-                "Axole не заменяет AmoCRM или HubSpot, но предоставляет CRM-like слой для AI-поддержки.",
-                _unit_vector_with_raw_cosine(0.64),
-                question="Какие CRM-функции доступны в Axole?",
-                granularity="composite",
-                exclusion_scope=("CRM", "AmoCRM", "HubSpot"),
-            ),
-        )
-    )
-
-    assert len(edges) == 1
-    assert 0.82 <= edges[0].vector_score < 0.85
-    assert edges[0].signals["edge_kind"] == "surface_supported_candidate"
-
-
-def test_weak_vector_without_surface_support_is_not_edge() -> None:
-    edges = DraftClaimHybridSimilarityPolicy(threshold=0.78).build_edges(
-        (
-            _claim(
-                "claim-a",
-                "Axole нужен для управляемой базы знаний.",
-                (1.0, 0.0),
-                question="Зачем нужен Axole?",
-                granularity="composite",
-                exclusion_scope=("база знаний",),
-            ),
-            _claim(
-                "claim-b",
-                "Стоимость зависит от объёма базы, документов и требований.",
-                _unit_vector_with_raw_cosine(0.64),
-                question="Сколько стоит продукт?",
-                granularity="composite",
-                exclusion_scope=("стоимость",),
-            ),
-        )
-    )
-
-    assert edges == ()
+    assert edge.signals["admitted_by_policy"] is True
+    assert edge.combined_score == edge.vector_score
+    assert edge.combined_score < policy.threshold

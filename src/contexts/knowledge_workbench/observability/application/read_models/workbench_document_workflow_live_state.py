@@ -282,6 +282,106 @@ class WorkbenchCurationAvailabilityView:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchClaimClusterMemberLiveView:
+    observation_ref: str
+    claim: str
+    possible_questions: tuple[str, ...]
+    exclusion_scope: tuple[str, ...]
+    granularity: str
+    source_document_ref: str
+    source_unit_ref: str
+    embedding_ref: str | None
+    embedding_model_id: str | None
+    embedding_dimensions: int | None
+    embedding_status: str
+    node_ref: str | None
+    node_kind: str | None
+    node_active: bool
+    node_status: str
+    member_rank: int
+    member_kind: str
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "observation_ref": self.observation_ref,
+            "claim": self.claim,
+            "possible_questions": list(self.possible_questions),
+            "exclusion_scope": list(self.exclusion_scope),
+            "granularity": self.granularity,
+            "source_document_ref": self.source_document_ref,
+            "source_unit_ref": self.source_unit_ref,
+            "embedding_ref": self.embedding_ref,
+            "embedding_model_id": self.embedding_model_id,
+            "embedding_dimensions": self.embedding_dimensions,
+            "embedding_status": self.embedding_status,
+            "node_ref": self.node_ref,
+            "node_kind": self.node_kind,
+            "node_active": self.node_active,
+            "node_status": self.node_status,
+            "member_rank": self.member_rank,
+            "member_kind": self.member_kind,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchClaimClusterComparisonLiveView:
+    comparison_ref: str
+    cluster_ref: str
+    left_node_ref: str
+    right_node_ref: str
+    status: str
+    result_node_ref: str | None
+    round_index: int
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "comparison_ref": self.comparison_ref,
+            "cluster_ref": self.cluster_ref,
+            "left_node_ref": self.left_node_ref,
+            "right_node_ref": self.right_node_ref,
+            "status": self.status,
+            "result_node_ref": self.result_node_ref,
+            "round_index": self.round_index,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchClaimClusterLiveView:
+    group_ref: str
+    status: str
+    member_count: int
+    candidate_edge_count: int
+    batch_count: int
+    node_count: int
+    active_node_count: int
+    active_compacted_node_count: int
+    comparison_count: int
+    pending_comparison_count: int
+    work_item_count: int
+    members: tuple[WorkbenchClaimClusterMemberLiveView, ...]
+    comparisons: tuple[WorkbenchClaimClusterComparisonLiveView, ...]
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "cluster_ref": self.group_ref,
+            "group_ref": self.group_ref,
+            "status": self.status,
+            "member_count": self.member_count,
+            "candidate_edge_count": self.candidate_edge_count,
+            "batch_count": self.batch_count,
+            "node_count": self.node_count,
+            "active_node_count": self.active_node_count,
+            "active_compacted_node_count": self.active_compacted_node_count,
+            "comparison_count": self.comparison_count,
+            "pending_comparison_count": self.pending_comparison_count,
+            "work_item_count": self.work_item_count,
+            "members": [member.to_dict() for member in self.members],
+            "claims": [member.to_dict() for member in self.members],
+            "comparisons": [comparison.to_dict() for comparison in self.comparisons],
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchWorkflowActionView:
     action_id: str
     visible: bool
@@ -311,6 +411,10 @@ class WorkbenchWorkflowLiveState:
     timeline: tuple[WorkbenchWorkflowTimelineEntryLiveView, ...]
     curation: WorkbenchCurationAvailabilityView
     actions: tuple[WorkbenchWorkflowActionView, ...]
+    claim_clusters: tuple[WorkbenchClaimClusterLiveView, ...] = ()
+    claim_compaction_comparisons: tuple[
+        WorkbenchClaimClusterComparisonLiveView, ...
+    ] = ()
 
     def to_dict(self) -> JsonDict:
         return {
@@ -326,6 +430,10 @@ class WorkbenchWorkflowLiveState:
             "timeline": [entry.to_dict() for entry in self.timeline],
             "curation": self.curation.to_dict(),
             "actions": [action.to_dict() for action in self.actions],
+            "claim_clusters": [cluster.to_dict() for cluster in self.claim_clusters],
+            "claim_compaction_comparisons": [
+                comparison.to_dict() for comparison in self.claim_compaction_comparisons
+            ],
         }
 
 

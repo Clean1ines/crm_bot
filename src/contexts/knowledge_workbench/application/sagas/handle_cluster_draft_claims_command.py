@@ -46,6 +46,7 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
     DraftClaimHybridSimilarityPolicy,
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
+    DraftClaimCompactionPlanPersistenceResult,
     DraftClaimCompactionPlanRepositoryPort,
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
@@ -82,6 +83,10 @@ DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS = 2050
 DRAFT_CLAIM_COMPACTION_WORKER_REF = (
     "knowledge-workbench-draft-claim-compaction-dispatch"
 )
+
+
+class DraftClaimCompactionPlanConflictError(RuntimeError):
+    """The workflow already has a different persisted compaction plan."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,6 +164,7 @@ class HandleClusterDraftClaimsCommandHandler:
             batches=budget_plan.batches,
             created_at=workflow_command.updated_at,
         )
+        _raise_for_partial_plan_conflict(persistence)
         claims_by_ref = {claim.observation_ref: claim for claim in claims}
         for group in budget_plan.groups:
             await compaction_reduction_state_repository.seed_initial_planner_state(
@@ -188,6 +194,9 @@ class HandleClusterDraftClaimsCommandHandler:
         if schedule.conflict_count:
             raise ValueError("draft claim compaction work item schedule conflict")
 
+        scheduled_work_item_count = (
+            schedule.created_count + schedule.already_exists_count
+        )
         await workflow_unit_of_work.outbox.append_event(
             WorkflowEvent(
                 event_id=WorkflowEventId(
@@ -202,17 +211,13 @@ class HandleClusterDraftClaimsCommandHandler:
                     "candidate_edge_count": persistence.requested_edge_count,
                     "group_count": persistence.requested_group_count,
                     "batch_count": persistence.requested_batch_count,
-                    "scheduled_work_item_count": schedule.created_count,
-                    "already_scheduled_work_item_count": schedule.already_exists_count,
+                    "scheduled_work_item_count": scheduled_work_item_count,
                     "semantic_meaning": "build hybrid draft claim compaction plan",
                 },
                 occurred_at=workflow_command.updated_at,
                 causation_command_id=workflow_command.command_id,
                 correlation_id=workflow_command.command_id.value,
             )
-        )
-        scheduled_work_item_count = (
-            schedule.created_count + schedule.already_exists_count
         )
         if scheduled_work_item_count > 0:
             await workflow_unit_of_work.command_log.append_pending_command(
@@ -230,7 +235,7 @@ class HandleClusterDraftClaimsCommandHandler:
             candidate_edge_count=persistence.requested_edge_count,
             group_count=persistence.requested_group_count,
             batch_count=persistence.requested_batch_count,
-            scheduled_work_item_count=schedule.created_count,
+            scheduled_work_item_count=scheduled_work_item_count,
             occurred_at=workflow_command.updated_at,
         )
         await workflow_unit_of_work.timeline.append_entry(
@@ -245,7 +250,7 @@ class HandleClusterDraftClaimsCommandHandler:
                     "candidate_edge_count": persistence.requested_edge_count,
                     "group_count": persistence.requested_group_count,
                     "batch_count": persistence.requested_batch_count,
-                    "scheduled_work_item_count": schedule.created_count,
+                    "scheduled_work_item_count": scheduled_work_item_count,
                 },
                 occurred_at=workflow_command.updated_at,
                 source_ref=workflow_command.command_type,
@@ -274,6 +279,22 @@ def _payload_text(
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"workflow command payload must include {key}")
     return value
+
+
+def _raise_for_partial_plan_conflict(
+    persistence: DraftClaimCompactionPlanPersistenceResult,
+) -> None:
+    inserted_count = (
+        persistence.inserted_edge_count
+        + persistence.inserted_group_count
+        + persistence.inserted_member_count
+        + persistence.inserted_batch_count
+    )
+    if persistence.already_exists_count > 0 and inserted_count > 0:
+        raise DraftClaimCompactionPlanConflictError(
+            "draft claim compaction plan already exists and differs; "
+            "use an explicit versioned rebuild path"
+        )
 
 
 def _prepare_dispatch_batch_command(

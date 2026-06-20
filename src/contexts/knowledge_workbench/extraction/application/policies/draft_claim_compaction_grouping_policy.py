@@ -12,7 +12,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 
 @dataclass(frozen=True, slots=True)
 class DraftClaimCompactionGroupingPolicy:
-    group_algorithm: str = "hybrid_connected_components_v1"
+    group_algorithm: str = "candidate_connected_components_v1"
     group_threshold: float = 0.78
 
     def build_groups(
@@ -23,9 +23,11 @@ class DraftClaimCompactionGroupingPolicy:
         by_ref = {claim.observation_ref: claim for claim in claims}
         graph: dict[str, set[str]] = {ref: set() for ref in by_ref}
         for edge in edges:
-            if edge.combined_score >= self.group_threshold:
-                graph[edge.left_observation_ref].add(edge.right_observation_ref)
-                graph[edge.right_observation_ref].add(edge.left_observation_ref)
+            if edge.combined_score < self.group_threshold:
+                continue
+            graph[edge.left_observation_ref].add(edge.right_observation_ref)
+            graph[edge.right_observation_ref].add(edge.left_observation_ref)
+
         groups: list[DraftClaimCompactionGroupCandidate] = []
         seen: set[str] = set()
         for ref in sorted(by_ref):
@@ -35,16 +37,17 @@ class DraftClaimCompactionGroupingPolicy:
             seen.update(members)
             claims_in_group = tuple(by_ref[item] for item in sorted(members))
             refs = tuple(claim.observation_ref for claim in claims_in_group)
+            first_claim = claims_in_group[0]
             groups.append(
                 DraftClaimCompactionGroupCandidate(
                     group_ref=_ref(
                         "draft-claim-compaction-group",
-                        by_ref[ref].workflow_run_id,
+                        first_claim.workflow_run_id,
                         *refs,
                     ),
-                    workflow_run_id=by_ref[ref].workflow_run_id,
-                    source_document_ref=by_ref[ref].source_document_ref,
-                    embedding_model_id=by_ref[ref].embedding_model_id,
+                    workflow_run_id=first_claim.workflow_run_id,
+                    source_document_ref=first_claim.source_document_ref,
+                    embedding_model_id=first_claim.embedding_model_id,
                     group_algorithm=self.group_algorithm,
                     group_threshold=self.group_threshold,
                     member_observation_refs=refs,

@@ -1,65 +1,78 @@
 from __future__ import annotations
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
+    DraftClaimCompactionEdgeCandidate,
     DraftClaimForCompaction,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_grouping_policy import (
     DraftClaimCompactionGroupingPolicy,
 )
-from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_hybrid_similarity_policy import (
-    DraftClaimHybridSimilarityPolicy,
-)
 
 
-def _claim(ref: str, vector: tuple[float, ...] = (1.0, 0.0)) -> DraftClaimForCompaction:
+def _claim(ref: str) -> DraftClaimForCompaction:
     return DraftClaimForCompaction(
         observation_ref=ref,
         embedding_ref=f"embedding:{ref}",
         workflow_run_id="workflow-1",
         source_document_ref="document-1",
         source_unit_ref=f"unit:{ref}",
-        claim="Product supports refunds",
-        possible_questions=("Does product support refunds?",),
+        claim=f"Claim {ref}",
+        possible_questions=(f"Question {ref}?",),
         exclusion_scope=(),
         granularity="atomic",
-        embedding_text="Product supports refunds",
-        embedding_model_id="openai/gpt-oss-120b",
-        dimensions=len(vector),
-        vector=vector,
+        embedding_text=f"Claim {ref}",
+        embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
+        dimensions=2,
+        vector=(1.0, 0.0),
     )
 
 
-def test_connected_edges_become_one_group_and_singletons_are_preserved() -> None:
-    claims = (
-        _claim("claim-a"),
-        _claim("claim-b"),
-        _claim("claim-c", (0.0, 1.0)),
+def _edge(
+    left: str, right: str, score: float = 0.95
+) -> DraftClaimCompactionEdgeCandidate:
+    ordered_left, ordered_right = sorted((left, right))
+    return DraftClaimCompactionEdgeCandidate(
+        edge_ref=f"edge:{ordered_left}:{ordered_right}",
+        workflow_run_id="workflow-1",
+        source_document_ref="document-1",
+        left_observation_ref=ordered_left,
+        right_observation_ref=ordered_right,
+        left_embedding_ref=f"embedding:{ordered_left}",
+        right_embedding_ref=f"embedding:{ordered_right}",
+        vector_score=score,
+        lexical_score=0.2,
+        question_overlap_score=0.2,
+        exclusion_scope_score=0.0,
+        granularity_score=1.0,
+        combined_score=score,
+        signals={"edge_kind": "vector_candidate"},
     )
-    edge = DraftClaimHybridSimilarityPolicy(threshold=0.0).build_edges(claims[:2])[0]
 
-    groups = DraftClaimCompactionGroupingPolicy(group_threshold=0.78).build_groups(
+
+def test_grouping_builds_connected_components_from_candidate_edges() -> None:
+    claims = tuple(_claim(ref) for ref in ("a", "b", "c", "d"))
+    groups = DraftClaimCompactionGroupingPolicy().build_groups(
         claims,
-        (edge,),
+        (
+            _edge("a", "b"),
+            _edge("b", "c"),
+        ),
     )
 
-    members = {group.member_observation_refs for group in groups}
-    assert ("claim-a", "claim-b") in members
-    assert ("claim-c",) in members
+    member_sets = {group.member_observation_refs for group in groups}
+
+    assert ("a", "b", "c") in member_sets
+    assert ("d",) in member_sets
 
 
-def test_group_ref_is_deterministic_independent_of_edge_order() -> None:
-    claims = (_claim("claim-a"), _claim("claim-b"), _claim("claim-c"))
-    edges = DraftClaimHybridSimilarityPolicy(threshold=0.0).build_edges(claims)
-
-    forward = DraftClaimCompactionGroupingPolicy(group_threshold=0.0).build_groups(
+def test_grouping_does_not_limit_large_cluster_size() -> None:
+    refs = tuple(f"claim-{index:02d}" for index in range(30))
+    claims = tuple(_claim(ref) for ref in refs)
+    groups = DraftClaimCompactionGroupingPolicy().build_groups(
         claims,
-        edges,
-    )
-    reverse = DraftClaimCompactionGroupingPolicy(group_threshold=0.0).build_groups(
-        claims,
-        tuple(reversed(edges)),
+        tuple(_edge(left, right) for left, right in zip(refs, refs[1:], strict=False)),
     )
 
-    assert tuple(group.group_ref for group in forward) == tuple(
-        group.group_ref for group in reverse
-    )
+    assert len(groups) == 1
+    assert groups[0].member_observation_refs == refs
+    assert groups[0].requires_split is False

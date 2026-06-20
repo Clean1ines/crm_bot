@@ -11,17 +11,28 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 )
 
 _TOKEN_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ0-9]+")
+_EPSILON = 1e-9
 
 
 @dataclass(frozen=True, slots=True)
 class DraftClaimHybridSimilarityPolicy:
+    """Recall-oriented pre-LLM candidate edge policy.
+
+    This stage only finds draft claims that are similar enough to compare in the
+    following LLM compaction phase. It does not assign final topics and does not
+    decide canonical entries.
+
+    Vector score is affine-normalized cosine:
+        normalized = (raw_cosine + 1.0) / 2.0
+    """
+
     threshold: float = 0.78
-    strong_vector_threshold: float = 0.87
-    supported_vector_threshold: float = 0.85
-    weak_vector_threshold: float = 0.82
+    strong_vector_threshold: float = 0.925
+    supported_vector_threshold: float = 0.910
+    review_vector_threshold: float = 0.900
     weak_support_threshold: float = 0.05
-    strong_question_threshold: float = 0.16
-    strong_lexical_threshold: float = 0.18
+    question_bridge_threshold: float = 0.10
+    lexical_bridge_threshold: float = 0.15
     strong_exclusion_threshold: float = 0.20
 
     def build_edges(
@@ -33,7 +44,7 @@ class DraftClaimHybridSimilarityPolicy:
         for index, left in enumerate(ordered):
             for right in ordered[index + 1 :]:
                 edge = self._build_edge(left, right)
-                if edge.combined_score >= self.threshold:
+                if edge.signals["admitted_by_policy"] is True:
                     edges.append(edge)
         return tuple(
             sorted(edges, key=lambda edge: (-edge.combined_score, edge.edge_ref))
@@ -53,8 +64,6 @@ class DraftClaimHybridSimilarityPolicy:
         exclusion_score = _jaccard(
             _tokens(left.exclusion_scope), _tokens(right.exclusion_scope)
         )
-        if not left.exclusion_scope and not right.exclusion_scope:
-            exclusion_score = 0.5
         granularity_score = 1.0 if left.granularity == right.granularity else 0.5
         weighted_score = _clamp(
             vector_score * 0.62
@@ -70,9 +79,7 @@ class DraftClaimHybridSimilarityPolicy:
             exclusion_score=exclusion_score,
         )
         combined = (
-            max(weighted_score, self.threshold)
-            if admission.edge_kind is not None
-            else weighted_score
+            max(weighted_score, vector_score) if admission.admitted else weighted_score
         )
         return DraftClaimCompactionEdgeCandidate(
             edge_ref=_ref(
@@ -94,7 +101,11 @@ class DraftClaimHybridSimilarityPolicy:
             granularity_score=granularity_score,
             combined_score=combined,
             signals={
-                "algorithm": "draft_claim_compaction_candidate_similarity_v2",
+                "algorithm": "draft_claim_compaction_candidate_similarity_v3",
+                "policy_version": "simple_candidate_clustering_v1",
+                "score_space": "affine_normalized_cosine_v1",
+                "raw_cosine_score": _raw_cosine_from_normalized(vector_score),
+                "normalized_vector_score": vector_score,
                 "vector_score": vector_score,
                 "lexical_score": lexical_score,
                 "question_overlap_score": question_score,
@@ -102,16 +113,16 @@ class DraftClaimHybridSimilarityPolicy:
                 "granularity_score": granularity_score,
                 "weighted_score": weighted_score,
                 "combined_score": combined,
-                "admitted_by_policy": admission.edge_kind is not None,
-                "edge_kind": admission.edge_kind or "not_admitted",
+                "admitted_by_policy": admission.admitted,
+                "edge_kind": admission.edge_kind,
                 "admission_reason": admission.reason,
                 "threshold": self.threshold,
                 "strong_vector_threshold": self.strong_vector_threshold,
                 "supported_vector_threshold": self.supported_vector_threshold,
-                "weak_vector_threshold": self.weak_vector_threshold,
+                "review_vector_threshold": self.review_vector_threshold,
                 "weak_support_threshold": self.weak_support_threshold,
-                "strong_question_threshold": self.strong_question_threshold,
-                "strong_lexical_threshold": self.strong_lexical_threshold,
+                "question_bridge_threshold": self.question_bridge_threshold,
+                "lexical_bridge_threshold": self.lexical_bridge_threshold,
                 "strong_exclusion_threshold": self.strong_exclusion_threshold,
             },
         )
@@ -124,10 +135,11 @@ class DraftClaimHybridSimilarityPolicy:
         question_score: float,
         exclusion_score: float,
     ) -> "_AdmissionDecision":
-        if vector_score >= self.strong_vector_threshold:
+        if _meets_threshold(vector_score, self.strong_vector_threshold):
             return _AdmissionDecision(
-                edge_kind="strong_vector_candidate",
-                reason="vector score is high enough for compaction candidate clustering",
+                admitted=True,
+                edge_kind="vector_candidate",
+                reason="vector similarity is high enough for candidate compaction clustering",
             )
 
         weak_support = (
@@ -135,32 +147,42 @@ class DraftClaimHybridSimilarityPolicy:
             or question_score >= self.weak_support_threshold
             or exclusion_score >= self.weak_support_threshold
         )
-        if vector_score >= self.supported_vector_threshold and weak_support:
+        if (
+            _meets_threshold(vector_score, self.supported_vector_threshold)
+            and weak_support
+        ):
             return _AdmissionDecision(
-                edge_kind="supported_vector_candidate",
-                reason="vector score is high and at least one surface signal supports the edge",
+                admitted=True,
+                edge_kind="surface_supported_vector_candidate",
+                reason="vector similarity is good and at least one surface signal supports the edge",
             )
 
         strong_support = (
-            lexical_score >= self.strong_lexical_threshold
-            or question_score >= self.strong_question_threshold
+            lexical_score >= self.lexical_bridge_threshold
+            or question_score >= self.question_bridge_threshold
             or exclusion_score >= self.strong_exclusion_threshold
         )
-        if vector_score >= self.weak_vector_threshold and strong_support:
+        if (
+            _meets_threshold(vector_score, self.review_vector_threshold)
+            and strong_support
+        ):
             return _AdmissionDecision(
-                edge_kind="surface_supported_candidate",
-                reason="vector score is medium and a surface signal strongly supports the edge",
+                admitted=True,
+                edge_kind="review_candidate",
+                reason="vector similarity is review-level but surface overlap is strong enough for LLM comparison",
             )
 
         return _AdmissionDecision(
-            edge_kind=None,
-            reason="insufficient vector/surface support for automatic compaction candidate edge",
+            admitted=False,
+            edge_kind="not_admitted",
+            reason="insufficient vector/surface support for candidate compaction clustering",
         )
 
 
 @dataclass(frozen=True, slots=True)
 class _AdmissionDecision:
-    edge_kind: str | None
+    admitted: bool
+    edge_kind: str
     reason: str
 
 
@@ -188,6 +210,10 @@ def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
     return _clamp((dot / (left_norm * right_norm) + 1.0) / 2.0)
 
 
+def _meets_threshold(value: float, threshold: float) -> bool:
+    return value + _EPSILON >= threshold
+
+
 def _ref(prefix: str, *parts: str) -> str:
     digest = hashlib.sha256(":".join(parts).encode("utf-8")).hexdigest()
     return f"{prefix}:{digest}"
@@ -195,3 +221,7 @@ def _ref(prefix: str, *parts: str) -> str:
 
 def _clamp(value: float) -> float:
     return max(0.0, min(1.0, float(value)))
+
+
+def _raw_cosine_from_normalized(value: float) -> float:
+    return max(-1.0, min(1.0, value * 2.0 - 1.0))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Protocol, cast
@@ -7,6 +8,9 @@ from typing import Protocol, cast
 import asyncpg
 
 from src.contexts.knowledge_workbench.observability.application.read_models.workbench_document_workflow_live_state import (
+    WorkbenchClaimClusterComparisonLiveView,
+    WorkbenchClaimClusterLiveView,
+    WorkbenchClaimClusterMemberLiveView,
     WorkbenchCurationAvailabilityView,
     WorkbenchDocumentWorkflowLiveState,
     WorkbenchLlmAttemptLiveView,
@@ -64,10 +68,14 @@ class WorkbenchWorkflowLiveStateQuery:
         model_summaries = await self._model_summaries(
             workflow_run_id=workflow_run_id,
         )
-        counts = await self._counts(
-            document_id=document_id,
-            workflow_run_id=workflow_run_id,
+        claim_clusters = await self._claim_clusters(workflow_run_id=workflow_run_id)
+        counts = dict(
+            await self._counts(
+                document_id=document_id,
+                workflow_run_id=workflow_run_id,
+            )
         )
+        counts.update(_claim_cluster_counts(claim_clusters))
         timeline = await self._timeline(workflow_run_id=workflow_run_id)
         timer_events = await self._timer_events(workflow_run_id=workflow_run_id)
         curation = await self._curation(
@@ -117,6 +125,12 @@ class WorkbenchWorkflowLiveStateQuery:
                 degraded_fallback_confirmation_pending=(
                     degraded_fallback_confirmation_pending
                 ),
+            ),
+            claim_clusters=claim_clusters,
+            claim_compaction_comparisons=tuple(
+                comparison
+                for cluster in claim_clusters
+                for comparison in cluster.comparisons
             ),
         )
         return WorkbenchDocumentWorkflowLiveState(
@@ -424,6 +438,233 @@ class WorkbenchWorkflowLiveStateQuery:
             for row in rows
         )
 
+    async def _claim_clusters(
+        self,
+        *,
+        workflow_run_id: str | None,
+    ) -> tuple[WorkbenchClaimClusterLiveView, ...]:
+        if workflow_run_id is None:
+            return ()
+
+        rows = await self._connection.fetch(
+            """
+            WITH edge_counts AS (
+                SELECT
+                    left_member.group_ref,
+                    COUNT(DISTINCT edge.edge_ref)::int AS candidate_edge_count
+                FROM draft_claim_compaction_candidate_edges AS edge
+                JOIN draft_claim_compaction_group_members AS left_member
+                  ON left_member.observation_ref = edge.left_observation_ref
+                JOIN draft_claim_compaction_group_members AS right_member
+                  ON right_member.group_ref = left_member.group_ref
+                 AND right_member.observation_ref = edge.right_observation_ref
+                WHERE edge.workflow_run_id = $1
+                GROUP BY left_member.group_ref
+            ),
+            batch_counts AS (
+                SELECT
+                    group_ref,
+                    COUNT(*)::int AS batch_count
+                FROM draft_claim_compaction_batches
+                WHERE workflow_run_id = $1
+                GROUP BY group_ref
+            ),
+            node_counts AS (
+                SELECT
+                    group_ref,
+                    COUNT(*)::int AS node_count,
+                    COUNT(*) FILTER (WHERE active IS TRUE)::int
+                        AS active_node_count,
+                    COUNT(*) FILTER (
+                        WHERE active IS TRUE
+                          AND node_kind = 'compacted'
+                    )::int AS active_compacted_node_count
+                FROM draft_claim_compaction_nodes
+                WHERE workflow_run_id = $1
+                GROUP BY group_ref
+            ),
+            comparison_counts AS (
+                SELECT
+                    group_ref,
+                    COUNT(*)::int AS comparison_count,
+                    COUNT(*) FILTER (WHERE status = 'pending')::int
+                        AS pending_comparison_count,
+                    COUNT(*) FILTER (
+                        WHERE status = 'waiting_user_model_choice'
+                    )::int AS waiting_comparison_count
+                FROM draft_claim_compaction_comparisons
+                WHERE workflow_run_id = $1
+                GROUP BY group_ref
+            ),
+            work_item_counts AS (
+                SELECT
+                    schedule.payload->>'group_ref' AS group_ref,
+                    COUNT(*)::int AS work_item_count,
+                    COUNT(*) FILTER (WHERE item.status = 'ready')::int
+                        AS ready_work_item_count,
+                    COUNT(*) FILTER (WHERE item.status = 'leased')::int
+                        AS leased_work_item_count,
+                    COUNT(*) FILTER (WHERE item.status = 'completed')::int
+                        AS completed_work_item_count,
+                    COUNT(*) FILTER (
+                        WHERE item.status = 'retryable_failed'
+                    )::int AS retryable_failed_work_item_count,
+                    COUNT(*) FILTER (
+                        WHERE item.status = 'terminal_failed'
+                    )::int AS terminal_failed_work_item_count,
+                    COUNT(*) FILTER (
+                        WHERE item.status = 'user_action_required'
+                    )::int AS user_action_required_work_item_count
+                FROM execution_work_items AS item
+                JOIN execution_work_item_schedules AS schedule
+                  ON schedule.work_item_id = item.work_item_id
+                WHERE item.work_kind =
+                    'knowledge_workbench.draft_claim_compaction'
+                  AND schedule.payload->>'workflow_run_id' = $1
+                GROUP BY schedule.payload->>'group_ref'
+            )
+            SELECT
+                group_state.group_ref,
+                group_state.member_count,
+                COALESCE(edge_state.candidate_edge_count, 0)::int
+                    AS candidate_edge_count,
+                COALESCE(batch_state.batch_count, 0)::int AS batch_count,
+                COALESCE(node_state.node_count, 0)::int AS node_count,
+                COALESCE(node_state.active_node_count, 0)::int
+                    AS active_node_count,
+                COALESCE(node_state.active_compacted_node_count, 0)::int
+                    AS active_compacted_node_count,
+                COALESCE(comparison_state.comparison_count, 0)::int
+                    AS comparison_count,
+                COALESCE(comparison_state.pending_comparison_count, 0)::int
+                    AS pending_comparison_count,
+                COALESCE(comparison_state.waiting_comparison_count, 0)::int
+                    AS waiting_comparison_count,
+                COALESCE(work_state.work_item_count, 0)::int AS work_item_count,
+                COALESCE(work_state.ready_work_item_count, 0)::int
+                    AS ready_work_item_count,
+                COALESCE(work_state.leased_work_item_count, 0)::int
+                    AS leased_work_item_count,
+                COALESCE(work_state.completed_work_item_count, 0)::int
+                    AS completed_work_item_count,
+                COALESCE(work_state.retryable_failed_work_item_count, 0)::int
+                    AS retryable_failed_work_item_count,
+                COALESCE(work_state.terminal_failed_work_item_count, 0)::int
+                    AS terminal_failed_work_item_count,
+                COALESCE(
+                    work_state.user_action_required_work_item_count,
+                    0
+                )::int AS user_action_required_work_item_count,
+                COALESCE(member_projection.members, '[]'::jsonb) AS members,
+                COALESCE(
+                    comparison_projection.comparisons,
+                    '[]'::jsonb
+                ) AS comparisons
+            FROM draft_claim_compaction_groups AS group_state
+            LEFT JOIN edge_counts AS edge_state
+              ON edge_state.group_ref = group_state.group_ref
+            LEFT JOIN batch_counts AS batch_state
+              ON batch_state.group_ref = group_state.group_ref
+            LEFT JOIN node_counts AS node_state
+              ON node_state.group_ref = group_state.group_ref
+            LEFT JOIN comparison_counts AS comparison_state
+              ON comparison_state.group_ref = group_state.group_ref
+            LEFT JOIN work_item_counts AS work_state
+              ON work_state.group_ref = group_state.group_ref
+            LEFT JOIN LATERAL (
+                SELECT jsonb_agg(
+                    jsonb_build_object(
+                        'observation_ref', member.observation_ref,
+                        'claim', observation.claim,
+                        'possible_questions', COALESCE(
+                            (
+                                SELECT jsonb_agg(
+                                    question.question
+                                    ORDER BY question.ordinal
+                                )
+                                FROM draft_claim_observation_possible_questions
+                                    AS question
+                                WHERE question.observation_ref =
+                                    member.observation_ref
+                            ),
+                            '[]'::jsonb
+                        ),
+                        'exclusion_scope', observation.exclusion_scope,
+                        'granularity', observation.granularity,
+                        'source_document_ref',
+                            embedding.source_document_ref,
+                        'source_unit_ref', member.source_unit_ref,
+                        'embedding_ref', embedding.embedding_ref,
+                        'embedding_model_id',
+                            embedding.embedding_model_id,
+                        'embedding_dimensions', embedding.dimensions,
+                        'embedding_status', CASE
+                            WHEN embedding.embedding_ref IS NULL
+                            THEN 'missing'
+                            ELSE 'ready'
+                        END,
+                        'node_ref', claim_node.node_ref,
+                        'node_kind', claim_node.node_kind,
+                        'node_active',
+                            COALESCE(claim_node.active, FALSE),
+                        'node_status', CASE
+                            WHEN claim_node.node_ref IS NULL THEN 'missing'
+                            WHEN claim_node.active IS TRUE THEN 'active'
+                            ELSE 'superseded'
+                        END,
+                        'member_rank', member.member_rank,
+                        'member_kind', member.member_kind
+                    )
+                    ORDER BY member.member_rank, member.observation_ref
+                ) AS members
+                FROM draft_claim_compaction_group_members AS member
+                JOIN draft_claim_observations AS observation
+                  ON observation.observation_ref = member.observation_ref
+                LEFT JOIN draft_claim_embeddings AS embedding
+                  ON embedding.embedding_ref = member.embedding_ref
+                 AND embedding.workflow_run_id = $1
+                LEFT JOIN LATERAL (
+                    SELECT
+                        node.node_ref,
+                        node.node_kind,
+                        node.active
+                    FROM draft_claim_compaction_node_sources AS node_source
+                    JOIN draft_claim_compaction_nodes AS node
+                      ON node.node_ref = node_source.node_ref
+                    WHERE node_source.source_ref = member.observation_ref
+                      AND node.group_ref = group_state.group_ref
+                      AND node.workflow_run_id = $1
+                    ORDER BY node.active DESC, node.updated_at DESC
+                    LIMIT 1
+                ) AS claim_node ON TRUE
+                WHERE member.group_ref = group_state.group_ref
+            ) AS member_projection ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT jsonb_agg(
+                    jsonb_build_object(
+                        'comparison_ref', comparison.comparison_ref,
+                        'cluster_ref', comparison.group_ref,
+                        'left_node_ref', comparison.left_node_ref,
+                        'right_node_ref', comparison.right_node_ref,
+                        'status', comparison.status,
+                        'result_node_ref', comparison.result_node_ref,
+                        'round_index', comparison.round_index
+                    )
+                    ORDER BY
+                        comparison.round_index,
+                        comparison.comparison_ref
+                ) AS comparisons
+                FROM draft_claim_compaction_comparisons AS comparison
+                WHERE comparison.group_ref = group_state.group_ref
+                  AND comparison.workflow_run_id = $1
+            ) AS comparison_projection ON TRUE
+            WHERE group_state.workflow_run_id = $1
+            ORDER BY group_state.group_ref
+            """,
+            workflow_run_id,
+        )
+        return tuple(_claim_cluster(dict(row)) for row in rows)
+
     async def _counts(
         self,
         *,
@@ -436,41 +677,41 @@ class WorkbenchWorkflowLiveStateQuery:
                 (
                     SELECT COUNT(*)::int
                     FROM source_units AS u
-                    WHERE u.document_ref = $1
+                    WHERE u.document_ref = $2
                 ) AS source_section_count,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_observations AS o
                     JOIN source_units AS u
                       ON u.unit_ref = o.source_unit_ref
-                    WHERE u.document_ref = $1
+                    WHERE u.document_ref = $2
                 ) AS draft_claim_count,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_embeddings AS e
-                    WHERE e.workflow_run_id = $2
+                    WHERE e.workflow_run_id = $1
                 ) AS draft_claim_embedding_count,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_compaction_nodes AS n
-                    WHERE n.workflow_run_id = $2
+                    WHERE n.workflow_run_id = $1
                       AND n.node_kind = 'compacted'
                       AND n.active IS TRUE
                 ) AS active_compacted_nodes,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_compaction_comparisons AS c
-                    WHERE c.workflow_run_id = $2
+                    WHERE c.workflow_run_id = $1
                       AND c.status IN ('pending', 'waiting_user_model_choice')
                 ) AS pending_compaction_comparisons,
                 (
                     SELECT COUNT(*)::int
                     FROM draft_claim_cluster_previews AS p
-                    WHERE p.workflow_run_id = $2
+                    WHERE p.workflow_run_id = $1
                 ) AS preview_count
             """,
-            document_id,
             workflow_run_id,
+            document_id,
         )
         return dict(row) if row is not None else {}
 
@@ -696,7 +937,8 @@ def _stages(
     source_sections = _int(counts, "source_section_count")
     draft_claim_count = _int(counts, "draft_claim_count")
     embedding_count = _int(counts, "draft_claim_embedding_count")
-    compacted_count = _int(counts, "active_compacted_nodes")
+    compacted_count = _int(counts, "compacted_group_count")
+    group_count = _int(counts, "group_count")
     preview_count = _int(counts, "preview_count")
     status = (workflow_status or "").upper()
     phase = (current_phase or "").upper()
@@ -766,12 +1008,18 @@ def _stages(
         WorkbenchWorkflowStageLiveView(
             id="draft_claim_compaction",
             label="Draft claim compaction",
-            status="completed" if compacted_count > 0 else "unknown",
+            status="completed"
+            if group_count > 0 and compacted_count == group_count
+            else ("running" if group_count > 0 else "unknown"),
             current=compacted_count,
-            total=compacted_count,
-            message="Active compacted nodes available"
-            if compacted_count
-            else "No compacted nodes observed",
+            total=group_count,
+            message=(
+                f"{_int(counts, 'candidate_edge_count')} edges, "
+                f"{_int(counts, 'batch_count')} batches, "
+                f"{_int(counts, 'node_count')} nodes, "
+                f"{_int(counts, 'comparison_count')} comparisons, "
+                f"{_int(counts, 'work_item_count')} work items"
+            ),
         ),
         WorkbenchWorkflowStageLiveView(
             id="cluster_preview",
@@ -847,6 +1095,151 @@ def _actions(
             else "fallback_confirmation_not_pending",
         ),
     )
+
+
+def _claim_cluster(row: Mapping[str, object]) -> WorkbenchClaimClusterLiveView:
+    members = tuple(
+        WorkbenchClaimClusterMemberLiveView(
+            observation_ref=_str(member, "observation_ref"),
+            claim=_str(member, "claim"),
+            possible_questions=_string_sequence(member, "possible_questions"),
+            exclusion_scope=_text_lines(member, "exclusion_scope"),
+            granularity=_str(member, "granularity"),
+            source_document_ref=_str(member, "source_document_ref"),
+            source_unit_ref=_str(member, "source_unit_ref"),
+            embedding_ref=_optional_str(member, "embedding_ref"),
+            embedding_model_id=_optional_str(member, "embedding_model_id"),
+            embedding_dimensions=_optional_int(member, "embedding_dimensions"),
+            embedding_status=_str(member, "embedding_status"),
+            node_ref=_optional_str(member, "node_ref"),
+            node_kind=_optional_str(member, "node_kind"),
+            node_active=_bool(member, "node_active"),
+            node_status=_str(member, "node_status"),
+            member_rank=_int(member, "member_rank"),
+            member_kind=_str(member, "member_kind"),
+        )
+        for member in _mapping_sequence(row, "members")
+    )
+    comparisons = tuple(
+        WorkbenchClaimClusterComparisonLiveView(
+            comparison_ref=_str(comparison, "comparison_ref"),
+            cluster_ref=_str(comparison, "cluster_ref"),
+            left_node_ref=_str(comparison, "left_node_ref"),
+            right_node_ref=_str(comparison, "right_node_ref"),
+            status=_str(comparison, "status"),
+            result_node_ref=_optional_str(comparison, "result_node_ref"),
+            round_index=_int(comparison, "round_index"),
+        )
+        for comparison in _mapping_sequence(row, "comparisons")
+    )
+    return WorkbenchClaimClusterLiveView(
+        group_ref=_str(row, "group_ref"),
+        status=_claim_cluster_status(
+            active_node_count=_int(row, "active_node_count"),
+            active_compacted_node_count=_int(row, "active_compacted_node_count"),
+            pending_comparison_count=_int(row, "pending_comparison_count"),
+            waiting_comparison_count=_int(row, "waiting_comparison_count"),
+            ready_work_item_count=_int(row, "ready_work_item_count"),
+            leased_work_item_count=_int(row, "leased_work_item_count"),
+            retryable_failed_work_item_count=_int(
+                row, "retryable_failed_work_item_count"
+            ),
+            terminal_failed_work_item_count=_int(
+                row, "terminal_failed_work_item_count"
+            ),
+            user_action_required_work_item_count=_int(
+                row, "user_action_required_work_item_count"
+            ),
+        ),
+        member_count=_int(row, "member_count"),
+        candidate_edge_count=_int(row, "candidate_edge_count"),
+        batch_count=_int(row, "batch_count"),
+        node_count=_int(row, "node_count"),
+        active_node_count=_int(row, "active_node_count"),
+        active_compacted_node_count=_int(row, "active_compacted_node_count"),
+        comparison_count=_int(row, "comparison_count"),
+        pending_comparison_count=_int(row, "pending_comparison_count"),
+        work_item_count=_int(row, "work_item_count"),
+        members=members,
+        comparisons=comparisons,
+    )
+
+
+def _claim_cluster_status(
+    *,
+    active_node_count: int = 0,
+    active_compacted_node_count: int = 0,
+    pending_comparison_count: int = 0,
+    waiting_comparison_count: int = 0,
+    ready_work_item_count: int = 0,
+    leased_work_item_count: int = 0,
+    retryable_failed_work_item_count: int = 0,
+    terminal_failed_work_item_count: int = 0,
+    user_action_required_work_item_count: int = 0,
+) -> str:
+    if terminal_failed_work_item_count > 0:
+        return "failed"
+    if waiting_comparison_count > 0 or user_action_required_work_item_count > 0:
+        return "blocked"
+    if (
+        active_node_count == 1
+        and active_compacted_node_count == 1
+        and pending_comparison_count == 0
+    ):
+        return "compacted"
+    if active_compacted_node_count > 0:
+        return "partially_compacted"
+    if leased_work_item_count > 0 or pending_comparison_count > 0:
+        return "comparing"
+    if ready_work_item_count > 0 or retryable_failed_work_item_count > 0:
+        return "ready"
+    return "planned"
+
+
+def _claim_cluster_counts(
+    clusters: tuple[WorkbenchClaimClusterLiveView, ...],
+) -> dict[str, object]:
+    return {
+        "group_count": len(clusters),
+        "compacted_group_count": sum(
+            cluster.status == "compacted" for cluster in clusters
+        ),
+        "candidate_edge_count": sum(
+            cluster.candidate_edge_count for cluster in clusters
+        ),
+        "batch_count": sum(cluster.batch_count for cluster in clusters),
+        "node_count": sum(cluster.node_count for cluster in clusters),
+        "comparison_count": sum(cluster.comparison_count for cluster in clusters),
+        "work_item_count": sum(cluster.work_item_count for cluster in clusters),
+    }
+
+
+def _mapping_sequence(
+    row: Mapping[str, object],
+    key: str,
+) -> tuple[Mapping[str, object], ...]:
+    value = row.get(key)
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(item for item in value if isinstance(item, Mapping))
+
+
+def _string_sequence(row: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = row.get(key)
+    if isinstance(value, str):
+        value = json.loads(value)
+    if not isinstance(value, (list, tuple)):
+        return ()
+    return tuple(item for item in value if isinstance(item, str) and item.strip())
+
+
+def _text_lines(row: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = row.get(key)
+    if not isinstance(value, str):
+        return ()
+    return tuple(line.strip() for line in value.splitlines() if line.strip())
 
 
 def _queue_item(row: Mapping[str, object]) -> WorkbenchSectionQueueItemLiveView:
@@ -1037,6 +1430,13 @@ def _optional_int(row: Mapping[str, object], key: str) -> int | None:
         return None
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{key} must be int when set")
+    return value
+
+
+def _bool(row: Mapping[str, object], key: str) -> bool:
+    value = row.get(key)
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} must be bool")
     return value
 
 

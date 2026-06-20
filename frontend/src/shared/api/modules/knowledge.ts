@@ -338,6 +338,54 @@ export type WorkbenchLlmAttemptLiveState = {
   blocked_reason?: string | null;
 };
 
+export type WorkbenchClaimClusterClaimLiveState = {
+  observation_ref: string;
+  claim: string;
+  possible_questions: string[];
+  exclusion_scope: string[];
+  granularity: string;
+  source_document_ref: string;
+  source_unit_ref: string;
+  embedding_ref?: string | null;
+  embedding_model_id?: string | null;
+  embedding_dimensions?: number | null;
+  embedding_status: string;
+  node_ref?: string | null;
+  node_kind?: string | null;
+  node_active: boolean;
+  node_status: string;
+  member_rank: number;
+  member_kind: string;
+};
+
+export type WorkbenchClaimClusterLiveState = {
+  group_ref: string;
+  cluster_ref: string;
+  status: string;
+  member_count: number;
+  candidate_edge_count: number;
+  batch_count: number;
+  node_count: number;
+  active_node_count: number;
+  active_compacted_node_count: number;
+  comparison_count: number;
+  pending_comparison_count: number;
+  work_item_count: number;
+  members: WorkbenchClaimClusterClaimLiveState[];
+  claims: WorkbenchClaimClusterClaimLiveState[];
+  comparisons: WorkbenchClaimCompactionComparisonLiveState[];
+};
+
+export type WorkbenchClaimCompactionComparisonLiveState = {
+  comparison_ref: string;
+  cluster_ref: string;
+  left_node_ref: string;
+  right_node_ref: string;
+  status: string;
+  result_node_ref?: string | null;
+  round_index: number;
+};
+
 export type WorkbenchCurationLiveState = {
   available: boolean;
   reason_code: string;
@@ -371,6 +419,8 @@ export type WorkbenchWorkflowLiveState = {
   section_lanes: WorkbenchSectionLaneLiveState[];
   llm_attempts: WorkbenchLlmAttemptLiveState[];
   timeline: WorkbenchWorkflowTimelineEntryLiveState[];
+  claim_clusters?: WorkbenchClaimClusterLiveState[];
+  claim_compaction_comparisons?: WorkbenchClaimCompactionComparisonLiveState[];
   curation: WorkbenchCurationLiveState;
   actions: WorkbenchWorkflowActionLiveState[];
 };

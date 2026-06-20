@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from src.contexts.knowledge_workbench.observability.application.read_models.workbench_document_workflow_live_state import (
+    WorkbenchClaimClusterComparisonLiveView,
+    WorkbenchClaimClusterLiveView,
+    WorkbenchClaimClusterMemberLiveView,
     WorkbenchCurationAvailabilityView,
     WorkbenchDocumentWorkflowLiveState,
     WorkbenchLlmAttemptLiveView,
@@ -165,6 +168,64 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                     reason_code=None,
                 ),
             ),
+            claim_clusters=(
+                WorkbenchClaimClusterLiveView(
+                    group_ref="group-1",
+                    status="comparing",
+                    member_count=2,
+                    candidate_edge_count=1,
+                    batch_count=1,
+                    node_count=2,
+                    active_node_count=2,
+                    active_compacted_node_count=0,
+                    comparison_count=1,
+                    pending_comparison_count=1,
+                    work_item_count=1,
+                    members=(
+                        WorkbenchClaimClusterMemberLiveView(
+                            observation_ref="claim-1",
+                            claim="Support is available",
+                            possible_questions=("When is support available?",),
+                            exclusion_scope=("Holidays are unspecified",),
+                            granularity="atomic",
+                            source_document_ref="document-1",
+                            source_unit_ref="section-1",
+                            embedding_ref="embedding-1",
+                            embedding_model_id="embedding-model",
+                            embedding_dimensions=384,
+                            embedding_status="ready",
+                            node_ref="node-1",
+                            node_kind="raw",
+                            node_active=True,
+                            node_status="active",
+                            member_rank=0,
+                            member_kind="draft_claim",
+                        ),
+                    ),
+                    comparisons=(
+                        WorkbenchClaimClusterComparisonLiveView(
+                            comparison_ref="comparison-1",
+                            cluster_ref="group-1",
+                            left_node_ref="node-1",
+                            right_node_ref="node-2",
+                            status="pending",
+                            result_node_ref=None,
+                            round_index=0,
+                        ),
+                    ),
+                ),
+            ),
+            claim_compaction_comparisons=(
+                WorkbenchClaimClusterComparisonLiveView(
+                    comparison_ref="comparison-1",
+                    cluster_ref="group-1",
+                    left_node_ref="node-1",
+                    right_node_ref="node-2",
+                    status="pending",
+                    result_node_ref=None,
+                    round_index=0,
+                ),
+            ),
         ),
     )
 
@@ -191,3 +252,74 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
     assert payload["workflow"]["llm_attempts"][0]["remaining_minute_tokens"] == 9000
     assert payload["workflow"]["timeline"][0]["event_type"] == "SourceUnitsCreated"
     assert payload["workflow"]["curation"]["available"] is True
+    assert payload["workflow"]["claim_clusters"][0] == {
+        "cluster_ref": "group-1",
+        "group_ref": "group-1",
+        "status": "comparing",
+        "member_count": 2,
+        "candidate_edge_count": 1,
+        "batch_count": 1,
+        "node_count": 2,
+        "active_node_count": 2,
+        "active_compacted_node_count": 0,
+        "comparison_count": 1,
+        "pending_comparison_count": 1,
+        "work_item_count": 1,
+        "members": [
+            {
+                "observation_ref": "claim-1",
+                "claim": "Support is available",
+                "possible_questions": ["When is support available?"],
+                "exclusion_scope": ["Holidays are unspecified"],
+                "granularity": "atomic",
+                "source_document_ref": "document-1",
+                "source_unit_ref": "section-1",
+                "embedding_ref": "embedding-1",
+                "embedding_model_id": "embedding-model",
+                "embedding_dimensions": 384,
+                "embedding_status": "ready",
+                "node_ref": "node-1",
+                "node_kind": "raw",
+                "node_active": True,
+                "node_status": "active",
+                "member_rank": 0,
+                "member_kind": "draft_claim",
+            }
+        ],
+        "claims": [
+            {
+                "observation_ref": "claim-1",
+                "claim": "Support is available",
+                "possible_questions": ["When is support available?"],
+                "exclusion_scope": ["Holidays are unspecified"],
+                "granularity": "atomic",
+                "source_document_ref": "document-1",
+                "source_unit_ref": "section-1",
+                "embedding_ref": "embedding-1",
+                "embedding_model_id": "embedding-model",
+                "embedding_dimensions": 384,
+                "embedding_status": "ready",
+                "node_ref": "node-1",
+                "node_kind": "raw",
+                "node_active": True,
+                "node_status": "active",
+                "member_rank": 0,
+                "member_kind": "draft_claim",
+            }
+        ],
+        "comparisons": [
+            {
+                "comparison_ref": "comparison-1",
+                "cluster_ref": "group-1",
+                "left_node_ref": "node-1",
+                "right_node_ref": "node-2",
+                "status": "pending",
+                "result_node_ref": None,
+                "round_index": 0,
+            }
+        ],
+    }
+    assert payload["workflow"]["claim_clusters"][0]["cluster_ref"] == "group-1"
+    assert payload["workflow"]["claim_compaction_comparisons"][0]["cluster_ref"] == (
+        "group-1"
+    )

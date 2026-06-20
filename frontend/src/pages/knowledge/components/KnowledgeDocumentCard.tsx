@@ -12,6 +12,8 @@ import {
   type WorkbenchWorkflowTimelineEntryLiveState,
   type WorkbenchSectionQueueItemLiveState,
   type WorkbenchLlmAttemptLiveState,
+  type WorkbenchClaimClusterClaimLiveState,
+  type WorkbenchClaimCompactionComparisonLiveState,
 } from '@shared/api/modules/knowledge';
 
 type DocCardDocument = {
@@ -186,6 +188,48 @@ const attemptStatusLabel = (status: string): string => {
     ready: 'ожидает запуска',
   };
   return labels[value] || 'состояние уточняется';
+};
+
+const clusterStatusLabel = (status: string): string => {
+  const labels: Record<string, string> = {
+    planned: 'запланирован',
+    ready: 'готов к объединению',
+    comparing: 'сравнивается',
+    partially_compacted: 'частично объединён',
+    compacted: 'объединён',
+    blocked: 'ожидает решения',
+    failed: 'ошибка',
+    waiting_user_model_choice: 'ожидает выбора модели',
+  };
+  return labels[normalize(status)] || status || 'состояние уточняется';
+};
+
+const embeddingStatusLabel = (status: string): string => {
+  const labels: Record<string, string> = {
+    pending: 'ожидает',
+    ready: 'готов',
+    completed: 'готов',
+    failed: 'ошибка',
+    missing: 'нет вектора',
+  };
+  return labels[normalize(status)] || status || 'состояние уточняется';
+};
+
+const nodeActivityLabel = (claim: WorkbenchClaimClusterClaimLiveState): string =>
+  claim.node_active ? 'активен' : 'неактивен';
+
+const comparisonStatusLabel = (
+  comparison: WorkbenchClaimCompactionComparisonLiveState,
+): string => {
+  const labels: Record<string, string> = {
+    pending: 'ожидает сравнения',
+    merged: 'объединены',
+    not_merged: 'оставлены раздельно',
+    too_large_for_primary_model: 'не помещается в основную модель',
+    waiting_user_model_choice: 'ожидает выбора модели',
+    superseded: 'заменено следующим сравнением',
+  };
+  return labels[normalize(comparison.status)] || comparison.status;
 };
 
 const userErrorLabel = (errorKind: string | null | undefined): string => {
@@ -444,6 +488,16 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const attempts = workflow?.llm_attempts ?? [];
   const timeline = workflow?.timeline ?? [];
   const actions = workflow?.actions ?? [];
+  const hasClaimClusters = Array.isArray(workflow?.claim_clusters);
+  const claimClusters = workflow?.claim_clusters ?? [];
+  const nestedCompactionComparisons = claimClusters.flatMap(
+    (cluster) => cluster.comparisons,
+  );
+  const hasCompactionComparisons =
+    Array.isArray(workflow?.claim_compaction_comparisons) ||
+    claimClusters.some((cluster) => Array.isArray(cluster.comparisons));
+  const compactionComparisons =
+    workflow?.claim_compaction_comparisons ?? nestedCompactionComparisons;
   const usage = workflow?.usage ?? null;
   const sourceUnits = sourceUnitsResponse?.source_units ?? [];
   const draftClaims = useMemo(
@@ -517,6 +571,43 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const compactionStage =
     stages.find((stage) => stage.id === 'draft_claim_compaction') ?? null;
   const previewStage = stages.find((stage) => stage.id === 'cluster_preview') ?? null;
+  const clusteredClaims = claimClusters.flatMap(
+    (cluster) => cluster.claims ?? cluster.members,
+  );
+  const clusteredClaimCount = claimClusters.reduce(
+    (total, cluster) => total + cluster.member_count,
+    0,
+  );
+  const embeddedClaimCount = clusteredClaims.filter(
+    (claim) =>
+      Boolean(claim.embedding_ref) &&
+      !['failed', 'missing', 'pending'].includes(normalize(claim.embedding_status)),
+  ).length;
+  const resolvedComparisonCount = compactionComparisons.filter(
+    (comparison) =>
+      !['pending', 'waiting_user_model_choice'].includes(normalize(comparison.status)),
+  ).length;
+  const compactedClusterCount = claimClusters.filter(
+    (cluster) => normalize(cluster.status) === 'compacted',
+  ).length;
+
+  const displayedStageCounts = (
+    stage: WorkbenchWorkflowStageLiveState,
+  ): { current: number; total: number } => {
+    if (stage.id === 'draft_claim_embeddings' && hasClaimClusters) {
+      return { current: embeddedClaimCount, total: clusteredClaimCount };
+    }
+    if (stage.id === 'draft_claim_clustering' && hasClaimClusters) {
+      return { current: claimClusters.length, total: claimClusters.length };
+    }
+    if (stage.id === 'draft_claim_compaction' && hasCompactionComparisons) {
+      return {
+        current: compactedClusterCount,
+        total: claimClusters.length,
+      };
+    }
+    return { current: stage.current, total: stage.total };
+  };
 
   const sectionItems = lanes
     .flatMap((lane) => lane.items)
@@ -604,13 +695,29 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       : 'разделы ещё не подготовлены';
 
   const resultSummaryText = workflow
-    ? `Черновики утверждений: ${formatNumber(claimStage?.current ?? 0)} · Векторы: ${formatNumber(
-        embeddingStage?.current ?? 0,
-      )} · Группы: ${formatNumber(clusterStage?.current ?? 0)} · Объединённые знания: ${formatNumber(
-        compactionStage?.current ?? 0,
-      )} · Предпросмотр: ${
-        (previewStage?.current ?? 0) > 0 ? 'готов' : 'ещё не готов'
-      }`
+    ? hasClaimClusters || hasCompactionComparisons
+      ? `Черновики утверждений: ${formatNumber(
+          hasClaimClusters ? clusteredClaimCount : claimStage?.current ?? 0,
+        )} · Векторы: ${formatNumber(
+          hasClaimClusters ? embeddedClaimCount : embeddingStage?.current ?? 0,
+        )} · Группы: ${formatNumber(
+          hasClaimClusters ? claimClusters.length : clusterStage?.current ?? 0,
+        )} · Сравнения: ${formatNumber(
+          hasCompactionComparisons
+            ? resolvedComparisonCount
+            : compactionStage?.current ?? 0,
+        )} / ${formatNumber(
+          hasCompactionComparisons
+            ? compactionComparisons.length
+            : compactionStage?.total ?? 0,
+        )}`
+      : `Черновики утверждений: ${formatNumber(claimStage?.current ?? 0)} · Векторы: ${formatNumber(
+          embeddingStage?.current ?? 0,
+        )} · Группы: ${formatNumber(clusterStage?.current ?? 0)} · Объединённые знания: ${formatNumber(
+          compactionStage?.current ?? 0,
+        )} · Предпросмотр: ${
+          (previewStage?.current ?? 0) > 0 ? 'готов' : 'ещё не готов'
+        }`
     : 'Нет данных обработки';
 
   const handleLiveAction = (action: WorkbenchWorkflowActionLiveState): void => {
@@ -755,24 +862,202 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               <section>
                 <div className="mb-1 font-medium text-[var(--text-primary)]">Этапы</div>
                 <div className="grid gap-1 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
-                  {stages.map((stage) => (
-                    <div
-                      key={stage.id}
-                      className="rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
-                    >
-                      <div className="font-medium text-[var(--text-primary)]">
-                        {liveStageLabel(stage)}
+                  {stages.map((stage) => {
+                    const stageCounts = displayedStageCounts(stage);
+                    return (
+                      <div
+                        key={stage.id}
+                        className="rounded-lg bg-[var(--surface-elevated)] px-2 py-1"
+                      >
+                        <div className="font-medium text-[var(--text-primary)]">
+                          {liveStageLabel(stage)}
+                        </div>
+                        <div className="text-[var(--text-muted)]">
+                          {stageStatusLabel(stage)}
+                          {stageCounts.total > 0 && stage.id !== 'cluster_preview'
+                            ? ` · ${formatNumber(stageCounts.current)} / ${formatNumber(
+                                stageCounts.total,
+                              )}`
+                            : ''}
+                        </div>
                       </div>
-                      <div className="text-[var(--text-muted)]">
-                        {stageStatusLabel(stage)}
-                        {stage.total > 0 && stage.id !== 'cluster_preview'
-                          ? ` · ${formatNumber(stage.current)} / ${formatNumber(stage.total)}`
-                          : ''}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
+
+              {hasClaimClusters && (
+                <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
+                  <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                    Кластеры утверждений: {formatNumber(claimClusters.length)}
+                  </summary>
+                  <div className="mt-2 space-y-2">
+                    {claimClusters.length === 0 && (
+                      <div className="text-[var(--text-muted)]">
+                        Кластеры ещё не сформированы.
+                      </div>
+                    )}
+                    {claimClusters.map((cluster, clusterIndex) => (
+                      <details
+                        key={cluster.cluster_ref}
+                        className="rounded-lg bg-[var(--control-bg)] p-2"
+                      >
+                        <summary className="cursor-pointer list-none">
+                          <span className="font-medium text-[var(--text-primary)]">
+                            Кластер {formatNumber(clusterIndex + 1)}
+                          </span>
+                          <span className="ml-2 text-[var(--text-muted)]">
+                            {clusterStatusLabel(cluster.status)} · утверждений:{' '}
+                            {formatNumber(cluster.member_count)}
+                          </span>
+                        </summary>
+                        <div className="mt-2 grid gap-1 text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">
+                          <div>кандидатных связей: {formatNumber(cluster.candidate_edge_count)}</div>
+                          <div>batch: {formatNumber(cluster.batch_count)}</div>
+                          <div>
+                            узлов: {formatNumber(cluster.active_node_count)} активных из{' '}
+                            {formatNumber(cluster.node_count)}
+                          </div>
+                          <div>
+                            compacted-узлов:{' '}
+                            {formatNumber(cluster.active_compacted_node_count)}
+                          </div>
+                          <div>
+                            сравнений: {formatNumber(cluster.comparison_count)} · ожидают:{' '}
+                            {formatNumber(cluster.pending_comparison_count)}
+                          </div>
+                          <div>work items: {formatNumber(cluster.work_item_count)}</div>
+                        </div>
+                        <div className="mt-2 space-y-2">
+                          {(cluster.claims ?? cluster.members).map((claim) => (
+                            <details
+                              key={claim.observation_ref}
+                              className="rounded bg-[var(--surface-elevated)] p-2"
+                            >
+                              <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                                {claim.claim}
+                              </summary>
+                              <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
+                                <div>
+                                  <span className="font-medium text-[var(--text-primary)]">
+                                    Гранулярность:
+                                  </span>{' '}
+                                  {claim.granularity}
+                                </div>
+                                <div>
+                                  <div className="font-medium text-[var(--text-primary)]">
+                                    Возможные вопросы
+                                  </div>
+                                  {claim.possible_questions.length > 0 ? (
+                                    <ul className="mt-1 list-disc pl-5">
+                                      {claim.possible_questions.map((question) => (
+                                        <li key={question}>{question}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <div className="mt-1 text-[var(--text-muted)]">—</div>
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="font-medium text-[var(--text-primary)]">
+                                    Исключения
+                                  </div>
+                                  {claim.exclusion_scope.length > 0 ? (
+                                    <ul className="mt-1 list-disc pl-5">
+                                      {claim.exclusion_scope.map((exclusion) => (
+                                        <li key={exclusion}>{exclusion}</li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <div className="mt-1 text-[var(--text-muted)]">—</div>
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="font-medium text-[var(--text-primary)]">
+                                    Источник
+                                  </div>
+                                  <div>{claim.source_unit_ref}</div>
+                                  <div className="text-[var(--text-muted)]">
+                                    документ: {claim.source_document_ref}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="font-medium text-[var(--text-primary)]">
+                                    Embedding
+                                  </div>
+                                  <div>
+                                    {claim.embedding_model_id || 'модель не указана'}
+                                    {claim.embedding_dimensions
+                                      ? ` · ${formatNumber(claim.embedding_dimensions)} изм.`
+                                      : ''}
+                                    {' · '}
+                                    {embeddingStatusLabel(claim.embedding_status)}
+                                  </div>
+                                  {claim.embedding_ref && (
+                                    <div className="font-mono text-[11px] text-[var(--text-muted)]">
+                                      {claim.embedding_ref}
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <div className="font-medium text-[var(--text-primary)]">
+                                    Узел compaction
+                                  </div>
+                                  <div>
+                                    {claim.node_kind || 'тип не указан'} ·{' '}
+                                    {nodeActivityLabel(claim)} · {claim.node_status}
+                                  </div>
+                                  {claim.node_ref && (
+                                    <div className="font-mono text-[11px] text-[var(--text-muted)]">
+                                      {claim.node_ref}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </details>
+                          ))}
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </details>
+              )}
+
+              {hasCompactionComparisons && (
+                <details className="rounded-lg bg-[var(--surface-elevated)] p-2">
+                  <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                    Сравнения compaction: {formatNumber(compactionComparisons.length)}
+                  </summary>
+                  <div className="mt-2 space-y-1">
+                    {compactionComparisons.length === 0 && (
+                      <div className="text-[var(--text-muted)]">
+                        Сравнения ещё не запускались.
+                      </div>
+                    )}
+                    {compactionComparisons.map((comparison) => (
+                      <details
+                        key={comparison.comparison_ref}
+                        className="rounded bg-[var(--control-bg)] px-2 py-1"
+                      >
+                        <summary className="cursor-pointer list-none">
+                          <span className="font-medium text-[var(--text-primary)]">
+                            Раунд {formatNumber(comparison.round_index + 1)}
+                          </span>
+                          <span className="ml-2 text-[var(--text-muted)]">
+                            {comparisonStatusLabel(comparison)}
+                          </span>
+                        </summary>
+                        <div className="mt-1 space-y-1 font-mono text-[11px] text-[var(--text-muted)]">
+                          <div>cluster: {comparison.cluster_ref}</div>
+                          <div>left: {comparison.left_node_ref}</div>
+                          <div>right: {comparison.right_node_ref}</div>
+                          <div>result: {technicalId(comparison.result_node_ref)}</div>
+                        </div>
+                      </details>
+                    ))}
+                  </div>
+                </details>
+              )}
 
               {sectionItems.length > 0 && (
                 <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>

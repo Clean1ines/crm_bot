@@ -72,6 +72,10 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
     DraftClaimClusterPreviewConnectionLike,
     PostgresDraftClaimClusterPreviewRepository,
 )
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_observation_read_repository import (
+    DraftClaimObservationReadConnectionLike,
+    PostgresDraftClaimObservationReadRepository,
+)
 from src.contexts.knowledge_workbench.curation.infrastructure.postgres.postgres_draft_claim_curation_workspace_repository import (
     DraftClaimCurationWorkspaceConnectionLike,
     PostgresDraftClaimCurationWorkspaceRepository,
@@ -420,6 +424,11 @@ class RunKnowledgeExtractionWorkflowResume:
                 cast(DraftClaimClusterPreviewConnectionLike, connection)
             )
         )
+        draft_claim_observation_read_repository = (
+            PostgresDraftClaimObservationReadRepository(
+                cast(DraftClaimObservationReadConnectionLike, connection)
+            )
+        )
 
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
@@ -468,6 +477,9 @@ class RunKnowledgeExtractionWorkflowResume:
                     or PostgresValidatedDraftClaimObservationPersistence(
                         cast(asyncpg.Connection, connection)
                     )
+                ),
+                draft_claim_observation_read_repository=(
+                    draft_claim_observation_read_repository
                 ),
                 draft_claim_embedding_read_repository=(
                     self._draft_claim_embedding_read_repository

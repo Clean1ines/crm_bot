@@ -7,6 +7,7 @@ import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.knowledge_workbench.application.sagas.handle_cluster_draft_claims_command import (
+    DraftClaimCompactionPlanConflictError,
     HandleClusterDraftClaimsCommand,
     HandleClusterDraftClaimsCommandHandler,
 )
@@ -111,6 +112,7 @@ def _claim(ref: str) -> DraftClaimForCompaction:
 @dataclass(slots=True)
 class FakeCompactionRepository:
     claims: tuple[DraftClaimForCompaction, ...]
+    persistence_result: DraftClaimCompactionPlanPersistenceResult | None = None
     persisted_edges: tuple[DraftClaimCompactionEdgeCandidate, ...] = ()
     persisted_groups: tuple[DraftClaimCompactionGroupCandidate, ...] = ()
     persisted_batches: tuple[DraftClaimCompactionBatchCandidate, ...] = ()
@@ -137,7 +139,7 @@ class FakeCompactionRepository:
         self.persisted_edges = edges
         self.persisted_groups = groups
         self.persisted_batches = batches
-        return DraftClaimCompactionPlanPersistenceResult(
+        return self.persistence_result or DraftClaimCompactionPlanPersistenceResult(
             requested_edge_count=len(edges),
             inserted_edge_count=len(edges),
             requested_group_count=len(groups),
@@ -462,3 +464,40 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
     assert workflow_uow.timeline.entries[0].message == (
         "Hybrid draft claim compaction plan built"
     )
+
+
+@pytest.mark.asyncio
+async def test_changed_existing_plan_raises_controlled_conflict_before_outbox() -> None:
+    repository = FakeCompactionRepository(
+        (_claim("claim-a"), _claim("claim-b")),
+        persistence_result=DraftClaimCompactionPlanPersistenceResult(
+            requested_edge_count=1,
+            inserted_edge_count=1,
+            requested_group_count=1,
+            inserted_group_count=0,
+            requested_member_count=2,
+            inserted_member_count=0,
+            requested_batch_count=1,
+            inserted_batch_count=0,
+            already_exists_count=4,
+        ),
+    )
+    workflow_uow = FakeWorkflowUnitOfWork()
+
+    with pytest.raises(
+        DraftClaimCompactionPlanConflictError,
+        match="explicit versioned rebuild path",
+    ):
+        await HandleClusterDraftClaimsCommandHandler().execute(
+            HandleClusterDraftClaimsCommand(
+                workflow_command=_command(
+                    KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
+                )
+            ),
+            compaction_plan_repository=repository,
+            work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
+            workflow_unit_of_work=workflow_uow,
+            compaction_reduction_state_repository=FakeReductionStateRepository(),
+        )
+
+    assert workflow_uow.outbox.events == []
