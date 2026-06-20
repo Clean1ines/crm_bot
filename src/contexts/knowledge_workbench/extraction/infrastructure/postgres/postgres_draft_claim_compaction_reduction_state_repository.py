@@ -30,11 +30,15 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionComparisonStatus,
     DraftClaimCompactionComponent,
     DraftClaimCompactionComponentIncompatibility,
+    DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionNode,
     DraftClaimCompactionNodeKind,
     DraftClaimCompactionNodeSource,
     DraftClaimCompactionPlannerState,
     DraftClaimCompactionRound,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_reduction_planner_policy import (
+    DraftClaimCompactionReductionPlannerPolicy,
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionApplyPersistenceResult,
@@ -71,6 +75,9 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             """
             SELECT group_ref,
                    COUNT(*) FILTER (WHERE active = true) AS active_node_count,
+                   COUNT(*) FILTER (
+                       WHERE active = true AND node_kind = 'raw'
+                   ) AS active_raw_node_count,
                    COUNT(*) FILTER (
                        WHERE active = true AND node_kind = 'compacted'
                    ) AS active_compacted_node_count
@@ -180,6 +187,8 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             )
         )
 
+        planner = DraftClaimCompactionReductionPlannerPolicy()
+
         done_group_count = 0
         waiting_group_count = 0
         active_node_count = 0
@@ -192,7 +201,12 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             comparison_row = comparison_counts.get(group_ref, {})
             component_row = component_counts.get(group_ref, {})
             incompatibility_row = incompatibility_counts.get(group_ref, {})
+
             group_active_node_count = _optional_int(node_row, "active_node_count")
+            group_active_raw_node_count = _optional_int(
+                node_row,
+                "active_raw_node_count",
+            )
             group_active_compacted_node_count = _optional_int(
                 node_row,
                 "active_compacted_node_count",
@@ -223,11 +237,20 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 waiting_group_count += 1
                 continue
 
-            if (
-                group_active_node_count == 1
-                and group_active_compacted_node_count == 1
-                and group_pending_comparison_count == 0
-            ):
+            if group_active_raw_node_count > 0:
+                continue
+            if group_active_compacted_node_count != group_active_node_count:
+                continue
+
+            planner_state = await self.load_planner_state(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+            )
+            if planner_state is None:
+                continue
+
+            planner_decision = planner.plan_next_step(planner_state)
+            if planner_decision.work_type is DraftClaimCompactionNextWorkItemType.DONE:
                 done_group_count += 1
 
         group_count = len(group_refs)

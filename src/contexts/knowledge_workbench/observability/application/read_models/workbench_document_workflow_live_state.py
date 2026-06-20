@@ -346,6 +346,26 @@ class WorkbenchClaimClusterComparisonLiveView:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchCompactedClaimPreviewLiveView:
+    node_ref: str
+    claim: str
+    claim_kind: str | None
+    merge_decision: str | None
+    source_claim_refs: tuple[str, ...]
+    active: bool
+
+    def to_dict(self) -> JsonDict:
+        return {
+            "node_ref": self.node_ref,
+            "claim": self.claim,
+            "claim_kind": self.claim_kind,
+            "merge_decision": self.merge_decision,
+            "source_claim_refs": list(self.source_claim_refs),
+            "active": self.active,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchClaimClusterLiveView:
     group_ref: str
     status: str
@@ -358,8 +378,15 @@ class WorkbenchClaimClusterLiveView:
     comparison_count: int
     pending_comparison_count: int
     work_item_count: int
+    ready_work_item_count: int
+    leased_work_item_count: int
+    completed_work_item_count: int
+    retryable_failed_work_item_count: int
+    terminal_failed_work_item_count: int
+    user_action_required_work_item_count: int
     members: tuple[WorkbenchClaimClusterMemberLiveView, ...]
     comparisons: tuple[WorkbenchClaimClusterComparisonLiveView, ...]
+    compacted_claims: tuple[WorkbenchCompactedClaimPreviewLiveView, ...]
 
     def to_dict(self) -> JsonDict:
         return {
@@ -375,9 +402,16 @@ class WorkbenchClaimClusterLiveView:
             "comparison_count": self.comparison_count,
             "pending_comparison_count": self.pending_comparison_count,
             "work_item_count": self.work_item_count,
+            "ready_work_item_count": self.ready_work_item_count,
+            "leased_work_item_count": self.leased_work_item_count,
+            "completed_work_item_count": self.completed_work_item_count,
+            "retryable_failed_work_item_count": self.retryable_failed_work_item_count,
+            "terminal_failed_work_item_count": self.terminal_failed_work_item_count,
+            "user_action_required_work_item_count": self.user_action_required_work_item_count,
             "members": [member.to_dict() for member in self.members],
             "claims": [member.to_dict() for member in self.members],
             "comparisons": [comparison.to_dict() for comparison in self.comparisons],
+            "compacted_claims": [claim.to_dict() for claim in self.compacted_claims],
         }
 
 

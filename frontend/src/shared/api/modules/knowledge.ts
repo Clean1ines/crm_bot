@@ -358,6 +358,15 @@ export type WorkbenchClaimClusterClaimLiveState = {
   member_kind: string;
 };
 
+export type WorkbenchCompactedClaimPreviewLiveState = {
+  node_ref: string;
+  claim: string;
+  claim_kind?: string | null;
+  merge_decision?: string | null;
+  source_claim_refs: string[];
+  active: boolean;
+};
+
 export type WorkbenchClaimClusterLiveState = {
   group_ref: string;
   cluster_ref: string;
@@ -371,9 +380,16 @@ export type WorkbenchClaimClusterLiveState = {
   comparison_count: number;
   pending_comparison_count: number;
   work_item_count: number;
+  ready_work_item_count?: number;
+  leased_work_item_count?: number;
+  completed_work_item_count?: number;
+  retryable_failed_work_item_count?: number;
+  terminal_failed_work_item_count?: number;
+  user_action_required_work_item_count?: number;
   members: WorkbenchClaimClusterClaimLiveState[];
   claims: WorkbenchClaimClusterClaimLiveState[];
   comparisons: WorkbenchClaimCompactionComparisonLiveState[];
+  compacted_claims?: WorkbenchCompactedClaimPreviewLiveState[];
 };
 
 export type WorkbenchClaimCompactionComparisonLiveState = {

@@ -192,16 +192,39 @@ const attemptStatusLabel = (status: string): string => {
 
 const clusterStatusLabel = (status: string): string => {
   const labels: Record<string, string> = {
-    planned: 'запланирован',
-    ready: 'готов к объединению',
-    comparing: 'сравнивается',
-    partially_compacted: 'частично объединён',
-    compacted: 'объединён',
-    blocked: 'ожидает решения',
+    planned: 'ещё не начинали',
+    ready: 'ждёт обработки',
+    comparing: 'сейчас объединяется',
+    partially_compacted: 'частично готов',
+    compacted: 'готов',
+    blocked: 'нужно решение',
     failed: 'ошибка',
-    waiting_user_model_choice: 'ожидает выбора модели',
+    waiting_user_model_choice: 'ждёт выбора модели',
   };
   return labels[normalize(status)] || status || 'состояние уточняется';
+};
+
+const clusterHumanState = (
+  cluster: {
+    status: string;
+    ready_work_item_count?: number;
+    leased_work_item_count?: number;
+    completed_work_item_count?: number;
+    retryable_failed_work_item_count?: number;
+    terminal_failed_work_item_count?: number;
+    user_action_required_work_item_count?: number;
+    active_compacted_node_count: number;
+    member_count: number;
+  },
+): string => {
+  if ((cluster.leased_work_item_count ?? 0) > 0) return 'ИИ прямо сейчас объединяет этот кластер';
+  if ((cluster.terminal_failed_work_item_count ?? 0) > 0) return 'ошибка: этот кластер не удалось объединить';
+  if ((cluster.user_action_required_work_item_count ?? 0) > 0) return 'нужно решение перед продолжением';
+  if ((cluster.retryable_failed_work_item_count ?? 0) > 0) return 'была ошибка, кластер ждёт повторной попытки';
+  if (normalize(cluster.status) === 'compacted') return 'готовый объединённый результат уже есть';
+  if ((cluster.ready_work_item_count ?? 0) > 0) return 'ждёт очереди на объединение';
+  if (cluster.active_compacted_node_count > 0) return 'часть результата уже готова';
+  return 'подготовлен к объединению';
 };
 
 const embeddingStatusLabel = (status: string): string => {
@@ -590,6 +613,55 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const compactedClusterCount = claimClusters.filter(
     (cluster) => normalize(cluster.status) === 'compacted',
   ).length;
+  const compactionReady = claimClusters.reduce(
+    (total, cluster) => total + (cluster.ready_work_item_count ?? 0),
+    0,
+  );
+  const compactionLeased = claimClusters.reduce(
+    (total, cluster) => total + (cluster.leased_work_item_count ?? 0),
+    0,
+  );
+  const compactionDone = claimClusters.reduce(
+    (total, cluster) => total + (cluster.completed_work_item_count ?? 0),
+    0,
+  );
+  const compactionRetry = claimClusters.reduce(
+    (total, cluster) => total + (cluster.retryable_failed_work_item_count ?? 0),
+    0,
+  );
+  const compactionFailed = claimClusters.reduce(
+    (total, cluster) => total + (cluster.terminal_failed_work_item_count ?? 0),
+    0,
+  );
+  const compactionNeedsDecision = claimClusters.reduce(
+    (total, cluster) => total + (cluster.user_action_required_work_item_count ?? 0),
+    0,
+  );
+  const compactedClaimPreviewCount = claimClusters.reduce(
+    (total, cluster) => total + (cluster.compacted_claims?.length ?? 0),
+    0,
+  );
+  const compactionLlmAttempts = attempts.filter(
+    (attempt) => attempt.node_name === 'knowledge_workbench.draft_claim_compaction',
+  );
+  const compactionSucceededAttempts = compactionLlmAttempts.filter(
+    (attempt) => normalize(attempt.status) === 'succeeded',
+  ).length;
+  const compactionRunningAttempts = compactionLlmAttempts.filter((attempt) =>
+    ['leased', 'running', 'ready'].includes(normalize(attempt.status)),
+  ).length;
+  const compactionTokens = compactionLlmAttempts.reduce(
+    (total, attempt) => total + Math.max(0, attempt.total_tokens || 0),
+    0,
+  );
+  const compactionSummaryText =
+    compactionLeased > 0
+      ? `Сейчас ИИ объединяет ${formatNumber(compactionLeased)} кластер(а).`
+      : compactionReady > 0
+        ? `Ждут объединения ${formatNumber(compactionReady)} кластер(а).`
+        : compactedClusterCount === claimClusters.length && claimClusters.length > 0
+          ? 'Все кластеры объединены.'
+          : 'Состояние объединения уточняется.';
 
   const displayedStageCounts = (
     stage: WorkbenchWorkflowStageLiveState,
@@ -844,6 +916,33 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           </div>
 
           <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
+            <div className="mb-1 font-medium text-[var(--text-primary)]">Объединение знаний</div>
+            <div className="text-[var(--text-muted)]">
+              {compactionSummaryText}
+              {claimClusters.length > 0
+                ? ` Готово: ${formatNumber(compactedClusterCount)} из ${formatNumber(
+                    claimClusters.length,
+                  )}.`
+                : ''}
+              {compactedClaimPreviewCount > 0
+                ? ` Уже получено результатов: ${formatNumber(compactedClaimPreviewCount)}.`
+                : ''}
+            </div>
+            <div className="mt-1 text-[var(--text-muted)]">
+              Запросов ИИ: {formatNumber(compactionLlmAttempts.length)}
+              {compactionSucceededAttempts > 0
+                ? ` · успешно ${formatNumber(compactionSucceededAttempts)}`
+                : ''}
+              {compactionRunningAttempts > 0
+                ? ` · выполняется ${formatNumber(compactionRunningAttempts)}`
+                : ''}
+              {compactionRetry > 0 ? ` · повторить ${formatNumber(compactionRetry)}` : ''}
+              {compactionFailed > 0 ? ` · ошибок ${formatNumber(compactionFailed)}` : ''}
+              {compactionTokens > 0 ? ` · ${formatNumber(compactionTokens)} токенов` : ''}
+            </div>
+          </div>
+
+          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
             <div className="mb-1 font-medium text-[var(--text-primary)]">Итог</div>
             <div className="text-[var(--text-muted)]">{resultSummaryText}</div>
           </div>
@@ -907,8 +1006,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                             Кластер {formatNumber(clusterIndex + 1)}
                           </span>
                           <span className="ml-2 text-[var(--text-muted)]">
-                            {clusterStatusLabel(cluster.status)} · утверждений:{' '}
-                            {formatNumber(cluster.member_count)}
+                            {clusterStatusLabel(cluster.status)} · {clusterHumanState(cluster)} ·{' '}
+                            утверждений: {formatNumber(cluster.member_count)}
                           </span>
                         </summary>
                         <div className="mt-2 grid gap-1 text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">

@@ -11,6 +11,7 @@ from src.contexts.knowledge_workbench.observability.application.read_models.work
     WorkbenchClaimClusterComparisonLiveView,
     WorkbenchClaimClusterLiveView,
     WorkbenchClaimClusterMemberLiveView,
+    WorkbenchCompactedClaimPreviewLiveView,
     WorkbenchCurationAvailabilityView,
     WorkbenchDocumentWorkflowLiveState,
     WorkbenchLlmAttemptLiveView,
@@ -559,7 +560,11 @@ class WorkbenchWorkflowLiveStateQuery:
                 COALESCE(
                     comparison_projection.comparisons,
                     '[]'::jsonb
-                ) AS comparisons
+                ) AS comparisons,
+                COALESCE(
+                    compacted_projection.compacted_claims,
+                    '[]'::jsonb
+                ) AS compacted_claims
             FROM draft_claim_compaction_groups AS group_state
             LEFT JOIN edge_counts AS edge_state
               ON edge_state.group_ref = group_state.group_ref
@@ -658,6 +663,27 @@ class WorkbenchWorkflowLiveStateQuery:
                 WHERE comparison.group_ref = group_state.group_ref
                   AND comparison.workflow_run_id = $1
             ) AS comparison_projection ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT jsonb_agg(
+                    jsonb_build_object(
+                        'node_ref', node.node_ref,
+                        'claim', COALESCE(node.compacted_payload->>'claim', ''),
+                        'claim_kind', node.compacted_claim_kind,
+                        'merge_decision', node.compacted_merge_decision,
+                        'source_claim_refs', COALESCE(
+                            node.compacted_payload->'source_claim_refs',
+                            '[]'::jsonb
+                        ),
+                        'active', COALESCE(node.active, FALSE)
+                    )
+                    ORDER BY node.active DESC, node.updated_at DESC
+                ) AS compacted_claims
+                FROM draft_claim_compaction_nodes AS node
+                WHERE node.group_ref = group_state.group_ref
+                  AND node.workflow_run_id = $1
+                  AND node.node_kind = 'compacted'
+                  AND node.compacted_payload IS NOT NULL
+            ) AS compacted_projection ON TRUE
             WHERE group_state.workflow_run_id = $1
             ORDER BY group_state.group_ref
             """,
@@ -1132,6 +1158,21 @@ def _claim_cluster(row: Mapping[str, object]) -> WorkbenchClaimClusterLiveView:
         )
         for comparison in _mapping_sequence(row, "comparisons")
     )
+    compacted_claims = tuple(
+        WorkbenchCompactedClaimPreviewLiveView(
+            node_ref=_str(compacted_claim, "node_ref"),
+            claim=_str(compacted_claim, "claim"),
+            claim_kind=_optional_str(compacted_claim, "claim_kind"),
+            merge_decision=_optional_str(compacted_claim, "merge_decision"),
+            source_claim_refs=_string_sequence(
+                compacted_claim,
+                "source_claim_refs",
+            ),
+            active=_bool(compacted_claim, "active"),
+        )
+        for compacted_claim in _mapping_sequence(row, "compacted_claims")
+        if _optional_str(compacted_claim, "claim")
+    )
     return WorkbenchClaimClusterLiveView(
         group_ref=_str(row, "group_ref"),
         status=_claim_cluster_status(
@@ -1160,8 +1201,24 @@ def _claim_cluster(row: Mapping[str, object]) -> WorkbenchClaimClusterLiveView:
         comparison_count=_int(row, "comparison_count"),
         pending_comparison_count=_int(row, "pending_comparison_count"),
         work_item_count=_int(row, "work_item_count"),
+        ready_work_item_count=_int(row, "ready_work_item_count"),
+        leased_work_item_count=_int(row, "leased_work_item_count"),
+        completed_work_item_count=_int(row, "completed_work_item_count"),
+        retryable_failed_work_item_count=_int(
+            row,
+            "retryable_failed_work_item_count",
+        ),
+        terminal_failed_work_item_count=_int(
+            row,
+            "terminal_failed_work_item_count",
+        ),
+        user_action_required_work_item_count=_int(
+            row,
+            "user_action_required_work_item_count",
+        ),
         members=members,
         comparisons=comparisons,
+        compacted_claims=compacted_claims,
     )
 
 
@@ -1182,8 +1239,8 @@ def _claim_cluster_status(
     if waiting_comparison_count > 0 or user_action_required_work_item_count > 0:
         return "blocked"
     if (
-        active_node_count == 1
-        and active_compacted_node_count == 1
+        active_node_count > 0
+        and active_node_count == active_compacted_node_count
         and pending_comparison_count == 0
     ):
         return "compacted"
@@ -1211,6 +1268,24 @@ def _claim_cluster_counts(
         "node_count": sum(cluster.node_count for cluster in clusters),
         "comparison_count": sum(cluster.comparison_count for cluster in clusters),
         "work_item_count": sum(cluster.work_item_count for cluster in clusters),
+        "ready_work_item_count": sum(
+            cluster.ready_work_item_count for cluster in clusters
+        ),
+        "leased_work_item_count": sum(
+            cluster.leased_work_item_count for cluster in clusters
+        ),
+        "completed_work_item_count": sum(
+            cluster.completed_work_item_count for cluster in clusters
+        ),
+        "retryable_failed_work_item_count": sum(
+            cluster.retryable_failed_work_item_count for cluster in clusters
+        ),
+        "terminal_failed_work_item_count": sum(
+            cluster.terminal_failed_work_item_count for cluster in clusters
+        ),
+        "user_action_required_work_item_count": sum(
+            cluster.user_action_required_work_item_count for cluster in clusters
+        ),
     }
 
 

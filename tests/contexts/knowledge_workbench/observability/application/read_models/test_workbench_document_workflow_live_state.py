@@ -181,6 +181,12 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                     comparison_count=1,
                     pending_comparison_count=1,
                     work_item_count=1,
+                    ready_work_item_count=1,
+                    leased_work_item_count=0,
+                    completed_work_item_count=0,
+                    retryable_failed_work_item_count=0,
+                    terminal_failed_work_item_count=0,
+                    user_action_required_work_item_count=0,
                     members=(
                         WorkbenchClaimClusterMemberLiveView(
                             observation_ref="claim-1",
@@ -213,6 +219,7 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                             round_index=0,
                         ),
                     ),
+                    compacted_claims=(),
                 ),
             ),
             claim_compaction_comparisons=(
@@ -265,6 +272,12 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
         "comparison_count": 1,
         "pending_comparison_count": 1,
         "work_item_count": 1,
+        "ready_work_item_count": 1,
+        "leased_work_item_count": 0,
+        "completed_work_item_count": 0,
+        "retryable_failed_work_item_count": 0,
+        "terminal_failed_work_item_count": 0,
+        "user_action_required_work_item_count": 0,
         "members": [
             {
                 "observation_ref": "claim-1",
@@ -318,6 +331,7 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                 "round_index": 0,
             }
         ],
+        "compacted_claims": [],
     }
     assert payload["workflow"]["claim_clusters"][0]["cluster_ref"] == "group-1"
     assert payload["workflow"]["claim_compaction_comparisons"][0]["cluster_ref"] == (
