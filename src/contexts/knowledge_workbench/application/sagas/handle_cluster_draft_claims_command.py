@@ -326,7 +326,6 @@ def _prepare_dispatch_batch_command(
                 "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
                 "requested_items": scheduled_work_item_count,
                 "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-                "account_capacities": (),
             },
         },
         status=WorkflowCommandStatus.PENDING,

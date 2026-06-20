@@ -448,6 +448,7 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
     assert isinstance(dispatch_preparation, dict)
     assert dispatch_preparation["active_model_ref"] == "openai/gpt-oss-120b"
     assert dispatch_preparation["requested_items"] == len(scheduling.saved_payloads)
+    assert "account_capacities" not in dispatch_preparation
     for payload in scheduling.saved_payloads:
         provider_messages = payload["provider_messages"]
         assert isinstance(provider_messages, list)

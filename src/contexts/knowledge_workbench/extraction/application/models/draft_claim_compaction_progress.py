@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from src.domain.project_plane.json_types import JsonObject
 
@@ -25,6 +26,7 @@ class DraftClaimCompactionProgressSummary:
     retryable_failed_work_item_count: int = 0
     terminal_failed_work_item_count: int = 0
     due_waiting_work_item_count: int = 0
+    next_due_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _text(self.workflow_run_id, "workflow_run_id")
@@ -66,6 +68,8 @@ class DraftClaimCompactionProgressSummary:
             )
         if self.active_group_count > self.group_count:
             raise ValueError("active_group_count must be <= group_count")
+        if self.next_due_at is not None and not isinstance(self.next_due_at, datetime):
+            raise TypeError("next_due_at must be datetime when provided")
 
     @property
     def all_groups_done(self) -> bool:
@@ -82,6 +86,10 @@ class DraftClaimCompactionProgressSummary:
     @property
     def has_active_compaction_work_items(self) -> bool:
         return self.active_work_item_count > 0
+
+    @property
+    def has_future_waiting_work(self) -> bool:
+        return self.next_due_at is not None and self.due_waiting_work_item_count == 0
 
     def to_payload(self) -> JsonObject:
         return {
@@ -105,6 +113,9 @@ class DraftClaimCompactionProgressSummary:
             "retryable_failed_work_item_count": self.retryable_failed_work_item_count,
             "terminal_failed_work_item_count": self.terminal_failed_work_item_count,
             "due_waiting_work_item_count": self.due_waiting_work_item_count,
+            "next_due_at": (
+                self.next_due_at.isoformat() if self.next_due_at is not None else None
+            ),
         }
 
 

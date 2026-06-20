@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -259,7 +259,7 @@ async def test_active_due_work_items_appends_prepare_command() -> None:
         compaction_reduction_state_repository=repository,
     )
 
-    assert result.decision == "ACTIVE"
+    assert result.decision == "PREPARE_NEXT_BATCH_NOW"
     assert result.appended_next_command_count == 1
     assert len(workflow_uow.command_log.pending_commands) == 1
     next_command = workflow_uow.command_log.pending_commands[0]
@@ -268,9 +268,53 @@ async def test_active_due_work_items_appends_prepare_command() -> None:
         == KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
     )
     assert next_command.payload["scheduled_work_item_count"] == 1
+    assert next_command.run_after == _now()
     assert next_command.payload["active_model_ref"] == "openai/gpt-oss-120b"
     assert next_command.payload["caused_by_command_id"] == _command().command_id.value
-    assert ":reconcile:" in next_command.idempotency_key.value
+    assert ":reconcile:now:" in next_command.idempotency_key.value
+    dispatch_preparation = next_command.payload["llm_dispatch_preparation"]
+    assert isinstance(dispatch_preparation, dict)
+    assert dispatch_preparation["active_model_ref"] == "openai/gpt-oss-120b"
+    assert dispatch_preparation["requested_items"] == 1
+    assert "account_capacities" not in dispatch_preparation
+
+
+@pytest.mark.asyncio
+async def test_future_due_work_items_append_delayed_prepare_command() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    next_due_at = _now() + timedelta(seconds=45)
+    repository = FakeReductionStateRepository(
+        _summary(
+            active_group_count=2,
+            active_work_item_count=3,
+            deferred_work_item_count=2,
+            retryable_failed_work_item_count=1,
+            due_waiting_work_item_count=0,
+            next_due_at=next_due_at,
+        )
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+    )
+
+    assert result.decision == "PREPARE_NEXT_BATCH_LATER"
+    assert result.appended_next_command_count == 1
+    assert len(workflow_uow.command_log.pending_commands) == 1
+    next_command = workflow_uow.command_log.pending_commands[0]
+    assert (
+        next_command.command_type
+        == KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert next_command.run_after == next_due_at
+    assert next_command.payload["scheduled_work_item_count"] == 3
+    assert ":reconcile:later:" in next_command.idempotency_key.value
+    dispatch_preparation = next_command.payload["llm_dispatch_preparation"]
+    assert isinstance(dispatch_preparation, dict)
+    assert dispatch_preparation["requested_items"] == 3
+    assert "account_capacities" not in dispatch_preparation
 
 
 @pytest.mark.asyncio
@@ -370,6 +414,7 @@ def _summary(
     retryable_failed_work_item_count: int = 0,
     terminal_failed_work_item_count: int = 0,
     due_waiting_work_item_count: int = 0,
+    next_due_at: datetime | None = None,
 ) -> DraftClaimCompactionProgressSummary:
     return DraftClaimCompactionProgressSummary(
         workflow_run_id=_workflow_run_id(),
@@ -390,4 +435,5 @@ def _summary(
         retryable_failed_work_item_count=retryable_failed_work_item_count,
         terminal_failed_work_item_count=terminal_failed_work_item_count,
         due_waiting_work_item_count=due_waiting_work_item_count,
+        next_due_at=next_due_at,
     )

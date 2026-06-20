@@ -45,6 +45,8 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 
 class DraftClaimCompactionProgressDecision(StrEnum):
     ACTIVE = "ACTIVE"
+    PREPARE_NEXT_BATCH_NOW = "PREPARE_NEXT_BATCH_NOW"
+    PREPARE_NEXT_BATCH_LATER = "PREPARE_NEXT_BATCH_LATER"
     WAITING_USER_MODEL_CHOICE = "WAITING_USER_MODEL_CHOICE"
     ALL_GROUPS_COMPACTED = "ALL_GROUPS_COMPACTED"
 
@@ -194,6 +196,10 @@ def _decide(
         return DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE
     if summary.all_groups_done and not summary.has_active_compaction_work_items:
         return DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED
+    if summary.has_due_compaction_work_items:
+        return DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_NOW
+    if summary.has_future_waiting_work:
+        return DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_LATER
     return DraftClaimCompactionProgressDecision.ACTIVE
 
 
@@ -205,15 +211,26 @@ def _next_command(
     decision: DraftClaimCompactionProgressDecision,
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
-    if (
-        decision is DraftClaimCompactionProgressDecision.ACTIVE
-        and summary.has_due_compaction_work_items
-    ):
+    if decision is DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_NOW:
         return _prepare_dispatch_batch_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
             scheduled_work_item_count=summary.due_waiting_work_item_count,
+            run_after=occurred_at,
             occurred_at=occurred_at,
+            suffix="now",
+        )
+
+    if decision is DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_LATER:
+        if summary.next_due_at is None:
+            raise ValueError("next_due_at is required for delayed compaction prepare")
+        return _prepare_dispatch_batch_command(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            scheduled_work_item_count=summary.active_work_item_count,
+            run_after=summary.next_due_at,
+            occurred_at=occurred_at,
+            suffix=f"later:{summary.next_due_at.isoformat()}",
         )
 
     if decision is not DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED:
@@ -244,11 +261,14 @@ def _prepare_dispatch_batch_command(
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
     scheduled_work_item_count: int,
+    run_after: datetime,
     occurred_at: datetime,
+    suffix: str,
 ) -> WorkflowCommand:
     causation_scope = _command_causation_scope(workflow_command)
     idempotency_key = (
-        f"draft-claim-compaction-dispatch:{workflow_run_id}:reconcile:{causation_scope}"
+        "draft-claim-compaction-dispatch:"
+        f"{workflow_run_id}:reconcile:{suffix}:{causation_scope}"
     )
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
@@ -268,11 +288,10 @@ def _prepare_dispatch_batch_command(
                 "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
                 "requested_items": scheduled_work_item_count,
                 "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-                "account_capacities": (),
             },
         },
         status=WorkflowCommandStatus.PENDING,
-        run_after=occurred_at,
+        run_after=run_after,
         created_at=occurred_at,
         updated_at=occurred_at,
     )

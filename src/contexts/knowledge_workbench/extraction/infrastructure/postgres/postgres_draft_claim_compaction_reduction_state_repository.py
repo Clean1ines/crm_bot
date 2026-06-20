@@ -152,7 +152,11 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                                OR next_attempt_at <= now()
                            )
                        )
-                ) AS due_waiting_work_item_count
+                ) AS due_waiting_work_item_count,
+                MIN(next_attempt_at) FILTER (
+                    WHERE status IN ('deferred', 'retryable_failed')
+                      AND next_attempt_at > now()
+                ) AS next_due_at
             FROM execution_work_items
             WHERE work_kind = 'knowledge_workbench.draft_claim_compaction'
               AND work_item_id LIKE $1
@@ -277,6 +281,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 work_item_counts,
                 "due_waiting_work_item_count",
             ),
+            next_due_at=_optional_datetime(work_item_counts, "next_due_at"),
         )
 
     async def load_planner_state(
@@ -1782,3 +1787,12 @@ def _source_claim_refs_from_node_ref(node_ref: str) -> tuple[str, ...]:
     if node_ref.startswith("raw:"):
         return (node_ref.rsplit(":", 1)[-1],)
     return ()
+
+
+def _optional_datetime(row: Mapping[str, object], key: str) -> datetime | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, datetime):
+        raise TypeError(f"{key} must be datetime")
+    return value
