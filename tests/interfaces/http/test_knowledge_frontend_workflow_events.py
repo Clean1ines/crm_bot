@@ -240,7 +240,7 @@ async def test_frontend_workflow_events_endpoint_returns_empty_list_without_drai
         FakeFrontendWorkflowEventRepository,
     )
     monkeypatch.setattr(
-        knowledge, "_drain_workflow_from_live_state_poll", forbidden_call
+        knowledge, "make_knowledge_extraction_workflow_resume", forbidden_call
     )
     monkeypatch.setattr(
         knowledge,
@@ -417,7 +417,7 @@ async def test_frontend_workflow_event_stream_does_not_call_runtime_paths(
         FakeFrontendWorkflowEventRepository,
     )
     monkeypatch.setattr(
-        knowledge, "_drain_workflow_from_live_state_poll", forbidden_call
+        knowledge, "make_knowledge_extraction_workflow_resume", forbidden_call
     )
     monkeypatch.setattr(
         knowledge,

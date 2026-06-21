@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 
 from src.interfaces.http import dependencies, knowledge
 from tests.api.test_knowledge import _FakeProjectRepo, _user_repo
@@ -37,12 +39,10 @@ async def test_workflow_live_state_endpoint_requires_project_access(
         await knowledge.knowledge_workflow_live_state(
             project_id="project-1",
             document_id="document-1",
-            background_tasks=BackgroundTasks(),
             authorization="Bearer valid-token",
             pool=object(),
             project_repo=_FakeProjectRepo(has_role=False),
             user_repo=_user_repo(platform_admin=False),
-            llm_executor=object(),
         )
 
     assert exc_info.value.status_code == 403
@@ -189,20 +189,15 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
         fake_fetch_workbench_workflow_live_state,
     )
 
-    background_tasks = BackgroundTasks()
-
     response = await knowledge.knowledge_workflow_live_state(
         project_id="project-1",
         document_id="source-document:project-1:abc",
-        background_tasks=background_tasks,
         authorization="Bearer valid-token",
         pool=object(),
         project_repo=_FakeProjectRepo(has_role=True),
         user_repo=_user_repo(),
-        llm_executor=object(),
     )
 
-    assert len(background_tasks.tasks) == 1
     assert response["workflow"]["workflow_run_id"] == "workflow-1"
     assert response["workflow"]["curation"]["available"] is True
     assert response["workflow"]["timer"]["active_elapsed_seconds"] == 10
@@ -249,12 +244,127 @@ async def test_workflow_live_state_endpoint_maps_missing_document_to_404(
         await knowledge.knowledge_workflow_live_state(
             project_id="project-1",
             document_id="missing-document",
-            background_tasks=BackgroundTasks(),
             authorization="Bearer valid-token",
             pool=object(),
             project_repo=_FakeProjectRepo(has_role=True),
             user_repo=_user_repo(),
-            llm_executor=object(),
         )
 
     assert exc_info.value.status_code == 404
+
+
+def test_workflow_live_state_endpoint_has_no_background_drain_dependencies() -> None:
+    signature = inspect.signature(knowledge.knowledge_workflow_live_state)
+
+    assert "background_tasks" not in signature.parameters
+    assert "llm_executor" not in signature.parameters
+
+    source = inspect.getsource(knowledge.knowledge_workflow_live_state)
+    assert "BackgroundTasks" not in source
+    assert ".add_task" not in source
+    assert "_drain_workflow_from_live_state_poll" not in source
+    assert "make_knowledge_extraction_workflow_resume" not in source
+    assert "RunKnowledgeExtractionWorkflowResumeCommand" not in source
+
+
+@pytest.mark.asyncio
+async def test_workflow_live_state_endpoint_does_not_resume_or_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    async def fake_fetch_workbench_workflow_live_state(
+        *,
+        pool: object,
+        project_id: str,
+        document_id: str,
+    ) -> dict[str, object]:
+        del pool
+        return {
+            "document_id": document_id,
+            "project_id": project_id,
+            "file_name": "faq.md",
+            "document_status": "processing",
+            "workflow": {"workflow_run_id": "workflow-1"},
+        }
+
+    def forbidden_resume_factory(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("live-state read endpoint must not resume/drain workflow")
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "fetch_workbench_workflow_live_state",
+        fake_fetch_workbench_workflow_live_state,
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "make_knowledge_extraction_workflow_resume",
+        forbidden_resume_factory,
+    )
+
+    response = await knowledge.knowledge_workflow_live_state(
+        project_id="project-1",
+        document_id="document-1",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert response["workflow"]["workflow_run_id"] == "workflow-1"
+
+
+@pytest.mark.asyncio
+async def test_workflow_live_state_snapshot_sse_is_deprecated_without_snapshot_or_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    async def forbidden_fetch_workbench_workflow_live_state(
+        *,
+        pool: object,
+        project_id: str,
+        document_id: str,
+    ) -> dict[str, object]:
+        del pool, project_id, document_id
+        raise AssertionError("snapshot SSE must not rebuild full live-state snapshots")
+
+    def forbidden_resume_factory(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("snapshot SSE must not resume/drain workflow")
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "fetch_workbench_workflow_live_state",
+        forbidden_fetch_workbench_workflow_live_state,
+    )
+    monkeypatch.setattr(
+        knowledge,
+        "make_knowledge_extraction_workflow_resume",
+        forbidden_resume_factory,
+    )
+
+    response = await knowledge.stream_knowledge_workflow_live_state_events(
+        project_id="project-1",
+        document_id="document-1",
+        request=object(),
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+    text = "".join(
+        chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks
+    )
+
+    assert "event: workflow_live_state_deprecated" in text
+    assert "deprecated_snapshot_sse" in text
+    assert "/frontend-events/stream" in text
+    assert "workflow_live_state_changed" not in text

@@ -17,7 +17,6 @@ from uuid import UUID
 import asyncpg
 from fastapi import (
     APIRouter,
-    BackgroundTasks,
     Body,
     Depends,
     File,
@@ -213,8 +212,6 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 
-_live_state_drain_running_workflows: set[str] = set()
-_live_state_drain_guard = asyncio.Lock()
 UPLOAD_TOO_LARGE_DETAIL = "Knowledge upload file is too large"
 _SOURCE_UNIT_TEXT_PREVIEW_LIMIT = 500
 
@@ -1949,28 +1946,22 @@ async def list_workbench_rag_eval_promotion_candidates(
 async def knowledge_workflow_live_state(
     project_id: str,
     document_id: str,
-    background_tasks: BackgroundTasks,
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
-    llm_executor: LlmDispatchExecutorPort = Depends(get_llm_dispatch_executor),
 ):
-    """Returns frontend-facing Workbench workflow live state for one document."""
+    """Returns bootstrap/recovery/debug Workbench workflow snapshot for one document.
+
+    This endpoint is intentionally read-only. Workflow liveness is owned by
+    upload/resume/lifespan/worker/admin command paths, never by frontend reads.
+    """
 
     await _require_project_access(
         project_id=project_id,
         authorization=authorization,
         project_repo=project_repo,
         user_repo=user_repo,
-    )
-
-    background_tasks.add_task(
-        _drain_workflow_from_live_state_poll,
-        pool=pool,
-        project_id=project_id,
-        document_id=document_id,
-        llm_executor=llm_executor,
     )
 
     try:
@@ -1984,52 +1975,6 @@ async def knowledge_workflow_live_state(
             status_code=404,
             detail="Knowledge document not found",
         ) from exc
-
-
-async def _drain_workflow_from_live_state_poll(
-    *,
-    pool: AsyncPool,
-    project_id: str,
-    document_id: str,
-    llm_executor: LlmDispatchExecutorPort,
-) -> None:
-    workflow_run_id = await _latest_workflow_run_id_for_source_document(
-        pool=pool,
-        project_id=project_id,
-        source_document_ref=document_id,
-    )
-    if workflow_run_id is None:
-        return
-
-    async with _live_state_drain_guard:
-        if workflow_run_id in _live_state_drain_running_workflows:
-            return
-        _live_state_drain_running_workflows.add(workflow_run_id)
-
-    try:
-        workflow_runner = make_knowledge_extraction_workflow_resume(
-            pool=pool,
-            llm_executor=llm_executor,
-        )
-        await workflow_runner.execute(
-            RunKnowledgeExtractionWorkflowResumeCommand(
-                project_id=project_id,
-                document_id=workflow_run_id,
-                max_drain_commands=25,
-            )
-        )
-    except Exception:
-        logger.exception(
-            "Background workflow drain from live-state polling failed",
-            extra={
-                "project_id": project_id,
-                "document_id": document_id,
-                "workflow_run_id": workflow_run_id,
-            },
-        )
-    finally:
-        async with _live_state_drain_guard:
-            _live_state_drain_running_workflows.discard(workflow_run_id)
 
 
 @router.get("/{document_id}/progress")
@@ -2637,13 +2582,14 @@ async def stream_knowledge_workflow_live_state_events(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Push Workbench card live-state changes to the frontend.
+    """Compatibility-only snapshot SSE endpoint.
 
-    No polling. The endpoint emits:
-    - one initial snapshot;
-    - a new snapshot only after workflow_runtime outbox publishes a
-      workflow_live_state_changed notification for this workflow.
+    Projection SSE under /frontend-events/stream is the realtime transport.
+    This endpoint must not fetch full live-state snapshots, subscribe to
+    legacy PostgreSQL live-state notification channels, or drain workflow commands.
     """
+
+    del request, pool
 
     await _require_project_access(
         project_id=project_id,
@@ -2653,60 +2599,25 @@ async def stream_knowledge_workflow_live_state_events(
     )
 
     async def event_stream():
-        initial_state = await fetch_workbench_workflow_live_state(
-            pool=pool,
-            project_id=project_id,
-            document_id=document_id,
+        yield _sse_json_event(
+            "workflow_live_state_deprecated",
+            {
+                "status": "deprecated_snapshot_sse",
+                "message": (
+                    "Snapshot SSE is compatibility/bootstrap only. "
+                    "Use persisted frontend workflow projection events for realtime."
+                ),
+                "document_id": document_id,
+                "project_id": project_id,
+                "replacement": (
+                    f"/api/projects/{project_id}/knowledge/source-documents/"
+                    f"{document_id}/workflows/{'{workflow_run_id}'}/frontend-events/stream"
+                ),
+                "bootstrap_snapshot": (
+                    f"/api/projects/{project_id}/knowledge/{document_id}/workflow-live-state"
+                ),
+            },
         )
-        workflow_run_id = _workflow_run_id_from_live_state(initial_state)
-        yield _sse_json_event("workflow_live_state", initial_state)
-
-        if workflow_run_id is None:
-            return
-
-        queue: asyncio.Queue[str] = asyncio.Queue(maxsize=100)
-
-        def listener(
-            _connection,
-            _pid: int,
-            _channel: str,
-            payload: str,
-        ) -> None:
-            try:
-                queue.put_nowait(payload)
-            except asyncio.QueueFull:
-                pass
-
-        async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
-            connection = cast(asyncpg.Connection, raw_connection)
-            await connection.add_listener("workflow_live_state_changed", listener)
-            try:
-                while not await request.is_disconnected():
-                    try:
-                        raw_event = await asyncio.wait_for(queue.get(), timeout=25.0)
-                    except asyncio.TimeoutError:
-                        yield ": keepalive\n\n"
-                        continue
-
-                    try:
-                        event_payload = json.loads(raw_event)
-                    except json.JSONDecodeError:
-                        continue
-
-                    if event_payload.get("workflow_run_id") != workflow_run_id:
-                        continue
-
-                    next_state = await fetch_workbench_workflow_live_state(
-                        pool=pool,
-                        project_id=project_id,
-                        document_id=document_id,
-                    )
-                    yield _sse_json_event("workflow_live_state", next_state)
-            finally:
-                await connection.remove_listener(
-                    "workflow_live_state_changed",
-                    listener,
-                )
 
     return StreamingResponse(
         event_stream(),
