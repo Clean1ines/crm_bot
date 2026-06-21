@@ -18,9 +18,13 @@ from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
+    KnowledgeExtractionCanonicalPhase,
 )
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -107,6 +111,7 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
             ClaimBuilderRetryActionReadRepositoryPort
         ),
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleReconcileClaimBuilderProgressResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -160,7 +165,30 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
             next_command=next_command,
             occurred_at=occurred_at,
         )
-        await workflow_unit_of_work.outbox.append_event(event)
+        persisted_event = await workflow_unit_of_work.outbox.append_event(event)
+        appended_event_count = 1
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(persisted_event)
+
+        if (
+            decision
+            is ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED
+            and _all_sections_extracted_success(summary)
+        ):
+            all_sections_event = _all_sections_extracted_event(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                summary=summary,
+                occurred_at=occurred_at,
+            )
+            persisted_all_sections_event = (
+                await workflow_unit_of_work.outbox.append_event(all_sections_event)
+            )
+            appended_event_count += 1
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(
+                    persisted_all_sections_event
+                )
 
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
@@ -191,7 +219,7 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
         return HandleReconcileClaimBuilderProgressResult(
             workflow_run_id=workflow_run_id,
             decision=decision.value,
-            appended_event_count=1,
+            appended_event_count=appended_event_count,
             appended_next_command_count=appended_next_command_count,
             completed_command_id=workflow_command.command_id,
         )
@@ -240,6 +268,10 @@ def _decide(
         return ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED
 
     return ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_PROGRESS_BLOCKED
+
+
+def _all_sections_extracted_success(summary: WorkItemProgressSummary) -> bool:
+    return summary.total_count > 0 and summary.completed_count >= summary.total_count
 
 
 def _next_command(
@@ -305,6 +337,7 @@ def _next_command(
     if (
         decision
         is ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED
+        and _all_sections_extracted_success(summary)
     ):
         return _generate_draft_claim_embeddings_command(
             workflow_command=workflow_command,
@@ -468,6 +501,10 @@ def _progress_reconciled_event(
     next_run_after = next_command.run_after.isoformat() if next_command else None
     payload = {
         "workflow_run_id": workflow_run_id,
+        "operation_key": "reconcile_claim_builder_progress",
+        "canonical_phase": (
+            KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+        ),
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "decision": decision.value,
         "summary": summary.to_payload(),
@@ -485,6 +522,45 @@ def _progress_reconciled_event(
         ),
         event_type=(
             KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED.value
+        ),
+        workflow_run_id=workflow_run_id,
+        payload=payload,
+        occurred_at=occurred_at,
+        causation_command_id=workflow_command.command_id,
+        correlation_id=workflow_command.command_id.value,
+    )
+
+
+def _all_sections_extracted_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    summary: WorkItemProgressSummary,
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    payload = {
+        "workflow_run_id": workflow_run_id,
+        "operation_key": "reconcile_claim_builder_progress",
+        "canonical_phase": (
+            KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+        ),
+        "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+        "summary": summary.to_payload(),
+        "completed_count": summary.completed_count,
+        "total_count": summary.total_count,
+        "next_command_type": (
+            KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS.value
+        ),
+    }
+    return WorkflowEvent(
+        event_id=WorkflowEventId(
+            "workflow-event:"
+            f"{workflow_run_id}:"
+            f"{KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED.value}:"
+            f"{workflow_command.command_id.value}"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED.value
         ),
         workflow_run_id=workflow_run_id,
         payload=payload,
@@ -514,8 +590,8 @@ async def _save_progress_snapshot(
         summary.terminal_coverage_count
     )
     domain_counters["claim_builder_due_waiting_count"] = summary.due_waiting_count
-    domain_counters["claim_builder_retry_same_model_pending_count"] = (
-        retry_action_summary.retry_same_model_count
+    domain_counters["claim_builder_retry_same_route_pending_count"] = (
+        retry_action_summary.retry_same_route_count
     )
     domain_counters["claim_builder_retry_empty_claims_check_model_pending_count"] = (
         retry_action_summary.retry_empty_claims_check_model_count
@@ -523,8 +599,8 @@ async def _save_progress_snapshot(
     domain_counters["claim_builder_retry_fallback_model_pending_count"] = (
         retry_action_summary.retry_fallback_model_count
     )
-    domain_counters["claim_builder_retry_larger_output_model_pending_count"] = (
-        retry_action_summary.retry_larger_output_model_count
+    domain_counters["claim_builder_retry_larger_output_limit_route_pending_count"] = (
+        retry_action_summary.retry_larger_output_limit_route_count
     )
     domain_counters["claim_builder_retry_larger_input_model_pending_count"] = (
         retry_action_summary.retry_larger_input_model_count
@@ -603,20 +679,20 @@ def _selected_retry_plan(
     retry_action_summary: WorkItemRetryActionSummary,
 ) -> str | None:
     if retry_action_summary.retry_larger_input_model_count > 0:
-        return "retry_larger_context_model"
-    if retry_action_summary.retry_larger_output_model_count > 0:
-        return "retry_larger_output_model"
+        return "retry_larger_input_limit_route"
+    if retry_action_summary.retry_larger_output_limit_route_count > 0:
+        return "retry_larger_output_limit_route"
     if _has_retry_strategy(
         retry_action_summary,
-        "DAILY_LIMIT_retry_daily_fallback_model",
+        "DAILY_LIMIT_retry_daily_fallback_route",
     ):
-        return "DAILY_LIMIT_retry_daily_fallback_model"
+        return "DAILY_LIMIT_retry_daily_fallback_route"
     if retry_action_summary.retry_empty_claims_check_model_count > 0:
-        return "retry_special_empty_claims_check_model"
+        return "retry_validation_check_route"
     if retry_action_summary.retry_fallback_model_count > 0:
-        return "retry_daily_fallback_model"
-    if retry_action_summary.retry_same_model_count > 0:
-        return "retry_same_model"
+        return "retry_daily_fallback_route"
+    if retry_action_summary.retry_same_route_count > 0:
+        return "retry_same_route"
     return None
 
 

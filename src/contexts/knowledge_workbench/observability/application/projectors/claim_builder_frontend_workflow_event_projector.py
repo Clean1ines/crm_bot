@@ -3,8 +3,14 @@ from __future__ import annotations
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_all_sections_extracted_frontend_workflow_event_projector import (
+    ClaimBuilderAllSectionsExtractedFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_dispatch_batch_frontend_workflow_event_projector import (
     ClaimBuilderDispatchBatchFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_progress_frontend_workflow_event_projector import (
+    ClaimBuilderProgressFrontendWorkflowEventProjector,
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_section_outcome_frontend_workflow_event_projector import (
     ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector,
@@ -30,6 +36,10 @@ class ClaimBuilderFrontendWorkflowEventProjector:
         self._section_outcome = (
             ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector()
         )
+        self._progress_reconciled = ClaimBuilderProgressFrontendWorkflowEventProjector()
+        self._all_sections_extracted = (
+            ClaimBuilderAllSectionsExtractedFrontendWorkflowEventProjector()
+        )
 
     def project(self, event: WorkflowEvent) -> FrontendWorkflowEvent | None:
         projected = self._scheduling.project(event)
@@ -41,4 +51,10 @@ class ClaimBuilderFrontendWorkflowEventProjector:
         projected = self._capacity_observed.project(event)
         if projected is not None:
             return projected
-        return self._section_outcome.project(event)
+        projected = self._section_outcome.project(event)
+        if projected is not None:
+            return projected
+        projected = self._progress_reconciled.project(event)
+        if projected is not None:
+            return projected
+        return self._all_sections_extracted.project(event)

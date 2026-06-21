@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+import inspect
 
 import pytest
 
@@ -23,6 +24,16 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_claim_b
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
+    KnowledgeExtractionCanonicalPhase,
+)
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_frontend_workflow_event_projector import (
+    ClaimBuilderFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
@@ -183,10 +194,10 @@ class FakeWorkItemProgressReadRepository:
 
 def _retry_action_summary(
     *,
-    retry_same_model_count: int = 0,
+    retry_same_route_count: int = 0,
     retry_empty_claims_check_model_count: int = 0,
     retry_fallback_model_count: int = 0,
-    retry_larger_output_model_count: int = 0,
+    retry_larger_output_limit_route_count: int = 0,
     retry_larger_input_model_count: int = 0,
     split_required_count: int = 0,
     defer_until_capacity_reset_count: int = 0,
@@ -198,10 +209,10 @@ def _retry_action_summary(
     return WorkItemRetryActionSummary(
         workflow_run_id=_workflow_run_id(),
         work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
-        retry_same_model_count=retry_same_model_count,
+        retry_same_route_count=retry_same_route_count,
         retry_empty_claims_check_model_count=retry_empty_claims_check_model_count,
         retry_fallback_model_count=retry_fallback_model_count,
-        retry_larger_output_model_count=retry_larger_output_model_count,
+        retry_larger_output_limit_route_count=retry_larger_output_limit_route_count,
         retry_larger_input_model_count=retry_larger_input_model_count,
         split_required_count=split_required_count,
         defer_until_capacity_reset_count=defer_until_capacity_reset_count,
@@ -256,10 +267,22 @@ class FakeCommandLogRepository:
 @dataclass(slots=True)
 class FakeOutboxRepository:
     events: list[WorkflowEvent] = field(default_factory=list)
+    _next_sequence_number: int = 1
 
     async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
-        self.events.append(event)
-        return event
+        persisted_event = WorkflowEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            workflow_run_id=event.workflow_run_id,
+            payload=event.payload,
+            occurred_at=event.occurred_at,
+            sequence_number=self._next_sequence_number,
+            causation_command_id=event.causation_command_id,
+            correlation_id=event.correlation_id,
+        )
+        self.events.append(persisted_event)
+        self._next_sequence_number += 1
+        return persisted_event
 
     async def list_events_after(
         self,
@@ -371,11 +394,24 @@ class FakeWorkflowRuntimeUnitOfWork:
         raise AssertionError("handler must not own transaction rollback")
 
 
+@dataclass(slots=True)
+class InMemoryFrontendWorkflowEventRepository:
+    events: dict[str, FrontendWorkflowEvent] = field(default_factory=dict)
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        existing = self.events.get(event.projection_event_id)
+        if existing is not None:
+            return existing
+        self.events[event.projection_event_id] = event
+        return event
+
+
 async def _execute(
     *,
     workflow_command: WorkflowCommand | None = None,
     summary: WorkItemProgressSummary | None = None,
     retry_action_summary: WorkItemRetryActionSummary | None = None,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
 ) -> tuple[
     object,
     FakeWorkItemProgressReadRepository,
@@ -396,6 +432,7 @@ async def _execute(
         work_item_progress_read_repository=progress_repository,
         claim_builder_retry_action_read_repository=retry_action_repository,
         workflow_unit_of_work=workflow_unit_of_work,
+        frontend_event_projection_writer=frontend_event_projection_writer,
     )
     return result, progress_repository, retry_action_repository, workflow_unit_of_work
 
@@ -543,12 +580,27 @@ async def test_all_completed_appends_generate_draft_claim_embeddings() -> None:
     assert result.decision == (
         ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED.value
     )
+    assert result.appended_event_count == 2
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
     assert next_command.command_type == (
         KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS.value
     )
     assert next_command.payload["source_document_ref"] == (
         "source-document:project-1:abc"
+    )
+    assert [event.event_type for event in workflow_unit_of_work.outbox.events] == [
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED.value,
+    ]
+    all_sections_payload = workflow_unit_of_work.outbox.events[1].payload
+    assert all_sections_payload["operation_key"] == "reconcile_claim_builder_progress"
+    assert all_sections_payload["canonical_phase"] == (
+        KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+    )
+    assert all_sections_payload["completed_count"] == 3
+    assert all_sections_payload["total_count"] == 3
+    assert all_sections_payload["next_command_type"] == (
+        KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS.value
     )
 
 
@@ -559,11 +611,21 @@ async def test_appends_reconciled_event_progress_timeline_and_marks_completed() 
     )
 
     assert result.appended_event_count == 1
-    assert result.appended_next_command_count == 1
+    assert result.appended_next_command_count == 0
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED.value
+    )
     assert workflow_unit_of_work.outbox.events[0].event_type == (
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED.value
     )
-    assert workflow_unit_of_work.outbox.events[0].payload["decision"] == (
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+    _assert_no_generate_draft_claim_embeddings_command(workflow_unit_of_work)
+    event_payload = workflow_unit_of_work.outbox.events[0].payload
+    assert event_payload["operation_key"] == "reconcile_claim_builder_progress"
+    assert event_payload["canonical_phase"] == (
+        KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+    )
+    assert event_payload["decision"] == (
         ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED.value
     )
 
@@ -661,7 +723,7 @@ async def test_retry_fallback_model_count_appends_prepare_with_retry_plan() -> N
     assert retry_repository.calls[0][1] == CLAIM_BUILDER_SECTION_WORK_KIND
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
     assert next_command.payload["retry_plan"] == (
-        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL.value
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE.value
     )
     assert "summary" not in next_command.payload
     assert "retry_action_summary" not in next_command.payload
@@ -687,7 +749,7 @@ async def test_retry_plan_prepare_key_ignores_reconcile_causation() -> None:
     assert first_command.payload == second_command.payload
     assert first_command.run_after == second_command.run_after
     assert first_command.payload["retry_plan"] == (
-        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL.value
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE.value
     )
 
 
@@ -696,13 +758,13 @@ async def test_retry_larger_output_count_appends_prepare_with_retry_plan() -> No
     _, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
         retry_action_summary=_retry_action_summary(
-            retry_larger_output_model_count=1,
+            retry_larger_output_limit_route_count=1,
         ),
     )
 
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
     assert next_command.payload["retry_plan"] == (
-        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL.value
+        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_LIMIT_ROUTE.value
     )
 
 
@@ -717,20 +779,20 @@ async def test_retry_larger_input_count_appends_prepare_with_retry_plan() -> Non
 
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
     assert next_command.payload["retry_plan"] == (
-        WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL.value
+        WorkItemRetryPlan.RETRY_LARGER_INPUT_LIMIT_ROUTE.value
     )
 
 
 @pytest.mark.asyncio
-async def test_retry_same_model_count_appends_prepare_with_retry_plan() -> None:
+async def test_retry_same_route_count_appends_prepare_with_retry_plan() -> None:
     _, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(retryable_failed_count=1, due_retryable_failed_count=1),
-        retry_action_summary=_retry_action_summary(retry_same_model_count=1),
+        retry_action_summary=_retry_action_summary(retry_same_route_count=1),
     )
 
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
     assert next_command.payload["retry_plan"] == (
-        WorkItemRetryPlan.RETRY_SAME_MODEL.value
+        WorkItemRetryPlan.RETRY_SAME_ROUTE.value
     )
 
 
@@ -772,7 +834,7 @@ async def test_progress_event_includes_retry_action_summary_and_selected_retry_p
 
     event_payload = workflow_unit_of_work.outbox.events[0].payload
     assert event_payload["selected_retry_plan"] == (
-        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL.value
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE.value
     )
     assert event_payload["retry_action_summary"]["retry_fallback_model_count"] == 1
 
@@ -831,3 +893,287 @@ async def test_all_completed_derives_source_document_ref_for_legacy_reconcile_pa
     assert next_command.payload["source_document_ref"] == (
         "source-document:project-1:abc"
     )
+
+
+@pytest.mark.asyncio
+async def test_projects_claim_builder_progress_reconciled_event_once() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(
+        summary=_summary(completed_count=2, terminal_failed_count=1),
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    progress = [
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_progress_reconciled"
+    ]
+    assert len(progress) == 1
+    assert progress[0].operation_key == "reconcile_claim_builder_progress"
+    assert set(progress[0].payload) <= {
+        "workflow_run_id",
+        "work_kind",
+        "summary",
+        "retry_action_summary",
+    }
+    assert "decision" not in progress[0].payload
+    assert "next_run_after" not in progress[0].payload
+    assert "deferred_count" not in progress[0].payload["summary"]
+    assert "defer_until_capacity_reset_count" not in progress[0].payload.get(
+        "retry_action_summary",
+        {},
+    )
+    assert "waiting_for_capacity" not in progress[0].payload
+
+
+@pytest.mark.asyncio
+async def test_reprojects_progress_reconciled_idempotently() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, _, _, workflow_unit_of_work = await _execute(
+        frontend_event_projection_writer=projection_writer,
+    )
+    persisted_event = workflow_unit_of_work.outbox.events[0]
+    await projection_writer.execute(persisted_event)
+    await projection_writer.execute(persisted_event)
+
+    assert len(repository.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_handler_without_projection_writer_preserves_existing_behavior() -> None:
+    result, _, _, workflow_unit_of_work = await _execute()
+
+    assert result.appended_event_count == 1
+    assert len(workflow_unit_of_work.outbox.events) == 1
+
+
+def test_reconcile_handler_projects_after_canonical_outbox_append() -> None:
+    source = inspect.getsource(
+        HandleReconcileClaimBuilderProgressCommandHandler.execute
+    )
+
+    progress_append_index = source.index(
+        "persisted_event = await workflow_unit_of_work.outbox.append_event(event)"
+    )
+    progress_projection_index = source.index(
+        "frontend_event_projection_writer.execute(persisted_event)",
+    )
+    all_sections_append_index = source.index("persisted_all_sections_event = (")
+    all_sections_projection_index = source.index(
+        "frontend_event_projection_writer.execute(\n                    persisted_all_sections_event"
+    )
+    assert progress_append_index < progress_projection_index
+    assert all_sections_append_index > progress_projection_index
+    assert all_sections_append_index < all_sections_projection_index
+
+
+def test_reconcile_handler_does_not_touch_live_state_for_projection() -> None:
+    source = inspect.getsource(
+        HandleReconcileClaimBuilderProgressCommandHandler.execute
+    )
+
+    for forbidden_marker in (
+        "live_state",
+        "fetch_workbench",
+        "drain",
+        "workflow_runner",
+        "frontend_workflow_events",
+    ):
+        assert forbidden_marker not in source
+
+
+def _outbox_event_types(
+    workflow_unit_of_work: FakeWorkflowRuntimeUnitOfWork,
+) -> list[str]:
+    return [event.event_type for event in workflow_unit_of_work.outbox.events]
+
+
+def _assert_no_all_sections_extracted_event(
+    workflow_unit_of_work: FakeWorkflowRuntimeUnitOfWork,
+) -> None:
+    assert (
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED.value
+        not in _outbox_event_types(workflow_unit_of_work)
+    )
+
+
+def _assert_no_generate_draft_claim_embeddings_command(
+    workflow_unit_of_work: FakeWorkflowRuntimeUnitOfWork,
+) -> None:
+    assert workflow_unit_of_work.command_log.pending_commands == []
+
+
+@pytest.mark.asyncio
+async def test_non_completion_branch_does_not_emit_all_sections_extracted() -> None:
+    _, _, _, workflow_unit_of_work = await _execute(summary=_summary(ready_count=1))
+
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_retryable_pending_work_does_not_emit_all_sections_extracted() -> None:
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(
+            retryable_failed_count=1,
+            due_retryable_failed_count=1,
+            completed_count=2,
+        ),
+    )
+
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_leased_work_does_not_emit_all_sections_extracted() -> None:
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(leased_count=1, completed_count=2),
+    )
+
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_split_required_does_not_emit_all_sections_extracted() -> None:
+    _, _, _, workflow_unit_of_work = await _execute(
+        retry_action_summary=_retry_action_summary(split_required_count=1),
+        summary=_summary(completed_count=2, retryable_failed_count=1),
+    )
+
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_capacity_wait_does_not_emit_all_sections_extracted() -> None:
+    _, _, _, workflow_unit_of_work = await _execute(
+        retry_action_summary=_retry_action_summary(
+            defer_until_capacity_reset_count=1,
+            next_run_after=_now() + timedelta(minutes=5),
+        ),
+        summary=_summary(completed_count=2, retryable_failed_count=1),
+    )
+
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_terminal_failed_drained_does_not_emit_all_sections_extracted() -> None:
+    result, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(completed_count=2, terminal_failed_count=1),
+    )
+
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED.value
+    )
+    assert result.appended_next_command_count == 0
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+    _assert_no_generate_draft_claim_embeddings_command(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_coverage_does_not_emit_all_sections_extracted() -> None:
+    result, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(completed_count=2, cancelled_count=1),
+    )
+
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED.value
+    )
+    assert result.appended_next_command_count == 0
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+    _assert_no_generate_draft_claim_embeddings_command(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_user_action_required_coverage_does_not_emit_all_sections_extracted() -> (
+    None
+):
+    result, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(completed_count=2, user_action_required_count=1),
+    )
+
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED.value
+    )
+    assert result.appended_next_command_count == 0
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+    _assert_no_generate_draft_claim_embeddings_command(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_split_superseded_coverage_does_not_emit_all_sections_extracted() -> None:
+    result, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(completed_count=2, split_superseded_count=1),
+    )
+
+    assert result.decision == (
+        ClaimBuilderProgressReconcileDecision.CLAIM_BUILDER_SECTION_EXTRACTION_DRAINED.value
+    )
+    assert result.appended_next_command_count == 0
+    _assert_no_all_sections_extracted_event(workflow_unit_of_work)
+    _assert_no_generate_draft_claim_embeddings_command(workflow_unit_of_work)
+
+
+@pytest.mark.asyncio
+async def test_projects_all_sections_extracted_event_once_on_completion() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(
+        summary=_summary(completed_count=3),
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    all_sections = [
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_all_sections_extracted"
+    ]
+    assert len(all_sections) == 1
+    assert all_sections[0].operation_key == "reconcile_claim_builder_progress"
+    assert set(all_sections[0].payload) <= {
+        "workflow_run_id",
+        "work_kind",
+        "summary",
+        "completed_count",
+        "total_count",
+    }
+    assert "decision" not in all_sections[0].payload
+    assert "next_command_type" not in all_sections[0].payload
+    assert "deferred_count" not in all_sections[0].payload["summary"]
+
+
+@pytest.mark.asyncio
+async def test_projection_order_follows_outbox_sequence_on_completion() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(
+        summary=_summary(completed_count=3),
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    ordered = sorted(
+        repository.events.values(),
+        key=lambda event: event.source_sequence_number,
+    )
+    assert [event.projection_type for event in ordered] == [
+        "workflow_claim_builder_progress_reconciled",
+        "workflow_claim_builder_all_sections_extracted",
+    ]
+    assert ordered[0].source_sequence_number < ordered[1].source_sequence_number

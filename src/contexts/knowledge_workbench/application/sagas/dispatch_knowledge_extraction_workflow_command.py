@@ -435,6 +435,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     claim_builder_retry_action_read_repository
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

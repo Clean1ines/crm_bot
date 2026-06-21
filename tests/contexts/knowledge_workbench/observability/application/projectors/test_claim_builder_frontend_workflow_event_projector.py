@@ -123,3 +123,59 @@ def test_routes_deferred_event_type_to_none() -> None:
     projected = ClaimBuilderFrontendWorkflowEventProjector().project(event)
 
     assert projected is None
+
+
+def test_routes_progress_reconciled_to_progress_projector() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:progress-reconciled"),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED.value
+        ),
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "operation_key": "reconcile_claim_builder_progress",
+            "canonical_phase": "CLAIM_BUILDER_SECTION_EXTRACTION",
+            "work_kind": "claim_builder_section",
+            "decision": "PREPARE_NEXT_BATCH_NOW",
+            "summary": {"ready_count": 1, "total_count": 1},
+            "retry_action_summary": {"defer_until_capacity_reset_count": 0},
+            "selected_retry_plan": None,
+            "next_command_type": None,
+            "next_run_after": None,
+        },
+        occurred_at=_now(),
+        sequence_number=7,
+    )
+
+    projected = ClaimBuilderFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_claim_builder_progress_reconciled"
+
+
+def test_routes_all_sections_extracted_to_all_sections_projector() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:all-sections-extracted"),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED.value
+        ),
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "operation_key": "reconcile_claim_builder_progress",
+            "canonical_phase": "CLAIM_BUILDER_SECTION_EXTRACTION",
+            "work_kind": "claim_builder_section",
+            "summary": {"completed_count": 3, "total_count": 3},
+            "completed_count": 3,
+            "total_count": 3,
+            "next_command_type": "GenerateDraftClaimEmbeddings",
+        },
+        occurred_at=_now(),
+        sequence_number=8,
+    )
+
+    projected = ClaimBuilderFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_claim_builder_all_sections_extracted"
