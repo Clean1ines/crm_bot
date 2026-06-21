@@ -248,7 +248,10 @@ class _LineageComparisonIndex:
             node_ref: frozenset(find(source_ref) for source_ref in source_refs)
             for node_ref, source_refs in raw_source_claim_refs_by_node_ref.items()
         }
-        incompatible_source_pairs: list[tuple[frozenset[str], frozenset[str]]] = []
+        incompatible_source_pairs: list[tuple[frozenset[str], frozenset[str]]] = [
+            (frozenset((edge.origin_ref_a,)), frozenset((edge.origin_ref_b,)))
+            for edge in state.origin_separation_edges
+        ]
         for comparison in state.comparisons:
             if comparison.status is not DraftClaimCompactionComparisonStatus.NOT_MERGED:
                 continue

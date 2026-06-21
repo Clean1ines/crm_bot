@@ -234,6 +234,34 @@ class DraftClaimCompactionComponentIncompatibility:
 
 
 @dataclass(frozen=True, slots=True)
+class DraftClaimCompactionOriginSeparationEdge:
+    origin_ref_a: str
+    origin_ref_b: str
+    established_by_batch_ref: str | None = None
+    established_by_work_item_id: str | None = None
+    established_by_dispatch_attempt_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.origin_ref_a, "origin_ref_a")
+        _text(self.origin_ref_b, "origin_ref_b")
+        if self.origin_ref_a >= self.origin_ref_b:
+            raise ValueError("origin separation refs must be ordered")
+        if self.established_by_batch_ref is not None:
+            _text(self.established_by_batch_ref, "established_by_batch_ref")
+        if self.established_by_work_item_id is not None:
+            _text(self.established_by_work_item_id, "established_by_work_item_id")
+        if self.established_by_dispatch_attempt_id is not None:
+            _text(
+                self.established_by_dispatch_attempt_id,
+                "established_by_dispatch_attempt_id",
+            )
+
+    @property
+    def pair_key(self) -> tuple[str, str]:
+        return self.origin_ref_a, self.origin_ref_b
+
+
+@dataclass(frozen=True, slots=True)
 class DraftClaimCompactionRound:
     round_index: int
     comparisons: tuple[DraftClaimCompactionComparison, ...]
@@ -252,6 +280,7 @@ class DraftClaimCompactionPlannerState:
     rounds: tuple[DraftClaimCompactionRound, ...] = ()
     components: tuple[DraftClaimCompactionComponent, ...] = ()
     incompatibilities: tuple[DraftClaimCompactionComponentIncompatibility, ...] = ()
+    origin_separation_edges: tuple[DraftClaimCompactionOriginSeparationEdge, ...] = ()
     budget_fit: DraftClaimCompactionBudgetFit = field(
         default_factory=lambda: DraftClaimCompactionBudgetFit(
             DraftClaimCompactionBudgetFitStatus.FITS_PRIMARY,
@@ -267,6 +296,7 @@ class DraftClaimCompactionPlannerState:
         _rounds_tuple(self.rounds)
         _components_tuple(self.components)
         _incompatibilities_tuple(self.incompatibilities)
+        _origin_separation_edges_tuple(self.origin_separation_edges)
         if not isinstance(self.budget_fit, DraftClaimCompactionBudgetFit):
             raise TypeError("budget_fit must be DraftClaimCompactionBudgetFit")
         _text(self.primary_model_id, "primary_model_id")
@@ -480,6 +510,19 @@ def _incompatibilities_tuple(
             raise TypeError(
                 "incompatibilities must contain "
                 "DraftClaimCompactionComponentIncompatibility",
+            )
+
+
+def _origin_separation_edges_tuple(
+    value: tuple[DraftClaimCompactionOriginSeparationEdge, ...],
+) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError("origin_separation_edges must be tuple")
+    for edge in value:
+        if not isinstance(edge, DraftClaimCompactionOriginSeparationEdge):
+            raise TypeError(
+                "origin_separation_edges must contain "
+                "DraftClaimCompactionOriginSeparationEdge"
             )
 
 

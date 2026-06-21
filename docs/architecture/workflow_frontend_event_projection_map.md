@@ -789,3 +789,37 @@ workflow-live-state, reducer, and React rendering remain later.
 CapacityWindow ownership remains unchanged: provider/account/model admission and
 reset are CapacityWindow-owned. Compaction projections must not expose provider
 reset or `next_attempt_at` as a WorkItem-owned retry timer.
+
+
+## Patch 18D DraftClaimCompaction active frontier correctness
+
+Patch 18D makes compaction correctness a backend invariant before reducer,
+curation, or publication work. The compaction stage is modeled as an active
+frontier of raw/compacted artifacts, immutable compacted artifacts, origin sets,
+and durable origin-level separation edges.
+
+`source_claim_refs` remains the origin_set for raw and compacted nodes. A
+successful apply consumes only the input artifacts that participated in the
+applied result. Retryable and terminal failures do not consume raw inputs, do not
+create compacted artifacts, and do not create separation edges.
+
+Successful non-merge records durable origin-level separation edges between
+origins that ended in different output partitions. Successful merge does not
+create separation edges inside merged origins. The planner must reject future
+candidate comparisons whenever any origin in one active artifact is separated
+from any origin in the other active artifact. Eligibility is evaluated before
+ordinary token/capacity fit checks.
+
+Compacted artifacts are immutable. If the LLM returns an output partition whose
+origin_set maps to an existing compacted node, the stored artifact is preserved;
+LLM changes to that existing artifact body are ignored. New compacted artifacts
+are created only for genuinely new origin_sets.
+
+Cluster-of-one self-enrichment remains allowed. A singleton token-budget chunk
+inside a larger ClusterGroup is not self-enriched as an initial batch; it waits
+in the active raw frontier until it can be compared with an eligible active
+compacted artifact.
+
+Frontend reducer, React rendering, curation, publication, workflow-live-state,
+SSE transport, LLM Runtime, Capacity Runtime ownership, and draft embedding
+cleanup remain later.

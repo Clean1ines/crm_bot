@@ -46,7 +46,10 @@ class DraftClaimCompactionBatchBudgetPolicy:
                     group, estimated_input_tokens=total, requires_split=len(chunks) > 1
                 )
             )
-            for index, refs in enumerate(chunks):
+            scheduled_chunks = tuple(
+                refs for refs in chunks if group.member_count == 1 or len(refs) > 1
+            )
+            for index, refs in enumerate(scheduled_chunks):
                 batches.append(
                     DraftClaimCompactionBatchCandidate(
                         batch_ref=_ref(

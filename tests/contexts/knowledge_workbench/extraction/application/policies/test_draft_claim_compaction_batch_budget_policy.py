@@ -65,7 +65,9 @@ def test_multi_member_group_keeps_draft_vs_draft_prompt_variant() -> None:
     assert plan.batches[0].member_observation_refs == ("claim-a", "claim-b")
 
 
-def test_capacity_split_inside_multi_member_group_still_uses_draft_vs_draft() -> None:
+def test_capacity_split_inside_multi_member_group_does_not_schedule_singleton_chunks() -> (
+    None
+):
     claims = (_claim("claim-a"), _claim("claim-b"))
     groups = (_group("group-a", ("claim-a", "claim-b")),)
 
@@ -75,9 +77,20 @@ def test_capacity_split_inside_multi_member_group_still_uses_draft_vs_draft() ->
         input_safety_multiplier=1,
     ).build_batches(claims, groups)
 
-    assert len(plan.batches) == 2
-    assert [batch.member_observation_refs for batch in plan.batches] == [
-        ("claim-a",),
-        ("claim-b",),
-    ]
-    assert {batch.prompt_variant for batch in plan.batches} == {"draft_vs_draft"}
+    assert plan.groups[0].member_count == 2
+    assert plan.groups[0].requires_split is True
+    assert plan.batches == ()
+
+
+def test_singleton_chunk_inside_larger_group_waits_for_compacted_frontier() -> None:
+    claims = tuple(_claim(f"claim-{index}") for index in range(3))
+    groups = (_group("group-a", tuple(claim.observation_ref for claim in claims)),)
+
+    plan = DraftClaimCompactionBatchBudgetPolicy(max_input_tokens=2145).build_batches(
+        claims,
+        groups,
+    )
+
+    assert plan.groups[0].member_count == 3
+    assert plan.groups[0].requires_split is True
+    assert plan.batches == ()

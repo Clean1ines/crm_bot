@@ -35,6 +35,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionNodeKind,
     DraftClaimCompactionNodeReadModel,
     DraftClaimCompactionNodeSource,
+    DraftClaimCompactionOriginSeparationEdge,
     DraftClaimCompactionPlannerState,
     DraftClaimCompactionRound,
 )
@@ -437,6 +438,17 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             workflow_run_id,
             group_ref,
         )
+        origin_separation_rows = await self._connection.fetch(
+            """
+            SELECT origin_ref_a, origin_ref_b, established_by_batch_ref,
+                   established_by_work_item_id, established_by_dispatch_attempt_id
+            FROM draft_claim_compaction_origin_separation_edges
+            WHERE workflow_run_id = $1 AND group_ref = $2
+            ORDER BY origin_ref_a, origin_ref_b
+            """,
+            workflow_run_id,
+            group_ref,
+        )
         incompatibility_rows = await self._connection.fetch(
             """
             SELECT left_component_ref, right_component_ref
@@ -457,6 +469,9 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             incompatibilities=tuple(
                 _component_incompatibility(row) for row in incompatibility_rows
             ),
+            origin_separation_edges=tuple(
+                _origin_separation_edge(row) for row in origin_separation_rows
+            ),
         )
 
     async def apply_compacted_claims_result(
@@ -471,7 +486,6 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         compared_node_refs: tuple[str, ...] = (),
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
-        del batch_ref, work_item_id
         compared_node_refs = tuple(compared_node_refs)
         compared_nodes = await self._load_compared_nodes_for_apply(
             workflow_run_id=workflow_run_id,
@@ -488,6 +502,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         requested_sources = 0
         requested_comparisons = 0
         output_node_refs: list[str] = []
+        output_origin_sets: list[tuple[str, ...]] = []
 
         for claim in compacted_claims:
             node_ref = compacted_claim_node_ref(
@@ -496,6 +511,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 source_claim_refs=claim.source_claim_refs,
             )
             output_node_refs.append(node_ref)
+            output_origin_sets.append(tuple(claim.source_claim_refs))
             fallback_raw_node_refs = tuple(
                 raw_claim_node_ref(
                     workflow_run_id=workflow_run_id,
@@ -596,6 +612,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
 
         for left_output, right_output in _node_ref_pairs(tuple(output_node_refs)):
             requested_comparisons += 1
+            source_comparison_ref = comparison_ref(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                round_index=round_index,
+                left_node_ref=ordered_pair(left_output, right_output)[0],
+                right_node_ref=ordered_pair(left_output, right_output)[1],
+            )
             if await self._insert_not_merged_comparison(
                 workflow_run_id=workflow_run_id,
                 group_ref=group_ref,
@@ -605,6 +628,23 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 created_at=created_at,
             ):
                 inserted_comparisons += 1
+            for left_origin, right_origin in _cross_origin_pairs_for_output_partitions(
+                output_origin_sets,
+                left_output,
+                right_output,
+                tuple(output_node_refs),
+            ):
+                await self._insert_origin_separation_edge(
+                    workflow_run_id=workflow_run_id,
+                    group_ref=group_ref,
+                    origin_ref_a=left_origin,
+                    origin_ref_b=right_origin,
+                    established_by_batch_ref=batch_ref,
+                    established_by_work_item_id=work_item_id,
+                    established_by_dispatch_attempt_id=None,
+                    source_comparison_ref=source_comparison_ref,
+                    established_at=created_at,
+                )
 
         requested_total = requested_nodes + requested_sources + requested_comparisons
         inserted_total = inserted_nodes + inserted_sources + inserted_comparisons
@@ -629,7 +669,6 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rewrite: DraftClaimReducedRewriteOutput,
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
-        del batch_ref, work_item_id
         source_nodes = await self._load_nodes_by_ref(
             workflow_run_id=workflow_run_id,
             group_ref=group_ref,
@@ -750,6 +789,49 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             superseded_node_count=superseded_nodes,
             already_exists_count=requested_total - inserted_total,
         )
+
+    async def _insert_origin_separation_edge(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        origin_ref_a: str,
+        origin_ref_b: str,
+        established_by_batch_ref: str | None,
+        established_by_work_item_id: str | None,
+        established_by_dispatch_attempt_id: str | None,
+        source_comparison_ref: str | None,
+        established_at: datetime,
+    ) -> bool:
+        left_origin, right_origin = ordered_pair(origin_ref_a, origin_ref_b)
+        result = await self._connection.execute(
+            """
+            INSERT INTO draft_claim_compaction_origin_separation_edges
+            (separation_ref, workflow_run_id, group_ref,
+             origin_ref_a, origin_ref_b,
+             established_by_batch_ref, established_by_work_item_id,
+             established_by_dispatch_attempt_id, source_comparison_ref, established_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT (workflow_run_id, group_ref, origin_ref_a, origin_ref_b)
+            DO NOTHING
+            """,
+            origin_separation_ref(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                origin_ref_a=left_origin,
+                origin_ref_b=right_origin,
+            ),
+            workflow_run_id,
+            group_ref,
+            left_origin,
+            right_origin,
+            established_by_batch_ref,
+            established_by_work_item_id,
+            established_by_dispatch_attempt_id,
+            source_comparison_ref,
+            established_at,
+        )
+        return _inserted(result)
 
     async def _load_nodes_by_ref(
         self,
@@ -1284,6 +1366,63 @@ def _estimated_compacted_claim_tokens(payload: JsonObject) -> int:
         sort_keys=True,
     )
     return max(1, estimate_tokens_roughly(serialized))
+
+
+def _origin_separation_edge(
+    row: Mapping[str, object],
+) -> DraftClaimCompactionOriginSeparationEdge:
+    return DraftClaimCompactionOriginSeparationEdge(
+        origin_ref_a=_read_model_text(row, "origin_ref_a"),
+        origin_ref_b=_read_model_text(row, "origin_ref_b"),
+        established_by_batch_ref=_read_model_optional_text(
+            row,
+            "established_by_batch_ref",
+        ),
+        established_by_work_item_id=_read_model_optional_text(
+            row,
+            "established_by_work_item_id",
+        ),
+        established_by_dispatch_attempt_id=_read_model_optional_text(
+            row,
+            "established_by_dispatch_attempt_id",
+        ),
+    )
+
+
+def origin_separation_ref(
+    *,
+    workflow_run_id: str,
+    group_ref: str,
+    origin_ref_a: str,
+    origin_ref_b: str,
+) -> str:
+    left, right = sorted((origin_ref_a, origin_ref_b))
+    _text(workflow_run_id, "workflow_run_id")
+    _text(group_ref, "group_ref")
+    _text(left, "origin_ref_a")
+    _text(right, "origin_ref_b")
+    return f"origin-separation:{workflow_run_id}:{group_ref}:{left}:{right}"
+
+
+def _cross_origin_pairs_for_output_partitions(
+    output_origin_sets: list[tuple[str, ...]],
+    left_output_ref: str,
+    right_output_ref: str,
+    output_node_refs: tuple[str, ...],
+) -> tuple[tuple[str, str], ...]:
+    try:
+        left_index = output_node_refs.index(left_output_ref)
+        right_index = output_node_refs.index(right_output_ref)
+    except ValueError:
+        return ()
+    pairs: list[tuple[str, str]] = []
+    for left_origin in output_origin_sets[left_index]:
+        for right_origin in output_origin_sets[right_index]:
+            if left_origin == right_origin:
+                continue
+            left, right = sorted((left_origin, right_origin))
+            pairs.append((left, right))
+    return tuple(dict.fromkeys(pairs))
 
 
 def _node_read_model(row: Mapping[str, object]) -> DraftClaimCompactionNodeReadModel:

@@ -432,3 +432,25 @@ def test_patch_18c_keeps_compaction_projection_out_of_reducer_and_curation() -> 
     assert "OpenDraftClaimCurationWorkspace(" not in projector
     assert "React" not in projector
     assert "workflow-live-state" not in projector
+
+
+def test_patch_18d_compaction_correctness_markers_are_backend_only() -> None:
+    repository_source = Path(
+        "src/contexts/knowledge_workbench/extraction/infrastructure/postgres/"
+        "postgres_draft_claim_compaction_reduction_state_repository.py"
+    ).read_text(encoding="utf-8")
+    planner_source = Path(
+        "src/contexts/knowledge_workbench/extraction/application/policies/"
+        "draft_claim_compaction_reduction_planner_policy.py"
+    ).read_text(encoding="utf-8")
+    budget_source = Path(
+        "src/contexts/knowledge_workbench/extraction/application/policies/"
+        "draft_claim_compaction_batch_budget_policy.py"
+    ).read_text(encoding="utf-8")
+
+    assert "draft_claim_compaction_origin_separation_edges" in repository_source
+    assert "origin_separation_edges" in planner_source
+    assert "group.member_count == 1 or len(refs) > 1" in budget_source
+    assert "frontend reducer" not in repository_source.lower()
+    assert "curation" not in repository_source.lower()
+    assert "publication" not in repository_source.lower()
