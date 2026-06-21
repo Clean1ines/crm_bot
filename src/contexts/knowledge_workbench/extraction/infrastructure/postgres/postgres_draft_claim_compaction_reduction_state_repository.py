@@ -29,12 +29,17 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionComparison,
     DraftClaimCompactionComparisonStatus,
     DraftClaimCompactionComponent,
+    DraftClaimCompactionFrontierNodeReadModel,
+    DraftClaimCompactionFrontierReadModel,
+    DraftClaimCompactionFrontierSummaryReadModel,
     DraftClaimCompactionComponentIncompatibility,
     DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionNode,
     DraftClaimCompactionNodeKind,
     DraftClaimCompactionNodeReadModel,
     DraftClaimCompactionNodeSource,
+    DraftClaimCompactionPendingWorkSummaryReadModel,
+    DraftClaimCompactionSeparationSummaryReadModel,
     DraftClaimCompactionOriginSeparationEdge,
     DraftClaimCompactionPlannerState,
     DraftClaimCompactionRound,
@@ -354,6 +359,133 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             offset,
         )
         return tuple(_node_read_model(row) for row in rows)
+
+    async def list_compaction_frontier_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str | None,
+        include_inactive: bool,
+        limit: int,
+        offset: int,
+    ) -> DraftClaimCompactionFrontierReadModel:
+        _read_model_require_text(workflow_run_id, "workflow_run_id")
+        if group_ref is not None:
+            _read_model_require_text(group_ref, "group_ref")
+        if not isinstance(include_inactive, bool):
+            raise TypeError("include_inactive must be bool")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError("limit must be positive int")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be non-negative int")
+
+        all_nodes = await self.list_compaction_nodes_for_workflow(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            node_ref=None,
+            active_only=False,
+            limit=10000,
+            offset=0,
+        )
+        group_refs = tuple(sorted({node.group_ref for node in all_nodes}))
+        planner = DraftClaimCompactionReductionPlannerPolicy()
+
+        group_done_count = 0
+        edge_pairs: list[tuple[str, str]] = []
+        edge_origins: set[str] = set()
+        separated_origins_by_group: dict[str, set[str]] = {}
+        active_raw_count = 0
+        active_compacted_count = 0
+        inactive_node_count = 0
+        superseded_node_count = 0
+
+        for node in all_nodes:
+            if node.active and node.node_kind == DraftClaimCompactionNodeKind.RAW.value:
+                active_raw_count += 1
+            if (
+                node.active
+                and node.node_kind == DraftClaimCompactionNodeKind.COMPACTED.value
+            ):
+                active_compacted_count += 1
+            if not node.active:
+                inactive_node_count += 1
+            if node.supersedes_node_refs:
+                superseded_node_count += 1
+
+        for current_group_ref in group_refs:
+            planner_state = await self.load_planner_state(
+                workflow_run_id=workflow_run_id,
+                group_ref=current_group_ref,
+            )
+            if planner_state is None:
+                continue
+            decision = planner.plan_next_step(planner_state)
+            if decision.work_type is DraftClaimCompactionNextWorkItemType.DONE:
+                group_done_count += 1
+            separated_origins = separated_origins_by_group.setdefault(
+                current_group_ref,
+                set(),
+            )
+            for edge in planner_state.origin_separation_edges:
+                edge_pairs.append(edge.pair_key)
+                edge_origins.update(edge.pair_key)
+                separated_origins.update(edge.pair_key)
+
+        affected_active_node_count = 0
+        for node in all_nodes:
+            if not node.active:
+                continue
+            if separated_origins_by_group.get(node.group_ref, set()).intersection(
+                node.source_claim_refs,
+            ):
+                affected_active_node_count += 1
+
+        visible_nodes = tuple(
+            node for node in all_nodes if include_inactive or node.active
+        )
+        paged_nodes = visible_nodes[offset : offset + limit]
+        progress = await self.summarize_compaction_progress(
+            workflow_run_id=workflow_run_id,
+        )
+        pending_work_summary = DraftClaimCompactionPendingWorkSummaryReadModel(
+            pending_work_item_count=(
+                progress.ready_work_item_count
+                + progress.deferred_work_item_count
+                + progress.retryable_failed_work_item_count
+            ),
+            leased_or_running_count=progress.leased_work_item_count,
+            waiting_for_capacity_count=(
+                progress.deferred_work_item_count
+                + progress.retryable_failed_work_item_count
+            ),
+            next_work_scheduled_count=progress.active_work_item_count,
+        )
+        group_count = len(group_refs)
+        return DraftClaimCompactionFrontierReadModel(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            summary=DraftClaimCompactionFrontierSummaryReadModel(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                group_count=group_count,
+                active_raw_count=active_raw_count,
+                active_compacted_count=active_compacted_count,
+                inactive_node_count=inactive_node_count,
+                superseded_node_count=superseded_node_count,
+                total_node_count=len(all_nodes),
+                group_done_count=group_done_count,
+                all_groups_compacted=group_count > 0
+                and group_done_count == group_count,
+            ),
+            separation_summary=DraftClaimCompactionSeparationSummaryReadModel(
+                edge_count=len(set(edge_pairs)),
+                origin_count=len(edge_origins),
+                affected_active_node_count=affected_active_node_count,
+                sample_origin_pairs=tuple(sorted(set(edge_pairs))[:5]),
+            ),
+            pending_work_summary=pending_work_summary,
+            rows=tuple(_frontier_node_read_model(node) for node in paged_nodes),
+        )
 
     async def load_planner_state(
         self,
@@ -1445,6 +1577,37 @@ def _node_read_model(row: Mapping[str, object]) -> DraftClaimCompactionNodeReadM
         ),
         created_at=_read_model_datetime(row, "created_at"),
         updated_at=_read_model_datetime(row, "updated_at"),
+    )
+
+
+def _frontier_node_read_model(
+    node: DraftClaimCompactionNodeReadModel,
+) -> DraftClaimCompactionFrontierNodeReadModel:
+    if not node.active:
+        frontier_state = "inactive_superseded"
+    elif node.node_kind == DraftClaimCompactionNodeKind.RAW.value:
+        frontier_state = "active_raw_waiting"
+    else:
+        frontier_state = "active_compacted"
+    return DraftClaimCompactionFrontierNodeReadModel(
+        workflow_run_id=node.workflow_run_id,
+        group_ref=node.group_ref,
+        node_ref=node.node_ref,
+        node_kind=node.node_kind,
+        active=node.active,
+        frontier_state=frontier_state,
+        source_claim_refs=node.source_claim_refs,
+        source_claim_count=len(node.source_claim_refs),
+        supersedes_node_refs=node.supersedes_node_refs,
+        supersedes_node_count=len(node.supersedes_node_refs),
+        estimated_input_tokens=node.estimated_input_tokens,
+        compacted_key=node.compacted_key,
+        compacted_claim=node.compacted_claim,
+        compacted_claim_kind=node.compacted_claim_kind,
+        compacted_granularity=node.compacted_granularity,
+        compacted_merge_decision=node.compacted_merge_decision,
+        created_at=node.created_at,
+        updated_at=node.updated_at,
     )
 
 

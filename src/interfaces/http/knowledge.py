@@ -163,6 +163,8 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
     DraftClaimCompactionReductionStateRepositoryPort,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionFrontierReadModel,
+    DraftClaimCompactionFrontierNodeReadModel,
     DraftClaimCompactionNodeReadModel,
 )
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
@@ -796,7 +798,9 @@ def _draft_claim_compaction_node_read_model(
         "node_kind": item.node_kind,
         "active": item.active,
         "source_claim_refs": list(item.source_claim_refs),
+        "source_claim_count": len(item.source_claim_refs),
         "supersedes_node_refs": list(item.supersedes_node_refs),
+        "supersedes_node_count": len(item.supersedes_node_refs),
         "estimated_input_tokens": item.estimated_input_tokens,
         "compacted_key": item.compacted_key,
         "compacted_claim": item.compacted_claim,
@@ -805,6 +809,83 @@ def _draft_claim_compaction_node_read_model(
         "compacted_merge_decision": item.compacted_merge_decision,
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def _draft_claim_compaction_frontier_node_read_model(
+    item: DraftClaimCompactionFrontierNodeReadModel,
+) -> dict[str, object]:
+    return {
+        "node_ref": item.node_ref,
+        "workflow_run_id": item.workflow_run_id,
+        "group_ref": item.group_ref,
+        "node_kind": item.node_kind,
+        "active": item.active,
+        "frontier_state": item.frontier_state,
+        "source_claim_refs": list(item.source_claim_refs),
+        "source_claim_count": item.source_claim_count,
+        "supersedes_node_refs": list(item.supersedes_node_refs),
+        "supersedes_node_count": item.supersedes_node_count,
+        "estimated_input_tokens": item.estimated_input_tokens,
+        "compacted_key": item.compacted_key,
+        "compacted_claim": item.compacted_claim,
+        "compacted_claim_kind": item.compacted_claim_kind,
+        "compacted_granularity": item.compacted_granularity,
+        "compacted_merge_decision": item.compacted_merge_decision,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def _draft_claim_compaction_frontier_read_model(
+    item: DraftClaimCompactionFrontierReadModel,
+    *,
+    limit: int,
+    offset: int,
+    include_inactive: bool,
+) -> dict[str, object]:
+    return {
+        "workflow_run_id": item.workflow_run_id,
+        "group_ref": item.group_ref,
+        "include_inactive": include_inactive,
+        "count": len(item.rows),
+        "limit": limit,
+        "offset": offset,
+        "summary": {
+            "workflow_run_id": item.summary.workflow_run_id,
+            "group_ref": item.summary.group_ref,
+            "group_count": item.summary.group_count,
+            "active_raw_count": item.summary.active_raw_count,
+            "active_compacted_count": item.summary.active_compacted_count,
+            "inactive_node_count": item.summary.inactive_node_count,
+            "superseded_node_count": item.summary.superseded_node_count,
+            "total_node_count": item.summary.total_node_count,
+            "group_done_count": item.summary.group_done_count,
+            "all_groups_compacted": item.summary.all_groups_compacted,
+        },
+        "separation_summary": {
+            "edge_count": item.separation_summary.edge_count,
+            "origin_count": item.separation_summary.origin_count,
+            "affected_active_node_count": (
+                item.separation_summary.affected_active_node_count
+            ),
+            "sample_origin_pairs": [
+                list(pair) for pair in item.separation_summary.sample_origin_pairs
+            ],
+        },
+        "pending_work_summary": {
+            "pending_work_item_count": item.pending_work_summary.pending_work_item_count,
+            "leased_or_running_count": item.pending_work_summary.leased_or_running_count,
+            "waiting_for_capacity_count": (
+                item.pending_work_summary.waiting_for_capacity_count
+            ),
+            "next_work_scheduled_count": (
+                item.pending_work_summary.next_work_scheduled_count
+            ),
+        },
+        "rows": [
+            _draft_claim_compaction_frontier_node_read_model(row) for row in item.rows
+        ],
     }
 
 
@@ -1459,6 +1540,51 @@ async def source_unit_draft_claims(
         "offset": offset,
         "items": [_draft_claim_observation_read_model(item) for item in items],
     }
+
+
+@router.get("/workflows/{workflow_run_id}/draft-claim-compaction-frontier")
+async def workflow_draft_claim_compaction_frontier(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    group_ref: str | None = Query(default=None),
+    include_inactive: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+    normalized_group_ref = _normalize_optional_query_text(group_ref)
+
+    repository = PostgresDraftClaimCompactionReductionStateRepository(pool)
+    try:
+        frontier = await repository.list_compaction_frontier_for_workflow(
+            workflow_run_id=normalized_workflow_run_id,
+            group_ref=normalized_group_ref,
+            include_inactive=include_inactive,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _draft_claim_compaction_frontier_read_model(
+        frontier,
+        limit=limit,
+        offset=offset,
+        include_inactive=include_inactive,
+    )
 
 
 @router.get("/workflows/{workflow_run_id}/draft-claim-compaction-nodes")

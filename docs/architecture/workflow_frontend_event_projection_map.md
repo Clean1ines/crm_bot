@@ -823,3 +823,28 @@ compacted artifact.
 Frontend reducer, React rendering, curation, publication, workflow-live-state,
 SSE transport, LLM Runtime, Capacity Runtime ownership, and draft embedding
 cleanup remain later.
+
+
+## Patch 18E — DraftClaimCompaction document-card reduction surface
+
+Patch 18E adds the backend/API read contract for the compaction document-card
+artifact surface after Patch 18D correctness invariants. The surface is not a
+frontend reducer and does not render React components.
+
+The new reduction frontier read contract exposes active raw waiting rows,
+active compacted rows, inactive/superseded counts, group completion summary,
+separation summary/debug counts, and pending work counts through targeted read.
+Generated compacted node rows remain loaded through the Patch 18C
+`draft-claim-compaction-nodes` targeted read; Patch 18E only adds lightweight
+row counts such as `source_claim_count` and `supersedes_node_count`.
+
+Origin-level separation edges remain backend correctness state. The default
+frontier response returns summary/debug counts and bounded sample pairs; it does
+not return the full raw separation edge graph.
+
+`DraftClaimCompactionNextWorkScheduled` remains progress visibility and does not
+invent ClusterBatch rows. `DraftClaimCompactionClusterDone` is a ClusterGroup
+completion overlay. `DraftClaimCompactionAllGroupsCompacted` is document-level
+compaction completion and curation-readiness later. Frontend reducer, React UI,
+curation, publication, workflow-live-state, SSE transport, and cross-cluster
+triple reconciliation remain later.

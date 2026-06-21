@@ -148,6 +148,8 @@ class FakeReductionStateConnection:
                     if is_enriched_compacted_insert
                     else None
                 ),
+                "created_at": _now(),
+                "updated_at": _now(),
             }
             return "INSERT 0 1"
 
@@ -609,6 +611,8 @@ def _compacted_node_row(
         "compacted_merge_decision": "merged",
         "compacted_triples": json.dumps([_triple().to_json_dict()]),
         "compacted_payload": None,
+        "created_at": _now(),
+        "updated_at": _now(),
     }
 
 
@@ -1326,3 +1330,146 @@ async def test_existing_compacted_artifact_preserves_stored_payload_when_returne
     )
 
     assert connection.nodes[node_ref]["compacted_claim"] == stored_claim
+
+
+@pytest.mark.asyncio
+async def test_list_compaction_frontier_returns_active_raw_and_compacted_nodes() -> (
+    None
+):
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+                estimated_input_tokens=10,
+            ),
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-b",
+                estimated_input_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(_compacted_claim(("claim-a",)),),
+        compared_node_refs=(
+            raw_claim_node_ref(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+            ),
+        ),
+        created_at=_now(),
+    )
+
+    frontier = await repository.list_compaction_frontier_for_workflow(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        include_inactive=False,
+        limit=50,
+        offset=0,
+    )
+
+    assert frontier.summary.active_raw_count == 1
+    assert frontier.summary.active_compacted_count == 1
+    assert {row.frontier_state for row in frontier.rows} == {
+        "active_raw_waiting",
+        "active_compacted",
+    }
+    assert all(row.active for row in frontier.rows)
+    assert all(
+        row.source_claim_count == len(row.source_claim_refs) for row in frontier.rows
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_compaction_frontier_includes_separation_summary_count() -> None:
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    raw_nodes = tuple(
+        build_initial_raw_node(
+            workflow_run_id="workflow-1",
+            group_ref="group-1",
+            observation_ref=claim_ref,
+            estimated_input_tokens=10,
+        )
+        for claim_ref in ("claim-1", "claim-2", "claim-3")
+    )
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=raw_nodes,
+        created_at=_now(),
+    )
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(
+            _compacted_claim(("claim-1", "claim-2")),
+            _compacted_claim(("claim-3",)),
+        ),
+        compared_node_refs=tuple(node.node_ref for node in raw_nodes),
+        created_at=_now(),
+    )
+
+    frontier = await repository.list_compaction_frontier_for_workflow(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        include_inactive=False,
+        limit=50,
+        offset=0,
+    )
+
+    assert frontier.separation_summary.edge_count == 2
+    assert frontier.separation_summary.origin_count == 3
+    assert frontier.separation_summary.sample_origin_pairs == (
+        ("claim-1", "claim-3"),
+        ("claim-2", "claim-3"),
+    )
+    assert not hasattr(frontier.separation_summary, "raw_edges")
+
+
+@pytest.mark.asyncio
+async def test_singleton_waiting_raw_node_is_visible_in_active_frontier() -> None:
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+                estimated_input_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+
+    frontier = await repository.list_compaction_frontier_for_workflow(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        include_inactive=False,
+        limit=50,
+        offset=0,
+    )
+
+    assert frontier.summary.active_raw_count == 1
+    assert frontier.rows[0].frontier_state == "active_raw_waiting"
+    assert frontier.rows[0].source_claim_refs == ("claim-a",)

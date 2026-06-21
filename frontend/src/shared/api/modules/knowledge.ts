@@ -1071,6 +1071,8 @@ export type DraftClaimCompactionNodeSummary = {
   active: boolean;
   source_claim_refs: string[];
   supersedes_node_refs: string[];
+  source_claim_count?: number;
+  supersedes_node_count?: number;
   estimated_input_tokens: number;
   compacted_key: string | null;
   compacted_claim: string | null;
@@ -1079,6 +1081,60 @@ export type DraftClaimCompactionNodeSummary = {
   compacted_merge_decision: string | null;
   created_at: string;
   updated_at: string;
+};
+
+
+export type DraftClaimCompactionFrontierNodeSummary = DraftClaimCompactionNodeSummary & {
+  frontier_state: string;
+  source_claim_count: number;
+  supersedes_node_count: number;
+};
+
+export type DraftClaimCompactionFrontierSummary = {
+  workflow_run_id: string;
+  group_ref: string | null;
+  group_count: number;
+  active_raw_count: number;
+  active_compacted_count: number;
+  inactive_node_count: number;
+  superseded_node_count: number;
+  total_node_count: number;
+  group_done_count: number;
+  all_groups_compacted: boolean;
+};
+
+export type DraftClaimCompactionSeparationSummary = {
+  edge_count: number;
+  origin_count: number;
+  affected_active_node_count: number;
+  sample_origin_pairs: string[][];
+};
+
+export type DraftClaimCompactionPendingWorkSummary = {
+  pending_work_item_count: number;
+  leased_or_running_count: number;
+  waiting_for_capacity_count: number;
+  next_work_scheduled_count: number;
+};
+
+export type WorkflowDraftClaimCompactionFrontierQuery = {
+  group_ref?: string;
+  include_inactive?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type WorkflowDraftClaimCompactionFrontierResponse = {
+  workflow_run_id: string;
+  group_ref: string | null;
+  include_inactive: boolean;
+  count: number;
+  limit: number;
+  offset: number;
+  summary: DraftClaimCompactionFrontierSummary;
+  separation_summary: DraftClaimCompactionSeparationSummary;
+  pending_work_summary: DraftClaimCompactionPendingWorkSummary;
+  rows: DraftClaimCompactionFrontierNodeSummary[];
 };
 
 export type WorkflowDraftClaimCompactionNodesQuery = {
@@ -1234,6 +1290,36 @@ export const knowledgeApi = {
     const queryString = params.toString();
     return authedJsonRequest<WorkflowScopedDraftClaimsResponse>(
       `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claims${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
+
+
+  getDraftClaimCompactionFrontierByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    query: WorkflowDraftClaimCompactionFrontierQuery = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof query.group_ref === 'string' && query.group_ref.length > 0) {
+      params.set('group_ref', query.group_ref);
+    }
+    if (typeof query.include_inactive === 'boolean') {
+      params.set('include_inactive', String(query.include_inactive));
+    }
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<WorkflowDraftClaimCompactionFrontierResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claim-compaction-frontier${
         queryString ? `?${queryString}` : ''
       }`,
       {

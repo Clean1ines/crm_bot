@@ -14,6 +14,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.enriched_dra
     EnrichedDraftClaimCompactionOutputClaim,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionFrontierReadModel,
     DraftClaimCompactionNode,
     DraftClaimCompactionNodeReadModel,
     DraftClaimCompactionPlannerState,
@@ -94,6 +95,16 @@ class DraftClaimCompactionReductionStateRepositoryPort(Protocol):
         limit: int,
         offset: int,
     ) -> tuple[DraftClaimCompactionNodeReadModel, ...]: ...
+
+    async def list_compaction_frontier_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str | None,
+        include_inactive: bool,
+        limit: int,
+        offset: int,
+    ) -> DraftClaimCompactionFrontierReadModel: ...
 
     async def seed_initial_planner_state(
         self,

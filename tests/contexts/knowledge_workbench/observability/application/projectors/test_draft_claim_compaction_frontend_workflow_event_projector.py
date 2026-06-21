@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +15,9 @@ from src.contexts.workflow_runtime.domain.entities.workflow_event import Workflo
 from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
     WorkflowEventId,
 )
+
+
+ROOT = Path(__file__).resolve().parents[6]
 
 
 def _event(event_type: str, payload: dict[str, object]) -> WorkflowEvent:
@@ -265,3 +269,20 @@ def test_cluster_done_and_all_groups_compacted_are_separate_layers() -> None:
         == "ready_to_open_workspace"
     )
     assert all_done.payload["document_compaction"]["publication_ready"] is False
+
+
+def test_next_work_scheduled_remains_progress_not_cluster_batch_row() -> None:
+    source = (
+        ROOT
+        / "src"
+        / "contexts"
+        / "knowledge_workbench"
+        / "observability"
+        / "application"
+        / "projectors"
+        / "draft_claim_compaction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert "workflow_draft_claim_compaction_next_work_scheduled" in source
+    assert "ClusterBatch" not in source
+    assert "generated_compaction_nodes" in source

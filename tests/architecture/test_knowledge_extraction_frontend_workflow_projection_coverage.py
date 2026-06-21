@@ -454,3 +454,36 @@ def test_patch_18d_compaction_correctness_markers_are_backend_only() -> None:
     assert "frontend reducer" not in repository_source.lower()
     assert "curation" not in repository_source.lower()
     assert "publication" not in repository_source.lower()
+
+
+def test_patch_18e_compaction_frontier_read_contract_is_backend_surface_not_reducer() -> (
+    None
+):
+    knowledge_http = KNOWLEDGE_HTTP_PATH.read_text(encoding="utf-8")
+    reduction_models = (
+        ROOT
+        / "src"
+        / "contexts"
+        / "knowledge_workbench"
+        / "extraction"
+        / "application"
+        / "models"
+        / "draft_claim_compaction_reduction_models.py"
+    ).read_text(encoding="utf-8")
+    frontend_api = (
+        ROOT / "frontend" / "src" / "shared" / "api" / "modules" / "knowledge.ts"
+    ).read_text(encoding="utf-8")
+    docs = (
+        ROOT / "docs" / "architecture" / "workflow_frontend_event_projection_map.md"
+    ).read_text(
+        encoding="utf-8",
+    )
+
+    assert "draft-claim-compaction-frontier" in knowledge_http
+    assert "DraftClaimCompactionFrontierReadModel" in reduction_models
+    assert "separation_summary" in knowledge_http
+    assert "sample_origin_pairs" in knowledge_http
+    assert "getDraftClaimCompactionFrontierByWorkflow" in frontend_api
+    assert "does not invent ClusterBatch rows" in docs
+    assert "Frontend reducer, React UI" in docs
+    assert "curation, publication" in docs
