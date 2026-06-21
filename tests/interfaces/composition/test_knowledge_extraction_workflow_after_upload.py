@@ -1615,3 +1615,10 @@ async def test_after_upload_drain_builds_dispatch_preparation_when_schedule_payl
     assert prepare_port.calls[0].lease_token_prefix == (
         f"claim-builder-dispatch:{_workflow_run_id()}"
     )
+
+
+def test_after_upload_uses_workflow_wide_frontend_projection_composite() -> None:
+    source = Path(composition.__file__).read_text(encoding="utf-8")
+
+    assert "KnowledgeExtractionFrontendWorkflowEventProjector()" in source
+    assert "ClaimBuilderFrontendWorkflowEventProjector()" not in source

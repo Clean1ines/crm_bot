@@ -140,8 +140,8 @@ from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacit
 from src.contexts.workflow_runtime.infrastructure.postgres.postgres_workflow_runtime_unit_of_work import (
     PostgresWorkflowRuntimeUnitOfWork,
 )
-from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_frontend_workflow_event_projector import (
-    ClaimBuilderFrontendWorkflowEventProjector,
+from src.contexts.knowledge_workbench.observability.application.projectors.knowledge_extraction_frontend_workflow_event_projector import (
+    KnowledgeExtractionFrontendWorkflowEventProjector,
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
@@ -439,7 +439,7 @@ class RunKnowledgeExtractionWorkflowResume:
             )
         )
         frontend_event_projection_writer = ProjectFrontendWorkflowEvent(
-            projector=ClaimBuilderFrontendWorkflowEventProjector(),
+            projector=KnowledgeExtractionFrontendWorkflowEventProjector(),
             repository=PostgresFrontendWorkflowEventRepository(
                 cast(asyncpg.Connection, connection),
             ),

@@ -536,6 +536,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 embedding_model_id=embedding_model_id,
                 embedding_dimensions=embedding_dimensions,
                 workflow_unit_of_work=workflow_unit_of_work,
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import cast
 
 import pytest
+from pathlib import Path
 
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
     DrainKnowledgeExtractionWorkflowCommandsResult,
@@ -100,3 +101,10 @@ async def test_resume_passes_postgres_draft_claim_observation_read_repository_in
     assert repository._connection is connection
     assert result.workflow_run_id == "workflow-1"
     assert pool.released_connections == [connection]
+
+
+def test_resume_uses_workflow_wide_frontend_projection_composite() -> None:
+    source = Path(composition.__file__).read_text(encoding="utf-8")
+
+    assert "KnowledgeExtractionFrontendWorkflowEventProjector()" in source
+    assert "ClaimBuilderFrontendWorkflowEventProjector()" not in source

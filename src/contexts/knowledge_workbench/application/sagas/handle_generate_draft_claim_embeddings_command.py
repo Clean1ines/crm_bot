@@ -11,6 +11,7 @@ from src.contexts.embedding_runtime.application.ports.embedding_generation_port 
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
+    KnowledgeExtractionCanonicalPhase,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_embedding_input_builder import (
     DraftClaimEmbeddingInput,
@@ -23,6 +24,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_e
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_embedding_read_repository_port import (
     DraftClaimEmbeddingReadRepositoryPort,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -109,6 +113,7 @@ class HandleGenerateDraftClaimEmbeddingsCommandHandler:
         embedding_model_id: str,
         embedding_dimensions: int,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleGenerateDraftClaimEmbeddingsResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -166,7 +171,7 @@ class HandleGenerateDraftClaimEmbeddingsCommandHandler:
                 )
             )
 
-            await workflow_unit_of_work.outbox.append_event(
+            persisted_batch_event = await workflow_unit_of_work.outbox.append_event(
                 _batch_completed_event(
                     workflow_command=workflow_command,
                     workflow_run_id=workflow_run_id,
@@ -175,8 +180,10 @@ class HandleGenerateDraftClaimEmbeddingsCommandHandler:
                     dimensions=embedding_dimensions,
                 )
             )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_batch_event)
 
-        await workflow_unit_of_work.outbox.append_event(
+        persisted_generated_event = await workflow_unit_of_work.outbox.append_event(
             _generated_event(
                 workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
@@ -185,6 +192,8 @@ class HandleGenerateDraftClaimEmbeddingsCommandHandler:
                 dimensions=embedding_dimensions,
             )
         )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(persisted_generated_event)
 
         next_command = _cluster_draft_claims_command(
             workflow_command=workflow_command,
@@ -364,6 +373,10 @@ def _payload(
 ) -> dict[str, object]:
     return {
         "workflow_run_id": workflow_run_id,
+        "operation_key": "generate_draft_claim_embeddings",
+        "canonical_phase": (
+            KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_EMBEDDING.value
+        ),
         "requested_count": persistence_result.requested_count,
         "persisted_count": persistence_result.inserted_count,
         "already_exists_count": persistence_result.already_exists_count,

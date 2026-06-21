@@ -1164,3 +1164,83 @@ async def test_dispatch_repairs_compaction_prepare_command_without_dispatch_prep
     assert prepare.calls[0].worker.value == (
         "knowledge-workbench-draft-claim-compaction-dispatch"
     )
+
+
+@pytest.mark.asyncio
+async def test_generate_draft_claim_embeddings_passes_frontend_projection_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_execute(
+        self: object, command: object, **dependencies: object
+    ) -> object:
+        del self, command
+        captured.update(dependencies)
+        from src.contexts.knowledge_workbench.application.sagas.handle_generate_draft_claim_embeddings_command import (
+            HandleGenerateDraftClaimEmbeddingsResult,
+        )
+        from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+            WorkflowCommandId,
+        )
+
+        return HandleGenerateDraftClaimEmbeddingsResult(
+            workflow_run_id=_workflow_run_id(),
+            requested_embedding_count=0,
+            persisted_embedding_count=0,
+            appended_event_count=1,
+            appended_next_command_count=1,
+            completed_command_id=WorkflowCommandId("workflow-command:done"),
+        )
+
+    from src.contexts.knowledge_workbench.application.sagas import (
+        handle_generate_draft_claim_embeddings_command as embedding_handler_module,
+    )
+    from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+        ProjectFrontendWorkflowEvent,
+    )
+
+    monkeypatch.setattr(
+        embedding_handler_module.HandleGenerateDraftClaimEmbeddingsCommandHandler,
+        "execute",
+        fake_execute,
+    )
+
+    @dataclass(slots=True)
+    class _FakeRepository:
+        async def append(self, event: object) -> object:
+            return event
+
+    @dataclass(slots=True)
+    class _FakeProjector:
+        def project(self, event: object) -> None:
+            del event
+            return None
+
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=_FakeProjector(),
+        repository=_FakeRepository(),
+    )
+
+    await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS,
+                payload={
+                    "workflow_run_id": _workflow_run_id(),
+                    "source_document_ref": "source-document:project-1:abc",
+                },
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        draft_claim_embedding_read_repository=object(),
+        draft_claim_embedding_persistence=object(),
+        embedding_generation_port=object(),
+        embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
+        embedding_dimensions=384,
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert captured["frontend_event_projection_writer"] is projection_writer
