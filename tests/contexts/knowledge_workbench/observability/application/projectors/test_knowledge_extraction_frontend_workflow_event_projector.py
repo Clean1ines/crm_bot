@@ -8,6 +8,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_frontend_workflow_event_projector import (
     ClaimBuilderFrontendWorkflowEventProjector,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_cluster_frontend_workflow_event_projector import (
+    DraftClaimClusterFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_embedding_frontend_workflow_event_projector import (
     DraftClaimEmbeddingFrontendWorkflowEventProjector,
 )
@@ -105,21 +108,93 @@ def test_workflow_composite_routes_embedding_generated_event() -> None:
     assert projected.projection_type == "workflow_draft_claim_embeddings_generated"
 
 
+def test_workflow_composite_routes_clusters_built_event() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:clusters-built"),
+        event_type=KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT.value,
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "operation_key": "cluster_draft_claims",
+            "canonical_phase": "DRAFT_CLAIM_CLUSTERING",
+            "candidate_edge_count": 1,
+            "group_count": 1,
+            "batch_count": 1,
+            "scheduled_work_item_count": 1,
+            "semantic_meaning": "build hybrid draft claim compaction plan",
+        },
+        occurred_at=_now(),
+        sequence_number=10,
+    )
+
+    projected = KnowledgeExtractionFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_draft_claim_clusters_built"
+
+
 def test_workflow_composite_ignores_unsupported_event() -> None:
     projected = KnowledgeExtractionFrontendWorkflowEventProjector().project(
         WorkflowEvent(
             event_id=WorkflowEventId("workflow-event:unsupported"),
-            event_type=KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT.value,
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED.value
+            ),
             workflow_run_id="knowledge-extraction:source-document:project-1:abc",
             payload={
                 "workflow_run_id": "knowledge-extraction:source-document:project-1:abc"
             },
             occurred_at=_now(),
-            sequence_number=10,
+            sequence_number=11,
         )
     )
 
     assert projected is None
+
+
+def test_claim_builder_composite_returns_none_for_clusters_built() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:clusters-built"),
+        event_type=KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT.value,
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "operation_key": "cluster_draft_claims",
+            "canonical_phase": "DRAFT_CLAIM_CLUSTERING",
+            "candidate_edge_count": 1,
+            "group_count": 1,
+            "batch_count": 1,
+            "scheduled_work_item_count": 1,
+            "semantic_meaning": "build hybrid draft claim compaction plan",
+        },
+        occurred_at=_now(),
+        sequence_number=12,
+    )
+
+    assert ClaimBuilderFrontendWorkflowEventProjector().project(event) is None
+
+
+def test_embedding_composite_returns_none_for_clusters_built() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:clusters-built"),
+        event_type=KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT.value,
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "operation_key": "cluster_draft_claims",
+            "canonical_phase": "DRAFT_CLAIM_CLUSTERING",
+            "candidate_edge_count": 1,
+            "group_count": 1,
+            "batch_count": 1,
+            "scheduled_work_item_count": 1,
+            "semantic_meaning": "build hybrid draft claim compaction plan",
+        },
+        occurred_at=_now(),
+        sequence_number=13,
+    )
+
+    assert DraftClaimEmbeddingFrontendWorkflowEventProjector().project(event) is None
+    assert DraftClaimClusterFrontendWorkflowEventProjector().project(event) is not None
 
 
 def test_claim_builder_composite_remains_claim_builder_scoped() -> None:

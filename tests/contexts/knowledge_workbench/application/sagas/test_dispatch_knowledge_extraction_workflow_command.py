@@ -1244,3 +1244,81 @@ async def test_generate_draft_claim_embeddings_passes_frontend_projection_writer
     )
 
     assert captured["frontend_event_projection_writer"] is projection_writer
+
+
+@pytest.mark.asyncio
+async def test_cluster_draft_claims_passes_frontend_projection_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_execute(
+        self: object, command: object, **dependencies: object
+    ) -> object:
+        del self, command
+        captured.update(dependencies)
+        from src.contexts.knowledge_workbench.application.sagas.handle_cluster_draft_claims_command import (
+            HandleClusterDraftClaimsResult,
+        )
+
+        return HandleClusterDraftClaimsResult(
+            workflow_run_id=_workflow_run_id(),
+            candidate_edge_count=0,
+            group_count=0,
+            batch_count=0,
+            scheduled_work_item_count=0,
+            already_scheduled_work_item_count=0,
+        )
+
+    from src.contexts.knowledge_workbench.application.sagas import (
+        handle_cluster_draft_claims_command as cluster_handler_module,
+    )
+    from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+        ProjectFrontendWorkflowEvent,
+    )
+
+    monkeypatch.setattr(
+        cluster_handler_module.HandleClusterDraftClaimsCommandHandler,
+        "execute",
+        fake_execute,
+    )
+
+    @dataclass(slots=True)
+    class _FakeRepository:
+        async def append(self, event: object) -> object:
+            return event
+
+    @dataclass(slots=True)
+    class _FakeProjector:
+        def project(self, event: object) -> None:
+            del event
+            return None
+
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=_FakeProjector(),
+        repository=_FakeRepository(),
+    )
+
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS,
+                payload={
+                    "workflow_run_id": _workflow_run_id(),
+                    "embedding_model_id": "sentence-transformers/all-MiniLM-L6-v2",
+                },
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        draft_claim_compaction_plan_repository=FakeDraftClaimCompactionPlanRepository(),
+        draft_claim_compaction_reduction_state_repository=(
+            FakeDraftClaimCompactionReductionStateRepository()
+        ),
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert captured["frontend_event_projection_writer"] is projection_writer
+    assert result.dispatched is True
+    assert result.blocked_reason is None

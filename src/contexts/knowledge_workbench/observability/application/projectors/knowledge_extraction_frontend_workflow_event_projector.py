@@ -6,6 +6,9 @@ from src.contexts.knowledge_workbench.observability.application.models.frontend_
 from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_frontend_workflow_event_projector import (
     ClaimBuilderFrontendWorkflowEventProjector,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_cluster_frontend_workflow_event_projector import (
+    DraftClaimClusterFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_embedding_frontend_workflow_event_projector import (
     DraftClaimEmbeddingFrontendWorkflowEventProjector,
 )
@@ -24,6 +27,7 @@ class KnowledgeExtractionFrontendWorkflowEventProjector:
         self._draft_claim_embedding = (
             DraftClaimEmbeddingFrontendWorkflowEventProjector()
         )
+        self._draft_claim_cluster = DraftClaimClusterFrontendWorkflowEventProjector()
 
     def project(self, event: WorkflowEvent) -> FrontendWorkflowEvent | None:
         projected = self._source_ingestion.project(event)
@@ -32,4 +36,7 @@ class KnowledgeExtractionFrontendWorkflowEventProjector:
         projected = self._claim_builder.project(event)
         if projected is not None:
             return projected
-        return self._draft_claim_embedding.project(event)
+        projected = self._draft_claim_embedding.project(event)
+        if projected is not None:
+            return projected
+        return self._draft_claim_cluster.project(event)

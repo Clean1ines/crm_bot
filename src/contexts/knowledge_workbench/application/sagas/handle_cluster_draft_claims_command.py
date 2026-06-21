@@ -52,6 +52,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -130,6 +133,7 @@ class HandleClusterDraftClaimsCommandHandler:
         compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort
         ),
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleClusterDraftClaimsResult:
         workflow_command = command.workflow_command
         if (
@@ -197,7 +201,7 @@ class HandleClusterDraftClaimsCommandHandler:
         scheduled_work_item_count = (
             schedule.created_count + schedule.already_exists_count
         )
-        await workflow_unit_of_work.outbox.append_event(
+        persisted_clusters_event = await workflow_unit_of_work.outbox.append_event(
             WorkflowEvent(
                 event_id=WorkflowEventId(
                     f"workflow-event:{workflow_run_id}:"
@@ -208,6 +212,10 @@ class HandleClusterDraftClaimsCommandHandler:
                 workflow_run_id=workflow_run_id,
                 payload={
                     "workflow_run_id": workflow_run_id,
+                    "operation_key": "cluster_draft_claims",
+                    "canonical_phase": (
+                        KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value
+                    ),
                     "candidate_edge_count": persistence.requested_edge_count,
                     "group_count": persistence.requested_group_count,
                     "batch_count": persistence.requested_batch_count,
@@ -219,6 +227,8 @@ class HandleClusterDraftClaimsCommandHandler:
                 correlation_id=workflow_command.command_id.value,
             )
         )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(persisted_clusters_event)
         if scheduled_work_item_count > 0:
             await workflow_unit_of_work.command_log.append_pending_command(
                 _prepare_dispatch_batch_command(

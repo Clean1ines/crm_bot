@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -14,6 +15,7 @@ from src.contexts.knowledge_workbench.application.sagas.handle_cluster_draft_cla
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
+    KnowledgeExtractionCanonicalPhase,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionBatchCandidate,
@@ -30,6 +32,15 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionNode,
     DraftClaimCompactionPlannerState,
+)
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.knowledge_extraction_frontend_workflow_event_projector import (
+    KnowledgeExtractionFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
@@ -246,10 +257,22 @@ class FakeCommandLog:
 @dataclass(slots=True)
 class FakeOutbox:
     events: list[WorkflowEvent] = field(default_factory=list)
+    _next_sequence_number: int = 1
 
     async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
-        self.events.append(event)
-        return event
+        persisted = WorkflowEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            workflow_run_id=event.workflow_run_id,
+            payload=event.payload,
+            occurred_at=event.occurred_at,
+            causation_command_id=event.causation_command_id,
+            correlation_id=event.correlation_id,
+            sequence_number=self._next_sequence_number,
+        )
+        self._next_sequence_number += 1
+        self.events.append(persisted)
+        return persisted
 
     async def list_events_after(
         self,
@@ -346,6 +369,41 @@ class FakeWorkflowUnitOfWork:
         raise AssertionError("handler must not rollback")
 
 
+@dataclass(slots=True)
+class InMemoryFrontendWorkflowEventRepository:
+    events: dict[str, FrontendWorkflowEvent] = field(default_factory=dict)
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        existing = self.events.get(event.projection_event_id)
+        if existing is not None:
+            return existing
+        self.events[event.projection_event_id] = event
+        return event
+
+
+async def _execute_cluster(
+    *,
+    repository: FakeCompactionRepository | None = None,
+    workflow_uow: FakeWorkflowUnitOfWork | None = None,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
+) -> tuple[object, FakeWorkflowUnitOfWork]:
+    workflow_uow = workflow_uow or FakeWorkflowUnitOfWork()
+    result = await HandleClusterDraftClaimsCommandHandler().execute(
+        HandleClusterDraftClaimsCommand(
+            workflow_command=_command(
+                KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
+            )
+        ),
+        compaction_plan_repository=repository
+        or FakeCompactionRepository((_claim("claim-a"), _claim("claim-b"))),
+        work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=FakeReductionStateRepository(),
+        frontend_event_projection_writer=frontend_event_projection_writer,
+    )
+    return result, workflow_uow
+
+
 @pytest.mark.asyncio
 async def test_rejects_wrong_command_type() -> None:
     with pytest.raises(ValueError, match="ClusterDraftClaims"):
@@ -427,6 +485,11 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
             assert len(node.source_claim_refs) == 1
     assert workflow_uow.outbox.events[0].event_type == (
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT.value
+    )
+    clusters_event = workflow_uow.outbox.events[0]
+    assert clusters_event.payload["operation_key"] == "cluster_draft_claims"
+    assert clusters_event.payload["canonical_phase"] == (
+        KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value
     )
     assert workflow_uow.progress_snapshots.snapshot is not None
     assert (
@@ -527,3 +590,90 @@ async def test_changed_existing_plan_raises_controlled_conflict_before_outbox() 
         )
 
     assert workflow_uow.outbox.events == []
+
+
+@pytest.mark.asyncio
+async def test_clusters_built_event_includes_operation_key() -> None:
+    _, workflow_uow = await _execute_cluster()
+
+    clusters_event = workflow_uow.outbox.events[0]
+    assert clusters_event.payload["operation_key"] == "cluster_draft_claims"
+
+
+@pytest.mark.asyncio
+async def test_clusters_built_event_includes_canonical_phase() -> None:
+    _, workflow_uow = await _execute_cluster()
+
+    clusters_event = workflow_uow.outbox.events[0]
+    assert clusters_event.payload["canonical_phase"] == (
+        KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_handler_projects_clusters_built_event() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=KnowledgeExtractionFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, workflow_uow = await _execute_cluster(
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert len(workflow_uow.outbox.events) == 1
+    assert len(repository.events) == 1
+    projected = next(iter(repository.events.values()))
+    assert projected.projection_type == "workflow_draft_claim_clusters_built"
+    assert projected.source_event_id == workflow_uow.outbox.events[0].event_id.value
+
+
+@pytest.mark.asyncio
+async def test_handler_without_projection_writer_preserves_existing_behavior() -> None:
+    result, workflow_uow = await _execute_cluster()
+
+    assert result.scheduled_work_item_count >= 1
+    assert len(workflow_uow.outbox.events) == 1
+    assert workflow_uow.command_log.pending_commands[0].command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+
+
+def test_handler_projects_after_canonical_outbox_append() -> None:
+    source = inspect.getsource(HandleClusterDraftClaimsCommandHandler.execute)
+
+    append_index = source.index("persisted_clusters_event =")
+    projection_index = source.index(
+        "frontend_event_projection_writer.execute(persisted_clusters_event)"
+    )
+    prepare_index = source.index("if scheduled_work_item_count > 0:")
+
+    assert append_index < projection_index < prepare_index
+
+
+@pytest.mark.asyncio
+async def test_does_not_append_prepare_command_when_no_scheduled_work_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
+        EnsureWorkItemsScheduled,
+        EnsureWorkItemsScheduledResult,
+    )
+
+    async def fake_schedule(
+        self: EnsureWorkItemsScheduled,
+        command: object,
+    ) -> EnsureWorkItemsScheduledResult:
+        del self, command
+        return EnsureWorkItemsScheduledResult(outcomes=())
+
+    monkeypatch.setattr(EnsureWorkItemsScheduled, "execute", fake_schedule)
+
+    _, workflow_uow = await _execute_cluster()
+
+    assert workflow_uow.outbox.events[0].event_type == (
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT.value
+    )
+    assert workflow_uow.outbox.events[0].payload["scheduled_work_item_count"] == 0
+    assert workflow_uow.command_log.pending_commands == []
