@@ -771,6 +771,36 @@ def _draft_claim_observation_read_model(
     }
 
 
+def _normalize_optional_query_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped if stripped else None
+
+
+def _require_workflow_draft_claim_scope_filter(
+    *,
+    source_unit_ref: str | None,
+    work_item_id: str | None,
+    dispatch_attempt_id: str | None,
+) -> None:
+    if not any(
+        filter_value is not None
+        for filter_value in (
+            source_unit_ref,
+            work_item_id,
+            dispatch_attempt_id,
+        )
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "At least one of source_unit_ref, work_item_id, "
+                "dispatch_attempt_id is required"
+            ),
+        )
+
+
 async def _require_project_access(
     *,
     project_id: str,
@@ -1333,6 +1363,67 @@ async def source_unit_draft_claims(
 
     return {
         "source_unit_ref": source_unit_ref,
+        "count": len(items),
+        "limit": limit,
+        "offset": offset,
+        "items": [_draft_claim_observation_read_model(item) for item in items],
+    }
+
+
+@router.get("/workflows/{workflow_run_id}/draft-claims")
+async def workflow_draft_claims(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    source_unit_ref: str | None = Query(default=None),
+    work_item_id: str | None = Query(default=None),
+    dispatch_attempt_id: str | None = Query(default=None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns draft claim observations for a workflow execution scope."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+
+    normalized_source_unit_ref = _normalize_optional_query_text(source_unit_ref)
+    normalized_work_item_id = _normalize_optional_query_text(work_item_id)
+    normalized_dispatch_attempt_id = _normalize_optional_query_text(dispatch_attempt_id)
+    _require_workflow_draft_claim_scope_filter(
+        source_unit_ref=normalized_source_unit_ref,
+        work_item_id=normalized_work_item_id,
+        dispatch_attempt_id=normalized_dispatch_attempt_id,
+    )
+
+    repository = PostgresDraftClaimObservationReadRepository(pool)
+    try:
+        items = await repository.list_by_workflow_scope(
+            workflow_run_id=normalized_workflow_run_id,
+            source_unit_ref=normalized_source_unit_ref,
+            work_item_id=normalized_work_item_id,
+            dispatch_attempt_id=normalized_dispatch_attempt_id,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "workflow_run_id": normalized_workflow_run_id,
+        "source_unit_ref": normalized_source_unit_ref,
+        "work_item_id": normalized_work_item_id,
+        "dispatch_attempt_id": normalized_dispatch_attempt_id,
         "count": len(items),
         "limit": limit,
         "offset": offset,

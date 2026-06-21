@@ -618,6 +618,49 @@ export type DraftClaimCurationItemUpdatePayload = Partial<
   >
 >;
 
+export type DraftClaimObservationProvenance = {
+  workflow_run_id?: string | null;
+  stage_run_id?: string | null;
+  work_item_id?: string | null;
+  work_item_attempt_id?: string | null;
+  llm_task_id?: string | null;
+  llm_attempt_id?: string | null;
+  prompt_id?: string | null;
+  prompt_version?: string | null;
+  claim_index?: number | null;
+};
+
+export type DraftClaimObservationReadItem = {
+  observation_ref: string;
+  source_unit_ref: string;
+  claim: string;
+  granularity: string;
+  possible_questions: string[];
+  exclusion_scope: string;
+  evidence_block: string;
+  provenance: DraftClaimObservationProvenance;
+  created_at: string;
+};
+
+export type WorkflowScopedDraftClaimsResponse = {
+  workflow_run_id: string;
+  source_unit_ref: string | null;
+  work_item_id: string | null;
+  dispatch_attempt_id: string | null;
+  count: number;
+  limit: number;
+  offset: number;
+  items: DraftClaimObservationReadItem[];
+};
+
+export type WorkflowScopedDraftClaimsQuery = {
+  source_unit_ref?: string;
+  work_item_id?: string;
+  dispatch_attempt_id?: string;
+  limit?: number;
+  offset?: number;
+};
+
 
 export type KnowledgeAnswerDraft = {
   id: string;
@@ -1063,6 +1106,38 @@ export const knowledgeApi = {
         method: 'GET',
       },
     ),
+
+  getDraftClaimsByWorkflowScope: (
+    projectId: string,
+    workflowRunId: string,
+    query: WorkflowScopedDraftClaimsQuery,
+  ) => {
+    const params = new URLSearchParams();
+    if (query.source_unit_ref?.trim()) {
+      params.set('source_unit_ref', query.source_unit_ref.trim());
+    }
+    if (query.work_item_id?.trim()) {
+      params.set('work_item_id', query.work_item_id.trim());
+    }
+    if (query.dispatch_attempt_id?.trim()) {
+      params.set('dispatch_attempt_id', query.dispatch_attempt_id.trim());
+    }
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<WorkflowScopedDraftClaimsResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claims${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
 
   updateCurationItem: (
     projectId: string,

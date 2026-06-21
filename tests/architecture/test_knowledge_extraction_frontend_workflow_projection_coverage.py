@@ -57,6 +57,7 @@ AFTER_UPLOAD_COMPOSITION_PATH = (
     / "composition"
     / "knowledge_extraction_workflow_after_upload.py"
 )
+KNOWLEDGE_HTTP_PATH = ROOT / "src" / "interfaces" / "http" / "knowledge.py"
 
 _FUTURE_UNCOVERED_EVENT_MARKERS = (
     "DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED",
@@ -148,6 +149,7 @@ def test_early_claim_builder_projection_contract_is_not_count_only() -> None:
 
     assert "draft_claims_available" in outcome
     assert "draft_claims_scope" in outcome
+    assert 'targeted_read_kind": "draft_claims_by_work_item_or_source_unit"' in outcome
     assert "eligible_for_future_admission" in outcome
     assert "capacity_window_admission" in outcome
     assert "retry_owner" not in outcome
@@ -174,3 +176,31 @@ def test_compaction_and_curation_events_remain_future_projection_coverage() -> N
     ).read_text(encoding="utf-8")
     for marker in _FUTURE_UNCOVERED_EVENT_MARKERS:
         assert marker not in composite_source
+
+
+def test_workflow_scoped_draft_claims_endpoint_matches_targeted_read_kind() -> None:
+    knowledge_source = KNOWLEDGE_HTTP_PATH.read_text(encoding="utf-8")
+    outcome = CLAIM_BUILDER_OUTCOME_PROJECTOR_PATH.read_text(encoding="utf-8")
+
+    assert 'targeted_read_kind": "draft_claims_by_work_item_or_source_unit"' in outcome
+    assert '@router.get("/workflows/{workflow_run_id}/draft-claims")' in (
+        knowledge_source
+    )
+    assert "list_by_workflow_scope" in knowledge_source
+
+    endpoint_start = knowledge_source.index("async def workflow_draft_claims(")
+    endpoint_end = knowledge_source.index(
+        '@router.post("/workflows/{workflow_run_id}/curation-workspace/open")'
+    )
+    endpoint_region = knowledge_source[endpoint_start:endpoint_end]
+
+    for forbidden_marker in (
+        "fetch_workbench_workflow_live_state",
+        "make_knowledge_extraction_workflow_resume",
+        "RunKnowledgeExtractionWorkflowResumeCommand",
+        "llm_runtime",
+        "capacity_runtime",
+        "compaction",
+        "cluster",
+    ):
+        assert forbidden_marker not in endpoint_region

@@ -186,6 +186,7 @@ class _FakeDraftClaimObservationReadRepository:
     items: tuple[DraftClaimObservationReadModel, ...] = ()
     document_calls: list[dict[str, object]] = field(default_factory=list)
     source_unit_calls: list[dict[str, object]] = field(default_factory=list)
+    workflow_scope_calls: list[dict[str, object]] = field(default_factory=list)
 
     instances: ClassVar[list[_FakeDraftClaimObservationReadRepository]] = []
     configured_items: ClassVar[tuple[DraftClaimObservationReadModel, ...]] = ()
@@ -195,6 +196,7 @@ class _FakeDraftClaimObservationReadRepository:
         self.items = self.configured_items
         self.document_calls = []
         self.source_unit_calls = []
+        self.workflow_scope_calls = []
         self.instances.append(self)
 
     async def list_by_source_document_ref(
@@ -230,6 +232,39 @@ class _FakeDraftClaimObservationReadRepository:
         return tuple(
             item for item in self.items if item.source_unit_ref == source_unit_ref
         )[offset : offset + limit]
+
+    async def list_by_workflow_scope(
+        self,
+        *,
+        workflow_run_id: str,
+        source_unit_ref: str | None,
+        work_item_id: str | None,
+        dispatch_attempt_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        self.workflow_scope_calls.append(
+            {
+                "workflow_run_id": workflow_run_id,
+                "source_unit_ref": source_unit_ref,
+                "work_item_id": work_item_id,
+                "dispatch_attempt_id": dispatch_attempt_id,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        filtered = [
+            item
+            for item in self.items
+            if item.workflow_run_id == workflow_run_id
+            and (source_unit_ref is None or item.source_unit_ref == source_unit_ref)
+            and (work_item_id is None or item.work_item_id == work_item_id)
+            and (
+                dispatch_attempt_id is None
+                or item.work_item_attempt_id == dispatch_attempt_id
+            )
+        ]
+        return tuple(filtered[offset : offset + limit])
 
 
 def _draft_claim_read_model(
@@ -1347,6 +1382,188 @@ async def test_draft_claims_endpoint_respects_limit_and_offset(
     ]
     assert response["count"] == 1
     assert response["items"][0]["observation_ref"] == "draft-claim-observation:2"
+
+
+@pytest.mark.asyncio
+async def test_workflow_draft_claims_endpoint_requires_project_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = ()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.workflow_draft_claims(
+            project_id="project-1",
+            workflow_run_id="workflow-1",
+            authorization="Bearer valid-token",
+            source_unit_ref="source-unit:1",
+            work_item_id="work-1",
+            dispatch_attempt_id="work-1:attempt-1",
+            limit=50,
+            offset=0,
+            pool=object(),
+            project_repo=_FakeProjectRepo(has_role=False),
+            user_repo=_user_repo(platform_admin=False),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert _FakeDraftClaimObservationReadRepository.instances == []
+
+
+@pytest.mark.asyncio
+async def test_workflow_draft_claims_endpoint_returns_empty_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = ()
+
+    response = await knowledge.workflow_draft_claims(
+        project_id="project-1",
+        workflow_run_id="workflow-1",
+        authorization="Bearer valid-token",
+        source_unit_ref="source-unit:1",
+        work_item_id="work-1",
+        dispatch_attempt_id="work-1:attempt-1",
+        limit=50,
+        offset=0,
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert response == {
+        "workflow_run_id": "workflow-1",
+        "source_unit_ref": "source-unit:1",
+        "work_item_id": "work-1",
+        "dispatch_attempt_id": "work-1:attempt-1",
+        "count": 0,
+        "limit": 50,
+        "offset": 0,
+        "items": [],
+    }
+
+
+@pytest.mark.asyncio
+async def test_workflow_draft_claims_endpoint_returns_patch_17a_scope_items(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    item = _draft_claim_read_model()
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = (item,)
+
+    response = await knowledge.workflow_draft_claims(
+        project_id="project-1",
+        workflow_run_id="workflow-1",
+        authorization="Bearer valid-token",
+        source_unit_ref="source-unit:1",
+        work_item_id="work-1",
+        dispatch_attempt_id="work-1:attempt-1",
+        limit=50,
+        offset=0,
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    repository = _FakeDraftClaimObservationReadRepository.instances[0]
+    assert repository.workflow_scope_calls == [
+        {
+            "workflow_run_id": "workflow-1",
+            "source_unit_ref": "source-unit:1",
+            "work_item_id": "work-1",
+            "dispatch_attempt_id": "work-1:attempt-1",
+            "limit": 50,
+            "offset": 0,
+        }
+    ]
+    assert response["count"] == 1
+    assert response["items"][0]["possible_questions"] == ["What does the system do?"]
+    assert response["items"][0]["evidence_block"] == item.evidence_block
+    assert response["items"][0]["provenance"]["work_item_id"] == "work-1"
+    assert response["items"][0]["provenance"]["work_item_attempt_id"] == (
+        "work-1:attempt-1"
+    )
+    assert response["items"][0]["provenance"]["claim_index"] == 0
+
+
+@pytest.mark.asyncio
+async def test_workflow_draft_claims_endpoint_returns_400_without_scope_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimObservationReadRepository",
+        _FakeDraftClaimObservationReadRepository,
+    )
+    _FakeDraftClaimObservationReadRepository.instances = []
+    _FakeDraftClaimObservationReadRepository.configured_items = ()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.workflow_draft_claims(
+            project_id="project-1",
+            workflow_run_id="workflow-1",
+            authorization="Bearer valid-token",
+            source_unit_ref=None,
+            work_item_id=None,
+            dispatch_attempt_id=None,
+            limit=50,
+            offset=0,
+            pool=object(),
+            project_repo=_FakeProjectRepo(has_role=True),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert _FakeDraftClaimObservationReadRepository.instances == []
+
+
+def test_workflow_draft_claims_endpoint_does_not_call_workflow_live_state() -> None:
+    source = _source()
+    start = source.index("async def workflow_draft_claims(")
+    end = source.index(
+        '@router.post("/workflows/{workflow_run_id}/curation-workspace/open")'
+    )
+    guarded_region = source[start:end]
+
+    for forbidden_marker in (
+        "fetch_workbench_workflow_live_state",
+        "make_knowledge_extraction_workflow_resume",
+        "RunKnowledgeExtractionWorkflowResumeCommand",
+        "llm_runtime",
+        "capacity_runtime",
+    ):
+        assert forbidden_marker not in guarded_region
 
 
 @dataclass(slots=True)

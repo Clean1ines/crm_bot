@@ -87,6 +87,61 @@ class PostgresDraftClaimObservationReadRepository(
             if model is not None
         )
 
+    async def list_by_workflow_scope(
+        self,
+        *,
+        workflow_run_id: str,
+        source_unit_ref: str | None,
+        work_item_id: str | None,
+        dispatch_attempt_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimObservationReadModel, ...]:
+        _require_non_empty_text(workflow_run_id, "workflow_run_id")
+        _validate_workflow_scope_filters(
+            source_unit_ref=source_unit_ref,
+            work_item_id=work_item_id,
+            dispatch_attempt_id=dispatch_attempt_id,
+        )
+        _validate_page(limit=limit, offset=offset)
+        if source_unit_ref is not None:
+            _require_non_empty_text(source_unit_ref, "source_unit_ref")
+        if work_item_id is not None:
+            _require_non_empty_text(work_item_id, "work_item_id")
+        if dispatch_attempt_id is not None:
+            _require_non_empty_text(dispatch_attempt_id, "dispatch_attempt_id")
+
+        conditions = ["p.workflow_run_id = $1"]
+        args: list[object] = [workflow_run_id]
+        next_param = 2
+
+        if source_unit_ref is not None:
+            conditions.append(f"dco.source_unit_ref = ${next_param}")
+            args.append(source_unit_ref)
+            next_param += 1
+        if work_item_id is not None:
+            conditions.append(f"p.work_item_id = ${next_param}")
+            args.append(work_item_id)
+            next_param += 1
+        if dispatch_attempt_id is not None:
+            conditions.append(f"p.work_item_attempt_id = ${next_param}")
+            args.append(dispatch_attempt_id)
+            next_param += 1
+
+        limit_param = next_param
+        offset_param = next_param + 1
+        args.extend([limit, offset])
+
+        rows = await self._connection.fetch(
+            _DRAFT_CLAIM_OBSERVATION_SELECT
+            + "\nWHERE "
+            + "\n  AND ".join(conditions)
+            + _DRAFT_CLAIM_OBSERVATION_GROUP_ORDER
+            + f"\nLIMIT ${limit_param} OFFSET ${offset_param}\n",
+            *args,
+        )
+        return tuple(_read_model_from_row(row) for row in rows)
+
 
 _DRAFT_CLAIM_OBSERVATION_SELECT = """
 SELECT
@@ -175,6 +230,26 @@ def _validate_page(*, limit: int, offset: int) -> None:
         raise TypeError("offset must be int")
     if offset < 0:
         raise ValueError("offset must be >= 0")
+
+
+def _validate_workflow_scope_filters(
+    *,
+    source_unit_ref: str | None,
+    work_item_id: str | None,
+    dispatch_attempt_id: str | None,
+) -> None:
+    if not any(
+        filter_value is not None
+        for filter_value in (
+            source_unit_ref,
+            work_item_id,
+            dispatch_attempt_id,
+        )
+    ):
+        raise ValueError(
+            "at least one of source_unit_ref, work_item_id, dispatch_attempt_id "
+            "is required"
+        )
 
 
 def _read_model_from_row(row: Mapping[str, object]) -> DraftClaimObservationReadModel:

@@ -250,3 +250,185 @@ async def test_document_level_ordering_is_by_source_unit_ordinal_then_claim_inde
         "    dco.created_at ASC,\n"
         "    dco.observation_ref ASC"
     ) in query
+
+
+@pytest.mark.asyncio
+async def test_list_by_workflow_scope_filters_by_workflow_run_id_and_work_item_id() -> (
+    None
+):
+    connection = FakeConnection(rows=[_row(work_item_id="work-2")])
+    repository = PostgresDraftClaimObservationReadRepository(connection)
+
+    result = await repository.list_by_workflow_scope(
+        workflow_run_id="workflow-1",
+        source_unit_ref=None,
+        work_item_id="work-2",
+        dispatch_attempt_id=None,
+        limit=50,
+        offset=0,
+    )
+
+    assert len(result) == 1
+    assert result[0].work_item_id == "work-2"
+    query, args = connection.calls[0]
+    assert "p.workflow_run_id = $1" in query
+    assert "p.work_item_id = $2" in query
+    assert args == ("workflow-1", "work-2", 50, 0)
+
+
+@pytest.mark.asyncio
+async def test_list_by_workflow_scope_maps_dispatch_attempt_id_to_work_item_attempt_id() -> (
+    None
+):
+    connection = FakeConnection(rows=[_row(work_item_attempt_id="work-1:attempt-9")])
+    repository = PostgresDraftClaimObservationReadRepository(connection)
+
+    result = await repository.list_by_workflow_scope(
+        workflow_run_id="workflow-1",
+        source_unit_ref=None,
+        work_item_id=None,
+        dispatch_attempt_id="work-1:attempt-9",
+        limit=50,
+        offset=0,
+    )
+
+    assert len(result) == 1
+    assert result[0].work_item_attempt_id == "work-1:attempt-9"
+    query, args = connection.calls[0]
+    assert "p.work_item_attempt_id = $2" in query
+    assert args == ("workflow-1", "work-1:attempt-9", 50, 0)
+
+
+@pytest.mark.asyncio
+async def test_list_by_workflow_scope_filters_by_source_unit_ref() -> None:
+    connection = FakeConnection(rows=[_row(source_unit_ref="source-unit:9")])
+    repository = PostgresDraftClaimObservationReadRepository(connection)
+
+    result = await repository.list_by_workflow_scope(
+        workflow_run_id="workflow-1",
+        source_unit_ref="source-unit:9",
+        work_item_id=None,
+        dispatch_attempt_id=None,
+        limit=25,
+        offset=5,
+    )
+
+    assert len(result) == 1
+    assert result[0].source_unit_ref == "source-unit:9"
+    query, args = connection.calls[0]
+    assert "dco.source_unit_ref = $2" in query
+    assert args == ("workflow-1", "source-unit:9", 25, 5)
+
+
+@pytest.mark.asyncio
+async def test_list_by_workflow_scope_combines_filters_with_and_semantics() -> None:
+    connection = FakeConnection(rows=[_row()])
+    repository = PostgresDraftClaimObservationReadRepository(connection)
+
+    await repository.list_by_workflow_scope(
+        workflow_run_id="workflow-1",
+        source_unit_ref="source-unit:1",
+        work_item_id="work-1",
+        dispatch_attempt_id="work-1:attempt-1",
+        limit=50,
+        offset=0,
+    )
+
+    query, args = connection.calls[0]
+    assert "p.workflow_run_id = $1" in query
+    assert "dco.source_unit_ref = $2" in query
+    assert "p.work_item_id = $3" in query
+    assert "p.work_item_attempt_id = $4" in query
+    assert args == (
+        "workflow-1",
+        "source-unit:1",
+        "work-1",
+        "work-1:attempt-1",
+        50,
+        0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_by_workflow_scope_rejects_missing_scope_filters() -> None:
+    with pytest.raises(ValueError, match="at least one of"):
+        await PostgresDraftClaimObservationReadRepository(
+            FakeConnection(rows=[]),
+        ).list_by_workflow_scope(
+            workflow_run_id="workflow-1",
+            source_unit_ref=None,
+            work_item_id=None,
+            dispatch_attempt_id=None,
+            limit=50,
+            offset=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_by_workflow_scope_preserves_possible_questions_order() -> None:
+    connection = FakeConnection(
+        rows=[
+            _row(
+                possible_questions=(
+                    "First question?",
+                    "Second question?",
+                ),
+            ),
+        ],
+    )
+
+    result = await PostgresDraftClaimObservationReadRepository(
+        connection,
+    ).list_by_workflow_scope(
+        workflow_run_id="workflow-1",
+        source_unit_ref="source-unit:1",
+        work_item_id=None,
+        dispatch_attempt_id=None,
+        limit=50,
+        offset=0,
+    )
+
+    assert result[0].possible_questions == (
+        "First question?",
+        "Second question?",
+    )
+    assert "array_agg(dpq.question ORDER BY dpq.ordinal)" in connection.calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_list_by_workflow_scope_preserves_claim_index_ordering() -> None:
+    connection = FakeConnection(rows=[_row(claim_index=2)])
+    await PostgresDraftClaimObservationReadRepository(
+        connection
+    ).list_by_workflow_scope(
+        workflow_run_id="workflow-1",
+        source_unit_ref="source-unit:1",
+        work_item_id=None,
+        dispatch_attempt_id=None,
+        limit=50,
+        offset=0,
+    )
+
+    query = connection.calls[0][0]
+    assert "p.claim_index ASC NULLS LAST" in query
+
+
+@pytest.mark.asyncio
+async def test_list_by_workflow_scope_returns_evidence_block_and_provenance() -> None:
+    result = await PostgresDraftClaimObservationReadRepository(
+        FakeConnection(rows=[_row()]),
+    ).list_by_workflow_scope(
+        workflow_run_id="workflow-1",
+        source_unit_ref="source-unit:1",
+        work_item_id="work-1",
+        dispatch_attempt_id="work-1:attempt-1",
+        limit=50,
+        offset=0,
+    )
+
+    item = result[0]
+    assert item.evidence_block == "System turns documents into knowledge."
+    assert item.workflow_run_id == "workflow-1"
+    assert item.work_item_id == "work-1"
+    assert item.work_item_attempt_id == "work-1:attempt-1"
+    assert item.claim_index == 0

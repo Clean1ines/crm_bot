@@ -80,6 +80,17 @@ class DraftClaimObservationReadRepositoryPort(Protocol):
         observation_refs: tuple[str, ...],
     ) -> tuple[DraftClaimObservationReadModel, ...]: ...
 
+    async def list_by_workflow_scope(
+        self,
+        *,
+        workflow_run_id: str,
+        source_unit_ref: str | None,
+        work_item_id: str | None,
+        dispatch_attempt_id: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimObservationReadModel, ...]: ...
+
 
 def _require_non_empty_text(value: str, field_name: str) -> None:
     if not isinstance(value, str):
