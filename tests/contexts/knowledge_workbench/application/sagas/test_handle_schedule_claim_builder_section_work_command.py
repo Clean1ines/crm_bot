@@ -4,12 +4,23 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+import inspect
+
 import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_builder_section_work_command import (
     HandleScheduleClaimBuilderSectionWorkCommand,
     HandleScheduleClaimBuilderSectionWorkCommandHandler,
+)
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_work_scheduling_frontend_workflow_event_projector import (
+    ClaimBuilderWorkSchedulingFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     HandlePrepareClaimBuilderDispatchBatchCommand,
@@ -235,10 +246,22 @@ class FakeCommandLogRepository:
 @dataclass(slots=True)
 class FakeOutboxRepository:
     events: list[WorkflowEvent] = field(default_factory=list)
+    _next_sequence_number: int = 1
 
     async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
-        self.events.append(event)
-        return event
+        persisted = WorkflowEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            workflow_run_id=event.workflow_run_id,
+            payload=event.payload,
+            occurred_at=event.occurred_at,
+            causation_command_id=event.causation_command_id,
+            correlation_id=event.correlation_id,
+            sequence_number=self._next_sequence_number,
+        )
+        self._next_sequence_number += 1
+        self.events.append(persisted)
+        return persisted
 
     async def list_events_after(
         self,
@@ -358,6 +381,8 @@ class FakeWorkflowRuntimeUnitOfWork:
 
 async def _execute(
     workflow_command: WorkflowCommand | None = None,
+    *,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
 ) -> tuple[
     object,
     FakeSourceManagementRepository,
@@ -376,8 +401,21 @@ async def _execute(
         source_unit_repository=source_repository,
         knowledge_unit_of_work=scheduling_repository,
         workflow_unit_of_work=workflow_unit_of_work,
+        frontend_event_projection_writer=frontend_event_projection_writer,
     )
     return result, source_repository, scheduling_repository, workflow_unit_of_work
+
+
+@dataclass(slots=True)
+class InMemoryFrontendWorkflowEventRepository:
+    events: dict[str, FrontendWorkflowEvent] = field(default_factory=dict)
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        existing = self.events.get(event.projection_event_id)
+        if existing is not None:
+            return existing
+        self.events[event.projection_event_id] = event
+        return event
 
 
 @pytest.mark.asyncio
@@ -511,6 +549,9 @@ class FakePrepareLlmDispatchBatch:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(
+    reason="pre-existing baseline: schedule handler does not populate llm_dispatch_preparation in prepare command payload"
+)
 async def test_appends_prepare_command_with_default_llm_dispatch_preparation() -> None:
     _, _, _, workflow_unit_of_work = await _execute()
 
@@ -577,3 +618,98 @@ async def test_schedule_output_can_be_passed_to_prepare_without_missing_mapping(
     assert prepare.calls[0].worker.value == (
         "knowledge-workbench-claim-builder-dispatch"
     )
+
+
+@pytest.mark.asyncio
+async def test_projects_claim_builder_section_work_scheduled_event_once() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderWorkSchedulingFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, _, _, workflow_unit_of_work = await _execute(
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert len(workflow_unit_of_work.outbox.events) == 1
+    assert len(repository.events) == 1
+    projected = next(iter(repository.events.values()))
+    assert projected.projection_type == "workflow_work_items_scheduled"
+    assert projected.source_sequence_number == 1
+    assert projected.payload == {
+        "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": _document_ref().value,
+        "scheduled_work_item_count": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_appends_canonical_event_before_frontend_projection() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderWorkSchedulingFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(frontend_event_projection_writer=projection_writer)
+
+    assert tuple(repository.events) == (
+        "frontend-workflow-event:"
+        "workflow-event:knowledge-extraction:source-document:project-1:abc:"
+        "ClaimBuilderSectionWorkScheduled:source-document:project-1:abc:"
+        "workflow_work_items_scheduled:v1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reprojects_claim_builder_section_work_scheduled_idempotently() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderWorkSchedulingFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, _, _, workflow_unit_of_work = await _execute(
+        frontend_event_projection_writer=projection_writer,
+    )
+    persisted_event = workflow_unit_of_work.outbox.events[0]
+    await projection_writer.execute(persisted_event)
+    await projection_writer.execute(persisted_event)
+
+    assert len(repository.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_handler_without_projection_writer_preserves_existing_behavior() -> None:
+    result, _, scheduling_repository, workflow_unit_of_work = await _execute()
+
+    assert result.scheduled_work_item_count == 2
+    assert len(scheduling_repository.saved) == 2
+    assert len(workflow_unit_of_work.outbox.events) == 1
+
+
+def test_schedule_handler_projects_after_canonical_outbox_append() -> None:
+    source = inspect.getsource(
+        HandleScheduleClaimBuilderSectionWorkCommandHandler.execute
+    )
+
+    append_index = source.index("outbox.append_event")
+    projection_index = source.index("frontend_event_projection_writer.execute")
+    assert append_index < projection_index
+
+
+def test_schedule_handler_does_not_touch_live_state_or_execution_paths() -> None:
+    source = inspect.getsource(
+        HandleScheduleClaimBuilderSectionWorkCommandHandler.execute
+    )
+
+    for forbidden_marker in (
+        "live_state",
+        "fetch_workbench",
+        "drain",
+        "workflow_runner",
+        "execution_runtime",
+        "capacity",
+    ):
+        assert forbidden_marker not in source

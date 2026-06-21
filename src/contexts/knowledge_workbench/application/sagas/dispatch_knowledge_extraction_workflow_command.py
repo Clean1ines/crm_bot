@@ -110,6 +110,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_bu
     HandleScheduleClaimBuilderSectionWorkCommand,
     HandleScheduleClaimBuilderSectionWorkCommandHandler,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_split_claim_builder_source_unit_command import (
     HandleSplitClaimBuilderSourceUnitCommand,
     HandleSplitClaimBuilderSourceUnitCommandHandler,
@@ -230,6 +233,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         draft_claim_compaction_output_validator: (
             DraftClaimCompactionOutputValidator | None
         ) = None,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> DispatchKnowledgeExtractionWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = _canonical_command_type(workflow_command.command_type)
@@ -305,6 +309,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 ),
                 prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
                 workflow_unit_of_work=workflow_unit_of_work,
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,
@@ -486,6 +491,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 source_unit_repository=source_unit_repository,
                 knowledge_unit_of_work=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

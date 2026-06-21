@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 
@@ -16,6 +17,15 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 )
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
+)
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_dispatch_batch_frontend_workflow_event_projector import (
+    ClaimBuilderDispatchBatchFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
@@ -257,10 +267,22 @@ class FakeCommandLogRepository:
 @dataclass(slots=True)
 class FakeOutboxRepository:
     events: list[WorkflowEvent] = field(default_factory=list)
+    _next_sequence_number: int = 1
 
     async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
-        self.events.append(event)
-        return event
+        persisted = WorkflowEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            workflow_run_id=event.workflow_run_id,
+            payload=event.payload,
+            occurred_at=event.occurred_at,
+            causation_command_id=event.causation_command_id,
+            correlation_id=event.correlation_id,
+            sequence_number=self._next_sequence_number,
+        )
+        self._next_sequence_number += 1
+        self.events.append(persisted)
+        return persisted
 
     async def list_events_after(
         self,
@@ -389,6 +411,7 @@ async def _execute(
     input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b",
     source_split_required: bool = False,
     capacity_retry_at: datetime | None = None,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
 ) -> tuple[
     HandlePrepareClaimBuilderDispatchBatchResult,
     FakePrepareLlmDispatchBatch,
@@ -415,8 +438,21 @@ async def _execute(
         ),
         prepare_llm_dispatch_batch=prepare,
         workflow_unit_of_work=workflow_unit_of_work,
+        frontend_event_projection_writer=frontend_event_projection_writer,
     )
     return result, prepare, workflow_unit_of_work
+
+
+@dataclass(slots=True)
+class InMemoryFrontendWorkflowEventRepository:
+    events: dict[str, FrontendWorkflowEvent] = field(default_factory=dict)
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        existing = self.events.get(event.projection_event_id)
+        if existing is not None:
+            return existing
+        self.events[event.projection_event_id] = event
+        return event
 
 
 @pytest.mark.asyncio
@@ -838,3 +874,121 @@ async def test_source_split_required_raises_when_prepare_result_has_no_source_un
 async def test_rejects_malformed_explicit_llm_dispatch_preparation() -> None:
     with pytest.raises(ValueError, match="llm_dispatch_preparation"):
         await _execute(_workflow_command_with_malformed_dispatch_preparation())
+
+
+@pytest.mark.asyncio
+async def test_projects_claim_builder_dispatch_batch_prepared_event_once() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderDispatchBatchFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, _, workflow_unit_of_work = await _execute(
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert len(workflow_unit_of_work.outbox.events) == 1
+    assert len(repository.events) == 1
+    projected = next(iter(repository.events.values()))
+    assert projected.projection_type == "workflow_dispatch_batch_prepared"
+    assert projected.payload["prepared_dispatch_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_reprojects_dispatch_batch_prepared_idempotently() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderDispatchBatchFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, _, workflow_unit_of_work = await _execute(
+        frontend_event_projection_writer=projection_writer,
+    )
+    persisted_event = workflow_unit_of_work.outbox.events[0]
+    await projection_writer.execute(persisted_event)
+    await projection_writer.execute(persisted_event)
+
+    assert len(repository.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_zero_dispatch_path_does_not_create_dispatch_prepared_projection() -> (
+    None
+):
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderDispatchBatchFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(
+        started_attempts=(),
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert repository.events == {}
+
+
+@pytest.mark.asyncio
+async def test_source_split_required_path_does_not_create_dispatch_prepared_projection() -> (
+    None
+):
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderDispatchBatchFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(
+        started_attempts=(),
+        input_size_preflight_decision="SOURCE_SPLIT_REQUIRED",
+        input_size_preflight_reason=(
+            "estimated prompt tokens exceed all automatic fallback input limits"
+        ),
+        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        affected_work_item_refs=("work-1",),
+        source_unit_refs=("unit-1",),
+        source_split_required=True,
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert all(
+        event.projection_type != "workflow_dispatch_batch_prepared"
+        for event in repository.events.values()
+    )
+    assert repository.events == {}
+
+
+@pytest.mark.asyncio
+async def test_handler_without_projection_writer_preserves_existing_behavior() -> None:
+    result, _, workflow_unit_of_work = await _execute()
+
+    assert result.prepared_dispatch_count == 2
+    assert len(workflow_unit_of_work.outbox.events) == 1
+
+
+def test_prepare_handler_projects_after_canonical_outbox_append() -> None:
+    source = inspect.getsource(
+        HandlePrepareClaimBuilderDispatchBatchCommandHandler.execute
+    )
+
+    append_index = source.index("outbox.append_event")
+    projection_index = source.index("frontend_event_projection_writer.execute")
+    assert append_index < projection_index
+
+
+def test_prepare_handler_does_not_touch_live_state_or_execution_paths() -> None:
+    source = inspect.getsource(
+        HandlePrepareClaimBuilderDispatchBatchCommandHandler.execute
+    )
+
+    for forbidden_marker in (
+        "live_state",
+        "fetch_workbench",
+        "drain",
+        "workflow_runner",
+        "frontend_workflow_events",
+    ):
+        assert forbidden_marker not in source

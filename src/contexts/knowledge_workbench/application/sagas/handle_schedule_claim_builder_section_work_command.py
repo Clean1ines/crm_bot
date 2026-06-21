@@ -15,6 +15,9 @@ from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_s
     ScheduleClaimBuilderSectionWork,
     ScheduleClaimBuilderSectionWorkCommand,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
     SourceManagementRepositoryPort,
 )
@@ -85,6 +88,7 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
         source_unit_repository: SourceManagementRepositoryPort,
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleScheduleClaimBuilderSectionWorkResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -127,7 +131,11 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
             scheduled_work_item_count=scheduled_work_item_count,
             occurred_at=occurred_at,
         )
-        await workflow_unit_of_work.outbox.append_event(scheduled_event)
+        persisted_scheduled_event = await workflow_unit_of_work.outbox.append_event(
+            scheduled_event
+        )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(persisted_scheduled_event)
 
         next_command = _prepare_dispatch_batch_command(
             workflow_run_id=workflow_run_id,

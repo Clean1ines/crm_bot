@@ -111,6 +111,15 @@ from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.
 from src.contexts.workflow_runtime.infrastructure.postgres.postgres_workflow_runtime_unit_of_work import (
     PostgresWorkflowRuntimeUnitOfWork,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_frontend_workflow_event_projector import (
+    ClaimBuilderFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
+    PostgresFrontendWorkflowEventRepository,
+)
 
 
 class SourceIngestionFirstPhaseRunnerPort(Protocol):
@@ -401,6 +410,12 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 cast(DraftClaimObservationReadConnectionLike, connection)
             )
         )
+        frontend_event_projection_writer = ProjectFrontendWorkflowEvent(
+            projector=ClaimBuilderFrontendWorkflowEventProjector(),
+            repository=PostgresFrontendWorkflowEventRepository(
+                cast(asyncpg.Connection, connection),
+            ),
+        )
 
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
@@ -487,6 +502,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                         cast(asyncpg.Connection, connection)
                     )
                 ),
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             await workflow_unit_of_work.commit()
             return result

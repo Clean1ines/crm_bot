@@ -55,6 +55,9 @@ from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extra
     DispatchKnowledgeExtractionWorkflowCommand,
     DispatchKnowledgeExtractionWorkflowCommandHandler,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
 )
@@ -191,6 +194,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
         workflow_state_repository: (
             KnowledgeExtractionSagaStateRepositoryPort | None
         ) = None,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -276,6 +280,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 draft_claim_compaction_output_validator=(
                     draft_claim_compaction_output_validator
                 ),
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             if not dispatch_result.dispatched:
                 blocked_count += 1

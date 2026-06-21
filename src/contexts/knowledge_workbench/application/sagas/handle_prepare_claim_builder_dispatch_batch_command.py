@@ -16,6 +16,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
 )
@@ -96,6 +99,7 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         *,
         prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandlePrepareClaimBuilderDispatchBatchResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -166,7 +170,11 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
                 preflight_metadata=preflight_metadata,
                 occurred_at=occurred_at,
             )
-            await workflow_unit_of_work.outbox.append_event(prepared_event)
+            persisted_prepared_event = await workflow_unit_of_work.outbox.append_event(
+                prepared_event
+            )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_prepared_event)
             appended_event_count = 1
 
             next_commands = _execute_claim_builder_section_commands(
