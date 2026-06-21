@@ -115,6 +115,14 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
     DraftClaimObservationReadConnectionLike,
     PostgresDraftClaimObservationReadRepository,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
+    DraftClaimCompactionBatchReadModel,
+    DraftClaimCompactionGroupMemberReadModel,
+    DraftClaimCompactionGroupReadModel,
+)
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_plan_repository import (
+    PostgresDraftClaimCompactionPlanRepository,
+)
 from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
     SourceManagementRepositoryPort,
 )
@@ -767,6 +775,64 @@ def _draft_claim_observation_read_model(
             "prompt_version": item.prompt_version,
             "claim_index": item.claim_index,
         },
+        "created_at": item.created_at.isoformat(),
+    }
+
+
+def _derived_compaction_work_item_id(*, workflow_run_id: str, batch_ref: str) -> str:
+    return f"claim-compaction:{workflow_run_id}:{batch_ref}"
+
+
+def _draft_claim_cluster_batch_read_model(
+    item: DraftClaimCompactionBatchReadModel,
+) -> dict[str, object]:
+    return {
+        "batch_ref": item.batch_ref,
+        "group_ref": item.group_ref,
+        "workflow_run_id": item.workflow_run_id,
+        "prompt_variant": item.prompt_variant,
+        "model_id": item.model_id,
+        "estimated_input_tokens": item.estimated_input_tokens,
+        "batch_status": item.batch_status,
+        "member_count": item.member_count,
+        "derived_work_item_id": _derived_compaction_work_item_id(
+            workflow_run_id=item.workflow_run_id,
+            batch_ref=item.batch_ref,
+        ),
+        "created_at": item.created_at.isoformat(),
+    }
+
+
+def _draft_claim_cluster_group_read_model(
+    item: DraftClaimCompactionGroupReadModel,
+    *,
+    batches: tuple[DraftClaimCompactionBatchReadModel, ...],
+) -> dict[str, object]:
+    return {
+        "group_ref": item.group_ref,
+        "workflow_run_id": item.workflow_run_id,
+        "source_document_ref": item.source_document_ref,
+        "embedding_model_id": item.embedding_model_id,
+        "group_algorithm": item.group_algorithm,
+        "group_threshold": item.group_threshold,
+        "member_count": item.member_count,
+        "estimated_input_tokens": item.estimated_input_tokens,
+        "requires_split": item.requires_split,
+        "created_at": item.created_at.isoformat(),
+        "batches": [_draft_claim_cluster_batch_read_model(batch) for batch in batches],
+    }
+
+
+def _draft_claim_cluster_member_read_model(
+    item: DraftClaimCompactionGroupMemberReadModel,
+) -> dict[str, object]:
+    return {
+        "group_ref": item.group_ref,
+        "observation_ref": item.observation_ref,
+        "embedding_ref": item.embedding_ref,
+        "source_unit_ref": item.source_unit_ref,
+        "member_rank": item.member_rank,
+        "member_kind": item.member_kind,
         "created_at": item.created_at.isoformat(),
     }
 
@@ -1428,6 +1494,108 @@ async def workflow_draft_claims(
         "limit": limit,
         "offset": offset,
         "items": [_draft_claim_observation_read_model(item) for item in items],
+    }
+
+
+@router.get("/workflows/{workflow_run_id}/draft-claim-clusters")
+async def workflow_draft_claim_clusters(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    include_batches: bool = Query(True),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns DraftClaimClusterGroup rows for one workflow."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+
+    repository = PostgresDraftClaimCompactionPlanRepository(pool)
+    groups = await repository.list_cluster_groups_for_workflow(
+        workflow_run_id=normalized_workflow_run_id,
+        limit=limit,
+        offset=offset,
+    )
+    batches_by_group: dict[str, list[DraftClaimCompactionBatchReadModel]] = {}
+    if include_batches and groups:
+        group_refs = {group.group_ref for group in groups}
+        for batch in await repository.list_cluster_batches_for_workflow(
+            workflow_run_id=normalized_workflow_run_id,
+        ):
+            if batch.group_ref in group_refs:
+                batches_by_group.setdefault(batch.group_ref, []).append(batch)
+
+    return {
+        "workflow_run_id": normalized_workflow_run_id,
+        "count": len(groups),
+        "limit": limit,
+        "offset": offset,
+        "include_batches": include_batches,
+        "groups": [
+            _draft_claim_cluster_group_read_model(
+                group,
+                batches=tuple(batches_by_group.get(group.group_ref, ())),
+            )
+            for group in groups
+        ],
+    }
+
+
+@router.get("/workflows/{workflow_run_id}/draft-claim-clusters/{group_ref}/members")
+async def workflow_draft_claim_cluster_members(
+    project_id: str,
+    workflow_run_id: str,
+    group_ref: str,
+    authorization: str | None = Header(default=None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns member refs for an expanded DraftClaimClusterGroup row."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    normalized_group_ref = _normalize_optional_query_text(group_ref)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+    if normalized_group_ref is None:
+        raise HTTPException(status_code=400, detail="group_ref must be non-empty")
+
+    repository = PostgresDraftClaimCompactionPlanRepository(pool)
+    members = await repository.list_cluster_members_for_group(
+        workflow_run_id=normalized_workflow_run_id,
+        group_ref=normalized_group_ref,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "workflow_run_id": normalized_workflow_run_id,
+        "group_ref": normalized_group_ref,
+        "count": len(members),
+        "limit": limit,
+        "offset": offset,
+        "items": [_draft_claim_cluster_member_read_model(member) for member in members],
     }
 
 

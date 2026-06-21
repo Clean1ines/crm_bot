@@ -7,8 +7,11 @@ from typing import Protocol
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionBatchCandidate,
     DraftClaimCompactionBatchForDispatch,
+    DraftClaimCompactionBatchReadModel,
     DraftClaimCompactionEdgeCandidate,
     DraftClaimCompactionGroupCandidate,
+    DraftClaimCompactionGroupMemberReadModel,
+    DraftClaimCompactionGroupReadModel,
     DraftClaimForCompaction,
 )
 
@@ -45,6 +48,29 @@ class DraftClaimCompactionPlanRepositoryPort(Protocol):
         workflow_run_id: str,
         embedding_model_id: str,
     ) -> tuple[DraftClaimForCompaction, ...]: ...
+
+    async def list_cluster_groups_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionGroupReadModel, ...]: ...
+
+    async def list_cluster_batches_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> tuple[DraftClaimCompactionBatchReadModel, ...]: ...
+
+    async def list_cluster_members_for_group(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionGroupMemberReadModel, ...]: ...
 
     async def persist_compaction_plan(
         self,

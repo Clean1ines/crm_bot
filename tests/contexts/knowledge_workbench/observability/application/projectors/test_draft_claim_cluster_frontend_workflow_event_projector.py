@@ -24,6 +24,7 @@ _CLUSTERS_BUILT_PAYLOAD_KEYS = frozenset(
         "batch_count",
         "scheduled_work_item_count",
         "semantic_meaning",
+        "draft_claim_cluster_rows",
     }
 )
 
@@ -139,6 +140,92 @@ def test_projection_payload_is_allowlist_only() -> None:
     assert set(projected.payload) == _CLUSTERS_BUILT_PAYLOAD_KEYS
     assert projected.payload["group_count"] == 2
     assert projected.payload["batch_count"] == 2
+
+
+def test_projection_exposes_cluster_row_availability() -> None:
+    projected = DraftClaimClusterFrontendWorkflowEventProjector().project(
+        _clusters_built_event()
+    )
+
+    assert projected is not None
+    rows = projected.payload["draft_claim_cluster_rows"]
+    assert isinstance(rows, dict)
+    assert rows["surface_kind"] == "draft_claim_cluster_group"
+    assert rows["availability"] == "available"
+    assert rows["row_count"] == 2
+    assert rows["batch_count"] == 2
+    assert rows["parent_scope"] == {
+        "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": "source-document:project-1:abc",
+    }
+    assert rows["targeted_read"] == {
+        "kind": "draft_claim_clusters_by_workflow",
+        "params": {
+            "workflow_run_id": _workflow_run_id(),
+            "include_batches": True,
+        },
+    }
+
+
+def test_zero_groups_do_not_expose_available_cluster_rows() -> None:
+    payload = _canonical_payload()
+    payload["group_count"] = 0
+    payload["batch_count"] = 0
+    payload["scheduled_work_item_count"] = 0
+
+    projected = DraftClaimClusterFrontendWorkflowEventProjector().project(
+        _clusters_built_event(payload=payload)
+    )
+
+    assert projected is not None
+    assert "draft_claim_cluster_rows" not in projected.payload
+
+
+def test_projection_does_not_carry_heavy_cluster_bodies() -> None:
+    payload = _canonical_payload()
+    payload.update(
+        {
+            "source_claim_refs": ["draft-claim-observation:1"],
+            "group_members": [{"claim": "heavy body"}],
+            "member_claims": [{"evidence_block": "heavy evidence"}],
+            "batches": [{"source_claim_refs": ["draft-claim-observation:1"]}],
+        }
+    )
+    event = _clusters_built_event(payload=payload)
+
+    projected = DraftClaimClusterFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    forbidden_body_keys = {
+        "claim",
+        "possible_questions",
+        "exclusion_scope",
+        "evidence_block",
+        "source_claim_refs",
+        "member_claims",
+        "group_members",
+    }
+    assert not _contains_forbidden_payload_key(
+        projected.payload,
+        forbidden_body_keys,
+    )
+
+
+def _contains_forbidden_payload_key(
+    value: object,
+    forbidden_keys: set[str],
+) -> bool:
+    if isinstance(value, dict):
+        return any(
+            key in forbidden_keys
+            or _contains_forbidden_payload_key(item, forbidden_keys)
+            for key, item in value.items()
+        )
+    if isinstance(value, (list, tuple)):
+        return any(
+            _contains_forbidden_payload_key(item, forbidden_keys) for item in value
+        )
+    return False
 
 
 @pytest.mark.parametrize(

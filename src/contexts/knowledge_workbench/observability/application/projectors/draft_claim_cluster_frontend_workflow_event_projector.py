@@ -90,7 +90,7 @@ class DraftClaimClusterFrontendWorkflowEventProjector:
             workflow_run_id=event.workflow_run_id,
             project_id=project_id,
             document_id=document_id,
-            payload=_clusters_built_patch(event.payload),
+            payload=_clusters_built_patch(event.payload, document_id=document_id),
             occurred_at=event.occurred_at,
             causation_command_id=(
                 event.causation_command_id.value
@@ -102,7 +102,11 @@ class DraftClaimClusterFrontendWorkflowEventProjector:
         )
 
 
-def _clusters_built_patch(payload: Mapping[str, object]) -> dict[str, object]:
+def _clusters_built_patch(
+    payload: Mapping[str, object],
+    *,
+    document_id: str,
+) -> dict[str, object]:
     patch: dict[str, object] = {}
     for key in _ALLOWED_PAYLOAD_KEYS:
         if key in _FORBIDDEN_PAYLOAD_KEYS:
@@ -112,7 +116,51 @@ def _clusters_built_patch(payload: Mapping[str, object]) -> dict[str, object]:
         value = payload[key]
         if value is not None:
             patch[key] = value
+
+    group_count = _payload_int(payload, "group_count")
+    if group_count > 0:
+        patch["draft_claim_cluster_rows"] = _draft_claim_cluster_rows_patch(
+            workflow_run_id=_payload_text(payload, "workflow_run_id"),
+            document_id=document_id,
+            group_count=group_count,
+            batch_count=_payload_int(payload, "batch_count"),
+        )
     return patch
+
+
+def _draft_claim_cluster_rows_patch(
+    *,
+    workflow_run_id: str,
+    document_id: str,
+    group_count: int,
+    batch_count: int,
+) -> dict[str, object]:
+    return {
+        "surface_kind": "draft_claim_cluster_group",
+        "availability": "available",
+        "row_count": group_count,
+        "batch_count": batch_count,
+        "parent_scope": {
+            "workflow_run_id": workflow_run_id,
+            "source_document_ref": document_id,
+        },
+        "targeted_read": {
+            "kind": "draft_claim_clusters_by_workflow",
+            "params": {
+                "workflow_run_id": workflow_run_id,
+                "include_batches": True,
+            },
+        },
+    }
+
+
+def _payload_int(payload: Mapping[str, object], key: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"event payload {key} must be int")
+    if value < 0:
+        raise ValueError(f"event payload {key} must be >= 0")
+    return value
 
 
 _SUPPORTED_EVENT_TYPES = frozenset(

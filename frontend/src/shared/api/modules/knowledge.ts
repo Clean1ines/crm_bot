@@ -1036,6 +1036,72 @@ export type SurfaceCurationMutationResponse = {
 };
 
 
+export type DraftClaimClusterBatchSummary = {
+  batch_ref: string;
+  group_ref: string;
+  workflow_run_id: string;
+  prompt_variant: string;
+  model_id: string;
+  estimated_input_tokens: number;
+  batch_status: string;
+  member_count: number;
+  derived_work_item_id: string;
+  created_at: string;
+};
+
+export type DraftClaimClusterGroupSummary = {
+  group_ref: string;
+  workflow_run_id: string;
+  source_document_ref: string;
+  embedding_model_id: string;
+  group_algorithm: string;
+  group_threshold: number;
+  member_count: number;
+  estimated_input_tokens: number;
+  requires_split: boolean;
+  created_at: string;
+  batches: DraftClaimClusterBatchSummary[];
+};
+
+export type WorkflowDraftClaimClustersQuery = {
+  include_batches?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type WorkflowDraftClaimClustersResponse = {
+  workflow_run_id: string;
+  count: number;
+  limit: number;
+  offset: number;
+  include_batches: boolean;
+  groups: DraftClaimClusterGroupSummary[];
+};
+
+export type DraftClaimClusterGroupMemberSummary = {
+  group_ref: string;
+  observation_ref: string;
+  embedding_ref: string;
+  source_unit_ref: string;
+  member_rank: number;
+  member_kind: string;
+  created_at: string;
+};
+
+export type DraftClaimClusterGroupMembersQuery = {
+  limit?: number;
+  offset?: number;
+};
+
+export type DraftClaimClusterGroupMembersResponse = {
+  workflow_run_id: string;
+  group_ref: string;
+  count: number;
+  limit: number;
+  offset: number;
+  items: DraftClaimClusterGroupMemberSummary[];
+};
+
 export const knowledgeApi = {
   list: (projectId: string) =>
     authedJsonRequest<{ documents?: Array<Record<string, unknown>>; items?: Array<Record<string, unknown>> }>(`/api/projects/${projectId}/knowledge`, {
@@ -1131,6 +1197,56 @@ export const knowledgeApi = {
     const queryString = params.toString();
     return authedJsonRequest<WorkflowScopedDraftClaimsResponse>(
       `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claims${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
+
+  getDraftClaimClustersByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    query: WorkflowDraftClaimClustersQuery = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof query.include_batches === 'boolean') {
+      params.set('include_batches', String(query.include_batches));
+    }
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<WorkflowDraftClaimClustersResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claim-clusters${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
+
+  getDraftClaimClusterMembersByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    groupRef: string,
+    query: DraftClaimClusterGroupMembersQuery = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<DraftClaimClusterGroupMembersResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claim-clusters/${encodeURIComponent(groupRef)}/members${
         queryString ? `?${queryString}` : ''
       }`,
       {

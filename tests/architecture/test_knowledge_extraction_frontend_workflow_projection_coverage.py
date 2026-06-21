@@ -144,6 +144,72 @@ def test_clusters_built_has_frontend_projection_coverage() -> None:
     assert "workflow_draft_claim_clusters_built" in cluster_projector_source
 
 
+def test_cluster_projection_contract_is_row_availability_not_count_only() -> None:
+    cluster_projector = (
+        PROJECTORS_DIR / "draft_claim_cluster_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert "workflow_draft_claim_clusters_built" in cluster_projector
+    assert "draft_claim_cluster_rows" in cluster_projector
+    assert "draft_claim_cluster_group" in cluster_projector
+    assert "draft_claim_clusters_by_workflow" in cluster_projector
+    assert "targeted_read" in cluster_projector
+    assert "include_batches" in cluster_projector
+    for forbidden_body_field in (
+        "member_claims",
+        "group_members",
+        '"claim"',
+        '"possible_questions"',
+        '"exclusion_scope"',
+        '"evidence_block"',
+        '"source_claim_refs"',
+    ):
+        assert forbidden_body_field not in cluster_projector
+
+
+def test_cluster_artifacts_are_loaded_by_targeted_read_contract() -> None:
+    knowledge_source = KNOWLEDGE_HTTP_PATH.read_text(encoding="utf-8")
+    frontend_source = (
+        ROOT / "frontend" / "src" / "shared" / "api" / "modules" / "knowledge.ts"
+    ).read_text(encoding="utf-8")
+
+    assert '@router.get("/workflows/{workflow_run_id}/draft-claim-clusters")' in (
+        knowledge_source
+    )
+    assert (
+        '@router.get("/workflows/{workflow_run_id}/draft-claim-clusters/{group_ref}/members")'
+        in knowledge_source
+    )
+    assert "list_cluster_groups_for_workflow" in knowledge_source
+    assert "list_cluster_batches_for_workflow" in knowledge_source
+    assert "list_cluster_members_for_group" in knowledge_source
+    assert "getDraftClaimClustersByWorkflow" in frontend_source
+    assert "getDraftClaimClusterMembersByWorkflow" in frontend_source
+
+
+def test_cluster_rows_are_projection_only_not_canonical_events() -> None:
+    workflow_definition = WORKFLOW_DEFINITION_PATH.read_text(encoding="utf-8")
+    for forbidden_event in (
+        "DraftClaimClusterGroupPersisted",
+        "DraftClaimClusterGroupsPersisted",
+        "DraftClaimClusterBatchPersisted",
+        "DraftClaimClusterMemberPersisted",
+    ):
+        assert forbidden_event not in workflow_definition
+
+
+def test_compaction_attempt_visibility_remains_later() -> None:
+    cluster_projector = (
+        PROJECTORS_DIR / "draft_claim_cluster_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+    composite_source = (
+        PROJECTORS_DIR / "knowledge_extraction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert "DraftClaimCompactionAttempt" not in cluster_projector
+    assert "workflow_draft_claim_compaction_attempt" not in composite_source
+
+
 def test_early_claim_builder_projection_contract_is_not_count_only() -> None:
     source_ingestion = SOURCE_INGESTION_PROJECTOR_PATH.read_text(encoding="utf-8")
     scheduling = CLAIM_BUILDER_SCHEDULING_PROJECTOR_PATH.read_text(encoding="utf-8")
@@ -312,7 +378,7 @@ def test_workflow_scoped_draft_claims_endpoint_matches_targeted_read_kind() -> N
 
     endpoint_start = knowledge_source.index("async def workflow_draft_claims(")
     endpoint_end = knowledge_source.index(
-        '@router.post("/workflows/{workflow_run_id}/curation-workspace/open")'
+        '@router.get("/workflows/{workflow_run_id}/draft-claim-clusters")'
     )
     endpoint_region = knowledge_source[endpoint_start:endpoint_end]
 

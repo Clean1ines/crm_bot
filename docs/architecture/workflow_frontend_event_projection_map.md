@@ -744,3 +744,13 @@ side effect, а не единственным liveness mechanism. Удалять
 planner/architect/backend/frontend mapper passes. Backend/frontend tests не
 запускались: обязательный `bash dev_scripts/ensure_test_env.sh` может создать
 `.env.test`, что нарушило бы строгий read-only режим задачи.
+
+## Patch 18B DraftClaimClusterGroup document-card rows
+
+`DraftClaimClustersBuilt` remains the canonical source event for clustering completion. The event is intentionally count-only: it proves that the clustering plan was persisted and reports aggregate counts, but it does not carry `group_ref`, `batch_ref`, member refs, claim text, questions, evidence, or exclusion bodies.
+
+`workflow_draft_claim_clusters_built` is therefore a lightweight document-card availability signal. When `group_count > 0`, it exposes a `draft_claim_cluster_rows` block with `surface_kind=draft_claim_cluster_group`, `availability=available`, `row_count`, `batch_count`, parent workflow scope, and a targeted-read hint with `kind=draft_claim_clusters_by_workflow` and `include_batches=true`.
+
+ClusterGroup rows are document-card artifact surfaces. ClusterBatch rows are child artifact surfaces under ClusterGroup rows. Their refs and row summaries are loaded by targeted read from the workflow-scoped draft-claim cluster endpoints. Cluster members are loaded on ClusterGroup expansion and default to refs (`observation_ref`, `embedding_ref`, `source_unit_ref`, rank/kind), not claim bodies. Claim/evidence/question bodies stay on the DraftClaimObservation targeted-read surface.
+
+Patch 18B does not update every DraftClaimObservation row with live cluster membership. It also does not add per-cluster, per-batch, or per-member canonical events. Compaction attempt visibility remains later and will attach to ClusterBatch rows after the batch parent surfaces are available. Reducer and React rendering remain later.\n\n
