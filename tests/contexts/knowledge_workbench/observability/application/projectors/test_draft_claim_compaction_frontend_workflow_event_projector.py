@@ -286,3 +286,27 @@ def test_next_work_scheduled_remains_progress_not_cluster_batch_row() -> None:
     assert "workflow_draft_claim_compaction_next_work_scheduled" in source
     assert "ClusterBatch" not in source
     assert "generated_compaction_nodes" in source
+
+
+def test_next_work_scheduled_points_to_pending_reduction_work_read_surface() -> None:
+    projected = DraftClaimCompactionFrontendWorkflowEventProjector().project(
+        _event(
+            KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED.value,
+            {
+                "workflow_run_id": "workflow-1",
+                "group_ref": "group-1",
+                "reason": "more_work",
+                "next_work_type": "mixed",
+                "scheduled_work_item_count": 1,
+                "already_scheduled_work_item_count": 0,
+                "appended_next_command_count": 1,
+            },
+        )
+    )
+
+    assert projected is not None
+    assert "cluster_batch_rows" not in projected.payload
+    assert (
+        projected.payload["next_compaction_work"]["does_not_create_cluster_batch_rows"]
+        is True
+    )

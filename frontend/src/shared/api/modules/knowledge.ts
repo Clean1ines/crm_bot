@@ -1117,6 +1117,25 @@ export type DraftClaimCompactionPendingWorkSummary = {
   next_work_scheduled_count: number;
 };
 
+export type DraftClaimCompactionPendingReductionWorkSummary = {
+  workflow_run_id: string;
+  group_ref: string;
+  batch_ref: string | null;
+  work_item_id: string;
+  input_node_refs: string[];
+  input_claim_refs: string[];
+  work_item_status: string;
+  dispatch_attempt_id: string | null;
+  capacity_window_key: string | null;
+  capacity_waiting: boolean;
+  provider: string | null;
+  account_ref: string | null;
+  model_id: string | null;
+  waiting_reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
 export type WorkflowDraftClaimCompactionFrontierQuery = {
   group_ref?: string;
   include_inactive?: boolean;
@@ -1134,6 +1153,7 @@ export type WorkflowDraftClaimCompactionFrontierResponse = {
   summary: DraftClaimCompactionFrontierSummary;
   separation_summary: DraftClaimCompactionSeparationSummary;
   pending_work_summary: DraftClaimCompactionPendingWorkSummary;
+  pending_work_items: DraftClaimCompactionPendingReductionWorkSummary[];
   rows: DraftClaimCompactionFrontierNodeSummary[];
 };
 

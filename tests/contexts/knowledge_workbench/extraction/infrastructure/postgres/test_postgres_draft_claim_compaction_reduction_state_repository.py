@@ -469,18 +469,24 @@ class FakeReductionStateConnection:
             return []
 
         if "FROM execution_work_items" in query:
-            return [
-                {
-                    "ready_work_item_count": 0,
-                    "leased_work_item_count": 0,
-                    "deferred_work_item_count": 0,
-                    "retryable_failed_work_item_count": 0,
-                    "completed_work_item_count": 0,
-                    "terminal_failed_work_item_count": 0,
-                    "active_work_item_count": 0,
-                    "due_waiting_work_item_count": 0,
-                }
-            ]
+            if (
+                "ready_work_item_count" in query
+                and "leased_work_item_count" in query
+                and "active_work_item_count" in query
+            ):
+                return [
+                    {
+                        "ready_work_item_count": 0,
+                        "leased_work_item_count": 0,
+                        "deferred_work_item_count": 0,
+                        "retryable_failed_work_item_count": 0,
+                        "completed_work_item_count": 0,
+                        "terminal_failed_work_item_count": 0,
+                        "active_work_item_count": 0,
+                        "due_waiting_work_item_count": 0,
+                    }
+                ]
+            return []
 
         raise AssertionError(f"unexpected fetch query: {query}")
 

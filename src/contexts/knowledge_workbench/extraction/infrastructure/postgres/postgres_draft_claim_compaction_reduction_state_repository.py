@@ -38,6 +38,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionNodeKind,
     DraftClaimCompactionNodeReadModel,
     DraftClaimCompactionNodeSource,
+    DraftClaimCompactionPendingReductionWorkReadModel,
     DraftClaimCompactionPendingWorkSummaryReadModel,
     DraftClaimCompactionSeparationSummaryReadModel,
     DraftClaimCompactionOriginSeparationEdge,
@@ -444,21 +445,25 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             node for node in all_nodes if include_inactive or node.active
         )
         paged_nodes = visible_nodes[offset : offset + limit]
-        progress = await self.summarize_compaction_progress(
+        pending_work_items = await self.list_pending_reduction_work_for_workflow(
             workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            limit=200,
+            offset=0,
         )
         pending_work_summary = DraftClaimCompactionPendingWorkSummaryReadModel(
-            pending_work_item_count=(
-                progress.ready_work_item_count
-                + progress.deferred_work_item_count
-                + progress.retryable_failed_work_item_count
+            pending_work_item_count=sum(
+                1
+                for item in pending_work_items
+                if item.work_item_status in {"ready", "deferred", "retryable_failed"}
             ),
-            leased_or_running_count=progress.leased_work_item_count,
-            waiting_for_capacity_count=(
-                progress.deferred_work_item_count
-                + progress.retryable_failed_work_item_count
+            leased_or_running_count=sum(
+                1 for item in pending_work_items if item.work_item_status == "leased"
             ),
-            next_work_scheduled_count=progress.active_work_item_count,
+            waiting_for_capacity_count=sum(
+                1 for item in pending_work_items if item.capacity_waiting
+            ),
+            next_work_scheduled_count=len(pending_work_items),
         )
         group_count = len(group_refs)
         return DraftClaimCompactionFrontierReadModel(
@@ -485,7 +490,57 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             ),
             pending_work_summary=pending_work_summary,
             rows=tuple(_frontier_node_read_model(node) for node in paged_nodes),
+            pending_work_items=pending_work_items,
         )
+
+    async def list_pending_reduction_work_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionPendingReductionWorkReadModel, ...]:
+        _read_model_require_text(workflow_run_id, "workflow_run_id")
+        if group_ref is not None:
+            _read_model_require_text(group_ref, "group_ref")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError("limit must be positive int")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be non-negative int")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT wi.work_item_id, wi.status, wi.created_at, wi.updated_at,
+                   wi.next_attempt_at, ws.payload AS schedule_payload,
+                   latest_dispatch.attempt_id AS dispatch_attempt_id,
+                   latest_dispatch.llm_allocation_payload AS llm_allocation_payload
+            FROM execution_work_items AS wi
+            JOIN execution_work_item_schedules AS ws
+              ON ws.work_item_id = wi.work_item_id
+            LEFT JOIN LATERAL (
+                SELECT attempt_id, llm_allocation_payload
+                FROM execution_work_item_attempt_dispatches AS dispatch
+                WHERE dispatch.work_item_id = wi.work_item_id
+                ORDER BY dispatch.attempt_number DESC
+                LIMIT 1
+            ) AS latest_dispatch ON true
+            WHERE wi.work_kind = 'knowledge_workbench.draft_claim_compaction'
+              AND wi.work_item_id LIKE $1
+              AND wi.status IN (
+                'ready', 'leased', 'deferred', 'retryable_failed',
+                'user_action_required'
+              )
+              AND ($2::text IS NULL OR ws.payload->>'group_ref' = $2)
+            ORDER BY wi.created_at ASC, wi.work_item_id ASC
+            LIMIT $3 OFFSET $4
+            """,
+            f"claim-compaction:{workflow_run_id}:%",
+            group_ref,
+            limit,
+            offset,
+        )
+        return tuple(_pending_reduction_work_read_model(row) for row in rows)
 
     async def load_planner_state(
         self,
@@ -1555,6 +1610,93 @@ def _cross_origin_pairs_for_output_partitions(
             left, right = sorted((left_origin, right_origin))
             pairs.append((left, right))
     return tuple(dict.fromkeys(pairs))
+
+
+def _pending_reduction_work_read_model(
+    row: Mapping[str, object],
+) -> DraftClaimCompactionPendingReductionWorkReadModel:
+    schedule_payload = _json_mapping(row.get("schedule_payload"))
+    allocation_payload = _json_mapping(row.get("llm_allocation_payload"))
+    provider = _optional_mapping_text(allocation_payload, "provider")
+    account_ref = _optional_mapping_text(allocation_payload, "account_ref")
+    model_id = _optional_mapping_text(allocation_payload, "model_ref")
+    capacity_window_key = None
+    if provider is not None and account_ref is not None and model_id is not None:
+        capacity_window_key = f"{provider}:{account_ref}:{model_id}"
+    status = _str(row, "status")
+    return DraftClaimCompactionPendingReductionWorkReadModel(
+        workflow_run_id=_str(schedule_payload, "workflow_run_id"),
+        group_ref=_str(schedule_payload, "group_ref"),
+        batch_ref=_optional_mapping_text(schedule_payload, "batch_ref"),
+        work_item_id=_str(row, "work_item_id"),
+        input_node_refs=_text_tuple_from_payload(
+            schedule_payload,
+            ("source_node_refs", "node_refs"),
+        ),
+        input_claim_refs=_text_tuple_from_payload(
+            schedule_payload,
+            ("source_claim_refs",),
+        ),
+        work_item_status=status,
+        dispatch_attempt_id=_optional_row_text(row, "dispatch_attempt_id"),
+        capacity_window_key=capacity_window_key,
+        capacity_waiting=status in {"deferred", "retryable_failed"},
+        provider=provider,
+        account_ref=account_ref,
+        model_id=model_id,
+        waiting_reason=_waiting_reason_from_status(status),
+        created_at=_read_model_datetime(row, "created_at"),
+        updated_at=_read_model_datetime(row, "updated_at"),
+    )
+
+
+def _json_mapping(value: object) -> Mapping[str, object]:
+    if isinstance(value, Mapping):
+        return value
+    return {}
+
+
+def _optional_mapping_text(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _optional_row_text(row: Mapping[str, object], key: str) -> str | None:
+    value = row.get(key)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _text_tuple_from_payload(
+    payload: Mapping[str, object],
+    keys: tuple[str, ...],
+) -> tuple[str, ...]:
+    for key in keys:
+        value = payload.get(key)
+        if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+            continue
+        refs: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                refs.append(item)
+        if refs:
+            return tuple(refs)
+    return ()
+
+
+def _waiting_reason_from_status(status: str) -> str | None:
+    if status in {"deferred", "retryable_failed"}:
+        return "capacity_or_retry_wait"
+    if status == "leased":
+        return "leased_or_running"
+    if status == "ready":
+        return "ready_for_capacity_admission"
+    if status == "user_action_required":
+        return "user_action_required"
+    return None
 
 
 def _node_read_model(row: Mapping[str, object]) -> DraftClaimCompactionNodeReadModel:

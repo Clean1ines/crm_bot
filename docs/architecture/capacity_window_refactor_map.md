@@ -484,3 +484,23 @@ retry_driver = capacity_window_admission
 `capacity_retry_at`, `run_after`, `wait_until`, `reset_at` и связанных SQL/domain
 paths. Тесты не запускались, потому что обязательный test-env bootstrap может
 создать `.env.test`, что нарушило бы strict read-only условие.
+
+
+## Patch 18F — DraftClaimCompaction CapacityWindow correlation
+
+Patch 18F makes CapacityWindow projections and document-card reads attachable to
+DraftClaimCompaction dynamic reduction work. CapacityWindow remains the owner of
+admission/reset timing; WorkItem retry overlays do not own provider reset state.
+
+Dynamic compaction work is represented as pending reduction work keyed by
+`work_item_id`, not as fake ClusterBatch rows. The pending work rows carry
+`group_ref`, `batch_ref`, `input_node_refs`, `input_claim_refs`, status, optional
+`dispatch_attempt_id`, and optional capacity window identity derived from the LLM
+allocation payload. The frontier read contract exposes these pending rows next to
+capacity-aware pending counts.
+
+`DraftClaimCompactionNextWorkScheduled` remains progress visibility. It does not
+invent persisted ClusterBatch rows. `run_after` is workflow command delivery for
+scheduled wakeups, not WorkItem retry ownership. `lease_expires_at` remains lease
+ownership, not a retry timer. Frontend reducer, React UI, curation, publication,
+and cross-cluster triple reconciliation remain later.

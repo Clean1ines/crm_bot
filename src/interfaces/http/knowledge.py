@@ -166,6 +166,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionFrontierReadModel,
     DraftClaimCompactionFrontierNodeReadModel,
     DraftClaimCompactionNodeReadModel,
+    DraftClaimCompactionPendingReductionWorkReadModel,
 )
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
     DraftClaimCompactionReductionStateConnectionLike,
@@ -837,6 +838,33 @@ def _draft_claim_compaction_frontier_node_read_model(
     }
 
 
+def _draft_claim_compaction_pending_work_read_model(
+    item: DraftClaimCompactionPendingReductionWorkReadModel,
+) -> dict[str, object]:
+    return {
+        "workflow_run_id": item.workflow_run_id,
+        "group_ref": item.group_ref,
+        "batch_ref": item.batch_ref,
+        "work_item_id": item.work_item_id,
+        "input_node_refs": list(item.input_node_refs),
+        "input_claim_refs": list(item.input_claim_refs),
+        "work_item_status": item.work_item_status,
+        "dispatch_attempt_id": item.dispatch_attempt_id,
+        "capacity_window_key": item.capacity_window_key,
+        "capacity_waiting": item.capacity_waiting,
+        "provider": item.provider,
+        "account_ref": item.account_ref,
+        "model_id": item.model_id,
+        "waiting_reason": item.waiting_reason,
+        "created_at": item.created_at.isoformat()
+        if item.created_at is not None
+        else None,
+        "updated_at": item.updated_at.isoformat()
+        if item.updated_at is not None
+        else None,
+    }
+
+
 def _draft_claim_compaction_frontier_read_model(
     item: DraftClaimCompactionFrontierReadModel,
     *,
@@ -885,6 +913,10 @@ def _draft_claim_compaction_frontier_read_model(
         },
         "rows": [
             _draft_claim_compaction_frontier_node_read_model(row) for row in item.rows
+        ],
+        "pending_work_items": [
+            _draft_claim_compaction_pending_work_read_model(row)
+            for row in item.pending_work_items
         ],
     }
 

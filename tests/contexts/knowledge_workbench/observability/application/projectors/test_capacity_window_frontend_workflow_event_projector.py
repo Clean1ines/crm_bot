@@ -163,3 +163,51 @@ def test_ignores_forbidden_overlay_fields_when_present_in_canonical_payload() ->
     assert projected is not None
     assert "next_attempt_at" not in projected.payload
     assert "retry_owner" not in projected.payload
+
+
+def test_compaction_capacity_event_projects_attachable_work_context() -> None:
+    projected = CapacityWindowFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_LEASED_WORK_ITEM.value
+            ),
+            payload={
+                "workflow_run_id": "workflow-1",
+                "window_key": "groq:account-1:model-1",
+                "provider": "groq",
+                "account_ref": "account-1",
+                "model_ref": "model-1",
+                "work_item_id": "claim-compaction:workflow-1:batch-1",
+                "dispatch_attempt_id": "attempt-1",
+                "lease_expires_at": "2026-01-01T00:01:00+00:00",
+                "selection_kind": "fresh",
+                "operation_key": "prepare_draft_claim_compaction_dispatch_batch",
+                "canonical_phase": "DRAFT_CLAIM_CLUSTERING",
+                "compaction_context": {
+                    "group_ref": "group-1",
+                    "batch_ref": "batch-1",
+                    "work_item_id": "claim-compaction:workflow-1:batch-1",
+                    "dispatch_attempt_id": "attempt-1",
+                    "input_node_refs": ["node-1", "node-2"],
+                    "input_claim_refs": ["claim-1", "claim-2"],
+                },
+            },
+        )
+    )
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_capacity_window_leased_work_item"
+    assert projected.payload["compaction_context"] == {
+        "group_ref": "group-1",
+        "batch_ref": "batch-1",
+        "work_item_id": "claim-compaction:workflow-1:batch-1",
+        "dispatch_attempt_id": "attempt-1",
+        "input_node_refs": ["node-1", "node-2"],
+        "input_claim_refs": ["claim-1", "claim-2"],
+    }
+    assert projected.payload["targeted_read"]["kind"] == (
+        "draft_claim_compaction_pending_work_by_workflow_or_group"
+    )
+    assert "next_attempt_at" not in str(projected.payload)
+    assert "retry_owner" not in str(projected.payload)
+    assert "work_item_retry_timer" not in str(projected.payload)

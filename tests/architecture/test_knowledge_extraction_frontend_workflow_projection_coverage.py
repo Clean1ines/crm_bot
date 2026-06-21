@@ -487,3 +487,39 @@ def test_patch_18e_compaction_frontier_read_contract_is_backend_surface_not_redu
     assert "does not invent ClusterBatch rows" in docs
     assert "Frontend reducer, React UI" in docs
     assert "curation, publication" in docs
+
+
+def test_patch_18f_compaction_capacity_window_correlation_is_attachable_without_fake_batches() -> (
+    None
+):
+    capacity_projector = (
+        ROOT
+        / "src"
+        / "contexts"
+        / "knowledge_workbench"
+        / "observability"
+        / "application"
+        / "projectors"
+        / "capacity_window_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+    capacity_events = (
+        ROOT
+        / "src"
+        / "contexts"
+        / "knowledge_workbench"
+        / "application"
+        / "sagas"
+        / "capacity_window_workflow_events.py"
+    ).read_text(encoding="utf-8")
+    docs = (
+        ROOT / "docs" / "architecture" / "workflow_frontend_event_projection_map.md"
+    ).read_text(encoding="utf-8")
+
+    assert "compaction_context" in capacity_projector
+    assert (
+        "draft_claim_compaction_pending_work_by_workflow_or_group" in capacity_projector
+    )
+    assert "compaction_context_from_schedule_payload" in capacity_events
+    assert "pending reduction work" in docs
+    assert "fake ClusterBatch" in docs
+    assert "Frontend reducer, React UI, curation, publication" in docs

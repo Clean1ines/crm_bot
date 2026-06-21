@@ -7,6 +7,15 @@ from typing import Protocol, cast
 
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
+    DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
+    DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
+    capacity_window_leased_work_item_event,
+    compaction_context_from_schedule_payload,
+)
+from src.interfaces.composition.lease_llm_admitted_work_items import (
+    LlmAdmittedLeasedWorkItem,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
 )
@@ -228,6 +237,10 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
             )
 
         if prepared_dispatch_count > 0:
+            if typed_prepare_result is None or prepare_command is None:
+                raise RuntimeError(
+                    "prepared compaction dispatch requires prepare result"
+                )
             prepared_event = _dispatch_batch_prepared_event(
                 workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
@@ -248,6 +261,24 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
                     next_command
                 )
             appended_next_command_count = len(next_commands)
+
+            leased_items = typed_prepare_result.lease_result.leased
+            for leased_item, started_attempt in zip(
+                leased_items,
+                started_attempts,
+                strict=True,
+            ):
+                await workflow_unit_of_work.outbox.append_event(
+                    _capacity_window_leased_work_item_event(
+                        workflow_command=workflow_command,
+                        workflow_run_id=workflow_run_id,
+                        leased_item=leased_item,
+                        started_attempt=started_attempt,
+                        lease_expires_at=prepare_command.lease_expires_at,
+                        occurred_at=occurred_at,
+                    )
+                )
+                appended_event_count += 1
 
             for timeline_entry in _timeline_entries(
                 workflow_command=workflow_command,
@@ -533,6 +564,45 @@ async def _save_progress_snapshot(
     )
 
 
+def _capacity_window_leased_work_item_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    leased_item: LlmAdmittedLeasedWorkItem,
+    started_attempt: object,
+    lease_expires_at: datetime,
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    dispatch_attempt_id = _attempt_text(started_attempt, "attempt_id")
+    work_item_id = _attempt_text(started_attempt, "work_item_id")
+    schedule_payload = leased_item.admitted_schedule_payload()
+    return capacity_window_leased_work_item_event(
+        workflow_run_id=workflow_run_id,
+        provider=leased_item.allocation.provider,
+        account_ref=leased_item.allocation.account_ref,
+        model_ref=leased_item.allocation.model_ref,
+        work_item_id=work_item_id,
+        dispatch_attempt_id=dispatch_attempt_id,
+        lease_expires_at=lease_expires_at,
+        selection_kind=leased_item.selection_kind,
+        occurred_at=occurred_at,
+        token_estimate=_optional_mapping_int(
+            schedule_payload, "estimated_prompt_tokens"
+        ),
+        reserved_tokens=_optional_mapping_int(
+            schedule_payload, "estimated_total_tokens"
+        ),
+        compaction_context=compaction_context_from_schedule_payload(
+            schedule_payload,
+            work_item_id=work_item_id,
+            dispatch_attempt_id=dispatch_attempt_id,
+        ),
+        causation_command_id=workflow_command.command_id,
+        operation_key=DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
+        canonical_phase=DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
+    )
+
+
 def _execute_draft_claim_compaction_commands(
     *,
     workflow_run_id: str,
@@ -612,6 +682,13 @@ def _attempt_schedule_payload(attempt: object) -> Mapping[str, object]:
         return schedule_payload
 
     return dispatch_payload
+
+
+def _optional_mapping_int(payload: Mapping[str, object], key: str) -> int | None:
+    value = payload.get(key)
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return None
 
 
 def _mapping_text(

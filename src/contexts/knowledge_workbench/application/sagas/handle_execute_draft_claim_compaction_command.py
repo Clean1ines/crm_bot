@@ -18,6 +18,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 from src.contexts.knowledge_workbench.application.sagas.append_capacity_window_prepare_wakeup import (
     append_capacity_window_prepare_wakeup,
 )
+from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
+    compaction_context_from_schedule_payload,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
 )
@@ -765,12 +768,33 @@ def _capacity_observed_event(
             "canonical_phase": (
                 KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value
             ),
+            "compaction_context": _compaction_context_for_capacity_event(
+                workflow_command.payload,
+                work_item_id=work_item_id,
+                dispatch_attempt_id=dispatch_attempt_id,
+            ),
             **capacity_observation.to_event_payload(),
         },
         occurred_at=occurred_at,
         causation_command_id=workflow_command.command_id,
         correlation_id=dispatch_attempt_id,
     )
+
+
+def _compaction_context_for_capacity_event(
+    payload: Mapping[str, object],
+    *,
+    work_item_id: str,
+    dispatch_attempt_id: str,
+) -> Mapping[str, object]:
+    return compaction_context_from_schedule_payload(
+        payload,
+        work_item_id=work_item_id,
+        dispatch_attempt_id=dispatch_attempt_id,
+    ) or {
+        "work_item_id": work_item_id,
+        "dispatch_attempt_id": dispatch_attempt_id,
+    }
 
 
 def _attempt_outcome_event(

@@ -124,6 +124,7 @@ def _exhausted_projection_payload(
         value = payload.get(optional_key)
         if isinstance(value, str) and value.strip():
             patch[optional_key] = value
+    _copy_optional_compaction_context(payload, patch)
     return _without_forbidden_fields(patch)
 
 
@@ -147,6 +148,7 @@ def _scheduled_wakeup_projection_payload(
     causation_command_id = payload.get("causation_command_id")
     if isinstance(causation_command_id, str) and causation_command_id.strip():
         patch["causation_command_id"] = causation_command_id
+    _copy_optional_compaction_context(payload, patch)
     return _without_forbidden_fields(patch)
 
 
@@ -178,7 +180,51 @@ def _leased_work_item_projection_payload(
             patch[optional_key] = value
         elif isinstance(value, int) and not isinstance(value, bool):
             patch[optional_key] = value
+    _copy_optional_compaction_context(payload, patch)
     return _without_forbidden_fields(patch)
+
+
+def _copy_optional_compaction_context(
+    source_payload: Mapping[str, object],
+    projected_payload: dict[str, object],
+) -> None:
+    raw_context = source_payload.get("compaction_context")
+    if raw_context is None:
+        return
+    if not isinstance(raw_context, Mapping):
+        raise ValueError("event payload compaction_context must be mapping")
+    context: dict[str, object] = {}
+    for key in (
+        "group_ref",
+        "batch_ref",
+        "work_item_id",
+        "dispatch_attempt_id",
+        "expected_output_kind",
+    ):
+        value = raw_context.get(key)
+        if isinstance(value, str) and value.strip():
+            context[key] = value
+    for key in ("input_node_refs", "input_claim_refs"):
+        value = raw_context.get(key)
+        if isinstance(value, list):
+            refs: list[str] = []
+            for item in value:
+                if not isinstance(item, str) or not item.strip():
+                    raise ValueError(
+                        f"event payload compaction_context.{key} must contain text"
+                    )
+                refs.append(item)
+            context[key] = refs
+    if context:
+        projected_payload["compaction_context"] = context
+        projected_payload["targeted_read"] = {
+            "kind": "draft_claim_compaction_pending_work_by_workflow_or_group",
+            "params": {
+                "workflow_run_id": projected_payload["workflow_run_id"],
+                "group_ref": context.get("group_ref"),
+                "work_item_id": context.get("work_item_id"),
+            },
+        }
 
 
 def _without_forbidden_fields(payload: dict[str, object]) -> Mapping[str, object]:

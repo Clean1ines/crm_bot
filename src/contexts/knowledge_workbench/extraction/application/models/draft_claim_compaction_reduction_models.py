@@ -249,6 +249,54 @@ class DraftClaimCompactionSeparationSummaryReadModel:
 
 
 @dataclass(frozen=True, slots=True)
+class DraftClaimCompactionPendingReductionWorkReadModel:
+    workflow_run_id: str
+    group_ref: str
+    batch_ref: str | None
+    work_item_id: str
+    input_node_refs: tuple[str, ...]
+    input_claim_refs: tuple[str, ...]
+    work_item_status: str
+    dispatch_attempt_id: str | None = None
+    capacity_window_key: str | None = None
+    capacity_waiting: bool = False
+    provider: str | None = None
+    account_ref: str | None = None
+    model_id: str | None = None
+    waiting_reason: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.workflow_run_id, "workflow_run_id")
+        _text(self.group_ref, "group_ref")
+        if self.batch_ref is not None:
+            _text(self.batch_ref, "batch_ref")
+        _text(self.work_item_id, "work_item_id")
+        _text_tuple(self.input_node_refs, "input_node_refs", allow_empty=True)
+        _text_tuple(self.input_claim_refs, "input_claim_refs", allow_empty=True)
+        _text(self.work_item_status, "work_item_status")
+        if self.dispatch_attempt_id is not None:
+            _text(self.dispatch_attempt_id, "dispatch_attempt_id")
+        if self.capacity_window_key is not None:
+            _text(self.capacity_window_key, "capacity_window_key")
+        if not isinstance(self.capacity_waiting, bool):
+            raise TypeError("capacity_waiting must be bool")
+        if self.provider is not None:
+            _text(self.provider, "provider")
+        if self.account_ref is not None:
+            _text(self.account_ref, "account_ref")
+        if self.model_id is not None:
+            _text(self.model_id, "model_id")
+        if self.waiting_reason is not None:
+            _text(self.waiting_reason, "waiting_reason")
+        if self.created_at is not None and not isinstance(self.created_at, datetime):
+            raise TypeError("created_at must be datetime")
+        if self.updated_at is not None and not isinstance(self.updated_at, datetime):
+            raise TypeError("updated_at must be datetime")
+
+
+@dataclass(frozen=True, slots=True)
 class DraftClaimCompactionPendingWorkSummaryReadModel:
     pending_work_item_count: int
     leased_or_running_count: int
@@ -301,6 +349,9 @@ class DraftClaimCompactionFrontierReadModel:
     separation_summary: DraftClaimCompactionSeparationSummaryReadModel
     pending_work_summary: DraftClaimCompactionPendingWorkSummaryReadModel
     rows: tuple[DraftClaimCompactionFrontierNodeReadModel, ...]
+    pending_work_items: tuple[
+        DraftClaimCompactionPendingReductionWorkReadModel, ...
+    ] = ()
 
     def __post_init__(self) -> None:
         _text(self.workflow_run_id, "workflow_run_id")
@@ -332,6 +383,14 @@ class DraftClaimCompactionFrontierReadModel:
             if not isinstance(row, DraftClaimCompactionFrontierNodeReadModel):
                 raise TypeError(
                     "rows must contain DraftClaimCompactionFrontierNodeReadModel"
+                )
+        if not isinstance(self.pending_work_items, tuple):
+            raise TypeError("pending_work_items must be tuple")
+        for item in self.pending_work_items:
+            if not isinstance(item, DraftClaimCompactionPendingReductionWorkReadModel):
+                raise TypeError(
+                    "pending_work_items must contain "
+                    "DraftClaimCompactionPendingReductionWorkReadModel"
                 )
 
 
