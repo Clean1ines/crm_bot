@@ -26,6 +26,10 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
     WorkflowIdempotencyKey,
 )
 
+from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
+    capacity_window_key,
+)
+
 LOGGER = structlog.get_logger(__name__)
 
 
@@ -35,7 +39,11 @@ class CapacityWindowPrepareWakeup:
     account_ref: str
     model_ref: str
     run_after: datetime
+    reset_at: datetime
+    window_key: str
     command_id: WorkflowCommandId
+    prepare_command_type: str
+    wakeup_reason: str
 
 
 async def append_capacity_window_prepare_wakeup(
@@ -58,7 +66,8 @@ async def append_capacity_window_prepare_wakeup(
     if capacity_observation.minute_reset_at is None:
         return None
 
-    run_after = capacity_observation.minute_reset_at
+    reset_at = capacity_observation.minute_reset_at
+    run_after = reset_at
     if run_after <= occurred_at:
         run_after = occurred_at
 
@@ -121,7 +130,15 @@ async def append_capacity_window_prepare_wakeup(
         account_ref=capacity_observation.account_ref,
         model_ref=capacity_observation.model_ref,
         run_after=run_after,
+        reset_at=reset_at,
+        window_key=capacity_window_key(
+            provider=capacity_observation.provider,
+            account_ref=capacity_observation.account_ref,
+            model_ref=capacity_observation.model_ref,
+        ),
         command_id=command_id,
+        prepare_command_type=prepare_command_type.value,
+        wakeup_reason="provider_minute_reset",
     )
 
 

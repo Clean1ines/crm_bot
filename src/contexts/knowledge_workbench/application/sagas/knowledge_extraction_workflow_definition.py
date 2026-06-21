@@ -62,6 +62,9 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED = "ClaimBuilderSourceUnitSplitRequired"
     CLAIM_BUILDER_SOURCE_UNIT_SPLIT_COMPLETED = "ClaimBuilderSourceUnitSplitCompleted"
     LLM_PROVIDER_CAPACITY_OBSERVED = "LlmProviderCapacityObserved"
+    CAPACITY_WINDOW_EXHAUSTED = "CapacityWindowExhausted"
+    CAPACITY_WINDOW_SCHEDULED_WAKEUP = "CapacityWindowScheduledWakeup"
+    CAPACITY_WINDOW_LEASED_WORK_ITEM = "CapacityWindowLeasedWorkItem"
     CLAIM_BUILDER_PROGRESS_RECONCILED = "ClaimBuilderProgressReconciled"
     CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED = "ClaimBuilderAllSectionsExtracted"
     DRAFT_CLAIM_EMBEDDING_BATCH_COMPLETED = "DraftClaimEmbeddingBatchCompleted"
@@ -291,6 +294,8 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             intermediate_event_types=(
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED,
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED,
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED,
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_LEASED_WORK_ITEM,
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION,
@@ -367,6 +372,8 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             intermediate_event_types=(
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_STARTED,
                 KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED,
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED,
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_SCHEDULED_WAKEUP,
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS,

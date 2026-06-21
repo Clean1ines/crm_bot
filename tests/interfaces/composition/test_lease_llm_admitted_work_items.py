@@ -7,6 +7,7 @@ import pytest
 
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    DueWorkItemRecord,
     LeasedWorkItemRecord,
     WorkItemLeaseRepositoryPort,
 )
@@ -43,6 +44,21 @@ from src.interfaces.composition.lease_llm_admitted_work_items import (
 class FakeLeaseRepository(WorkItemLeaseRepositoryPort):
     queue: list[LeasedWorkItemRecord] = field(default_factory=list)
     lease_tokens: list[LeaseToken] = field(default_factory=list)
+    peek_calls: int = 0
+
+    async def peek_due_work_items(
+        self,
+        *,
+        work_kind: WorkKind,
+        requested_items: int,
+        now: datetime,
+    ) -> tuple[DueWorkItemRecord, ...]:
+        self.peek_calls += 1
+        del work_kind, now
+        return tuple(
+            _due_record(record.work_item.work_item_id)
+            for record in self.queue[:requested_items]
+        )
 
     async def lease_due_work_item(
         self,
@@ -103,6 +119,21 @@ def _account(
     )
 
 
+def _due_record(work_item_id: str) -> DueWorkItemRecord:
+    return DueWorkItemRecord(
+        work_item=WorkItem(
+            work_item_id=work_item_id,
+            work_kind=_work_kind(),
+            status=WorkItemStatus.READY,
+            attempt_count=0,
+            leased_by=None,
+            lease_token=None,
+            lease_expires_at=None,
+        ),
+        schedule_payload={"source_unit_ref": f"{work_item_id}:source"},
+    )
+
+
 def _record(work_item_id: str) -> LeasedWorkItemRecord:
     return LeasedWorkItemRecord(
         work_item=WorkItem(
@@ -118,12 +149,34 @@ def _record(work_item_id: str) -> LeasedWorkItemRecord:
     )
 
 
+def _pre_lease_records_for_queue(
+    queue: list[LeasedWorkItemRecord],
+) -> tuple[DueWorkItemRecord, ...]:
+    return tuple(_due_record(record.work_item.work_item_id) for record in queue)
+
+
+def _retryable_due_record(work_item_id: str) -> DueWorkItemRecord:
+    return DueWorkItemRecord(
+        work_item=WorkItem(
+            work_item_id=work_item_id,
+            work_kind=_work_kind(),
+            status=WorkItemStatus.RETRYABLE_FAILED,
+            attempt_count=1,
+            leased_by=None,
+            lease_token=None,
+            lease_expires_at=None,
+        ),
+        schedule_payload={"source_unit_ref": f"{work_item_id}:source"},
+    )
+
+
 def _command(
     *,
     account_capacities: tuple[LlmProviderAccountCapacity, ...],
     requested_items: int,
     active_model_ref: str = "qwen/qwen3-32b",
     now: datetime | None = None,
+    pre_lease_due_records: tuple[DueWorkItemRecord, ...] = (),
 ) -> LeaseLlmAdmittedWorkItemsCommand:
     return LeaseLlmAdmittedWorkItemsCommand(
         work_kind=_work_kind(),
@@ -135,6 +188,24 @@ def _command(
         lease_token_prefix="lease-prefix",
         lease_expires_at=_lease_expires_at(),
         now=now or _now(),
+        pre_lease_due_records=pre_lease_due_records,
+    )
+
+
+def _command_for_repository(
+    repository: FakeLeaseRepository,
+    *,
+    account_capacities: tuple[LlmProviderAccountCapacity, ...],
+    requested_items: int,
+    active_model_ref: str = "qwen/qwen3-32b",
+    now: datetime | None = None,
+) -> LeaseLlmAdmittedWorkItemsCommand:
+    return _command(
+        account_capacities=account_capacities,
+        requested_items=requested_items,
+        active_model_ref=active_model_ref,
+        now=now,
+        pre_lease_due_records=_pre_lease_records_for_queue(repository.queue),
     )
 
 
@@ -161,7 +232,8 @@ async def test_assigns_allocation_slots_to_leased_work_items() -> None:
     )
 
     result = await _use_case(repository).execute(
-        _command(
+        _command_for_repository(
+            repository,
             account_capacities=(
                 _account(
                     account_ref="account_1", minute_requests=2, minute_tokens=7000
@@ -173,6 +245,8 @@ async def test_assigns_allocation_slots_to_leased_work_items() -> None:
             requested_items=4,
         ),
     )
+
+    assert repository.peek_calls == 0
 
     assert len(result.leased) == 4
     assert [item.allocation.account_ref for item in result.leased] == [
@@ -201,7 +275,8 @@ async def test_qwen_active_model_uses_reasoning_disabled_execution_settings() ->
     repository = FakeLeaseRepository(queue=[_record("work-1")])
 
     result = await _use_case(repository).execute(
-        _command(
+        _command_for_repository(
+            repository,
             account_capacities=(
                 _account(
                     account_ref="account_1",
@@ -280,7 +355,8 @@ async def test_requested_items_caps_projection_and_leasing() -> None:
     )
 
     result = await _use_case(repository).execute(
-        _command(
+        _command_for_repository(
+            repository,
             account_capacities=(
                 _account(
                     account_ref="account_1", minute_requests=10, minute_tokens=35000
@@ -300,7 +376,8 @@ async def test_fewer_due_items_than_allocations_uses_prefix_allocations_only() -
     repository = FakeLeaseRepository(queue=[_record("work-1"), _record("work-2")])
 
     result = await _use_case(repository).execute(
-        _command(
+        _command_for_repository(
+            repository,
             account_capacities=(
                 _account(
                     account_ref="account_1", minute_requests=5, minute_tokens=17500
@@ -353,7 +430,8 @@ async def test_uses_only_active_model_accounts() -> None:
     )
 
     result = await _use_case(repository).execute(
-        _command(
+        _command_for_repository(
+            repository,
             account_capacities=(
                 _account(
                     account_ref="qwen_1",
@@ -409,7 +487,8 @@ async def test_active_fallback_model_can_be_selected_explicitly() -> None:
     )
 
     result = await _use_case(repository).execute(
-        _command(
+        _command_for_repository(
+            repository,
             account_capacities=(
                 _account(
                     account_ref="qwen_1",
@@ -468,7 +547,8 @@ async def test_mixed_model_capacities_do_not_raise_in_composition() -> None:
     repository = FakeLeaseRepository(queue=[_record("work-1")])
 
     result = await _use_case(repository).execute(
-        _command(
+        _command_for_repository(
+            repository,
             account_capacities=(
                 _account(
                     account_ref="qwen_1",
@@ -498,7 +578,8 @@ async def test_unknown_active_model_in_catalog_raises_before_assignment() -> Non
 
     with pytest.raises(ValueError, match="model_ref is not in route catalog"):
         await _use_case(repository).execute(
-            _command(
+            _command_for_repository(
+                repository,
                 account_capacities=(
                     _account(
                         account_ref="custom_1",
@@ -513,6 +594,52 @@ async def test_unknown_active_model_in_catalog_raises_before_assignment() -> Non
         )
 
     assert repository.lease_tokens == []
+
+
+@pytest.mark.asyncio
+async def test_selection_kind_matches_pre_lease_retryable_status() -> None:
+    repository = FakeLeaseRepository(queue=[_record("work-retry-1")])
+
+    result = await _use_case(repository).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="account_1",
+                    minute_requests=1,
+                    minute_tokens=3500,
+                ),
+            ),
+            requested_items=1,
+            pre_lease_due_records=(_retryable_due_record("work-retry-1"),),
+        ),
+    )
+
+    assert repository.peek_calls == 0
+    assert len(result.leased) == 1
+    assert result.leased[0].selection_kind == "retryable"
+
+
+@pytest.mark.asyncio
+async def test_leased_work_item_requires_matching_pre_lease_record() -> None:
+    repository = FakeLeaseRepository(queue=[_record("work-1")])
+
+    with pytest.raises(
+        ValueError,
+        match="leased work item missing pre-lease admission selection_kind",
+    ):
+        await _use_case(repository).execute(
+            _command(
+                account_capacities=(
+                    _account(
+                        account_ref="account_1",
+                        minute_requests=1,
+                        minute_tokens=3500,
+                    ),
+                ),
+                requested_items=1,
+                pre_lease_due_records=(),
+            ),
+        )
 
 
 def test_direct_projector_still_rejects_mixed_model_capacities() -> None:

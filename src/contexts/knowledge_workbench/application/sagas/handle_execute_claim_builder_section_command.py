@@ -47,6 +47,13 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 from src.contexts.knowledge_workbench.application.sagas.append_capacity_window_prepare_wakeup import (
     append_capacity_window_prepare_wakeup,
 )
+from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
+    CLAIM_BUILDER_CANONICAL_PHASE,
+    CLAIM_BUILDER_EXECUTE_OPERATION_KEY,
+    capacity_exhaustion_from_observation,
+    capacity_window_exhausted_event,
+    capacity_window_scheduled_wakeup_event,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
 )
@@ -355,6 +362,34 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                     persisted_capacity_event,
                 )
             appended_event_count += 1
+
+            capacity_exhaustion = capacity_exhaustion_from_observation(
+                capacity_observation=capacity_observation,
+                workflow_run_id=workflow_run_id,
+                dispatch_attempt_id=dispatch_attempt_id,
+                work_item_id=work_item_id,
+            )
+            if capacity_exhaustion is not None:
+                exhausted_event = capacity_window_exhausted_event(
+                    workflow_run_id=workflow_run_id,
+                    exhaustion=capacity_exhaustion,
+                    operation_key=CLAIM_BUILDER_EXECUTE_OPERATION_KEY,
+                    canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
+                    occurred_at=finished_at,
+                    causation_command_id=workflow_command.command_id,
+                    correlation_id=dispatch_attempt_id,
+                )
+                persisted_exhausted_event = (
+                    await workflow_unit_of_work.outbox.append_event(
+                        exhausted_event,
+                    )
+                )
+                if frontend_event_projection_writer is not None:
+                    await frontend_event_projection_writer.execute(
+                        persisted_exhausted_event,
+                    )
+                appended_event_count += 1
+
             wakeup = await append_capacity_window_prepare_wakeup(
                 workflow_unit_of_work=workflow_unit_of_work,
                 source_command=workflow_command,
@@ -367,6 +402,31 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             )
             if wakeup is not None:
                 capacity_window_wakeup_count = 1
+                scheduled_wakeup_event = capacity_window_scheduled_wakeup_event(
+                    workflow_run_id=workflow_run_id,
+                    provider=wakeup.provider,
+                    account_ref=wakeup.account_ref,
+                    model_ref=wakeup.model_ref,
+                    run_after=wakeup.run_after,
+                    reset_at=wakeup.reset_at,
+                    wakeup_command_id=wakeup.command_id,
+                    prepare_command_type=wakeup.prepare_command_type,
+                    wakeup_reason=wakeup.wakeup_reason,
+                    operation_key=CLAIM_BUILDER_EXECUTE_OPERATION_KEY,
+                    canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
+                    occurred_at=finished_at,
+                    causation_command_id=workflow_command.command_id,
+                )
+                persisted_wakeup_event = (
+                    await workflow_unit_of_work.outbox.append_event(
+                        scheduled_wakeup_event,
+                    )
+                )
+                if frontend_event_projection_writer is not None:
+                    await frontend_event_projection_writer.execute(
+                        persisted_wakeup_event,
+                    )
+                appended_event_count += 1
 
         persisted_draft_claim_count = await _persist_validated_draft_claims(
             persistence=draft_claim_observation_persistence,

@@ -47,6 +47,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_a
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
     PostgresWorkItemLeaseRepository,
 )
+from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
+    CapacityWindowExhaustionSnapshot,
+)
 from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
     ClaimBuilderDispatchPreparationBuilder,
 )
@@ -90,6 +93,7 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_s
 from src.interfaces.composition.lease_llm_admitted_work_items import (
     LeaseLlmAdmittedWorkItemsResult,
     LlmAdmittedLeasedWorkItem,
+    llm_admitted_leased_work_item_from_pre_lease_status,
 )
 from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
     StartLlmAdmittedWorkItemAttempts,
@@ -208,6 +212,7 @@ class PrepareLlmDispatchBatchResult:
     affected_work_item_refs: tuple[str, ...] = ()
     source_unit_refs: tuple[str, ...] = ()
     capacity_retry_at: datetime | None = None
+    capacity_window_exhaustion: CapacityWindowExhaustionSnapshot | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.lease_result, LeaseLlmAdmittedWorkItemsResult):
@@ -240,6 +245,13 @@ class PrepareLlmDispatchBatchResult:
             _require_timezone_aware(
                 self.capacity_retry_at,
                 field_name="capacity_retry_at",
+            )
+        if self.capacity_window_exhaustion is not None and not isinstance(
+            self.capacity_window_exhaustion,
+            CapacityWindowExhaustionSnapshot,
+        ):
+            raise TypeError(
+                "capacity_window_exhaustion must be CapacityWindowExhaustionSnapshot"
             )
         _require_non_empty_text_tuple(
             self.affected_work_item_refs,
@@ -557,6 +569,17 @@ class PrepareLlmDispatchBatch:
                         profile=preparation_profile,
                         now=command.now,
                     )
+                capacity_window_exhaustion = None
+                if (
+                    next_capacity_retry_at is not None
+                    and admission_due_records
+                    and not lease_result.leased
+                ):
+                    capacity_window_exhaustion = _prepare_capacity_window_exhaustion(
+                        account_capacities=account_capacities,
+                        active_model_ref=resolved_active_model_ref,
+                        reset_at=next_capacity_retry_at,
+                    )
                 return PrepareLlmDispatchBatchResult(
                     lease_result=lease_result,
                     attempt_result=attempt_result,
@@ -565,6 +588,7 @@ class PrepareLlmDispatchBatch:
                     input_size_preflight_active_model_ref=preflight_result.active_model_ref,
                     source_split_required=False,
                     capacity_retry_at=next_capacity_retry_at,
+                    capacity_window_exhaustion=capacity_window_exhaustion,
                 )
         finally:
             await self.pool.release(connection)
@@ -783,10 +807,11 @@ async def _lease_input_admitted_work_items(
         )
         allocations.append(allocation)
         leased_items.append(
-            LlmAdmittedLeasedWorkItem(
+            llm_admitted_leased_work_item_from_pre_lease_status(
                 leased=leased_record,
                 allocation=allocation,
                 execution_settings=execution_settings,
+                pre_lease_status=candidate.record.work_item.status,
                 schedule_payload_override=_admitted_schedule_payload(
                     schedule_payload=leased_record.schedule_payload,
                     reserved_output_tokens=candidate.reserved_output_tokens,
@@ -1085,6 +1110,59 @@ def _input_admitted_capacity_decision(*, projected_items: int) -> CapacityDecisi
         blocking_resources=(CapacityResourceKind.EXTERNAL_IO,),
         reason="input token capacity unavailable",
     )
+
+
+def _prepare_capacity_window_exhaustion(
+    *,
+    account_capacities: tuple[LlmProviderAccountCapacity, ...],
+    active_model_ref: str,
+    reset_at: datetime,
+) -> CapacityWindowExhaustionSnapshot | None:
+    matching_accounts = tuple(
+        account
+        for account in account_capacities
+        if account.model_ref == active_model_ref
+    )
+    if not matching_accounts:
+        return None
+
+    exhausted_account = next(
+        (
+            account
+            for account in matching_accounts
+            if _exhausted_dimensions_from_account_capacity(account)
+        ),
+        matching_accounts[0],
+    )
+    exhausted_dimensions = _exhausted_dimensions_from_account_capacity(
+        exhausted_account,
+    )
+    if not exhausted_dimensions:
+        exhausted_dimensions = ("capacity_window",)
+
+    return CapacityWindowExhaustionSnapshot(
+        provider=exhausted_account.provider,
+        account_ref=exhausted_account.account_ref,
+        model_ref=exhausted_account.model_ref,
+        exhausted_reason="prepare_capacity_window_unavailable",
+        exhausted_dimensions=exhausted_dimensions,
+        reset_at=reset_at,
+    )
+
+
+def _exhausted_dimensions_from_account_capacity(
+    account: LlmProviderAccountCapacity,
+) -> tuple[str, ...]:
+    dimensions: list[str] = []
+    if account.remaining_minute_requests == 0:
+        dimensions.append("minute_requests")
+    if account.remaining_minute_tokens == 0:
+        dimensions.append("minute_tokens")
+    if account.remaining_daily_requests == 0:
+        dimensions.append("daily_requests")
+    if account.remaining_daily_tokens == 0:
+        dimensions.append("daily_tokens")
+    return tuple(dimensions)
 
 
 def _no_due_work_items_result(

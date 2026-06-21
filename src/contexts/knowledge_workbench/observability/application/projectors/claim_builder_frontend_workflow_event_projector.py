@@ -3,6 +3,9 @@ from __future__ import annotations
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.capacity_window_frontend_workflow_event_projector import (
+    CapacityWindowFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_all_sections_extracted_frontend_workflow_event_projector import (
     ClaimBuilderAllSectionsExtractedFrontendWorkflowEventProjector,
 )
@@ -33,6 +36,7 @@ class ClaimBuilderFrontendWorkflowEventProjector:
         self._capacity_observed = (
             LlmProviderCapacityObservedFrontendWorkflowEventProjector()
         )
+        self._capacity_window = CapacityWindowFrontendWorkflowEventProjector()
         self._section_outcome = (
             ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector()
         )
@@ -49,6 +53,9 @@ class ClaimBuilderFrontendWorkflowEventProjector:
         if projected is not None:
             return projected
         projected = self._capacity_observed.project(event)
+        if projected is not None:
+            return projected
+        projected = self._capacity_window.project(event)
         if projected is not None:
             return projected
         projected = self._section_outcome.project(event)

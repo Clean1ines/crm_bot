@@ -9,6 +9,13 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan im
     WorkItemRetryPlan,
 )
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
+    CLAIM_BUILDER_CANONICAL_PHASE,
+    CLAIM_BUILDER_PREPARE_OPERATION_KEY,
+    capacity_window_exhausted_event,
+    capacity_window_leased_work_item_event,
+    source_unit_ref_from_schedule_payload,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -48,6 +55,9 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import
 )
 from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
     WorkflowIdempotencyKey,
+)
+from src.interfaces.composition.lease_llm_admitted_work_items import (
+    LlmAdmittedLeasedWorkItem,
 )
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
@@ -192,6 +202,31 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
                     )
                 appended_event_count += 1
 
+            leased_items = typed_prepare_result.lease_result.leased
+            for leased_item, started_attempt in zip(
+                leased_items,
+                started_attempts,
+                strict=True,
+            ):
+                leased_event = _capacity_window_leased_work_item_event(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    leased_item=leased_item,
+                    started_attempt=started_attempt,
+                    lease_expires_at=prepare_command.lease_expires_at,
+                    occurred_at=occurred_at,
+                )
+                persisted_leased_event = (
+                    await workflow_unit_of_work.outbox.append_event(
+                        leased_event,
+                    )
+                )
+                if frontend_event_projection_writer is not None:
+                    await frontend_event_projection_writer.execute(
+                        persisted_leased_event,
+                    )
+                appended_event_count += 1
+
             next_commands = _execute_claim_builder_section_commands(
                 workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
@@ -226,6 +261,35 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
                 occurred_at=occurred_at,
             )
             if capacity_retry_at is not None:
+                capacity_window_exhaustion = (
+                    typed_prepare_result.capacity_window_exhaustion
+                )
+                if capacity_window_exhaustion is not None:
+                    exhausted_event = capacity_window_exhausted_event(
+                        workflow_run_id=workflow_run_id,
+                        exhaustion=capacity_window_exhaustion,
+                        operation_key=CLAIM_BUILDER_PREPARE_OPERATION_KEY,
+                        canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
+                        occurred_at=occurred_at,
+                        causation_command_id=workflow_command.command_id,
+                        correlation_id=(
+                            f"{capacity_window_exhaustion.provider}:"
+                            f"{capacity_window_exhaustion.account_ref}:"
+                            f"{capacity_window_exhaustion.model_ref}:"
+                            f"{capacity_retry_at.isoformat()}"
+                        ),
+                    )
+                    persisted_exhausted_event = (
+                        await workflow_unit_of_work.outbox.append_event(
+                            exhausted_event,
+                        )
+                    )
+                    if frontend_event_projection_writer is not None:
+                        await frontend_event_projection_writer.execute(
+                            persisted_exhausted_event,
+                        )
+                    appended_event_count += 1
+
                 await workflow_unit_of_work.timeline.append_entry(
                     _capacity_throttled_timeline_entry(
                         workflow_command=workflow_command,
@@ -793,6 +857,35 @@ def _metadata_text(
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"preflight metadata must include {key}")
     return value
+
+
+def _capacity_window_leased_work_item_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    leased_item: LlmAdmittedLeasedWorkItem,
+    started_attempt: object,
+    lease_expires_at: datetime,
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    dispatch_attempt_id = _attempt_text(started_attempt, "attempt_id")
+    work_item_id = _attempt_text(started_attempt, "work_item_id")
+    schedule_payload = leased_item.admitted_schedule_payload()
+    return capacity_window_leased_work_item_event(
+        workflow_run_id=workflow_run_id,
+        provider=leased_item.allocation.provider,
+        account_ref=leased_item.allocation.account_ref,
+        model_ref=leased_item.allocation.model_ref,
+        work_item_id=work_item_id,
+        dispatch_attempt_id=dispatch_attempt_id,
+        lease_expires_at=lease_expires_at,
+        selection_kind=leased_item.selection_kind,
+        occurred_at=occurred_at,
+        source_unit_ref=source_unit_ref_from_schedule_payload(schedule_payload),
+        causation_command_id=workflow_command.command_id,
+        operation_key=CLAIM_BUILDER_PREPARE_OPERATION_KEY,
+        canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
+    )
 
 
 def _claim_builder_dispatch_batch_prepared_event(

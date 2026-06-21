@@ -43,6 +43,9 @@ CLAIM_BUILDER_OUTCOME_PROJECTOR_PATH = (
     PROJECTORS_DIR
     / "claim_builder_section_outcome_frontend_workflow_event_projector.py"
 )
+CAPACITY_WINDOW_PROJECTOR_PATH = (
+    PROJECTORS_DIR / "capacity_window_frontend_workflow_event_projector.py"
+)
 RESUME_COMPOSITION_PATH = (
     ROOT
     / "src"
@@ -168,6 +171,41 @@ def test_item_retry_projection_does_not_own_capacity_reset_timing() -> None:
         '"reset_at"',
     ):
         assert forbidden_marker not in outcome
+
+
+def test_capacity_window_projection_boundary_is_passive_and_window_owned() -> None:
+    capacity_window = CAPACITY_WINDOW_PROJECTOR_PATH.read_text(encoding="utf-8")
+    claim_builder_router = (
+        PROJECTORS_DIR / "claim_builder_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert "workflow_capacity_window_exhausted" in capacity_window
+    assert "workflow_capacity_window_scheduled_wakeup" in capacity_window
+    assert "workflow_capacity_window_leased_work_item" in capacity_window
+    assert "CapacityWindowFrontendWorkflowEventProjector" in claim_builder_router
+
+    for forbidden_marker in (
+        'patch["next_attempt_at"]',
+        'patch["retry_owner"]',
+        'patch["work_item_retry_timer"]',
+    ):
+        assert forbidden_marker not in capacity_window
+    assert "_FORBIDDEN_CAPACITY_OVERLAY_FIELDS" in capacity_window
+
+
+def test_zero_dispatch_is_not_always_capacity_exhausted_in_prepare_handler() -> None:
+    prepare_handler = (
+        ROOT
+        / "src"
+        / "contexts"
+        / "knowledge_workbench"
+        / "application"
+        / "sagas"
+        / "handle_prepare_claim_builder_dispatch_batch_command.py"
+    ).read_text(encoding="utf-8")
+
+    assert "capacity_window_exhaustion is not None" in prepare_handler
+    assert "capacity_window_exhausted_event" in prepare_handler
 
 
 def test_compaction_and_curation_events_remain_future_projection_coverage() -> None:

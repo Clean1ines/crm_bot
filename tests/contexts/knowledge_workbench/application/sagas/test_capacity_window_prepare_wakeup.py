@@ -143,6 +143,12 @@ async def test_capacity_observation_appends_single_account_prepare_wakeup() -> N
 
     assert wakeup is not None
     assert len(fake_unit_of_work.command_log.pending_commands) == 1
+    assert wakeup.reset_at == _now() + timedelta(seconds=60)
+    assert wakeup.window_key == "groq:groq_org_2:qwen/qwen3-32b"
+    assert wakeup.prepare_command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+    )
+    assert wakeup.wakeup_reason == "provider_minute_reset"
     command = fake_unit_of_work.command_log.pending_commands[0]
     assert command.command_type == (
         KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value

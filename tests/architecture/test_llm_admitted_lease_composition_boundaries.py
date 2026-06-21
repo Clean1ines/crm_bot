@@ -53,6 +53,14 @@ def test_composition_does_not_call_provider_or_read_env() -> None:
         assert marker not in source
 
 
+def test_lease_composition_does_not_peek_due_work_items() -> None:
+    source = COMPOSITION_PATH.read_text(encoding="utf-8")
+
+    assert "peek_due_work_items" not in source
+    assert "pre_lease_due_records" in source
+    assert "llm_admitted_leased_work_item_from_pre_lease_status" in source
+
+
 def test_execution_runtime_still_does_not_import_llm_runtime() -> None:
     root = Path("src/contexts/execution_runtime")
     offenders: list[str] = []

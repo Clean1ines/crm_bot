@@ -1728,3 +1728,98 @@ def test_source_context_text_keeps_heading_path_for_validation() -> None:
     assert "Клиентский Telegram-бот нужен для первого контакта" in _source_context_text(
         dispatch_payload,
     )
+
+
+def _rate_limited_capacity_payload() -> dict[str, object]:
+    return {
+        **_capacity_payload(),
+        "remaining_minute_requests": 0,
+        "remaining_minute_tokens": 0,
+        "outcome_class": "rate_limited",
+    }
+
+
+@pytest.mark.asyncio
+async def test_provider_rate_limit_emits_capacity_window_exhausted() -> None:
+    result, _, _, workflow_unit_of_work, _ = await _execute(
+        execution_result=_execution_result_with_capacity(
+            _rate_limited_capacity_payload(),
+        ),
+    )
+
+    del result
+    exhausted_events = [
+        event
+        for event in workflow_unit_of_work.outbox.events
+        if event.event_type
+        == KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED.value
+    ]
+    assert len(exhausted_events) == 1
+    payload = exhausted_events[0].payload
+    assert payload["reset_at"]
+    assert payload["window_key"] == "groq:groq_org_primary:qwen/qwen3-32b"
+    assert "minute_requests" in payload["exhausted_dimensions"]
+    assert "next_attempt_at" not in payload
+    assert "retry_owner" not in payload
+
+
+@pytest.mark.asyncio
+async def test_provider_rate_limit_may_emit_capacity_window_scheduled_wakeup() -> None:
+    workflow_command = _workflow_command()
+    payload = dict(workflow_command.payload)
+    payload["scheduled_work_item_count"] = 3
+    workflow_command = WorkflowCommand(
+        command_id=workflow_command.command_id,
+        command_type=workflow_command.command_type,
+        workflow_run_id=workflow_command.workflow_run_id,
+        idempotency_key=workflow_command.idempotency_key,
+        payload=payload,
+        status=workflow_command.status,
+        run_after=workflow_command.run_after,
+        created_at=workflow_command.created_at,
+        updated_at=workflow_command.updated_at,
+    )
+
+    _, _, _, workflow_unit_of_work, _ = await _execute(
+        workflow_command=workflow_command,
+        execution_result=_execution_result_with_capacity(
+            _rate_limited_capacity_payload(),
+        ),
+    )
+
+    wakeup_events = [
+        event
+        for event in workflow_unit_of_work.outbox.events
+        if event.event_type
+        == KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_SCHEDULED_WAKEUP.value
+    ]
+    assert len(wakeup_events) == 1
+    wakeup_payload = wakeup_events[0].payload
+    assert wakeup_payload["run_after"]
+    assert wakeup_payload["reset_at"]
+    assert wakeup_payload["wakeup_reason"] == "provider_minute_reset"
+    assert "next_attempt_at" not in wakeup_payload
+    assert "retry_owner" not in wakeup_payload
+
+
+def _execution_result_with_capacity(
+    capacity_payload: dict[str, object],
+) -> ExecutePreparedLlmDispatchAttemptResult:
+    return ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+            finished_at=_finished_at(),
+            error_kind="rate_limited",
+            capacity_observation=capacity_payload,
+        ),
+        outcome_result=RecordWorkItemAttemptOutcomeResult(
+            work_item=WorkItem(
+                work_item_id=_work_item_id(),
+                work_kind=WorkKind(
+                    "knowledge_workbench.claim_builder.section_extraction"
+                ),
+                status=WorkItemStatus.RETRYABLE_FAILED,
+            )
+        ),
+    )

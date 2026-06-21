@@ -11,6 +11,18 @@ from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_bui
     HandlePrepareClaimBuilderDispatchBatchCommandHandler,
     HandlePrepareClaimBuilderDispatchBatchResult,
 )
+from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    LeasedWorkItemRecord,
+)
+from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
+from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
+    CapacityWindowExhaustionSnapshot,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -52,6 +64,15 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_consumer_ref im
 )
 from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
     WorkflowIdempotencyKey,
+)
+from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
+    LlmCapacityAllocationSlot,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    default_groq_llm_model_route_catalog,
+)
+from src.interfaces.composition.lease_llm_admitted_work_items import (
+    LlmAdmittedLeasedWorkItem,
 )
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
@@ -162,6 +183,47 @@ def _attempt(index: int) -> StartedLlmAdmittedAttempt:
     )
 
 
+def _leased_item(
+    attempt: StartedLlmAdmittedAttempt,
+    *,
+    selection_kind: str = "fresh",
+) -> LlmAdmittedLeasedWorkItem:
+    dispatch_payload = attempt.dispatch_payload
+    allocation_mapping = dispatch_payload["llm_allocation"]
+    assert isinstance(allocation_mapping, dict)
+    route_catalog = default_groq_llm_model_route_catalog()
+    model_ref = str(allocation_mapping["model_ref"])
+    schedule_payload = dispatch_payload["schedule_payload"]
+    assert isinstance(schedule_payload, dict)
+    return LlmAdmittedLeasedWorkItem(
+        leased=LeasedWorkItemRecord(
+            work_item=WorkItem(
+                work_item_id=attempt.work_item_id,
+                work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+                status=WorkItemStatus.LEASED,
+                attempt_count=1,
+                leased_by=WorkerRef("worker-1"),
+                lease_token=LeaseToken(f"lease:{attempt.work_item_id}"),
+                lease_expires_at=_now(),
+            ),
+            schedule_payload=schedule_payload,
+        ),
+        allocation=LlmCapacityAllocationSlot(
+            provider=str(allocation_mapping["provider"]),
+            account_ref=str(allocation_mapping["account_ref"]),
+            model_ref=model_ref,
+            slot_index=0,
+        ),
+        execution_settings=route_catalog.execution_settings_for_model_ref(model_ref),
+        selection_kind="retryable" if selection_kind == "retryable" else "fresh",
+    )
+
+
+@dataclass(slots=True)
+class FakeLeaseResultWrapper:
+    leased: tuple[LlmAdmittedLeasedWorkItem, ...]
+
+
 @dataclass(slots=True)
 class FakeAttemptResult:
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
@@ -169,6 +231,7 @@ class FakeAttemptResult:
 
 @dataclass(slots=True)
 class FakePrepareResult:
+    lease_result: FakeLeaseResultWrapper
     attempt_result: FakeAttemptResult
     affected_work_item_refs: tuple[str, ...] = ()
     source_unit_refs: tuple[str, ...] = ()
@@ -179,6 +242,7 @@ class FakePrepareResult:
     input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
     source_split_required: bool = False
     capacity_retry_at: datetime | None = None
+    capacity_window_exhaustion: CapacityWindowExhaustionSnapshot | None = None
 
 
 @dataclass(slots=True)
@@ -195,11 +259,23 @@ class FakePrepareLlmDispatchBatch:
     input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
     source_split_required: bool = False
     capacity_retry_at: datetime | None = None
+    capacity_window_exhaustion: CapacityWindowExhaustionSnapshot | None = None
+    selection_kinds: tuple[str, ...] = ("fresh", "fresh")
     calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
 
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
         self.calls.append(command)
+        leased_items = tuple(
+            _leased_item(
+                attempt,
+                selection_kind=self.selection_kinds[index]
+                if index < len(self.selection_kinds)
+                else "fresh",
+            )
+            for index, attempt in enumerate(self.started_attempts)
+        )
         return FakePrepareResult(
+            lease_result=FakeLeaseResultWrapper(leased=leased_items),
             attempt_result=FakeAttemptResult(
                 started_attempts=self.started_attempts,
             ),
@@ -212,6 +288,7 @@ class FakePrepareLlmDispatchBatch:
             ),
             source_split_required=self.source_split_required,
             capacity_retry_at=self.capacity_retry_at,
+            capacity_window_exhaustion=self.capacity_window_exhaustion,
         )
 
 
@@ -419,6 +496,8 @@ async def _execute(
     input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b",
     source_split_required: bool = False,
     capacity_retry_at: datetime | None = None,
+    capacity_window_exhaustion: CapacityWindowExhaustionSnapshot | None = None,
+    selection_kinds: tuple[str, ...] = ("fresh", "fresh"),
     frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
 ) -> tuple[
     HandlePrepareClaimBuilderDispatchBatchResult,
@@ -436,6 +515,8 @@ async def _execute(
         input_size_preflight_active_model_ref=input_size_preflight_active_model_ref,
         source_split_required=source_split_required,
         capacity_retry_at=capacity_retry_at,
+        capacity_window_exhaustion=capacity_window_exhaustion,
+        selection_kinds=selection_kinds,
     )
     workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
     result = await HandlePrepareClaimBuilderDispatchBatchCommandHandler().execute(
@@ -506,7 +587,7 @@ async def test_calls_existing_prepare_llm_dispatch_batch_for_claim_builder_work_
 async def test_appends_claim_builder_dispatch_batch_prepared_event() -> None:
     result, _, workflow_unit_of_work = await _execute()
 
-    assert result.appended_event_count == 3
+    assert result.appended_event_count == 5
     event = workflow_unit_of_work.outbox.events[0]
     assert (
         event.event_type
@@ -525,6 +606,8 @@ async def test_appends_claim_builder_dispatch_batch_prepared_event() -> None:
     ) == (
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value,
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value,
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_LEASED_WORK_ITEM.value,
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_LEASED_WORK_ITEM.value,
     )
     assert workflow_unit_of_work.outbox.events[1].payload["source_unit_ref"] == "unit-1"
     assert (
@@ -595,13 +678,23 @@ async def test_marks_prepare_completed_when_scheduled_work_has_no_due_items() ->
 @pytest.mark.asyncio
 async def test_reschedules_prepare_when_zero_attempts_are_capacity_throttled() -> None:
     retry_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    exhaustion = CapacityWindowExhaustionSnapshot(
+        provider="groq",
+        account_ref="groq_org_primary",
+        model_ref="qwen/qwen3-32b",
+        exhausted_reason="prepare_capacity_window_unavailable",
+        exhausted_dimensions=("minute_tokens",),
+        reset_at=retry_at,
+    )
 
     result, _, workflow_unit_of_work = await _execute(
         started_attempts=(),
         capacity_retry_at=retry_at,
+        capacity_window_exhaustion=exhaustion,
     )
 
     assert result.prepared_dispatch_count == 0
+    assert result.appended_event_count == 1
     assert result.appended_next_command_count == 0
     assert workflow_unit_of_work.command_log.failed_command_ids == []
     assert workflow_unit_of_work.command_log.completed_command_ids == []
@@ -907,7 +1000,7 @@ async def test_projects_claim_builder_dispatch_batch_prepared_event_once() -> No
         frontend_event_projection_writer=projection_writer,
     )
 
-    assert len(workflow_unit_of_work.outbox.events) == 3
+    assert len(workflow_unit_of_work.outbox.events) == 5
     assert len(repository.events) == 3
     projected = next(
         event
@@ -996,7 +1089,7 @@ async def test_handler_without_projection_writer_preserves_existing_behavior() -
     result, _, workflow_unit_of_work = await _execute()
 
     assert result.prepared_dispatch_count == 2
-    assert len(workflow_unit_of_work.outbox.events) == 3
+    assert len(workflow_unit_of_work.outbox.events) == 5
 
 
 def test_prepare_handler_projects_after_canonical_outbox_append() -> None:
@@ -1022,3 +1115,76 @@ def test_prepare_handler_does_not_touch_live_state_or_execution_paths() -> None:
         "frontend_workflow_events",
     ):
         assert forbidden_marker not in source
+
+
+@pytest.mark.asyncio
+async def test_emits_capacity_window_leased_with_selection_kind_per_item() -> None:
+    _, _, workflow_unit_of_work = await _execute(
+        selection_kinds=("fresh", "retryable"),
+    )
+
+    leased_events = [
+        event
+        for event in workflow_unit_of_work.outbox.events
+        if event.event_type
+        == KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_LEASED_WORK_ITEM.value
+    ]
+    assert len(leased_events) == 2
+    assert leased_events[0].payload["selection_kind"] == "fresh"
+    assert leased_events[1].payload["selection_kind"] == "retryable"
+    assert leased_events[0].payload["window_key"] == (
+        "groq:groq_org_primary:qwen/qwen3-32b"
+    )
+    assert leased_events[0].payload["lease_expires_at"]
+    assert "next_attempt_at" not in leased_events[0].payload
+    assert "retry_owner" not in leased_events[0].payload
+
+
+@pytest.mark.asyncio
+async def test_zero_dispatch_without_capacity_exhaustion_does_not_emit_exhausted() -> (
+    None
+):
+    _, _, workflow_unit_of_work = await _execute(started_attempts=())
+
+    exhausted_events = [
+        event
+        for event in workflow_unit_of_work.outbox.events
+        if event.event_type
+        == KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED.value
+    ]
+    assert exhausted_events == []
+
+
+@pytest.mark.asyncio
+async def test_capacity_throttled_zero_dispatch_emits_capacity_window_exhausted() -> (
+    None
+):
+    retry_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    exhaustion = CapacityWindowExhaustionSnapshot(
+        provider="groq",
+        account_ref="groq_org_primary",
+        model_ref="qwen/qwen3-32b",
+        exhausted_reason="prepare_capacity_window_unavailable",
+        exhausted_dimensions=("minute_tokens",),
+        reset_at=retry_at,
+    )
+
+    _, _, workflow_unit_of_work = await _execute(
+        started_attempts=(),
+        capacity_retry_at=retry_at,
+        capacity_window_exhaustion=exhaustion,
+    )
+
+    exhausted_events = [
+        event
+        for event in workflow_unit_of_work.outbox.events
+        if event.event_type
+        == KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED.value
+    ]
+    assert len(exhausted_events) == 1
+    payload = exhausted_events[0].payload
+    assert payload["reset_at"] == retry_at.isoformat()
+    assert payload["exhausted_dimensions"] == ["minute_tokens"]
+    assert "next_attempt_at" not in payload
+    assert "retry_owner" not in payload
+    assert "work_item_retry_timer" not in payload

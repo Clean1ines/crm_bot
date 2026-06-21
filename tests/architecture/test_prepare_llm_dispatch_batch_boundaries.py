@@ -112,6 +112,16 @@ def test_prepare_batch_uses_active_model_selector() -> None:
         assert marker in source
 
 
+def test_prepare_hot_path_carries_selection_kind_from_admitted_candidate() -> None:
+    source = COMPOSITION_PATH.read_text(encoding="utf-8")
+
+    assert "LeaseLlmAdmittedWorkItems(" not in source
+    assert "_lease_input_admitted_work_items" in source
+    assert "llm_admitted_leased_work_item_from_pre_lease_status" in source
+    assert "candidate.record.work_item.status" in source
+    assert source.count("peek_due_work_items") == 2
+
+
 def test_prepare_batch_does_not_depend_on_direct_projector() -> None:
     source = Path("src/interfaces/composition/prepare_llm_dispatch_batch.py").read_text(
         encoding="utf-8",
