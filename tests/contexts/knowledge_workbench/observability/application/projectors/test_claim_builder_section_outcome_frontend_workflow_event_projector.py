@@ -75,6 +75,8 @@ def _extracted_payload() -> dict[str, object]:
         "actual_total_tokens": 15,
         "persisted_draft_claim_count": 1,
         "validated_claim_count": 1,
+        "validation_decision": "VALID_CLAIMS",
+        "claim_builder_attempt_next_action_kind": "PERSIST_VALID_CLAIMS",
     }
 
 
@@ -152,6 +154,24 @@ def test_projects_extracted_to_versioned_envelope() -> None:
         projected.payload["targeted_read_kind"]
         == "draft_claims_by_work_item_or_source_unit"
     )
+    attempt_outcome = projected.payload["attempt_outcome"]
+    assert isinstance(attempt_outcome, dict)
+    assert attempt_outcome["attempt_scope"]["dispatch_attempt_id"] == (
+        "work-1:attempt:1"
+    )
+    assert attempt_outcome["provider_outcome"]["provider_status"] == "succeeded"
+    assert attempt_outcome["provider_outcome"]["actual_total_tokens"] == 15
+    assert (
+        attempt_outcome["validation_outcome"]["validation_status"]
+        == "passed_valid_claims"
+    )
+    assert attempt_outcome["persistence_outcome"]["persistence_status"] == "persisted"
+    assert attempt_outcome["targeted_read_hint"]["available"] is True
+    assert (
+        attempt_outcome["targeted_read_hint"]["targeted_read_kind"]
+        == "draft_claims_by_work_item_or_source_unit"
+    )
+    assert attempt_outcome["work_item_outcome"]["final_work_item_status"] == "completed"
 
 
 def test_projects_item_owned_retryable_failed_to_versioned_envelope() -> None:
@@ -175,6 +195,24 @@ def test_projects_item_owned_retryable_failed_to_versioned_envelope() -> None:
     assert "DEFER_UNTIL_CAPACITY_RESET" not in projected.payload.values()
     assert projected.payload["work_item_state"] == "retryable_failed"
     assert projected.payload["retry_driver"] == "capacity_window_admission"
+    attempt_outcome = projected.payload["attempt_outcome"]
+    assert isinstance(attempt_outcome, dict)
+    assert attempt_outcome["provider_outcome"]["provider_status"] == "succeeded"
+    assert (
+        attempt_outcome["validation_outcome"]["validation_status"] == "failed_retryable"
+    )
+    assert (
+        attempt_outcome["validation_outcome"]["validation_failure_reason"]
+        == "INVALID_JSON_RETRY_REQUIRED"
+    )
+    assert (
+        attempt_outcome["work_item_outcome"]["retry_eligibility"]
+        == "eligible_for_future_admission"
+    )
+    assert (
+        attempt_outcome["work_item_outcome"]["retry_driver"]
+        == "capacity_window_admission"
+    )
 
 
 def test_capacity_owned_minute_limit_retryable_failed_is_not_projected() -> None:
@@ -225,6 +263,129 @@ def test_projects_terminal_failed_to_versioned_envelope() -> None:
     assert projected.payload["validation_failure_reason"] == "CLAIM_FIELD_SET_INVALID"
     assert projected.payload["work_item_state"] == "terminal_failed"
     assert projected.payload["retry_eligibility"] == "not_eligible"
+    attempt_outcome = projected.payload["attempt_outcome"]
+    assert isinstance(attempt_outcome, dict)
+    assert (
+        attempt_outcome["validation_outcome"]["validation_status"] == "failed_terminal"
+    )
+    assert (
+        attempt_outcome["work_item_outcome"]["final_work_item_status"]
+        == "terminal_failed"
+    )
+    assert attempt_outcome["work_item_outcome"]["retry_eligibility"] == "not_eligible"
+
+
+def test_valid_empty_accepted_is_visible_as_attempt_outcome() -> None:
+    payload = {
+        **_extracted_payload(),
+        "persisted_draft_claim_count": 0,
+        "validated_claim_count": 0,
+        "validation_decision": "VALID_EMPTY",
+        "claim_builder_attempt_next_action_kind": "ACCEPT_VALID_EMPTY",
+    }
+    projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value
+            ),
+            payload=payload,
+        )
+    )
+
+    assert projected is not None
+    attempt_outcome = projected.payload["attempt_outcome"]
+    assert isinstance(attempt_outcome, dict)
+    assert (
+        attempt_outcome["validation_outcome"]["validation_status"]
+        == "passed_valid_empty"
+    )
+    assert attempt_outcome["validation_outcome"]["valid_empty_accepted"] is True
+    assert attempt_outcome["persistence_outcome"]["persistence_status"] == "skipped"
+    assert attempt_outcome["persistence_outcome"]["draft_claims_available"] is False
+    assert attempt_outcome["targeted_read_hint"]["available"] is False
+
+
+def test_truncated_output_retry_is_visible_in_attempt_outcome() -> None:
+    payload = {
+        **_item_owned_retryable_failed_payload(),
+        "error_kind": "claim_builder_output_validation_failed",
+        "validation_failure_reason": "OUTPUT_TRUNCATED_RETRY_REQUIRED",
+        "claim_builder_attempt_next_action_kind": "RETRY_LARGER_OUTPUT_LIMIT_MODEL",
+        "claim_builder_attempt_next_action_reason": "output_truncated",
+        "claim_builder_attempt_outcome_kind": "RETRY_LARGER_OUTPUT_LIMIT_MODEL",
+    }
+    projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
+            ),
+            payload=payload,
+        )
+    )
+
+    assert projected is not None
+    attempt_outcome = projected.payload["attempt_outcome"]
+    assert isinstance(attempt_outcome, dict)
+    assert attempt_outcome["provider_outcome"]["provider_status"] == "succeeded"
+    assert (
+        attempt_outcome["validation_outcome"]["validation_next_action"]
+        == "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
+    )
+    assert attempt_outcome["validation_outcome"]["output_truncated"] is True
+
+
+def test_network_failure_is_provider_failure_with_passive_retryability() -> None:
+    payload = {
+        **_item_owned_retryable_failed_payload(),
+        "error_kind": "network_error",
+        "validation_failure_reason": None,
+        "claim_builder_attempt_next_action_kind": "RETRY_SAME_MODEL",
+        "claim_builder_attempt_next_action_reason": "network_error",
+    }
+    projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
+            ),
+            payload=payload,
+        )
+    )
+
+    assert projected is not None
+    attempt_outcome = projected.payload["attempt_outcome"]
+    assert isinstance(attempt_outcome, dict)
+    assert attempt_outcome["provider_outcome"]["provider_status"] == "failed"
+    assert attempt_outcome["provider_outcome"]["provider_error_kind"] == "network_error"
+    assert attempt_outcome["validation_outcome"]["validation_status"] == "not_run"
+    assert (
+        attempt_outcome["work_item_outcome"]["retry_eligibility"]
+        == "eligible_for_future_admission"
+    )
+
+
+def test_attempt_outcome_excludes_forbidden_retry_timer_fields() -> None:
+    projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
+            ),
+            payload=_item_owned_retryable_failed_payload(),
+        )
+    )
+
+    assert projected is not None
+    attempt_outcome = projected.payload["attempt_outcome"]
+    assert isinstance(attempt_outcome, dict)
+    forbidden_keys = {
+        "retry_owner",
+        "work_item_retry_timer",
+        "provider reset as item retry",
+        "capacity_retry_at",
+    }
+    assert forbidden_keys.isdisjoint(attempt_outcome.keys())
+    for nested_value in attempt_outcome.values():
+        if isinstance(nested_value, dict):
+            assert forbidden_keys.isdisjoint(nested_value.keys())
 
 
 def test_deferred_event_type_is_not_projected() -> None:

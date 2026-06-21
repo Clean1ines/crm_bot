@@ -176,6 +176,66 @@ CapacityWindow owns provider/account/model reset, wakeup and admission. WorkItem
 does not own provider reset and must not expose provider/account/model reset as item
 retry countdown.
 
+
+## 2.2 Patch 17E Claim-builder attempt outcome visibility
+
+Patch 17E prepares the claim-builder attempt outcome visibility contract for this
+frontend shape:
+
+```text
+SourceUnit surface
+└── WorkItem overlay
+    └── Attempts list
+```
+
+Existing section outcome projections remain the primary owners of the
+SourceUnit/WorkItem overlay transition:
+
+| projection | Overlay meaning |
+| --- | --- |
+| `workflow_claim_builder_section_extracted` | SourceUnit/WorkItem completed. |
+| `workflow_claim_builder_section_retryable_failed` | WorkItem became passive retryable eligibility. |
+| `workflow_claim_builder_section_terminal_failed` | WorkItem reached terminal failed state. |
+
+Patch 17E does not add new provider/validation/persistence canonical events and
+does not add `ProviderRequestStarted`, `ProviderExecutionCompleted`,
+`OutputValidationCompleted`, `DraftClaimsPersisted` or
+`DraftClaimsPersistenceFailed`. The current durable boundary already emits final
+claim-builder outcome events after provider execution, output validation,
+persistence decision and WorkItem lifecycle classification are known.
+
+The desired future fanout projection type is:
+
+```text
+workflow_claim_builder_attempt_outcome_classified
+```
+
+However, the current projection writer persists one `FrontendWorkflowEvent | None`
+per canonical `WorkflowEvent`; fanout is not changed in Patch 17E. Therefore 17E
+uses projection-only enrichment of the existing section outcome projections with
+an `attempt_outcome` block. A later projection fanout migration can split that
+same block into `workflow_claim_builder_attempt_outcome_classified` without moving
+SourceUnit/WorkItem overlay ownership.
+
+The `attempt_outcome` block is an append/update payload for a DispatchAttempt
+history row. It contains:
+
+| block | Meaning |
+| --- | --- |
+| `attempt_scope` | `workflow_run_id`, `source_document_ref`, `source_unit_ref`, `work_item_id`, `dispatch_attempt_id` and available operation/phase fields. |
+| `provider_outcome` | Provider status, provider/account/model, token usage and provider error kind when available. Provider success does not imply task success. |
+| `validation_outcome` | Validation status, decision, failure reason, next action, claim count, truncated-output marker and valid-empty acceptance. |
+| `persistence_outcome` | Persisted/skipped/not-applicable status, persisted draft claim count, draft-claims availability and targeted read scope when available. |
+| `work_item_outcome` | Attempt-row annotation of completed/retryable/terminal WorkItem result. Existing section projections still own the overlay transition. |
+| `capacity_annotation` | Non-timer capacity correlation such as provider/account/model window key when available. |
+| `targeted_read_hint` | Patch 17B workflow-scoped draft-claims targeted read parameters for successful persisted claims. |
+
+Attempt outcome visibility keeps Patch 17C ownership rules: provider/account/model
+reset remains CapacityWindow-owned, `RETRYABLE` means
+`eligible_for_future_admission`, and the attempt history payload must not expose
+`retry_owner`, `work_item_retry_timer`, provider reset as item retry, or
+`_validated_claims`.
+
 ## 3. Canonical workflow phases
 
 Источник:

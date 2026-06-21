@@ -46,6 +46,18 @@ CLAIM_BUILDER_OUTCOME_PROJECTOR_PATH = (
 CAPACITY_WINDOW_PROJECTOR_PATH = (
     PROJECTORS_DIR / "capacity_window_frontend_workflow_event_projector.py"
 )
+PROJECT_FRONTEND_WORKFLOW_EVENT_PATH = (
+    PROJECTORS_DIR / "project_frontend_workflow_event.py"
+)
+WORKFLOW_DEFINITION_PATH = (
+    ROOT
+    / "src"
+    / "contexts"
+    / "knowledge_workbench"
+    / "application"
+    / "sagas"
+    / "knowledge_extraction_workflow_definition.py"
+)
 RESUME_COMPOSITION_PATH = (
     ROOT
     / "src"
@@ -155,7 +167,14 @@ def test_early_claim_builder_projection_contract_is_not_count_only() -> None:
     assert 'targeted_read_kind": "draft_claims_by_work_item_or_source_unit"' in outcome
     assert "eligible_for_future_admission" in outcome
     assert "capacity_window_admission" in outcome
+    assert "attempt_outcome" in outcome
+    assert "provider_outcome" in outcome
+    assert "validation_outcome" in outcome
+    assert "persistence_outcome" in outcome
+    assert "work_item_outcome" in outcome
+    assert "targeted_read_hint" in outcome
     assert "retry_owner" not in outcome
+    assert "_validated_claims" not in outcome
 
 
 def test_item_retry_projection_does_not_own_capacity_reset_timing() -> None:
@@ -206,6 +225,35 @@ def test_zero_dispatch_is_not_always_capacity_exhausted_in_prepare_handler() -> 
 
     assert "capacity_window_exhaustion is not None" in prepare_handler
     assert "capacity_window_exhausted_event" in prepare_handler
+
+
+def test_attempt_outcome_visibility_uses_existing_projection_single_event_contract() -> (
+    None
+):
+    outcome = CLAIM_BUILDER_OUTCOME_PROJECTOR_PATH.read_text(encoding="utf-8")
+    projector_writer = PROJECT_FRONTEND_WORKFLOW_EVENT_PATH.read_text(encoding="utf-8")
+
+    assert "attempt_outcome" in outcome
+    assert "workflow_claim_builder_attempt_outcome_classified" not in outcome
+    assert (
+        "def project(self, event: WorkflowEvent) -> FrontendWorkflowEvent | None"
+        in (projector_writer)
+    )
+    assert "repository.append(projected)" in projector_writer
+
+
+def test_attempt_outcome_visibility_does_not_add_provider_validation_persistence_events() -> (
+    None
+):
+    workflow_definition = WORKFLOW_DEFINITION_PATH.read_text(encoding="utf-8")
+    for forbidden_event in (
+        "ProviderRequestStarted",
+        "ProviderExecutionCompleted",
+        "OutputValidationCompleted",
+        "DraftClaimsPersisted",
+        "DraftClaimsPersistenceFailed",
+    ):
+        assert forbidden_event not in workflow_definition
 
 
 def test_compaction_and_curation_events_remain_future_projection_coverage() -> None:
