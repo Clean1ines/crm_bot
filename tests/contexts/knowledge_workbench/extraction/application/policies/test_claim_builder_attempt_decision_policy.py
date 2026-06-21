@@ -14,6 +14,7 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 )
 
 
+SOURCE_UNIT_REF = "source-unit:workflow-1:section-1"
 SOURCE_UNIT_TEXT = "Product System turns documents into knowledge. Цены не описаны."
 
 
@@ -25,7 +26,6 @@ def _valid_payload() -> dict[str, object]:
                 "granularity": "atomic",
                 "possible_questions": ["Что делает Product System?"],
                 "exclusion_scope": "Цены не описаны.",
-                "evidence_block": "Product System turns documents into knowledge.",
             }
         ]
     }
@@ -40,6 +40,7 @@ def _validation(
         ValidateClaimBuilderOutputCommand(
             output_payload=payload,
             source_unit_text=SOURCE_UNIT_TEXT,
+            source_unit_ref=SOURCE_UNIT_REF,
             empty_claims_attempt_count=empty_claims_attempt_count,
         )
     )
@@ -72,7 +73,7 @@ def test_empty_raw_output_retries_same_model() -> None:
         _command(output_payload=None, raw_output_text=""),
     )
 
-    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL
+    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE
     assert decision.next_model_strategy is ClaimBuilderNextModelStrategy.SAME_MODEL
     assert decision.retry_recommended is True
 
@@ -84,7 +85,7 @@ def test_invalid_json_marker_retries_same_model() -> None:
         _command(validation_result=validation_result),
     )
 
-    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL
+    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE
     assert decision.validation_failure_reason is (
         ClaimBuilderOutputValidationFailureReason.CLAIMS_MISSING
     )
@@ -111,9 +112,9 @@ def test_empty_claims_first_time_retries_same_model() -> None:
         _command(validation_result=_validation({"claims": []})),
     )
 
-    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL
+    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE
     assert decision.validation_decision is (
-        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL
+        ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE
     )
     assert decision.next_model_strategy is ClaimBuilderNextModelStrategy.SAME_MODEL
 
@@ -163,7 +164,6 @@ def test_latin_evidence_failure_retries_with_exact_reason() -> None:
                     "granularity": "atomic",
                     "possible_questions": ["Что делает Product System?"],
                     "exclusion_scope": "Цены не описаны.",
-                    "evidence_block": "Product System turns documents into knowledge.",
                 }
             ]
         }
@@ -173,7 +173,7 @@ def test_latin_evidence_failure_retries_with_exact_reason() -> None:
         _command(validation_result=validation_result),
     )
 
-    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL
+    assert decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE
     assert decision.validation_failure_reason is (
         ClaimBuilderOutputValidationFailureReason.LATIN_TEXT_NOT_SUPPORTED_BY_EVIDENCE
     )

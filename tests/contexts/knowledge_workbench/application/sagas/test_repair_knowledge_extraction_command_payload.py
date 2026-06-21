@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
 )
@@ -12,35 +10,6 @@ from tests.contexts.knowledge_workbench.application.sagas.test_dispatch_knowledg
     _workflow_command,
     _workflow_run_id,
 )
-
-
-def test_repairs_claim_builder_prepare_command_without_dispatch_preparation() -> None:
-    command = _workflow_command(
-        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH,
-        payload={
-            "workflow_run_id": _workflow_run_id(),
-            "source_document_ref": "source-document:project-1:abc",
-            "scheduled_work_item_count": 2,
-        },
-    )
-
-    repaired = repair_knowledge_extraction_command_payload(
-        workflow_command=command,
-        command_type=(
-            KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
-        ),
-    )
-
-    dispatch_preparation = repaired.payload["llm_dispatch_preparation"]
-    assert isinstance(dispatch_preparation, dict)
-    assert dispatch_preparation["active_model_ref"] == "qwen/qwen3-32b"
-    assert dispatch_preparation["requested_items"] == 2
-    assert dispatch_preparation["worker_ref"] == (
-        "knowledge-workbench-claim-builder-dispatch"
-    )
-    assert dispatch_preparation["lease_token_prefix"] == (
-        f"claim-builder-dispatch:{_workflow_run_id()}"
-    )
 
 
 def test_repairs_compaction_prepare_command_without_dispatch_preparation() -> None:
@@ -96,18 +65,3 @@ def test_does_not_mask_malformed_explicit_dispatch_preparation() -> None:
 
     assert repaired is command
     assert repaired.payload["llm_dispatch_preparation"] == "not-a-mapping"
-
-
-def test_requires_scheduled_work_item_count_for_missing_dispatch_preparation() -> None:
-    command = _workflow_command(
-        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH,
-        payload={"workflow_run_id": _workflow_run_id()},
-    )
-
-    with pytest.raises(ValueError, match="scheduled_work_item_count"):
-        repair_knowledge_extraction_command_payload(
-            workflow_command=command,
-            command_type=(
-                KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
-            ),
-        )

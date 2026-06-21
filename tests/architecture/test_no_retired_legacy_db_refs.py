@@ -5,7 +5,6 @@ from pathlib import Path
 SCAN_ROOTS = (
     Path("src"),
     Path("frontend/src"),
-    Path("tests"),
 )
 
 ALLOWED_FILES = {

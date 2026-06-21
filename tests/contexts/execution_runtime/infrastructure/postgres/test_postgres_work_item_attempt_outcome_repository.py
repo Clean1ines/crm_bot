@@ -203,13 +203,13 @@ async def test_retryable_failed_updates_attempt_and_moves_work_item_to_retryable
             outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
             error_kind="rate_limit",
             next_attempt_at=_next_attempt_at(),
-            retry_plan=WorkItemRetryPlan.RETRY_OTHER_ORG,
+            retry_plan=WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE,
         ),
     )
 
     assert work_item.status is WorkItemStatus.RETRYABLE_FAILED
     assert work_item.last_error_kind == "rate_limit"
-    assert work_item.retry_plan is WorkItemRetryPlan.RETRY_OTHER_ORG
+    assert work_item.retry_plan is WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE
     assert _attempt_update_args(connection)[2:5] == (
         "retryable_failed",
         "rate_limit",
@@ -219,7 +219,7 @@ async def test_retryable_failed_updates_attempt_and_moves_work_item_to_retryable
     assert work_item_args[1] == "retryable_failed"
     assert work_item_args[6] == _next_attempt_at()
     assert work_item_args[7] == "rate_limit"
-    assert work_item_args[8] == WorkItemRetryPlan.RETRY_OTHER_ORG.value
+    assert work_item_args[8] == WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE.value
 
 
 @pytest.mark.asyncio
@@ -259,13 +259,13 @@ async def test_deferred_updates_attempt_and_next_attempt_at() -> None:
             outcome_status=WorkItemAttemptOutcomeStatus.DEFERRED,
             error_kind="quota_wait",
             next_attempt_at=_next_attempt_at(),
-            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
+            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
         ),
     )
 
     assert work_item.status is WorkItemStatus.RETRYABLE_FAILED
     assert work_item.last_error_kind == "quota_wait"
-    assert work_item.retry_plan is WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
+    assert work_item.retry_plan is WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW
     assert _attempt_update_args(connection)[2:5] == (
         "deferred",
         "quota_wait",
@@ -275,7 +275,7 @@ async def test_deferred_updates_attempt_and_next_attempt_at() -> None:
     assert work_item_args[1] == "retryable_failed"
     assert work_item_args[6] == _next_attempt_at()
     assert work_item_args[7] == "quota_wait"
-    assert work_item_args[8] == WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW.value
+    assert work_item_args[8] == WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW.value
 
 
 @pytest.mark.asyncio

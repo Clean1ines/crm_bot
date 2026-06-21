@@ -43,6 +43,7 @@ class FakeConnection:
     def __init__(self) -> None:
         self.rows_by_event_id: dict[str, dict[str, object]] = {}
         self.next_sequence_number = 1
+        self.notifications: list[tuple[str, str]] = []
 
     async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
         if "INSERT INTO workflow_runtime_outbox_events" in query:
@@ -67,6 +68,12 @@ class FakeConnection:
             return self.rows_by_event_id.get(_arg_str(args, 0))
 
         raise AssertionError(query)
+
+    async def execute(self, query: str, *args: object) -> str:
+        if "pg_notify" not in query:
+            raise AssertionError(query)
+        self.notifications.append((_arg_str(args, 0), _arg_str(args, 1)))
+        return "SELECT 1"
 
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
         if "FROM workflow_runtime_outbox_events" not in query:

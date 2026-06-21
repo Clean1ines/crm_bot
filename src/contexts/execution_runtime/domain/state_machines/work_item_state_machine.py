@@ -88,7 +88,7 @@ class WorkItemStateMachine:
             lease_expires_at=None,
             next_attempt_at=wait_until,
             last_error_kind=error_kind,
-            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
+            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
         )
 
     @staticmethod
@@ -97,7 +97,7 @@ class WorkItemStateMachine:
         *,
         error_kind: str,
         next_attempt_at: WaitUntil | None,
-        retry_plan: WorkItemRetryPlan = WorkItemRetryPlan.RETRY_SAME_MODEL,
+        retry_plan: WorkItemRetryPlan = WorkItemRetryPlan.RETRY_SAME_ROUTE,
     ) -> WorkItem:
         WorkItemStateMachine._require_leased(item, "mark retryable failed")
         if not error_kind or not error_kind.strip():
@@ -235,7 +235,7 @@ class WorkItemStateMachine:
             lease_expires_at=None,
             next_attempt_at=wait_until,
             last_error_kind=reason,
-            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
+            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
         )
 
     @staticmethod

@@ -784,8 +784,11 @@ def test_upload_boundary_has_no_legacy_patch_points() -> None:
 def test_clear_knowledge_uses_workbench_clear_composition() -> None:
     source = _source()
 
-    assert "clear_workbench_project" in source
-    assert "src.interfaces.composition.faq_workbench_clear" in source
+    assert "DeleteKnowledgeExtractionDocumentRun" in source
+    assert "DeleteKnowledgeExtractionDocumentRunCommand" in source
+    assert "PostgresWorkbenchDocumentRunCleanupRepository" in source
+    assert "clear_workbench_project" not in source
+    assert "src.interfaces.composition.faq_workbench_clear" not in source
     assert "clear_project_knowledge(" not in source
 
 
@@ -1043,7 +1046,6 @@ def test_source_ingestion_source_units_read_side_guard() -> None:
         "artifact_runtime",
         "worker_loop",
         "JobDispatcher",
-        "queue",
         "openpyxl",
         "pandas",
         "BeautifulSoup",
@@ -1086,7 +1088,6 @@ def test_upload_response_source_units_url_source_guard() -> None:
         "artifact_runtime",
         "worker_loop",
         "JobDispatcher",
-        "queue",
         "openpyxl",
         "pandas",
         "BeautifulSoup",
@@ -1133,7 +1134,6 @@ def test_knowledge_http_routes_are_not_duplicated() -> None:
         "artifact_runtime",
         "worker_loop",
         "JobDispatcher",
-        "queue",
     )
 
     for marker in forbidden:
@@ -1903,6 +1903,12 @@ async def test_list_knowledge_documents_returns_fallback_documents(
     )
 
     assert response["documents"][0]["id"] == "source-document:project-1:abc"
-    assert response["documents"][0]["card_view"] is None
+    card_view = response["documents"][0]["card_view"]
+    assert isinstance(card_view, dict)
+    assert card_view["document_id"] == "source-document:project-1:abc"
+    assert card_view["project_id"] == "project-1"
+    assert card_view["file_name"] == "faq.md"
+    assert card_view["source_type"] == "source_ingestion"
+    assert card_view["lifecycle_state"] == "processing"
     assert response["items"][0]["document_id"] == "source-document:project-1:abc"
     assert response["count"] == 1

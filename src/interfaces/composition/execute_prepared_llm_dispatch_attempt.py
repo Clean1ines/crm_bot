@@ -410,14 +410,14 @@ def _retry_plan_for_result(
 
     error_kind = llm_result.error_kind
     if error_kind == "request_too_large":
-        return WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL
+        return WorkItemRetryPlan.RETRY_LARGER_INPUT_LIMIT_ROUTE
     if error_kind == "output_too_large":
-        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL
+        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_LIMIT_ROUTE
     if error_kind == "daily_limit":
-        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL
+        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE
     if error_kind == "minute_limit":
-        return WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
-    return WorkItemRetryPlan.RETRY_SAME_MODEL
+        return WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW
+    return WorkItemRetryPlan.RETRY_SAME_ROUTE
 
 
 def _retry_plan_from_validation_metadata(
@@ -427,22 +427,22 @@ def _retry_plan_from_validation_metadata(
         return None
 
     next_action_kind = validation_metadata.get("claim_builder_attempt_next_action_kind")
-    if next_action_kind == "RETRY_SAME_MODEL":
-        return WorkItemRetryPlan.RETRY_SAME_MODEL
+    if next_action_kind == "RETRY_SAME_ROUTE":
+        return WorkItemRetryPlan.RETRY_SAME_ROUTE
     if next_action_kind == "RETRY_EMPTY_CLAIMS_CHECK_MODEL":
-        return WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL
+        return WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE
     if next_action_kind == "RETRY_FALLBACK_MODEL":
-        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL
+        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE
     if next_action_kind == "RETRY_LARGER_OUTPUT_LIMIT_MODEL":
-        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL
+        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_LIMIT_ROUTE
     if next_action_kind == "RETRY_LARGER_INPUT_LIMIT_MODEL":
-        return WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL
+        return WorkItemRetryPlan.RETRY_LARGER_INPUT_LIMIT_ROUTE
     if next_action_kind == "DEFER_UNTIL_CAPACITY_RESET":
-        return WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
+        return WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW
     if next_action_kind == "PAUSE_FOR_DAILY_LIMIT_RESET":
-        return WorkItemRetryPlan.WAIT_DAILY_CAPACITY_RESET
-    if next_action_kind == "SPLIT_SOURCE_UNIT":
-        return WorkItemRetryPlan.SPLIT_SOURCE_UNIT
+        return WorkItemRetryPlan.WAIT_DAILY_ADMISSION_RESET
+    if next_action_kind == "SPLIT_WORK_PAYLOAD":
+        return WorkItemRetryPlan.SPLIT_WORK_PAYLOAD
     if next_action_kind == "TERMINAL_FAILURE":
         return WorkItemRetryPlan.TERMINAL
     return None

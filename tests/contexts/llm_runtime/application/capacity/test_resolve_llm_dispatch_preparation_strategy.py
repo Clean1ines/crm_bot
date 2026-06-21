@@ -89,20 +89,20 @@ def test_no_strategy_keeps_active_model_ref() -> None:
     assert result.strategy_applied is None
 
 
-def test_retry_same_model_keeps_active_model_ref() -> None:
-    result = _resolver().execute(_command("RETRY_SAME_MODEL"))
+def test_retry_same_route_keeps_active_model_ref() -> None:
+    result = _resolver().execute(_command("RETRY_SAME_ROUTE"))
 
     assert result.active_model_ref == _primary_model_ref()
-    assert result.strategy_applied == "RETRY_SAME_MODEL"
+    assert result.strategy_applied == "RETRY_SAME_ROUTE"
 
 
 def test_retry_plan_same_model_keeps_active_model_ref() -> None:
     result = _resolver().execute(
-        _retry_plan_command(WorkItemRetryPlan.RETRY_SAME_MODEL),
+        _retry_plan_command(WorkItemRetryPlan.RETRY_SAME_ROUTE),
     )
 
     assert result.active_model_ref == _primary_model_ref()
-    assert result.strategy_applied == WorkItemRetryPlan.RETRY_SAME_MODEL.value
+    assert result.strategy_applied == WorkItemRetryPlan.RETRY_SAME_ROUTE.value
 
 
 def test_same_model_marker_keeps_active_model_ref() -> None:
@@ -125,12 +125,12 @@ def test_retry_plan_empty_claims_check_resolves_first_automatic_fallback_model()
     None
 ):
     result = _resolver().execute(
-        _retry_plan_command(WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL),
+        _retry_plan_command(WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE),
     )
 
     assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == (
-        WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL.value
+        WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE.value
     )
 
 
@@ -320,9 +320,9 @@ def test_retry_plan_daily_limit_fallback_skips_openai_gpt_oss() -> None:
         ResolveLlmDispatchPreparationStrategyCommand(
             current_active_model_ref="qwen/qwen3-32b",
             route_catalog=default_groq_llm_model_route_catalog(),
-            retry_plan=WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL,
+            retry_plan=WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE,
         )
     )
 
     assert result.active_model_ref == "llama-3.3-70b-versatile"
-    assert result.strategy_applied == WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL.value
+    assert result.strategy_applied == WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE.value

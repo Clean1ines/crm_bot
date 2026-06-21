@@ -84,12 +84,12 @@ class PostgresClaimBuilderRetryActionReadRepository(
 
 def _retry_action_values() -> list[str]:
     return [
-        ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value,
+        ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE.value,
         ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value,
-        ClaimBuilderAttemptNextActionKind.SPLIT_SOURCE_UNIT.value,
+        ClaimBuilderAttemptNextActionKind.SPLIT_WORK_PAYLOAD.value,
         ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value,
         ClaimBuilderAttemptNextActionKind.PAUSE_FOR_DAILY_LIMIT_RESET.value,
         ClaimBuilderAttemptNextActionKind.REQUEST_USER_LOW_QUALITY_CONTINUE_OR_WAIT.value,
@@ -140,10 +140,10 @@ def _summary_from_records(
     records: tuple[WorkItemRetryActionRecord, ...],
     now: datetime,
 ) -> WorkItemRetryActionSummary:
-    retry_same_model_count = 0
+    retry_same_route_count = 0
     retry_empty_claims_check_model_count = 0
     retry_fallback_model_count = 0
-    retry_larger_output_model_count = 0
+    retry_larger_output_limit_route_count = 0
     retry_larger_input_model_count = 0
     split_required_count = 0
     defer_until_capacity_reset_count = 0
@@ -154,9 +154,9 @@ def _summary_from_records(
     for record in records:
         if (
             record.next_action_kind
-            == ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value
+            == ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE.value
         ):
-            retry_same_model_count += 1
+            retry_same_route_count += 1
         elif (
             record.next_action_kind
             == ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
@@ -171,7 +171,7 @@ def _summary_from_records(
             record.next_action_kind
             == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value
         ):
-            retry_larger_output_model_count += 1
+            retry_larger_output_limit_route_count += 1
         elif (
             record.next_action_kind
             == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
@@ -179,7 +179,7 @@ def _summary_from_records(
             retry_larger_input_model_count += 1
         elif (
             record.next_action_kind
-            == ClaimBuilderAttemptNextActionKind.SPLIT_SOURCE_UNIT.value
+            == ClaimBuilderAttemptNextActionKind.SPLIT_WORK_PAYLOAD.value
         ):
             split_required_count += 1
         elif (
@@ -204,10 +204,10 @@ def _summary_from_records(
     return WorkItemRetryActionSummary(
         workflow_run_id=workflow_run_id,
         work_kind=work_kind,
-        retry_same_model_count=retry_same_model_count,
+        retry_same_route_count=retry_same_route_count,
         retry_empty_claims_check_model_count=retry_empty_claims_check_model_count,
         retry_fallback_model_count=retry_fallback_model_count,
-        retry_larger_output_model_count=retry_larger_output_model_count,
+        retry_larger_output_limit_route_count=retry_larger_output_limit_route_count,
         retry_larger_input_model_count=retry_larger_input_model_count,
         split_required_count=split_required_count,
         defer_until_capacity_reset_count=defer_until_capacity_reset_count,
@@ -229,41 +229,41 @@ def _retry_plan_from_next_action_payload(
         "claim_builder_attempt_next_action_kind",
     )
 
-    if next_action_kind == ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value:
-        return WorkItemRetryPlan.RETRY_SAME_MODEL
+    if next_action_kind == ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE.value:
+        return WorkItemRetryPlan.RETRY_SAME_ROUTE
     if (
         next_action_kind
         == ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value
     ):
-        return WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL
+        return WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE
     if (
         next_action_kind
         == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value
     ):
-        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL
+        return WorkItemRetryPlan.RETRY_LARGER_OUTPUT_LIMIT_ROUTE
     if (
         next_action_kind
         == ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
     ):
-        return WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL
+        return WorkItemRetryPlan.RETRY_LARGER_INPUT_LIMIT_ROUTE
     if (
         next_action_kind
         == ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
     ):
-        return WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
+        return WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW
     if (
         next_action_kind
         == ClaimBuilderAttemptNextActionKind.PAUSE_FOR_DAILY_LIMIT_RESET.value
     ):
-        return WorkItemRetryPlan.WAIT_DAILY_CAPACITY_RESET
+        return WorkItemRetryPlan.WAIT_DAILY_ADMISSION_RESET
     if next_action_kind == ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value:
         next_model_strategy = _optional_text(
             payload,
             "claim_builder_attempt_next_model_strategy",
         )
         if next_model_strategy == "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED":
-            return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL
-        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL
+            return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE
+        return WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE
 
     return None
 
@@ -272,12 +272,12 @@ def _selected_retry_plan_from_records(
     records: tuple[WorkItemRetryActionRecord, ...],
 ) -> WorkItemRetryPlan | None:
     priority = (
-        WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL,
-        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL,
-        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL,
-        WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL,
-        WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
-        WorkItemRetryPlan.RETRY_SAME_MODEL,
+        WorkItemRetryPlan.RETRY_LARGER_INPUT_LIMIT_ROUTE,
+        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_LIMIT_ROUTE,
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE,
+        WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE,
+        WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
+        WorkItemRetryPlan.RETRY_SAME_ROUTE,
     )
     available = {
         record.retry_plan for record in records if record.retry_plan is not None

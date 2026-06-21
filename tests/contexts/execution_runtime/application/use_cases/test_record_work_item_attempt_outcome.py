@@ -136,7 +136,7 @@ async def test_retryable_without_next_attempt_at_is_immediate_retry() -> None:
         _command(
             outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
             error_kind="validation_failed",
-            retry_plan=WorkItemRetryPlan.RETRY_SAME_MODEL,
+            retry_plan=WorkItemRetryPlan.RETRY_SAME_ROUTE,
         ),
     )
 
@@ -180,6 +180,6 @@ async def test_rejects_next_attempt_at_not_after_finished_at() -> None:
                 outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
                 error_kind="rate_limit",
                 next_attempt_at=_finished_at(),
-                retry_plan=WorkItemRetryPlan.RETRY_SAME_MODEL,
+                retry_plan=WorkItemRetryPlan.RETRY_SAME_ROUTE,
             ),
         )

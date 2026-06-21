@@ -93,6 +93,9 @@ from src.contexts.knowledge_workbench.source_management.domain.value_objects.sou
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_text import (
     SourceUnitText,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutionResult,
     LlmDispatchExecutionStatus,
@@ -565,10 +568,22 @@ class FakeCommandLogRepository:
 @dataclass(slots=True)
 class FakeOutboxRepository:
     events: list[WorkflowEvent] = field(default_factory=list)
+    next_sequence_number: int = 1
 
     async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
-        self.events.append(event)
-        return event
+        persisted_event = WorkflowEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            workflow_run_id=event.workflow_run_id,
+            payload=event.payload,
+            occurred_at=event.occurred_at,
+            causation_command_id=event.causation_command_id,
+            correlation_id=event.correlation_id,
+            sequence_number=self.next_sequence_number,
+        )
+        self.next_sequence_number += 1
+        self.events.append(persisted_event)
+        return persisted_event
 
     async def list_events_after(
         self,
@@ -692,9 +707,26 @@ class FakeConnection:
     outcome_records: list[WorkItemAttemptOutcomeRecord] = field(
         default_factory=list,
     )
+    frontend_workflow_events: list[FrontendWorkflowEvent] = field(
+        default_factory=list,
+    )
 
     def transaction(self) -> FakeTransaction:
         return FakeTransaction()
+
+
+class FakePostgresFrontendWorkflowEventRepository:
+    def __init__(self, connection: object) -> None:
+        if not isinstance(connection, FakeConnection):
+            raise TypeError("connection must be FakeConnection")
+        self.connection = connection
+
+    async def append(
+        self,
+        event: FrontendWorkflowEvent,
+    ) -> FrontendWorkflowEvent:
+        self.connection.frontend_workflow_events.append(event)
+        return event
 
 
 class FakePool:
@@ -1025,6 +1057,11 @@ def _patch_drain_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         composition,
         "PostgresValidatedDraftClaimObservationPersistence",
         FakePostgresValidatedDraftClaimObservationPersistence,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresFrontendWorkflowEventRepository",
+        FakePostgresFrontendWorkflowEventRepository,
     )
 
 

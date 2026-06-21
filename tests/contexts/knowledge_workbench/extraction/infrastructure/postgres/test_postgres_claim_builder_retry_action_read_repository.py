@@ -114,7 +114,7 @@ async def test_retry_action_for_retryable_failed_work_item_is_counted() -> None:
 
     assert summary.retry_fallback_model_count == 1
     assert summary.retry_empty_claims_check_model_count == 0
-    assert summary.retry_larger_output_model_count == 0
+    assert summary.retry_larger_output_limit_route_count == 0
     assert connection.last_status_values == [
         WorkItemStatus.READY.value,
         WorkItemStatus.LEASED.value,
@@ -132,13 +132,13 @@ async def test_retry_action_for_legacy_deferred_work_item_is_ignored() -> None:
             FakeRetryActionRow(
                 work_item_id="work-1",
                 status=WorkItemStatus.DEFERRED,
-                action_kind=ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL,
+                action_kind=ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE,
                 next_model_strategy="SAME_MODEL",
             ),
         )
     )
 
-    assert summary.retry_same_model_count == 0
+    assert summary.retry_same_route_count == 0
     assert summary.records == ()
 
 
@@ -157,7 +157,7 @@ async def test_retry_action_for_completed_work_item_is_ignored() -> None:
         )
     )
 
-    assert summary.retry_larger_output_model_count == 0
+    assert summary.retry_larger_output_limit_route_count == 0
     assert summary.records == ()
 
 
@@ -201,6 +201,6 @@ async def test_mixed_stale_larger_output_and_current_fallback_selects_current_on
         )
     )
 
-    assert summary.retry_larger_output_model_count == 0
+    assert summary.retry_larger_output_limit_route_count == 0
     assert summary.retry_fallback_model_count == 1
     assert tuple(record.work_item_id for record in summary.records) == ("current-work",)

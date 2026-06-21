@@ -41,6 +41,8 @@ class FakeConnection:
     async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
         self.executed_queries.append(query)
         work_item_id = str(args[0])
+        if "FROM execution_work_item_schedules" in query:
+            return self.schedules.get(work_item_id)
         return self.work_items.get(work_item_id)
 
     async def fetchval(self, query: str, *args: object) -> object | None:
@@ -279,7 +281,8 @@ def test_scheduling_repository_persists_payload_as_jsonb_from_json_dump() -> Non
         "postgres_work_item_scheduling_repository.py"
     ).read_text(encoding="utf-8")
 
-    assert "json.dumps(payload" in content
+    assert "payload_json = json.dumps(" in content
+    assert "payload," in content
     assert "$4::jsonb" in content
 
 
@@ -289,5 +292,5 @@ def test_lease_repository_hydrates_scheduled_jsonb_payload_from_string() -> None
         "postgres_work_item_lease_repository.py"
     ).read_text(encoding="utf-8")
 
-    assert "json.loads(value)" in content
-    assert "payload JSON must decode to Mapping" in content
+    assert "hydrate_jsonb_object_payload" in content
+    assert 'field_name="execution_work_item_schedules.payload"' in content

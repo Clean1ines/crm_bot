@@ -14,12 +14,12 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 class ClaimBuilderAttemptNextActionKind(Enum):
     PERSIST_VALID_CLAIMS = "PERSIST_VALID_CLAIMS"
     ACCEPT_VALID_EMPTY = "ACCEPT_VALID_EMPTY"
-    RETRY_SAME_MODEL = "RETRY_SAME_MODEL"
+    RETRY_SAME_ROUTE = "RETRY_SAME_ROUTE"
     RETRY_EMPTY_CLAIMS_CHECK_MODEL = "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
     RETRY_FALLBACK_MODEL = "RETRY_FALLBACK_MODEL"
     RETRY_LARGER_OUTPUT_LIMIT_MODEL = "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
     RETRY_LARGER_INPUT_LIMIT_MODEL = "RETRY_LARGER_INPUT_LIMIT_MODEL"
-    SPLIT_SOURCE_UNIT = "SPLIT_SOURCE_UNIT"
+    SPLIT_WORK_PAYLOAD = "SPLIT_WORK_PAYLOAD"
     DEFER_UNTIL_CAPACITY_RESET = "DEFER_UNTIL_CAPACITY_RESET"
     PAUSE_FOR_DAILY_LIMIT_RESET = "PAUSE_FOR_DAILY_LIMIT_RESET"
     REQUEST_USER_LOW_QUALITY_CONTINUE_OR_WAIT = (
@@ -67,12 +67,12 @@ class ClaimBuilderAttemptNextAction:
             if not self.should_mark_work_item_completed:
                 raise ValueError("ACCEPT_VALID_EMPTY must mark work item completed")
         if self.kind in {
-            ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL,
+            ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE,
             ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL,
             ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL,
             ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL,
             ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL,
-            ClaimBuilderAttemptNextActionKind.SPLIT_SOURCE_UNIT,
+            ClaimBuilderAttemptNextActionKind.SPLIT_WORK_PAYLOAD,
             ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET,
             ClaimBuilderAttemptNextActionKind.PAUSE_FOR_DAILY_LIMIT_RESET,
             ClaimBuilderAttemptNextActionKind.REQUEST_USER_LOW_QUALITY_CONTINUE_OR_WAIT,
@@ -114,11 +114,11 @@ class ClaimBuilderAttemptNextActionPolicy:
                 should_mark_work_item_completed=True,
             )
 
-        if decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL:
+        if decision.outcome_kind is ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE:
             return _retry_action(
-                kind=ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL,
+                kind=ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE,
                 decision=decision,
-                fallback_reason="retry_same_model",
+                fallback_reason="retry_same_route",
             )
 
         if (

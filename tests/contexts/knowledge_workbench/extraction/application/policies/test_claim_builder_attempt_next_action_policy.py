@@ -83,11 +83,11 @@ def test_valid_empty_maps_to_accept_valid_empty() -> None:
     assert action.should_mark_work_item_completed is True
 
 
-def test_retry_same_model_maps_to_retry_same_model() -> None:
+def test_retry_same_route_maps_to_retry_same_route() -> None:
     action = _action(
         _decision(
-            outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL,
-            validation_decision=ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE,
+            validation_decision=ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             validation_failure_reason=(
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_MISSING
             ),
@@ -96,7 +96,7 @@ def test_retry_same_model_maps_to_retry_same_model() -> None:
         )
     )
 
-    assert action.kind is ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL
+    assert action.kind is ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE
     assert action.reason == "CLAIMS_MISSING"
     assert action.next_model_strategy is ClaimBuilderNextModelStrategy.SAME_MODEL
     assert action.should_mark_work_item_completed is False
@@ -202,7 +202,7 @@ def test_terminal_invalid_maps_to_terminal_failure_without_completion() -> None:
 
 def test_reserved_enum_values_exist_for_later_application_flow() -> None:
     assert ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
-    assert ClaimBuilderAttemptNextActionKind.SPLIT_SOURCE_UNIT.value
+    assert ClaimBuilderAttemptNextActionKind.SPLIT_WORK_PAYLOAD.value
     assert ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
     assert ClaimBuilderAttemptNextActionKind.PAUSE_FOR_DAILY_LIMIT_RESET.value
     assert ClaimBuilderAttemptNextActionKind.REQUEST_USER_LOW_QUALITY_CONTINUE_OR_WAIT.value

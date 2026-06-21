@@ -151,7 +151,7 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
                         "error_kind": "minute_limit",
                         "error_message_user": "primary_model_daily_capacity_exhausted",
                         "next_attempt_at": "2026-06-15T12:01:00+00:00",
-                        "retry_plan": "wait_nearest_capacity_window",
+                        "retry_plan": "wait_nearest_admission_window",
                         "user_action_required": False,
                         "blocked_reason": None,
                     }
@@ -213,7 +213,7 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
     assert response["workflow"]["llm_attempts"][0]["account_ref"] == "groq_org_primary"
     assert (
         response["workflow"]["llm_attempts"][0]["retry_plan"]
-        == "wait_nearest_capacity_window"
+        == "wait_nearest_admission_window"
     )
     assert response["workflow"]["timeline"][0]["event_type"] == "SourceUnitsCreated"
 

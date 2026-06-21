@@ -50,10 +50,10 @@ def _observation(
     )
 
 
-def test_local_primary_tpm_budget_subtracts_actual_usage_per_account_model_pair() -> (
+def test_local_active_model_tpm_budget_subtracts_actual_usage_per_account_model_pair() -> (
     None
 ):
-    capacities = prepare_llm_dispatch_batch._local_primary_tpm_account_capacities(
+    capacities = prepare_llm_dispatch_batch._local_active_model_tpm_account_capacities(
         seed_capacities=(
             _seed_capacity("groq_org_primary"),
             _seed_capacity("groq_org_secondary"),
@@ -63,6 +63,7 @@ def test_local_primary_tpm_budget_subtracts_actual_usage_per_account_model_pair(
             _observation(account_ref="groq_org_secondary", actual_total_tokens=1_000),
             _observation(account_ref="groq_org_primary", actual_total_tokens=500),
         ),
+        now=_now(),
     )
 
     by_account = {capacity.account_ref: capacity for capacity in capacities}
@@ -73,8 +74,8 @@ def test_local_primary_tpm_budget_subtracts_actual_usage_per_account_model_pair(
     assert by_account["groq_org_secondary"].remaining_minute_requests == 59
 
 
-def test_local_primary_tpm_budget_never_waits_for_provider_reset_headers() -> None:
-    capacities = prepare_llm_dispatch_batch._local_primary_tpm_account_capacities(
+def test_local_active_model_tpm_budget_never_waits_for_provider_reset_headers() -> None:
+    capacities = prepare_llm_dispatch_batch._local_active_model_tpm_account_capacities(
         seed_capacities=(_seed_capacity("groq_org_primary"),),
         observations=(
             LlmAttemptCapacityObservation(
@@ -94,16 +95,17 @@ def test_local_primary_tpm_budget_never_waits_for_provider_reset_headers() -> No
                 observed_at=_now(),
             ),
         ),
+        now=_now(),
     )
 
     assert capacities[0].remaining_minute_tokens == 3_000
     assert capacities[0].remaining_minute_requests == 59
 
 
-def test_local_primary_tpm_budget_exhausts_account_after_deferred_without_tokens() -> (
+def test_local_active_model_tpm_budget_exhausts_account_after_deferred_without_tokens() -> (
     None
 ):
-    capacities = prepare_llm_dispatch_batch._local_primary_tpm_account_capacities(
+    capacities = prepare_llm_dispatch_batch._local_active_model_tpm_account_capacities(
         seed_capacities=(
             _seed_capacity("groq_org_primary"),
             _seed_capacity("groq_org_secondary"),
@@ -126,6 +128,7 @@ def test_local_primary_tpm_budget_exhausts_account_after_deferred_without_tokens
                 observed_at=_now(),
             ),
         ),
+        now=_now(),
     )
 
     by_account = {capacity.account_ref: capacity for capacity in capacities}

@@ -15,7 +15,7 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 class ClaimBuilderAttemptOutcomeKind(Enum):
     VALID_CLAIMS = "VALID_CLAIMS"
     VALID_EMPTY = "VALID_EMPTY"
-    RETRY_SAME_MODEL = "RETRY_SAME_MODEL"
+    RETRY_SAME_ROUTE = "RETRY_SAME_ROUTE"
     RETRY_EMPTY_CLAIMS_CHECK_MODEL = "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
     RETRY_FALLBACK_MODEL = "RETRY_FALLBACK_MODEL"
     RETRY_LARGER_INPUT_LIMIT_MODEL = "RETRY_LARGER_INPUT_LIMIT_MODEL"
@@ -159,9 +159,9 @@ class ClaimBuilderAttemptDecisionPolicy:
             and command.output_payload is None
         ):
             return ClaimBuilderAttemptDecision(
-                outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL,
+                outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE,
                 validation_decision=(
-                    ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL
+                    ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE
                 ),
                 validation_failure_reason=(
                     ClaimBuilderOutputValidationFailureReason.OUTPUT_NOT_OBJECT
@@ -173,9 +173,9 @@ class ClaimBuilderAttemptDecisionPolicy:
 
         if command.validation_result is None:
             return ClaimBuilderAttemptDecision(
-                outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL,
+                outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE,
                 validation_decision=(
-                    ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL
+                    ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE
                 ),
                 validation_failure_reason=(
                     ClaimBuilderOutputValidationFailureReason.OUTPUT_NOT_OBJECT
@@ -257,7 +257,7 @@ def _decision_from_validation(
         )
 
     return _retry_decision(
-        outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL,
+        outcome_kind=ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE,
         validation_result=validation_result,
         strategy=ClaimBuilderNextModelStrategy.SAME_MODEL,
     )

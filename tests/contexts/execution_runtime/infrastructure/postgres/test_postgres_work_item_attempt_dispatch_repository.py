@@ -29,6 +29,11 @@ class FakeConnection:
     work_item_attempts: set[tuple[str, int]] = field(default_factory=set)
     executed_sql: list[str] = field(default_factory=list)
 
+    async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
+        self.executed_sql.append(query)
+        attempt_id = str(args[0])
+        return self.dispatches.get(attempt_id)
+
     async def execute(self, query: str, *args: object) -> str:
         self.executed_sql.append(query)
         if "execution_work_item_attempt_dispatches" in query:

@@ -148,7 +148,7 @@ def test_defer_leased_item_marks_retryable_with_wait_until_and_clears_lease() ->
     assert deferred.status is WorkItemStatus.RETRYABLE_FAILED
     assert deferred.next_attempt_at == wait_until
     assert deferred.last_error_kind == "minute_limit"
-    assert deferred.retry_plan is WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW
+    assert deferred.retry_plan is WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW
     assert deferred.leased_by is None
     assert deferred.lease_token is None
     assert not deferred.is_due(_now())
@@ -162,13 +162,13 @@ def test_retryable_and_terminal_failures_are_explicit_transitions() -> None:
         leased,
         error_kind="network_timeout",
         next_attempt_at=WaitUntil(_now() + timedelta(seconds=10)),
-        retry_plan=WorkItemRetryPlan.RETRY_OTHER_ORG,
+        retry_plan=WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE,
     )
 
     assert retryable.status is WorkItemStatus.RETRYABLE_FAILED
     assert retryable.last_error_kind == "network_timeout"
     assert retryable.next_attempt_at == WaitUntil(_now() + timedelta(seconds=10))
-    assert retryable.retry_plan is WorkItemRetryPlan.RETRY_OTHER_ORG
+    assert retryable.retry_plan is WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE
 
     terminal = WorkItemStateMachine.fail_leased_terminal(
         leased,

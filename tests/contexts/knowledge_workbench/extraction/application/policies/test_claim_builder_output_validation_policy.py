@@ -59,7 +59,7 @@ def _assert_failure(
     result: ClaimBuilderOutputValidationResult,
     *,
     decision: ClaimBuilderOutputValidationDecision = (
-        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL
+        ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE
     ),
     failure_reason: ClaimBuilderOutputValidationFailureReason,
 ) -> None:
@@ -146,7 +146,7 @@ def test_empty_claims_first_time_retries_same_model() -> None:
 
     _assert_failure(
         result,
-        decision=ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+        decision=ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
         failure_reason=(
             ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED
         ),
@@ -344,7 +344,7 @@ def test_invalid_granularity_invalid() -> None:
             None,
         ),
         (
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             (),
             None,
         ),

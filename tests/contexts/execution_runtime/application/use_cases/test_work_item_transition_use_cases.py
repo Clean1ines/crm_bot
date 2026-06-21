@@ -37,6 +37,9 @@ from src.contexts.execution_runtime.domain.state_machines.work_item_state_machin
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -128,9 +131,10 @@ def test_defer_work_item_commits_deferred_item_and_event() -> None:
             occurred_at=_now(),
         )
     )
-    assert result.item.status is WorkItemStatus.DEFERRED
+    assert result.item.status is WorkItemStatus.RETRYABLE_FAILED
     assert result.item.next_attempt_at == wait_until
     assert result.item.last_error_kind == "minute_limit"
+    assert result.item.retry_plan is WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW
     assert isinstance(result.event, WorkItemDeferred)
     assert result.event.wait_until == wait_until.value
     assert result.event.error_kind == "minute_limit"

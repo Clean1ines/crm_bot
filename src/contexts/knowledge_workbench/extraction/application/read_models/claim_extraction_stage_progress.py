@@ -53,7 +53,7 @@ class ClaimExtractionStageNextAction(StrEnum):
     WAIT_FOR_ACTIVE_LEASE = "wait_for_active_lease"
     RESUME_AFTER_WAIT = "resume_after_wait"
     RETRY_WHEN_DUE = "retry_when_due"
-    SPLIT_SOURCE_UNIT = "split_source_unit"
+    SPLIT_WORK_PAYLOAD = "split_work_payload"
     CHOOSE_DAILY_LIMIT_RECOVERY = "choose_daily_limit_recovery"
     INSPECT_TERMINAL_FAILURE = "inspect_terminal_failure"
     STOPPED_CANCELLED = "stopped_cancelled"
@@ -402,7 +402,7 @@ def _split_required_interpretation() -> _StageBlockerInterpretation:
     return _StageBlockerInterpretation(
         kind=ClaimExtractionStageBlockerKind.SPLIT_REQUIRED,
         reason=ClaimExtractionStageBlockerReason.SOURCE_UNIT_SPLIT_REQUIRED,
-        next_action=ClaimExtractionStageNextAction.SPLIT_SOURCE_UNIT,
+        next_action=ClaimExtractionStageNextAction.SPLIT_WORK_PAYLOAD,
     )
 
 

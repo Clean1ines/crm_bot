@@ -9,17 +9,17 @@ class WorkItemRetryPlan(StrEnum):
     Status answers only whether the work item is executable, leased, terminal, or
     retryable. RetryPlan answers *how* a retryable item should be retried.
 
-    This vocabulary is intentionally generic and must not know Workbench facts,
-    prompts, source units, or provider-specific implementation details.
+    This vocabulary is intentionally generic and must not know business facts,
+    bounded-context payloads, admission pools, or implementation details.
     """
 
-    RETRY_SAME_MODEL = "retry_same_model"
-    RETRY_OTHER_ORG = "retry_other_org"
-    RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL = "retry_special_empty_claims_check_model"
-    RETRY_LARGER_CONTEXT_MODEL = "retry_larger_context_model"
-    RETRY_LARGER_OUTPUT_MODEL = "retry_larger_output_model"
-    RETRY_DAILY_FALLBACK_MODEL = "retry_daily_fallback_model"
-    WAIT_NEAREST_CAPACITY_WINDOW = "wait_nearest_capacity_window"
-    SPLIT_SOURCE_UNIT = "split_source_unit"
-    WAIT_DAILY_CAPACITY_RESET = "wait_daily_capacity_reset"
+    RETRY_SAME_ROUTE = "retry_same_route"
+    RETRY_ALTERNATE_ROUTE = "retry_alternate_route"
+    RETRY_VALIDATION_CHECK_ROUTE = "retry_validation_check_route"
+    RETRY_LARGER_INPUT_LIMIT_ROUTE = "retry_larger_input_limit_route"
+    RETRY_LARGER_OUTPUT_LIMIT_ROUTE = "retry_larger_output_limit_route"
+    RETRY_DAILY_FALLBACK_ROUTE = "retry_daily_fallback_route"
+    WAIT_NEAREST_ADMISSION_WINDOW = "wait_nearest_admission_window"
+    SPLIT_WORK_PAYLOAD = "split_work_payload"
+    WAIT_DAILY_ADMISSION_RESET = "wait_daily_admission_reset"
     TERMINAL = "terminal"

@@ -24,7 +24,7 @@ _LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 class ClaimBuilderOutputValidationDecision(Enum):
     VALID_CLAIMS = "VALID_CLAIMS"
     VALID_EMPTY = "VALID_EMPTY"
-    RETRY_SAME_MODEL = "RETRY_SAME_MODEL"
+    RETRY_SAME_ROUTE = "RETRY_SAME_ROUTE"
     RETRY_EMPTY_CLAIMS_CHECK_MODEL = "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
     RETRY_FALLBACK_MODEL = "RETRY_FALLBACK_MODEL"
     RETRY_LARGER_OUTPUT_LIMIT_MODEL = "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
@@ -140,28 +140,28 @@ class ClaimBuilderOutputValidationPolicy:
     ) -> ClaimBuilderOutputValidationResult:
         if not isinstance(command.output_payload, Mapping):
             return _failure(
-                ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+                ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
                 ClaimBuilderOutputValidationFailureReason.OUTPUT_NOT_OBJECT,
             )
 
         payload = command.output_payload
         if "claims" not in payload:
             return _failure(
-                ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+                ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_MISSING,
             )
 
         claims_value = payload["claims"]
         if not isinstance(claims_value, list):
             return _failure(
-                ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+                ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
                 ClaimBuilderOutputValidationFailureReason.CLAIMS_NOT_LIST,
             )
 
         if not claims_value:
             if command.empty_claims_attempt_count <= 0:
                 return _failure(
-                    ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+                    ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
                     ClaimBuilderOutputValidationFailureReason.CLAIMS_EMPTY_RETRY_REQUIRED,
                 )
             if command.empty_claims_attempt_count == 1:
@@ -201,21 +201,21 @@ def _validate_claim_item(
 ) -> ValidatedClaimBuilderClaim | ClaimBuilderOutputValidationResult:
     if not isinstance(claim_value, Mapping):
         return _failure(
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             ClaimBuilderOutputValidationFailureReason.CLAIM_ITEM_NOT_OBJECT,
         )
 
     claim_mapping = claim_value
     if set(claim_mapping.keys()) != _CLAIM_FIELDS:
         return _failure(
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             ClaimBuilderOutputValidationFailureReason.CLAIM_FIELD_SET_INVALID,
         )
 
     for value in claim_mapping.values():
         if value is None:
             return _failure(
-                ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+                ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
                 ClaimBuilderOutputValidationFailureReason.CLAIM_FIELD_NULL,
             )
 
@@ -267,7 +267,7 @@ def _string(
 ) -> str | ClaimBuilderOutputValidationResult:
     if not isinstance(value, str):
         return _failure(
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             failure_reason,
         )
     return value
@@ -279,7 +279,7 @@ def _non_empty_string(
 ) -> str | ClaimBuilderOutputValidationResult:
     if not isinstance(value, str) or not value.strip():
         return _failure(
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             failure_reason,
         )
     return value
@@ -290,14 +290,14 @@ def _granularity(
 ) -> DraftClaimGranularity | ClaimBuilderOutputValidationResult:
     if not isinstance(value, str) or not value.strip():
         return _failure(
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             ClaimBuilderOutputValidationFailureReason.GRANULARITY_INVALID,
         )
     try:
         return DraftClaimGranularity(value)
     except ValueError:
         return _failure(
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             ClaimBuilderOutputValidationFailureReason.GRANULARITY_INVALID,
         )
 
@@ -307,7 +307,7 @@ def _possible_questions(
 ) -> tuple[str, ...] | ClaimBuilderOutputValidationResult:
     if not isinstance(value, list):
         return _failure(
-            ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+            ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
             ClaimBuilderOutputValidationFailureReason.POSSIBLE_QUESTIONS_NOT_LIST,
         )
 
@@ -315,7 +315,7 @@ def _possible_questions(
     for question_value in value:
         if not isinstance(question_value, str) or not question_value.strip():
             return _failure(
-                ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+                ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
                 ClaimBuilderOutputValidationFailureReason.POSSIBLE_QUESTION_EMPTY,
             )
         questions.append(question_value)
@@ -336,7 +336,7 @@ def _validate_latin_tokens_against_source_unit(
         for token in _latin_tokens(text):
             if token not in source_unit_tokens:
                 return _failure(
-                    ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+                    ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
                     ClaimBuilderOutputValidationFailureReason.LATIN_TEXT_NOT_SUPPORTED_BY_EVIDENCE,
                 )
     return None

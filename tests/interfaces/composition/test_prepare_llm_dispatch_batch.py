@@ -718,7 +718,7 @@ async def test_retry_plan_drives_dispatch_strategy_without_legacy_strategy() -> 
 
     result = await _runner(FakePool(connection=connection)).execute(
         _command(
-            retry_plan=WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL,
+            retry_plan=WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE,
             account_capacities=(
                 _account(
                     account_ref="org-fallback",

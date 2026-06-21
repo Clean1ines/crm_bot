@@ -55,7 +55,7 @@ def test_retryable_outcome_record_can_be_immediate_without_next_attempt_at() -> 
         outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
         error_kind="claim_builder_output_validation_failed",
         next_attempt_at=None,
-        retry_plan=WorkItemRetryPlan.RETRY_SAME_MODEL,
+        retry_plan=WorkItemRetryPlan.RETRY_SAME_ROUTE,
     )
 
     assert record.next_attempt_at is None
@@ -72,7 +72,7 @@ def test_deferred_outcome_record_still_requires_next_attempt_at() -> None:
             outcome_status=WorkItemAttemptOutcomeStatus.DEFERRED,
             error_kind="minute_limit",
             next_attempt_at=None,
-            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
+            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
         )
 
 
@@ -86,7 +86,7 @@ def test_deferred_outcome_record_accepts_future_next_attempt_at() -> None:
         outcome_status=WorkItemAttemptOutcomeStatus.DEFERRED,
         error_kind="minute_limit",
         next_attempt_at=_now() + timedelta(seconds=60),
-        retry_plan=WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
+        retry_plan=WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
     )
 
     assert record.next_attempt_at == _now() + timedelta(seconds=60)

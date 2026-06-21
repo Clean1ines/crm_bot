@@ -675,19 +675,19 @@ def _dispatch_preparation_strategy_from_retry_plan(
         return legacy_strategy
 
     strategy_by_retry_plan = {
-        WorkItemRetryPlan.RETRY_SAME_MODEL: "RETRY_SAME_MODEL",
-        WorkItemRetryPlan.RETRY_OTHER_ORG: "RETRY_SAME_MODEL",
-        WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW: "RETRY_SAME_MODEL",
-        WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL: (
+        WorkItemRetryPlan.RETRY_SAME_ROUTE: "RETRY_SAME_ROUTE",
+        WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE: "RETRY_SAME_ROUTE",
+        WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW: "RETRY_SAME_ROUTE",
+        WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE: (
             "RETRY_EMPTY_CLAIMS_CHECK_MODEL"
         ),
-        WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL: (
+        WorkItemRetryPlan.RETRY_LARGER_INPUT_LIMIT_ROUTE: (
             "RETRY_LARGER_INPUT_LIMIT_MODEL"
         ),
-        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL: (
+        WorkItemRetryPlan.RETRY_LARGER_OUTPUT_LIMIT_ROUTE: (
             "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
         ),
-        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL: (
+        WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE: (
             "RETRY_DAILY_LIMIT_FALLBACK_MODEL"
         ),
     }

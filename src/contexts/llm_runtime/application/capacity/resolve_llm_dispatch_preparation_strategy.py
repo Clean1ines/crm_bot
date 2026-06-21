@@ -66,16 +66,16 @@ def _resolve_retry_plan(
         raise ValueError("retry_plan is required")
 
     if retry_plan in {
-        WorkItemRetryPlan.RETRY_SAME_MODEL,
-        WorkItemRetryPlan.RETRY_OTHER_ORG,
-        WorkItemRetryPlan.WAIT_NEAREST_CAPACITY_WINDOW,
+        WorkItemRetryPlan.RETRY_SAME_ROUTE,
+        WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE,
+        WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
     }:
         return ResolveLlmDispatchPreparationStrategyResult(
             active_model_ref=command.current_active_model_ref,
             strategy_applied=retry_plan.value,
         )
 
-    if retry_plan is WorkItemRetryPlan.RETRY_SPECIAL_EMPTY_CLAIMS_CHECK_MODEL:
+    if retry_plan is WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE:
         return ResolveLlmDispatchPreparationStrategyResult(
             active_model_ref=_special_empty_claims_check_model_ref(
                 command.route_catalog,
@@ -83,13 +83,13 @@ def _resolve_retry_plan(
             strategy_applied=retry_plan.value,
         )
 
-    if retry_plan is WorkItemRetryPlan.RETRY_DAILY_FALLBACK_MODEL:
+    if retry_plan is WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE:
         return ResolveLlmDispatchPreparationStrategyResult(
             active_model_ref=_first_daily_limit_fallback(command.route_catalog),
             strategy_applied=retry_plan.value,
         )
 
-    if retry_plan is WorkItemRetryPlan.RETRY_LARGER_OUTPUT_MODEL:
+    if retry_plan is WorkItemRetryPlan.RETRY_LARGER_OUTPUT_LIMIT_ROUTE:
         return ResolveLlmDispatchPreparationStrategyResult(
             active_model_ref=_first_larger_output_fallback(
                 current_model_ref=command.current_active_model_ref,
@@ -98,7 +98,7 @@ def _resolve_retry_plan(
             strategy_applied=retry_plan.value,
         )
 
-    if retry_plan is WorkItemRetryPlan.RETRY_LARGER_CONTEXT_MODEL:
+    if retry_plan is WorkItemRetryPlan.RETRY_LARGER_INPUT_LIMIT_ROUTE:
         return ResolveLlmDispatchPreparationStrategyResult(
             active_model_ref=_first_larger_input_fallback(
                 current_model_ref=command.current_active_model_ref,
@@ -121,7 +121,7 @@ def _resolve_legacy_strategy(
             strategy_applied=None,
         )
 
-    if strategy in {"SAME_MODEL", "RETRY_SAME_MODEL"}:
+    if strategy in {"SAME_MODEL", "RETRY_SAME_ROUTE"}:
         return ResolveLlmDispatchPreparationStrategyResult(
             active_model_ref=command.current_active_model_ref,
             strategy_applied=strategy,
