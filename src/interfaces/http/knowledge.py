@@ -1157,6 +1157,76 @@ def _frontend_workflow_event_read_model(
     }
 
 
+def _frontend_workflow_event_sse(event: FrontendWorkflowEvent) -> str:
+    payload = _frontend_workflow_event_read_model(event)
+    return (
+        f"id: {event.projection_event_id}\n"
+        "event: frontend_workflow_event\n"
+        f"data: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
+    )
+
+
+@router.get(
+    "/source-documents/{document_id}/workflows/{workflow_run_id}/frontend-events/stream"
+)
+async def stream_knowledge_frontend_workflow_events(
+    project_id: str,
+    document_id: str,
+    workflow_run_id: str,
+    request: Request,
+    after_source_sequence: int = Query(0, ge=0),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> StreamingResponse:
+    """Streams persisted frontend projection events with bounded polling."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    async def event_stream():
+        cursor = after_source_sequence
+        async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
+            repository = PostgresFrontendWorkflowEventRepository(
+                cast(asyncpg.Connection, raw_connection)
+            )
+            while True:
+                events = await repository.list_frontend_events(
+                    workflow_run_id,
+                    cursor,
+                    200,
+                )
+                for event in events:
+                    cursor = max(cursor, event.source_sequence_number)
+                    if (
+                        event.project_id == project_id
+                        and event.document_id == document_id
+                        and event.workflow_run_id == workflow_run_id
+                    ):
+                        yield _frontend_workflow_event_sse(event)
+
+                if await request.is_disconnected():
+                    return
+                if not events:
+                    yield ": keepalive\n\n"
+                await asyncio.sleep(1.0)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/source-documents/{source_document_ref}/draft-claims")
 async def source_document_draft_claims(
     project_id: str,
