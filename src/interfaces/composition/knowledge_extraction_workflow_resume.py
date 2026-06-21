@@ -57,9 +57,6 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
-from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_cluster_preview_repository_port import (
-    DraftClaimClusterPreviewRepositoryPort,
-)
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_plan_repository import (
     DraftClaimCompactionPlanConnectionLike,
     PostgresDraftClaimCompactionPlanRepository,
@@ -67,10 +64,6 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
     DraftClaimCompactionReductionStateConnectionLike,
     PostgresDraftClaimCompactionReductionStateRepository,
-)
-from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_cluster_preview_repository import (
-    DraftClaimClusterPreviewConnectionLike,
-    PostgresDraftClaimClusterPreviewRepository,
 )
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_observation_read_repository import (
     DraftClaimObservationReadConnectionLike,
@@ -267,8 +260,6 @@ class RunKnowledgeExtractionWorkflowResume:
         draft_claim_compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort | None
         ) = None,
-        cluster_preview_repository: DraftClaimClusterPreviewRepositoryPort
-        | None = None,
         draft_claim_compaction_output_validator: (
             DraftClaimCompactionOutputValidator | None
         ) = None,
@@ -298,7 +289,6 @@ class RunKnowledgeExtractionWorkflowResume:
         self._draft_claim_compaction_reduction_state_repository = (
             draft_claim_compaction_reduction_state_repository
         )
-        self._cluster_preview_repository = cluster_preview_repository
         self._draft_claim_compaction_output_validator = (
             draft_claim_compaction_output_validator
             or DraftClaimCompactionOutputValidator()
@@ -427,12 +417,6 @@ class RunKnowledgeExtractionWorkflowResume:
                 cast(DraftClaimCompactionReductionStateConnectionLike, connection)
             )
         )
-        cluster_preview_repository = (
-            self._cluster_preview_repository
-            or PostgresDraftClaimClusterPreviewRepository(
-                cast(DraftClaimClusterPreviewConnectionLike, connection)
-            )
-        )
         draft_claim_observation_read_repository = (
             PostgresDraftClaimObservationReadRepository(
                 cast(DraftClaimObservationReadConnectionLike, connection)
@@ -513,7 +497,6 @@ class RunKnowledgeExtractionWorkflowResume:
                 draft_claim_compaction_reduction_state_repository=(
                     draft_claim_compaction_reduction_state_repository
                 ),
-                cluster_preview_repository=cluster_preview_repository,
                 curation_workspace_repository=(
                     PostgresDraftClaimCurationWorkspaceRepository(
                         cast(DraftClaimCurationWorkspaceConnectionLike, connection)

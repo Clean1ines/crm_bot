@@ -98,10 +98,6 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
         ),
         handler_name="HandlePublishDraftClaimCurationWorkspaceCommandHandler",
     ),
-    KnowledgeExtractionImplementedCommandHandler(
-        command_type=KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW,
-        handler_name="HandleBuildClusterPreviewCommandHandler",
-    ),
 )
 
 

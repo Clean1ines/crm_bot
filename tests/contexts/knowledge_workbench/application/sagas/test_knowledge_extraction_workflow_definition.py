@@ -208,23 +208,37 @@ def test_contract_has_embedding_and_clustering_operations() -> None:
     )
 
 
-def test_contract_stops_at_cluster_preview_and_review_pause() -> None:
-    build_preview = _operation("build_cluster_preview")
-    pause_review = _operation("pause_for_cluster_contract_review")
+def test_contract_has_no_cluster_preview_or_review_operations() -> None:
+    operation_keys = {
+        operation.operation_key
+        for operation in DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT.operations
+    }
 
-    assert (
-        build_preview.success_event_type
-        is KnowledgeExtractionCanonicalEventType.CLUSTER_PREVIEW_READY
+    assert all("preview" not in operation_key for operation_key in operation_keys)
+    assert all(
+        "contract_review" not in operation_key for operation_key in operation_keys
     )
-    assert (
-        pause_review.success_event_type
-        is KnowledgeExtractionCanonicalEventType.CLUSTER_CONTRACT_REVIEW_REQUIRED
-    )
-    assert pause_review.next_command_types == ()
     assert (
         DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT.operations[-1].operation_key
-        == "pause_for_cluster_contract_review"
+        == "publish_draft_claim_curation_workspace"
     )
+    assert len(DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT.operations) == 15
+
+
+def test_cluster_draft_claims_routes_directly_to_compaction_dispatch() -> None:
+    cluster_operation = _operation("cluster_draft_claims")
+    compaction_operation = _operation("prepare_draft_claim_compaction_dispatch_batch")
+
+    assert cluster_operation.success_event_type == (
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT
+    )
+    assert cluster_operation.next_command_types == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+    )
+    assert compaction_operation.command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH
+    )
+    assert len(KnowledgeExtractionCanonicalPhase) == 9
 
 
 def test_operation_by_key_returns_contract() -> None:
@@ -338,10 +352,7 @@ def test_only_superseded_late_phases_are_out_of_current_contract() -> None:
 
     for legacy_phase_key in superseded_phase_keys:
         mapping = mapping_by_key[legacy_phase_key]
-        assert (
-            mapping.canonical_phase
-            is KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY
-        )
+        assert mapping.canonical_phase is KnowledgeExtractionCanonicalPhase.COMPLETED
         assert mapping.migration_status == "out_of_current_contract"
 
     assert (

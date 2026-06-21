@@ -15,7 +15,6 @@ class KnowledgeExtractionCanonicalPhase(StrEnum):
     CLAIM_BUILDER_SECTION_EXTRACTION = "CLAIM_BUILDER_SECTION_EXTRACTION"
     DRAFT_CLAIM_EMBEDDING = "DRAFT_CLAIM_EMBEDDING"
     DRAFT_CLAIM_CLUSTERING = "DRAFT_CLAIM_CLUSTERING"
-    CLUSTER_PREVIEW_READY = "CLUSTER_PREVIEW_READY"
     DRAFT_CLAIM_CURATION = "DRAFT_CLAIM_CURATION"
     PUBLICATION = "PUBLICATION"
     COMPLETED = "COMPLETED"
@@ -39,8 +38,6 @@ class KnowledgeExtractionCanonicalCommandType(StrEnum):
     RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS = "ReconcileDraftClaimCompactionProgress"
     OPEN_DRAFT_CLAIM_CURATION_WORKSPACE = "OpenDraftClaimCurationWorkspace"
     PUBLISH_DRAFT_CLAIM_CURATION_WORKSPACE = "PublishDraftClaimCurationWorkspace"
-    BUILD_CLUSTER_PREVIEW = "BuildClusterPreview"
-    PAUSE_FOR_CLUSTER_CONTRACT_REVIEW = "PauseForClusterContractReview"
 
 
 class KnowledgeExtractionCanonicalEventType(StrEnum):
@@ -96,8 +93,6 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     DRAFT_CLAIM_CURATION_WORKSPACE_OPENED = "DraftClaimCurationWorkspaceOpened"
     DRAFT_CLAIM_CURATION_REVIEW_REQUIRED = "DraftClaimCurationReviewRequired"
     DRAFT_CLAIM_CURATION_WORKSPACE_PUBLISHED = "DraftClaimCurationWorkspacePublished"
-    CLUSTER_PREVIEW_READY = "ClusterPreviewReady"
-    CLUSTER_CONTRACT_REVIEW_REQUIRED = "ClusterContractReviewRequired"
     WORKFLOW_MANUALLY_PAUSED = "WorkflowManuallyPaused"
     WORKFLOW_MANUALLY_RESUMED = "WorkflowManuallyResumed"
 
@@ -108,7 +103,6 @@ class KnowledgeExtractionReadModelName(StrEnum):
     RECENT_CLAIMS = "recent_claims"
     TIMELINE = "timeline"
     CAPACITY_STATUS = "capacity_status"
-    CLUSTER_PREVIEW = "cluster_preview"
 
 
 class KnowledgeExtractionRecoveryScope(StrEnum):
@@ -119,7 +113,6 @@ class KnowledgeExtractionRecoveryScope(StrEnum):
     CLAIM_BUILDER_SECTION = "claim_builder_section"
     EMBEDDING_BATCH = "embedding_batch"
     CLUSTER_BUILD = "cluster_build"
-    CLUSTER_PREVIEW = "cluster_preview"
     CURATION_WORKSPACE = "curation_workspace"
     PUBLICATION = "publication"
 
@@ -671,49 +664,6 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             ),
             frontend_visibility=True,
         ),
-        KnowledgeExtractionOperationContract(
-            operation_key="build_cluster_preview",
-            phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
-            command_type=KnowledgeExtractionCanonicalCommandType.BUILD_CLUSTER_PREVIEW,
-            owner_contexts=("knowledge_workbench",),
-            unit_of_work_name="ClusterPreviewBuildUnitOfWork",
-            idempotency_key_template="cluster-preview:{workflow_run_id}",
-            success_event_type=KnowledgeExtractionCanonicalEventType.CLUSTER_PREVIEW_READY,
-            next_command_types=(
-                KnowledgeExtractionCanonicalCommandType.PAUSE_FOR_CLUSTER_CONTRACT_REVIEW,
-            ),
-            affected_read_models=(
-                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
-                KnowledgeExtractionReadModelName.TIMELINE,
-                KnowledgeExtractionReadModelName.CLUSTER_PREVIEW,
-            ),
-            recovery_scopes=(KnowledgeExtractionRecoveryScope.CLUSTER_PREVIEW,),
-            frontend_visibility=True,
-        ),
-        KnowledgeExtractionOperationContract(
-            operation_key="pause_for_cluster_contract_review",
-            phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
-            command_type=(
-                KnowledgeExtractionCanonicalCommandType.PAUSE_FOR_CLUSTER_CONTRACT_REVIEW
-            ),
-            owner_contexts=("knowledge_workbench",),
-            unit_of_work_name="ClusterContractReviewPauseUnitOfWork",
-            idempotency_key_template="cluster-contract-review:{workflow_run_id}",
-            success_event_type=(
-                KnowledgeExtractionCanonicalEventType.CLUSTER_CONTRACT_REVIEW_REQUIRED
-            ),
-            next_command_types=(),
-            affected_read_models=(
-                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
-                KnowledgeExtractionReadModelName.TIMELINE,
-                KnowledgeExtractionReadModelName.CLUSTER_PREVIEW,
-            ),
-            recovery_scopes=(
-                KnowledgeExtractionRecoveryScope.WORKFLOW,
-                KnowledgeExtractionRecoveryScope.CLUSTER_PREVIEW,
-            ),
-            frontend_visibility=True,
-        ),
     ),
 )
 
@@ -775,27 +725,27 @@ LEGACY_PHASE_MIGRATION_MAP = (
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.PROMPT_B_WORK_SCHEDULED.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
+        canonical_phase=KnowledgeExtractionCanonicalPhase.COMPLETED,
         migration_status="out_of_current_contract",
-        replacement_reason="Prompt B starts after the cluster preview cutoff.",
+        replacement_reason="Prompt B scheduling is outside the current workflow contract.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.PROMPT_B_WORK_COMPLETED.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
+        canonical_phase=KnowledgeExtractionCanonicalPhase.COMPLETED,
         migration_status="out_of_current_contract",
-        replacement_reason="Prompt B completion is after the cluster preview cutoff.",
+        replacement_reason="Prompt B completion is outside the current workflow contract.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.FINAL_KNOWLEDGE_PREPARED.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
+        canonical_phase=KnowledgeExtractionCanonicalPhase.COMPLETED,
         migration_status="out_of_current_contract",
-        replacement_reason="Final knowledge preparation is outside this contract cutoff.",
+        replacement_reason="Final knowledge preparation is outside the current workflow contract.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.REVIEW_COMPLETED.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
+        canonical_phase=KnowledgeExtractionCanonicalPhase.COMPLETED,
         migration_status="out_of_current_contract",
-        replacement_reason="Review completion is outside this contract cutoff.",
+        replacement_reason="Review completion is outside the current workflow contract.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.PUBLISHED.value,
@@ -811,9 +761,9 @@ LEGACY_PHASE_MIGRATION_MAP = (
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.INTERMEDIATE_ARTIFACTS_CLEANED.value,
-        canonical_phase=KnowledgeExtractionCanonicalPhase.CLUSTER_PREVIEW_READY,
+        canonical_phase=KnowledgeExtractionCanonicalPhase.COMPLETED,
         migration_status="out_of_current_contract",
-        replacement_reason="Intermediate cleanup is outside this contract cutoff.",
+        replacement_reason="Intermediate cleanup is outside the current workflow contract.",
     ),
     KnowledgeExtractionLegacyPhaseMapping(
         legacy_phase_key=KnowledgeExtractionPhaseKey.DONE.value,

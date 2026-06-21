@@ -19,14 +19,15 @@ canonical workflow event
 
 Ключевые выводы аудита:
 
-- canonical contract содержит 10 phases, 17 commands, 17 operations и 46 events;
+- canonical contract содержит 9 phases, 15 commands, 15 operations и 44 events;
 - durable phase vocabulary требует отдельной сверки: migration 090 содержит
   `PROMPT_A_*` constraints, тогда как текущий Python пишет `CLAIM_BUILDER_*`;
-- 14 commands зарегистрированы в generic handler map;
+- 13 commands зарегистрированы в generic handler map;
 - start и source ingestion выполняются специальным upload/ingestion path;
-- `PauseForClusterContractReview` объявлен, но фактического handler нет;
-- ряд contract events не emitится: started/deferred/all-sections-extracted и
-  cluster-review-required являются наиболее заметными gaps;
+- после `DraftClaimClustersBuilt` workflow продолжается в draft-claim compaction без
+  отдельной preview/review pause phase;
+- ряд contract events не emitится: started/deferred/all-sections-extracted являются
+  наиболее заметными gaps;
 - все operations имеют `frontend_visibility=True`, но связь event → projection → UI
   нигде не проверяется;
 - SSE несёт полный snapshot, теряет `sequence_number` из notification и не имеет
@@ -100,7 +101,6 @@ handler → outbox INSERT → PostgreSQL NOTIFY
 | `CLAIM_BUILDER_SECTION_EXTRACTION` | Capacity admission, lease, LLM attempt, claim persistence, split и reconciliation. |
 | `DRAFT_CLAIM_EMBEDDING` | Batch embedding draft claims. |
 | `DRAFT_CLAIM_CLUSTERING` | Cluster plan, compaction dispatch/execution/application/reconciliation. |
-| `CLUSTER_PREVIEW_READY` | Диагностический preview и объявленная review pause. |
 | `DRAFT_CLAIM_CURATION` | Открытие manual curation workspace. |
 | `PUBLICATION` | Atomic publication canonical facts, retrieval entries и embeddings. |
 | `COMPLETED` | Terminal phase; отдельной operation нет, состояние выставляет publication handler. |
@@ -128,8 +128,11 @@ frontend повторять `LEGACY_PHASE_MIGRATION_MAP`.
 | `ReconcileDraftClaimCompactionProgress` | `HandleReconcileDraftClaimCompactionProgressCommandHandler`. |
 | `OpenDraftClaimCurationWorkspace` | `HandleOpenDraftClaimCurationWorkspaceCommandHandler`. |
 | `PublishDraftClaimCurationWorkspace` | `HandlePublishDraftClaimCurationWorkspaceCommandHandler`. |
-| `BuildClusterPreview` | `HandleBuildClusterPreviewCommandHandler`. |
-| `PauseForClusterContractReview` | Объявлен contract, handler отсутствует. |
+
+Текущий workflow не содержит отдельной cluster preview / cluster contract review
+phase. После `DraftClaimClustersBuilt` workflow продолжается в draft-claim
+compaction. Cluster card/detail UI должен строиться из compaction/cluster read
+models или explicit cluster projections, а не из удалённых preview/review events.
 
 ## 5. Canonical event inventory
 
@@ -172,8 +175,6 @@ events. Остальные events связаны с operation contract.
 | `DraftClaimCurationWorkspaceOpened` | Emit. | curation availability |
 | `DraftClaimCurationReviewRequired` | Emit. | action/header |
 | `DraftClaimCurationWorkspacePublished` | Emit. | publication/completed state |
-| `ClusterPreviewReady` | Emit. | preview stage/projection |
-| `ClusterContractReviewRequired` | **Не emitится: handler отсутствует.** | pause/action |
 | `WorkflowManuallyPaused` | Emit pause use case. | header/timer/actions |
 | `WorkflowManuallyResumed` | Emit resume use case. | header/timer/actions |
 
@@ -200,17 +201,14 @@ entries. Они не должны становиться неявным frontend
 | `reconcile_draft_claim_compaction_progress` | `DRAFT_CLAIM_CLUSTERING` | `ReconcileDraftClaimCompactionProgress` | `DraftClaimCompactionAllGroupsCompacted` | progress reconciled, waiting choice | — | `OpenDraftClaimCurationWorkspace` | progress, attempts, timeline | yes |
 | `open_draft_claim_curation_workspace` | `DRAFT_CLAIM_CURATION` | `OpenDraftClaimCurationWorkspace` | `DraftClaimCurationWorkspaceOpened` | `DraftClaimCurationReviewRequired` | — | — | progress, timeline | yes |
 | `publish_draft_claim_curation_workspace` | `PUBLICATION` | `PublishDraftClaimCurationWorkspace` | `DraftClaimCurationWorkspacePublished` | — | — | — | progress, timeline | yes |
-| `build_cluster_preview` | `CLUSTER_PREVIEW_READY` | `BuildClusterPreview` | `ClusterPreviewReady` | — | — | `PauseForClusterContractReview` | progress, timeline, preview | yes |
-| `pause_for_cluster_contract_review` | `CLUSTER_PREVIEW_READY` | `PauseForClusterContractReview` | `ClusterContractReviewRequired` | — | — | — | progress, timeline, preview | yes |
 
 Recovery scopes, в порядке contract:
 
-- workflow: start, ingestion, curation, publication, review pause;
+- workflow: start, ingestion, curation, publication;
 - phase/source unit: ingestion, scheduling, reconciliation;
 - work item attempt/section: prepare/execute/split claim builder;
 - embedding batch: embedding;
 - cluster build/work item attempt: clustering/compaction;
-- cluster preview: preview/review pause;
 - curation workspace/publication: terminal manual paths.
 
 ## 7. Handler emission matrix
@@ -232,8 +230,6 @@ Recovery scopes, в порядке contract:
 | `handle_reconcile_draft_claim_compaction_progress_command.py` | reconcile compaction | command/outbox | progress; conditional all compacted/waiting | reconciliation | aggregate cluster counters | open curation or delayed reconcile | — |
 | `handle_open_draft_claim_curation_workspace_command.py` | open curation | workspace/items, workflow state, command/outbox | workspace opened, review required | review required | waiting-review state | — | — |
 | `handle_publish_draft_claim_curation_workspace_command.py` | publish | publication, fact registry/facts/triples, runtime retrieval entries/embeddings, workspace/workflow state, command/outbox | workspace published | publication completed | terminal completed snapshot | — | Event payload должен нести publication/workspace/result counts для projection без refetch. |
-| `handle_build_cluster_preview_command.py` | preview | preview projection, command/outbox | preview ready | preview ready | preview counters | declared pause command path | Проверить фактический append pause command в composition/dispatcher path. |
-| **missing** | `PauseForClusterContractReview` | none | none | none | none | none | Весь operation не реализован. |
 
 Pause/resume control handlers отдельно пишут outbox и timeline; resume не создаёт
 progress snapshot самостоятельно. Degraded fallback confirmation emitит
@@ -295,8 +291,6 @@ progress snapshot самостоятельно. Degraded fallback confirmation e
 | curation opened | `DraftClaimCurationWorkspaceOpened` | workspace ref/status/item counts | curation button/modal availability | event id | Нужны excluded count и version/revision. |
 | curation review required | `DraftClaimCurationReviewRequired` | workspace ref, item counts | header/action/banner | event id | Достаточно. |
 | publication completed | `DraftClaimCurationWorkspacePublished` | publication ref, published fact/entry/embedding counts, completed_at | document status/result/actions | event id | Проверить actual payload; likely не хватает всех result counts. |
-| preview ready | `ClusterPreviewReady` | preview ref/count/version | preview stage/widget | event id | Нужна preview summary или отдельный fetch. |
-| cluster review required | `ClusterContractReviewRequired` | preview ref/reason | pause/action/banner | event id | Event отсутствует. |
 | workflow paused | `WorkflowManuallyPaused` | phase, paused_at, reason | header/timer/actions | event id | Достаточно при reason. |
 | workflow resumed | `WorkflowManuallyResumed` | phase, resumed_at | header/timer/actions | event id | Достаточно. |
 
@@ -404,8 +398,7 @@ side effect, а не единственным liveness mechanism. Удалять
    добавить forward migration/contract tests при необходимости; frontend получает
    только canonical phase.
 3. **Закрыть canonical emission gaps.** Started events, all-sections-extracted,
-   distinct deferred semantics либо удалить их из contract осознанным ADR,
-   реализовать/снять `PauseForClusterContractReview`.
+   distinct deferred semantics либо удалить их из contract осознанным ADR.
 4. **Добавить capacity window vocabulary.** Не копировать provider reset time в
    item retry projection; emit observed/exhausted/wakeup/available/admitted.
 5. **Обогатить payloads.** Stable refs и cumulative counters для reducers; user-safe
@@ -449,21 +442,19 @@ side effect, а не единственным liveness mechanism. Удалять
    visible business change или лишь необходимость refresh существующего read model?
 9. Contract и tests расходятся с реализацией по all-sections-extracted/started/
    deferred events. Следует исправить emitters или изменить contract через ADR?
-10. `PauseForClusterContractReview` всё ещё продуктовый путь или legacy diagnostic
-    cutoff после появления полной compaction/curation/publication цепочки?
-11. Snapshot query связывает attempt с nearest capacity observation по времени.
+10. Snapshot query связывает attempt с nearest capacity observation по времени.
     Для event projection нужен явный observation/window ref, иначе correlation
     остаётся эвристической.
-12. Проверка выполнена статически. Не проверялись реальные PostgreSQL notifications,
+11. Проверка выполнена статически. Не проверялись реальные PostgreSQL notifications,
     proxy buffering, connection-pool pressure и browser reconnect.
 
 ### Gap report
 
 | category | Finding |
 |---|---|
-| existing canonical event | 46 enum events; большинство outcome/progress/publication events имеют emit path. |
+| existing canonical event | 44 enum events; большинство outcome/progress/publication events имеют emit path. |
 | actual emitted event | Handlers emit 26 canonical event types; source/start/control/confirmation добавляют ещё несколько. |
-| missing actual event | extraction started/deferred/split-required, all-sections-extracted, compaction attempt started, cluster contract review required. |
+| missing actual event | extraction started/deferred/split-required, all-sections-extracted, compaction attempt started. |
 | missing frontend projection | Все события: formal typed projection catalog отсутствует; capacity selection/wakeup events отсутствуют даже канонически. |
 | unsafe snapshot dependency | SSE full refetch, GET-triggered drain, six-document limit, no replay/reconnect, manual TS/OpenAPI drift. |
 | recommended migration order | envelope/cursor → phase vocabulary alignment → emission gaps → capacity ownership → payloads → mapper/stream → shadow reducer → widgets → detach drain → retire realtime snapshot. |
