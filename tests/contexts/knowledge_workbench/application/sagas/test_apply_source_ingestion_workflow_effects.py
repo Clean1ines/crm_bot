@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 
 import pytest
@@ -19,6 +19,15 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_workflo
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
+)
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.source_ingestion_frontend_workflow_event_projector import (
+    SourceIngestionFrontendWorkflowEventProjector,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
@@ -115,8 +124,9 @@ class FakeOutboxRepository:
     events: list[WorkflowEvent] = field(default_factory=list)
 
     async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
-        self.events.append(event)
-        return event
+        persisted = replace(event, sequence_number=len(self.events) + 1)
+        self.events.append(persisted)
+        return persisted
 
     async def list_events_after(
         self,
@@ -234,6 +244,18 @@ class FakeWorkflowRuntimeUnitOfWork:
         raise AssertionError("applier must not own transaction rollback")
 
 
+@dataclass(slots=True)
+class InMemoryFrontendWorkflowEventRepository:
+    events: dict[str, FrontendWorkflowEvent] = field(default_factory=dict)
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        existing = self.events.get(event.projection_event_id)
+        if existing is not None:
+            return existing
+        self.events[event.projection_event_id] = event
+        return event
+
+
 @pytest.mark.asyncio
 async def test_marks_ingest_source_document_command_completed() -> None:
     unit_of_work = FakeWorkflowRuntimeUnitOfWork()
@@ -269,6 +291,37 @@ async def test_appends_source_document_and_source_units_outbox_events() -> None:
     assert tuple(event.event_type for event in unit_of_work.outbox.events) == (
         KnowledgeExtractionCanonicalEventType.SOURCE_DOCUMENT_PERSISTED.value,
         KnowledgeExtractionCanonicalEventType.SOURCE_UNITS_CREATED.value,
+    )
+
+
+@pytest.mark.asyncio
+async def test_projects_persisted_source_ingestion_events_once() -> None:
+    unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=SourceIngestionFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await ApplySourceIngestionWorkflowEffects().execute(
+        ApplySourceIngestionWorkflowEffectsCommand(effects=_effects()),
+        unit_of_work=unit_of_work,
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert tuple(event.event_type for event in unit_of_work.outbox.events) == (
+        KnowledgeExtractionCanonicalEventType.SOURCE_DOCUMENT_PERSISTED.value,
+        KnowledgeExtractionCanonicalEventType.SOURCE_UNITS_CREATED.value,
+    )
+    assert tuple(repository.events) == (
+        "frontend-workflow-event:"
+        "workflow-event:knowledge-extraction:source-document:project-1:abc:"
+        "SourceDocumentPersisted:source-document:project-1:abc:"
+        "workflow_source_document_persisted:v1",
+        "frontend-workflow-event:"
+        "workflow-event:knowledge-extraction:source-document:project-1:abc:"
+        "SOURCE_UNITS_CREATED:source-document:project-1:abc:source-units:"
+        "workflow_source_units_created:v1",
     )
 
 

@@ -174,9 +174,25 @@ async def test_upload_calls_production_after_upload_factory(
     assert command.project_id == "project-1"
     assert command.original_filename == "knowledge.md"
     assert command.raw_text == "# Title\n\nBody"
-    assert response["status"] == "knowledge_extraction_workflow_started"
-    assert response["blocked_command_type"] == "PREPARE_CLAIM_BUILDER_DISPATCH_BATCH"
-    assert response["blocked_reason"] == "COMMAND_HANDLER_NOT_IMPLEMENTED"
+    assert response == {
+        "status": "knowledge_extraction_workflow_started",
+        "workflow_run_id": "knowledge-extraction:source-document:project-1:test",
+        "source_ingestion_completed": True,
+        "drained_inspected_count": 2,
+        "drained_dispatched_count": 1,
+        "blocked_command_type": "PREPARE_CLAIM_BUILDER_DISPATCH_BATCH",
+        "blocked_reason": "COMMAND_HANDLER_NOT_IMPLEMENTED",
+        "source_document_ref": "source-document:project-1:test",
+        "source_unit_count": 1,
+        "source_units_url": (
+            "/api/projects/project-1/knowledge/source-documents/"
+            "source-document:project-1:test/source-units"
+        ),
+        "draft_claims_url": (
+            "/api/projects/project-1/knowledge/source-documents/"
+            "source-document:project-1:test/draft-claims"
+        ),
+    }
 
 
 @pytest.mark.asyncio

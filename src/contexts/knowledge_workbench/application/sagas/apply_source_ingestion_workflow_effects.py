@@ -12,6 +12,9 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_workflo
     SourceIngestionWorkflowEffects,
     SourceIngestionWorkflowEventEffect,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -66,6 +69,7 @@ class ApplySourceIngestionWorkflowEffects:
         command: ApplySourceIngestionWorkflowEffectsCommand,
         *,
         unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> ApplySourceIngestionWorkflowEffectsResult:
         effects = command.effects
         completion_effect = effects.command_completion_effect
@@ -80,12 +84,14 @@ class ApplySourceIngestionWorkflowEffects:
 
         appended_event_count = 0
         for event_effect in effects.event_effects:
-            await unit_of_work.outbox.append_event(
+            persisted_event = await unit_of_work.outbox.append_event(
                 _workflow_event_from_event_effect(
                     effects=effects,
                     event_effect=event_effect,
                 )
             )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_event)
             appended_event_count += 1
 
         appended_next_command_count = 0

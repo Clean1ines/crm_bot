@@ -44,6 +44,15 @@ from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_knowledge
     AsyncKnowledgeExtractionSagaConnectionLike,
     PostgresKnowledgeExtractionSagaStateRepository,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.source_ingestion_frontend_workflow_event_projector import (
+    SourceIngestionFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
+    PostgresFrontendWorkflowEventRepository,
+)
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     AsyncSourceManagementConnectionLike,
     PostgresSourceManagementRepository,
@@ -384,6 +393,10 @@ class _TransactionalSourceIngestionFirstPhaseRunner(
                 timeline=PostgresTimelineRepository(connection),
                 resource_usage=PostgresResourceUsageRepository(connection),
             )
+            frontend_event_projection_writer = ProjectFrontendWorkflowEvent(
+                projector=SourceIngestionFrontendWorkflowEventProjector(),
+                repository=PostgresFrontendWorkflowEventRepository(connection),
+            )
             unit_of_work = _SourceIngestionFirstPhaseUnitOfWork(
                 source_management=source_management,
                 saga_state=saga_state,
@@ -420,6 +433,7 @@ class _TransactionalSourceIngestionFirstPhaseRunner(
                         effects=result.workflow_effects,
                     ),
                     unit_of_work=workflow_runtime_unit_of_work,
+                    frontend_event_projection_writer=(frontend_event_projection_writer),
                 )
             await transaction.commit()
             return result

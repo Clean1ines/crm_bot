@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import cast
@@ -28,12 +29,16 @@ from src.contexts.knowledge_workbench.document_segmentation.domain import (
     SegmentationModelBudgetProfile,
     SegmentationPromptProfile,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommandStatus,
 )
+from src.contexts.workflow_runtime.domain.entities.workflow_event import WorkflowEvent
 from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
     WorkflowCommandId,
 )
@@ -205,13 +210,21 @@ class FakeWorkflowOutboxRepository:
 
     def __init__(self, connection: FakeConnection) -> None:
         self.connection = connection
+        self.events_by_id: dict[str, WorkflowEvent] = {}
         FakeWorkflowOutboxRepository.constructed_with.append(connection)
 
     async def append_event(self, event: object) -> object:
+        if not isinstance(event, WorkflowEvent):
+            raise TypeError("event must be WorkflowEvent")
+        existing = self.events_by_id.get(event.event_id.value)
+        if existing is not None:
+            return existing
+        persisted = replace(event, sequence_number=len(self.events_by_id) + 1)
+        self.events_by_id[event.event_id.value] = persisted
         self.connection.executed.append(
-            ("workflow_runtime_outbox_events.append", (event,))
+            ("workflow_runtime_outbox_events.append", (persisted,))
         )
-        return event
+        return persisted
 
     async def list_events_after(
         self,
@@ -307,6 +320,25 @@ class FakeWorkflowResourceUsageRepository:
             ("workflow_runtime_resource_usage_snapshots.save", (usage,))
         )
         return usage
+
+
+class FakeFrontendWorkflowEventRepository:
+    constructed_with: list[FakeConnection] = []
+    events: dict[str, FrontendWorkflowEvent] = {}
+
+    def __init__(self, connection: FakeConnection) -> None:
+        self.connection = connection
+        FakeFrontendWorkflowEventRepository.constructed_with.append(connection)
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        existing = FakeFrontendWorkflowEventRepository.events.get(
+            event.projection_event_id
+        )
+        if existing is not None:
+            return existing
+        FakeFrontendWorkflowEventRepository.events[event.projection_event_id] = event
+        self.connection.executed.append(("frontend_workflow_events.append", (event,)))
+        return event
 
 
 class FakeDocumentPersister:
@@ -407,6 +439,8 @@ def _reset_fake_classes() -> None:
     FakeWorkflowProgressSnapshotRepository.constructed_with = []
     FakeWorkflowTimelineRepository.constructed_with = []
     FakeWorkflowResourceUsageRepository.constructed_with = []
+    FakeFrontendWorkflowEventRepository.constructed_with = []
+    FakeFrontendWorkflowEventRepository.events = {}
     FakeDocumentPersister.constructed_uows = []
     FakeSourceUnitCreator.constructed_uows = []
     FakeInnerRunner.should_fail = False
@@ -475,6 +509,11 @@ def _patch_transactional_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         composition,
         "PostgresResourceUsageRepository",
         FakeWorkflowResourceUsageRepository,
+    )
+    monkeypatch.setattr(
+        composition,
+        "PostgresFrontendWorkflowEventRepository",
+        FakeFrontendWorkflowEventRepository,
     )
     monkeypatch.setattr(
         composition,
@@ -1010,11 +1049,34 @@ async def test_completed_source_ingestion_applies_workflow_runtime_effects(
         "workflow_runtime_resource_usage_snapshots" in query
         for query in command_queries
     )
+    assert command_queries.count("frontend_workflow_events.append") == 2
+    assert tuple(
+        query
+        for query in command_queries
+        if query
+        in {
+            "workflow_runtime_outbox_events.append",
+            "frontend_workflow_events.append",
+        }
+    ) == (
+        "workflow_runtime_outbox_events.append",
+        "frontend_workflow_events.append",
+        "workflow_runtime_outbox_events.append",
+        "frontend_workflow_events.append",
+    )
     assert FakeWorkflowCommandLogRepository.constructed_with == [connection]
     assert FakeWorkflowOutboxRepository.constructed_with == [connection]
     assert FakeWorkflowProgressSnapshotRepository.constructed_with == [connection]
     assert FakeWorkflowTimelineRepository.constructed_with == [connection]
     assert FakeWorkflowResourceUsageRepository.constructed_with == [connection]
+    assert FakeFrontendWorkflowEventRepository.constructed_with == [connection]
+    assert tuple(
+        event.event_type
+        for event in FakeFrontendWorkflowEventRepository.events.values()
+    ) == (
+        "SourceDocumentPersisted",
+        "SourceUnitsCreated",
+    )
 
 
 @pytest.mark.asyncio
@@ -1036,6 +1098,9 @@ async def test_rejected_source_ingestion_writes_no_workflow_runtime_effects(
 
     assert result.status is RunSourceIngestionFirstPhaseStatus.REJECTED
     assert not any("workflow_runtime_" in query for query, _ in connection.executed)
+    assert not any(
+        query == "frontend_workflow_events.append" for query, _ in connection.executed
+    )
     assert transaction.commit_count == 1
 
 
