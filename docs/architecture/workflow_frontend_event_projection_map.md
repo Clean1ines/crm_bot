@@ -754,3 +754,38 @@ planner/architect/backend/frontend mapper passes. Backend/frontend tests не
 ClusterGroup rows are document-card artifact surfaces. ClusterBatch rows are child artifact surfaces under ClusterGroup rows. Their refs and row summaries are loaded by targeted read from the workflow-scoped draft-claim cluster endpoints. Cluster members are loaded on ClusterGroup expansion and default to refs (`observation_ref`, `embedding_ref`, `source_unit_ref`, rank/kind), not claim bodies. Claim/evidence/question bodies stay on the DraftClaimObservation targeted-read surface.
 
 Patch 18B does not update every DraftClaimObservation row with live cluster membership. It also does not add per-cluster, per-batch, or per-member canonical events. Compaction attempt visibility remains later and will attach to ClusterBatch rows after the batch parent surfaces are available. Reducer and React rendering remain later.\n\n
+
+## Patch 18C DraftClaimCompaction stage artifact graph
+
+ClusterBatch rows receive compaction processing visibility after Patch 18B. A
+compaction attempt is similar to a claim-builder attempt because it has provider,
+validation, work-item, and capacity outcomes, but it is not identical: attempt
+success means the LLM/validation path completed, while generated durable
+compacted/reduction node rows become available only after
+`DraftClaimCompactionResultApplied`.
+
+Patch 18C therefore treats `DraftClaimCompactionResultApplied` as the generated
+node availability boundary. The projection exposes a lightweight
+`generated_compaction_nodes` block with counts/refs when available and a targeted
+read hint. Generated compacted/reduction nodes are document-card artifact
+surfaces loaded by targeted read from the workflow-scoped compaction node read
+endpoint. The projection never forwards compacted claim bodies, reduced rewrite
+bodies, raw model output, prompt messages, claim/evidence/question bodies, or
+triples from attempt metadata.
+
+Reduced rewrite may require targeted read even when the applied event has no
+`created_node_refs`, because the reduction state persists the rewritten compacted
+node while the event may only carry parent scope and superseded refs. In that
+case the projection must not invent node refs; it points the frontend to
+workflow/group targeted read.
+
+`DraftClaimCompactionNextWorkScheduled` is a processing/progress signal only. It
+does not invent ClusterBatch rows when the event has no persisted batch refs.
+`DraftClaimCompactionClusterDone` is a ClusterGroup-level completion overlay.
+`DraftClaimCompactionAllGroupsCompacted` is document-level compaction completion
+and curation-readiness, not publication readiness. Curation, publication,
+workflow-live-state, reducer, and React rendering remain later.
+
+CapacityWindow ownership remains unchanged: provider/account/model admission and
+reset are CapacityWindow-owned. Compaction projections must not expose provider
+reset or `next_attempt_at` as a WorkItem-owned retry timer.

@@ -392,3 +392,43 @@ def test_workflow_scoped_draft_claims_endpoint_matches_targeted_read_kind() -> N
         "cluster",
     ):
         assert forbidden_marker not in endpoint_region
+
+
+def test_patch_18c_compaction_projector_registered_and_sanitized() -> None:
+    root = Path(__file__).resolve().parents[2]
+    router = (
+        root
+        / "src/contexts/knowledge_workbench/observability/application/projectors/"
+        / "knowledge_extraction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+    projector = (
+        root
+        / "src/contexts/knowledge_workbench/observability/application/projectors/"
+        / "draft_claim_compaction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert "DraftClaimCompactionFrontendWorkflowEventProjector" in router
+    assert "_draft_claim_compaction.project(event)" in router
+    assert "DRAFT_CLAIM_COMPACTION_ATTEMPT_COMPLETED" in projector
+    assert "DRAFT_CLAIM_COMPACTION_RESULT_APPLIED" in projector
+    assert "_HEAVY_OUTPUT_KEYS" in projector
+    assert "compacted_claims" in projector
+    assert "reduced_rewrite" in projector
+    assert "_FORBIDDEN_TIMER_KEYS" in projector
+    assert "next_attempt_at" in projector
+    assert "generated_compaction_nodes" in projector
+    assert "draft_claim_compaction_nodes_by_workflow_or_group" in projector
+
+
+def test_patch_18c_keeps_compaction_projection_out_of_reducer_and_curation() -> None:
+    root = Path(__file__).resolve().parents[2]
+    projector = (
+        root
+        / "src/contexts/knowledge_workbench/observability/application/projectors/"
+        / "draft_claim_compaction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert "PublishDraftClaimCurationWorkspace" not in projector
+    assert "OpenDraftClaimCurationWorkspace(" not in projector
+    assert "React" not in projector
+    assert "workflow-live-state" not in projector

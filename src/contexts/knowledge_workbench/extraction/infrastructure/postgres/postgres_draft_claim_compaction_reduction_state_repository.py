@@ -33,6 +33,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionNode,
     DraftClaimCompactionNodeKind,
+    DraftClaimCompactionNodeReadModel,
     DraftClaimCompactionNodeSource,
     DraftClaimCompactionPlannerState,
     DraftClaimCompactionRound,
@@ -306,6 +307,52 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             ),
             next_due_at=_optional_datetime(work_item_counts, "next_due_at"),
         )
+
+    async def list_compaction_nodes_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str | None,
+        node_ref: str | None,
+        active_only: bool,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionNodeReadModel, ...]:
+        _read_model_require_text(workflow_run_id, "workflow_run_id")
+        if group_ref is not None:
+            _read_model_require_text(group_ref, "group_ref")
+        if node_ref is not None:
+            _read_model_require_text(node_ref, "node_ref")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError("limit must be positive int")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be non-negative int")
+        if not isinstance(active_only, bool):
+            raise TypeError("active_only must be bool")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT workflow_run_id, group_ref, node_ref, node_kind, active,
+                   source_claim_refs, supersedes_node_refs, estimated_input_tokens,
+                   compacted_key, compacted_claim, compacted_claim_kind,
+                   compacted_granularity, compacted_merge_decision,
+                   created_at, updated_at
+            FROM draft_claim_compaction_nodes
+            WHERE workflow_run_id = $1
+              AND ($2::text IS NULL OR group_ref = $2)
+              AND ($3::text IS NULL OR node_ref = $3)
+              AND ($4::boolean = false OR active = true)
+            ORDER BY group_ref ASC, active DESC, updated_at DESC, node_ref ASC
+            LIMIT $5 OFFSET $6
+            """,
+            workflow_run_id,
+            group_ref,
+            node_ref,
+            active_only,
+            limit,
+            offset,
+        )
+        return tuple(_node_read_model(row) for row in rows)
 
     async def load_planner_state(
         self,
@@ -1237,6 +1284,84 @@ def _estimated_compacted_claim_tokens(payload: JsonObject) -> int:
         sort_keys=True,
     )
     return max(1, estimate_tokens_roughly(serialized))
+
+
+def _node_read_model(row: Mapping[str, object]) -> DraftClaimCompactionNodeReadModel:
+    return DraftClaimCompactionNodeReadModel(
+        workflow_run_id=_read_model_text(row, "workflow_run_id"),
+        group_ref=_read_model_text(row, "group_ref"),
+        node_ref=_read_model_text(row, "node_ref"),
+        node_kind=_read_model_text(row, "node_kind"),
+        active=_read_model_bool(row, "active"),
+        source_claim_refs=_read_model_json_text_tuple(row, "source_claim_refs"),
+        supersedes_node_refs=_read_model_json_text_tuple(row, "supersedes_node_refs"),
+        estimated_input_tokens=_read_model_int(row, "estimated_input_tokens"),
+        compacted_key=_read_model_optional_text(row, "compacted_key"),
+        compacted_claim=_read_model_optional_text(row, "compacted_claim"),
+        compacted_claim_kind=_read_model_optional_text(row, "compacted_claim_kind"),
+        compacted_granularity=_read_model_optional_text(row, "compacted_granularity"),
+        compacted_merge_decision=_read_model_optional_text(
+            row,
+            "compacted_merge_decision",
+        ),
+        created_at=_read_model_datetime(row, "created_at"),
+        updated_at=_read_model_datetime(row, "updated_at"),
+    )
+
+
+def _read_model_text(row: Mapping[str, object], key: str) -> str:
+    value = row[key]
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text")
+    return value
+
+
+def _read_model_optional_text(row: Mapping[str, object], key: str) -> str | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text or null")
+    return value
+
+
+def _read_model_int(row: Mapping[str, object], key: str) -> int:
+    value = row[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be int")
+    return value
+
+
+def _read_model_bool(row: Mapping[str, object], key: str) -> bool:
+    value = row[key]
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} must be bool")
+    return value
+
+
+def _read_model_datetime(row: Mapping[str, object], key: str) -> datetime:
+    value = row[key]
+    if not isinstance(value, datetime):
+        raise TypeError(f"{key} must be datetime")
+    return value
+
+
+def _read_model_json_text_tuple(row: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = row[key]
+    decoded = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(decoded, list | tuple):
+        raise ValueError(f"{key} must be JSON array")
+    result: list[str] = []
+    for item in decoded:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{key} must contain non-empty strings")
+        result.append(item)
+    return tuple(result)
+
+
+def _read_model_require_text(value: str, name: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be non-empty text")
 
 
 def _node(

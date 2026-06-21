@@ -15,6 +15,7 @@ from src.contexts.knowledge_workbench.extraction.application.models.enriched_dra
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionNode,
+    DraftClaimCompactionNodeReadModel,
     DraftClaimCompactionPlannerState,
 )
 
@@ -82,6 +83,17 @@ class DraftClaimCompactionReductionStateRepositoryPort(Protocol):
         workflow_run_id: str,
         group_ref: str,
     ) -> DraftClaimCompactionPlannerState | None: ...
+
+    async def list_compaction_nodes_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str | None,
+        node_ref: str | None,
+        active_only: bool,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionNodeReadModel, ...]: ...
 
     async def seed_initial_planner_state(
         self,

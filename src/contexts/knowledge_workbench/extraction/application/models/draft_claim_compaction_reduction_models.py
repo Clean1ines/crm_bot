@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
@@ -111,6 +112,55 @@ class DraftClaimCompactionNode:
             _text(self.compacted_merge_decision, "compacted_merge_decision")
         if self.compacted_payload is not None:
             _json_object(self.compacted_payload, "compacted_payload")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionNodeReadModel:
+    workflow_run_id: str
+    group_ref: str
+    node_ref: str
+    node_kind: str
+    active: bool
+    source_claim_refs: tuple[str, ...]
+    supersedes_node_refs: tuple[str, ...]
+    estimated_input_tokens: int
+    compacted_key: str | None
+    compacted_claim: str | None
+    compacted_claim_kind: str | None
+    compacted_granularity: str | None
+    compacted_merge_decision: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("workflow_run_id", self.workflow_run_id),
+            ("group_ref", self.group_ref),
+            ("node_ref", self.node_ref),
+            ("node_kind", self.node_kind),
+        ):
+            _text(value, name)
+        if self.node_kind not in {item.value for item in DraftClaimCompactionNodeKind}:
+            raise ValueError("node_kind must be raw or compacted")
+        if not isinstance(self.active, bool):
+            raise TypeError("active must be bool")
+        _text_tuple(self.source_claim_refs, "source_claim_refs", allow_empty=False)
+        _text_tuple(self.supersedes_node_refs, "supersedes_node_refs", allow_empty=True)
+        _non_negative_int(self.estimated_input_tokens, "estimated_input_tokens")
+        if self.compacted_key is not None:
+            _text(self.compacted_key, "compacted_key")
+        if self.compacted_claim is not None:
+            _text(self.compacted_claim, "compacted_claim")
+        if self.compacted_claim_kind is not None:
+            _text(self.compacted_claim_kind, "compacted_claim_kind")
+        if self.compacted_granularity is not None:
+            _text(self.compacted_granularity, "compacted_granularity")
+        if self.compacted_merge_decision is not None:
+            _text(self.compacted_merge_decision, "compacted_merge_decision")
+        if not isinstance(self.created_at, datetime):
+            raise TypeError("created_at must be datetime")
+        if not isinstance(self.updated_at, datetime):
+            raise TypeError("updated_at must be datetime")
 
 
 @dataclass(frozen=True, slots=True)

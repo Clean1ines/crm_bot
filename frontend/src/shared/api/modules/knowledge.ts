@@ -1063,6 +1063,43 @@ export type DraftClaimClusterGroupSummary = {
   batches: DraftClaimClusterBatchSummary[];
 };
 
+export type DraftClaimCompactionNodeSummary = {
+  node_ref: string;
+  workflow_run_id: string;
+  group_ref: string;
+  node_kind: string;
+  active: boolean;
+  source_claim_refs: string[];
+  supersedes_node_refs: string[];
+  estimated_input_tokens: number;
+  compacted_key: string | null;
+  compacted_claim: string | null;
+  compacted_claim_kind: string | null;
+  compacted_granularity: string | null;
+  compacted_merge_decision: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkflowDraftClaimCompactionNodesQuery = {
+  group_ref?: string;
+  node_ref?: string;
+  active_only?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type WorkflowDraftClaimCompactionNodesResponse = {
+  workflow_run_id: string;
+  group_ref: string | null;
+  node_ref: string | null;
+  active_only: boolean;
+  count: number;
+  limit: number;
+  offset: number;
+  items: DraftClaimCompactionNodeSummary[];
+};
+
 export type WorkflowDraftClaimClustersQuery = {
   include_batches?: boolean;
   limit?: number;
@@ -1197,6 +1234,38 @@ export const knowledgeApi = {
     const queryString = params.toString();
     return authedJsonRequest<WorkflowScopedDraftClaimsResponse>(
       `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claims${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
+
+  getDraftClaimCompactionNodesByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    query: WorkflowDraftClaimCompactionNodesQuery = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof query.group_ref === 'string' && query.group_ref.length > 0) {
+      params.set('group_ref', query.group_ref);
+    }
+    if (typeof query.node_ref === 'string' && query.node_ref.length > 0) {
+      params.set('node_ref', query.node_ref);
+    }
+    if (typeof query.active_only === 'boolean') {
+      params.set('active_only', String(query.active_only));
+    }
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<WorkflowDraftClaimCompactionNodesResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claim-compaction-nodes${
         queryString ? `?${queryString}` : ''
       }`,
       {

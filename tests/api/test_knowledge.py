@@ -2395,3 +2395,36 @@ async def test_list_knowledge_documents_returns_fallback_documents(
     assert card_view["lifecycle_state"] == "processing"
     assert response["items"][0]["document_id"] == "source-document:project-1:abc"
     assert response["count"] == 1
+
+
+def test_patch_18c_compaction_node_endpoint_is_read_model_only() -> None:
+    knowledge_py = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
+
+    route_marker = (
+        '@router.get("/workflows/{workflow_run_id}/draft-claim-compaction-nodes")'
+    )
+    assert route_marker in knowledge_py
+
+    route_start = knowledge_py.index(route_marker)
+    next_route = knowledge_py.find("\n@router.", route_start + len(route_marker))
+    if next_route == -1:
+        next_route = len(knowledge_py)
+
+    endpoint_slice = knowledge_py[route_start:next_route]
+
+    assert "PostgresDraftClaimCompactionReductionStateRepository" in endpoint_slice
+    assert "list_compaction_nodes_for_workflow" in endpoint_slice
+    assert "_draft_claim_compaction_node_read_model" in endpoint_slice
+
+    forbidden = (
+        "open_draft_claim_curation_workspace",
+        "publish_draft_claim_curation_workspace",
+        "fetch_workbench_workflow_live_state",
+        "make_knowledge_extraction_workflow_resume",
+        "workflow_live_state",
+        "raw_output",
+        "parsed_output",
+        "model_output",
+    )
+    for marker in forbidden:
+        assert marker not in endpoint_slice

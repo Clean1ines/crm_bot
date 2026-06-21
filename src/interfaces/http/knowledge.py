@@ -162,6 +162,9 @@ from src.contexts.knowledge_workbench.curation.infrastructure.postgres.postgres_
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionNodeReadModel,
+)
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
     DraftClaimCompactionReductionStateConnectionLike,
     PostgresDraftClaimCompactionReductionStateRepository,
@@ -781,6 +784,28 @@ def _draft_claim_observation_read_model(
 
 def _derived_compaction_work_item_id(*, workflow_run_id: str, batch_ref: str) -> str:
     return f"claim-compaction:{workflow_run_id}:{batch_ref}"
+
+
+def _draft_claim_compaction_node_read_model(
+    item: DraftClaimCompactionNodeReadModel,
+) -> dict[str, object]:
+    return {
+        "node_ref": item.node_ref,
+        "workflow_run_id": item.workflow_run_id,
+        "group_ref": item.group_ref,
+        "node_kind": item.node_kind,
+        "active": item.active,
+        "source_claim_refs": list(item.source_claim_refs),
+        "supersedes_node_refs": list(item.supersedes_node_refs),
+        "estimated_input_tokens": item.estimated_input_tokens,
+        "compacted_key": item.compacted_key,
+        "compacted_claim": item.compacted_claim,
+        "compacted_claim_kind": item.compacted_claim_kind,
+        "compacted_granularity": item.compacted_granularity,
+        "compacted_merge_decision": item.compacted_merge_decision,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
 
 
 def _draft_claim_cluster_batch_read_model(
@@ -1433,6 +1458,58 @@ async def source_unit_draft_claims(
         "limit": limit,
         "offset": offset,
         "items": [_draft_claim_observation_read_model(item) for item in items],
+    }
+
+
+@router.get("/workflows/{workflow_run_id}/draft-claim-compaction-nodes")
+async def workflow_draft_claim_compaction_nodes(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    group_ref: str | None = Query(default=None),
+    node_ref: str | None = Query(default=None),
+    active_only: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+    normalized_group_ref = _normalize_optional_query_text(group_ref)
+    normalized_node_ref = _normalize_optional_query_text(node_ref)
+
+    repository = PostgresDraftClaimCompactionReductionStateRepository(pool)
+    try:
+        items = await repository.list_compaction_nodes_for_workflow(
+            workflow_run_id=normalized_workflow_run_id,
+            group_ref=normalized_group_ref,
+            node_ref=normalized_node_ref,
+            active_only=active_only,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "workflow_run_id": normalized_workflow_run_id,
+        "group_ref": normalized_group_ref,
+        "node_ref": normalized_node_ref,
+        "active_only": active_only,
+        "count": len(items),
+        "limit": limit,
+        "offset": offset,
+        "items": [_draft_claim_compaction_node_read_model(item) for item in items],
     }
 
 
