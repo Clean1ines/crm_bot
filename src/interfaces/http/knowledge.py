@@ -62,6 +62,9 @@ from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_workbench
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event_cursor import (
+    FrontendWorkflowEventCursor,
+)
 from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
     PostgresFrontendWorkflowEventRepository,
 )
@@ -1093,6 +1096,7 @@ async def list_knowledge_frontend_workflow_events(
     project_id: str,
     document_id: str,
     workflow_run_id: str,
+    after_cursor: str | None = Query(default=None),
     after_source_sequence: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     authorization: str | None = Header(default=None),
@@ -1109,26 +1113,37 @@ async def list_knowledge_frontend_workflow_events(
         user_repo=user_repo,
     )
 
+    try:
+        cursor = _resolve_frontend_workflow_event_cursor(
+            after_cursor=after_cursor,
+            after_source_sequence=after_source_sequence,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
         repository = PostgresFrontendWorkflowEventRepository(
             cast(asyncpg.Connection, raw_connection)
         )
         events = await repository.list_frontend_events(
             workflow_run_id,
-            after_source_sequence,
+            cursor,
             limit,
         )
 
-    visible_events = (
+    visible_events = tuple(
         event
         for event in events
         if event.project_id == project_id
         and event.document_id == document_id
         and event.workflow_run_id == workflow_run_id
     )
+    next_cursor = _next_frontend_workflow_event_cursor(visible_events)
     return {
         "workflow_run_id": workflow_run_id,
-        "after_source_sequence": after_source_sequence,
+        "after_source_sequence": cursor.source_sequence_number,
+        "after_cursor": None if cursor.sequence_only else cursor.serialize(),
+        "next_cursor": next_cursor,
         "events": [
             _frontend_workflow_event_read_model(event) for event in visible_events
         ],
@@ -1166,6 +1181,26 @@ def _frontend_workflow_event_sse(event: FrontendWorkflowEvent) -> str:
     )
 
 
+def _resolve_frontend_workflow_event_cursor(
+    *,
+    after_cursor: str | None,
+    after_source_sequence: int,
+) -> FrontendWorkflowEventCursor:
+    if isinstance(after_cursor, str) and after_cursor.strip():
+        return FrontendWorkflowEventCursor.parse(after_cursor)
+    return FrontendWorkflowEventCursor.from_legacy_source_sequence(
+        after_source_sequence
+    )
+
+
+def _next_frontend_workflow_event_cursor(
+    events: tuple[FrontendWorkflowEvent, ...],
+) -> str | None:
+    if not events:
+        return None
+    return FrontendWorkflowEventCursor.from_event(events[-1]).serialize()
+
+
 @router.get(
     "/source-documents/{document_id}/workflows/{workflow_run_id}/frontend-events/stream"
 )
@@ -1174,6 +1209,7 @@ async def stream_knowledge_frontend_workflow_events(
     document_id: str,
     workflow_run_id: str,
     request: Request,
+    after_cursor: str | None = Query(default=None),
     after_source_sequence: int = Query(0, ge=0),
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
@@ -1189,8 +1225,16 @@ async def stream_knowledge_frontend_workflow_events(
         user_repo=user_repo,
     )
 
+    try:
+        cursor = _resolve_frontend_workflow_event_cursor(
+            after_cursor=after_cursor,
+            after_source_sequence=after_source_sequence,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     async def event_stream():
-        cursor = after_source_sequence
+        poll_cursor = cursor
         async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
             repository = PostgresFrontendWorkflowEventRepository(
                 cast(asyncpg.Connection, raw_connection)
@@ -1198,11 +1242,11 @@ async def stream_knowledge_frontend_workflow_events(
             while True:
                 events = await repository.list_frontend_events(
                     workflow_run_id,
-                    cursor,
+                    poll_cursor,
                     200,
                 )
                 for event in events:
-                    cursor = max(cursor, event.source_sequence_number)
+                    poll_cursor = FrontendWorkflowEventCursor.from_event(event)
                     if (
                         event.project_id == project_id
                         and event.document_id == document_id

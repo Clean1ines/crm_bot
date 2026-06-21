@@ -9,6 +9,9 @@ import asyncpg
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event_cursor import (
+    FrontendWorkflowEventCursor,
+)
 from src.contexts.knowledge_workbench.observability.application.ports.frontend_workflow_event_repository_port import (
     FrontendWorkflowEventRepositoryPort,
 )
@@ -93,17 +96,13 @@ class PostgresFrontendWorkflowEventRepository(FrontendWorkflowEventRepositoryPor
     async def list_frontend_events(
         self,
         workflow_run_id: str,
-        after_source_sequence: int,
+        after_cursor: FrontendWorkflowEventCursor,
         limit: int,
     ) -> tuple[FrontendWorkflowEvent, ...]:
         if not isinstance(workflow_run_id, str) or not workflow_run_id.strip():
             raise ValueError("workflow_run_id must be non-empty")
-        if (
-            not isinstance(after_source_sequence, int)
-            or isinstance(after_source_sequence, bool)
-            or after_source_sequence < 0
-        ):
-            raise ValueError("after_source_sequence must be a non-negative int")
+        if not isinstance(after_cursor, FrontendWorkflowEventCursor):
+            raise TypeError("after_cursor must be FrontendWorkflowEventCursor")
         if (
             not isinstance(limit, int)
             or isinstance(limit, bool)
@@ -112,39 +111,87 @@ class PostgresFrontendWorkflowEventRepository(FrontendWorkflowEventRepositoryPor
         ):
             raise ValueError("limit must be between 1 and 200")
 
-        rows = await self._connection.fetch(
-            """
-            SELECT
-                projection_event_id,
-                source_event_id,
-                source_sequence_number,
-                projection_version,
-                projection_type,
-                event_type,
-                operation_key,
-                canonical_phase,
+        if after_cursor.sequence_only:
+            rows = await self._connection.fetch(
+                """
+                SELECT
+                    projection_event_id,
+                    source_event_id,
+                    source_sequence_number,
+                    projection_version,
+                    projection_type,
+                    event_type,
+                    operation_key,
+                    canonical_phase,
+                    workflow_run_id,
+                    project_id,
+                    document_id,
+                    payload,
+                    occurred_at,
+                    causation_command_id,
+                    correlation_id,
+                    projected_at
+                FROM frontend_workflow_events
+                WHERE workflow_run_id = $1
+                  AND source_sequence_number > $2
+                ORDER BY
+                    source_sequence_number ASC,
+                    projection_type ASC,
+                    projection_version ASC,
+                    projection_event_id ASC
+                LIMIT $3
+                """,
                 workflow_run_id,
-                project_id,
-                document_id,
-                payload,
-                occurred_at,
-                causation_command_id,
-                correlation_id,
-                projected_at
-            FROM frontend_workflow_events
-            WHERE workflow_run_id = $1
-              AND source_sequence_number > $2
-            ORDER BY
-                source_sequence_number ASC,
-                projection_type ASC,
-                projection_version ASC,
-                projection_event_id ASC
-            LIMIT $3
-            """,
-            workflow_run_id,
-            after_source_sequence,
-            limit,
-        )
+                after_cursor.source_sequence_number,
+                limit,
+            )
+        else:
+            rows = await self._connection.fetch(
+                """
+                SELECT
+                    projection_event_id,
+                    source_event_id,
+                    source_sequence_number,
+                    projection_version,
+                    projection_type,
+                    event_type,
+                    operation_key,
+                    canonical_phase,
+                    workflow_run_id,
+                    project_id,
+                    document_id,
+                    payload,
+                    occurred_at,
+                    causation_command_id,
+                    correlation_id,
+                    projected_at
+                FROM frontend_workflow_events
+                WHERE workflow_run_id = $1
+                  AND (
+                      source_sequence_number,
+                      projection_type,
+                      projection_version,
+                      projection_event_id
+                  ) > (
+                      $2,
+                      $3,
+                      $4,
+                      $5
+                  )
+                ORDER BY
+                    source_sequence_number ASC,
+                    projection_type ASC,
+                    projection_version ASC,
+                    projection_event_id ASC
+                LIMIT $6
+                """,
+                workflow_run_id,
+                after_cursor.source_sequence_number,
+                after_cursor.projection_type,
+                after_cursor.projection_version,
+                after_cursor.projection_event_id,
+                limit,
+            )
         return tuple(_hydrate_event(row) for row in rows)
 
     async def _load_by_identity(

@@ -13,6 +13,9 @@ import pytest
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event_cursor import (
+    FrontendWorkflowEventCursor,
+)
 from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
     PostgresFrontendWorkflowEventRepository,
 )
@@ -116,14 +119,28 @@ class FakeConnection:
         if "FROM frontend_workflow_events" not in query:
             raise AssertionError(query)
         workflow_run_id = _arg_str(args, 0)
-        after_source_sequence = _arg_int(args, 1)
-        limit = _arg_int(args, 2)
-        rows = (
-            row
-            for row in self.rows.values()
-            if row["workflow_run_id"] == workflow_run_id
-            and _row_int(row, "source_sequence_number") > after_source_sequence
-        )
+        limit = _arg_int(args, -1)
+        if "source_sequence_number > $2" in query:
+            after_source_sequence = _arg_int(args, 1)
+            rows = (
+                row
+                for row in self.rows.values()
+                if row["workflow_run_id"] == workflow_run_id
+                and _row_int(row, "source_sequence_number") > after_source_sequence
+            )
+        else:
+            after_cursor = FrontendWorkflowEventCursor(
+                source_sequence_number=_arg_int(args, 1),
+                projection_type=_arg_str(args, 2),
+                projection_version=_arg_int(args, 3),
+                projection_event_id=_arg_str(args, 4),
+            )
+            rows = (
+                row
+                for row in self.rows.values()
+                if row["workflow_run_id"] == workflow_run_id
+                and _row_is_after_cursor(row, after_cursor)
+            )
         return sorted(
             rows,
             key=lambda row: (
@@ -161,6 +178,23 @@ def _row_int(row: Mapping[str, object], key: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool):
         raise TypeError("expected int row value")
     return value
+
+
+def _row_is_after_cursor(
+    row: Mapping[str, object],
+    after_cursor: FrontendWorkflowEventCursor,
+) -> bool:
+    return (
+        _row_int(row, "source_sequence_number"),
+        _row_str(row, "projection_type"),
+        _row_int(row, "projection_version"),
+        _row_str(row, "projection_event_id"),
+    ) > (
+        after_cursor.source_sequence_number,
+        after_cursor.projection_type,
+        after_cursor.projection_version,
+        after_cursor.projection_event_id,
+    )
 
 
 @pytest.mark.asyncio
@@ -238,7 +272,7 @@ async def test_list_frontend_events_uses_deterministic_composite_order() -> None
 
     events = await repository.list_frontend_events(
         "workflow-1",
-        after_source_sequence=0,
+        FrontendWorkflowEventCursor.beginning(),
         limit=10,
     )
 
@@ -267,7 +301,7 @@ async def test_list_frontend_events_applies_after_source_sequence_and_limit() ->
 
     events = await repository.list_frontend_events(
         "workflow-1",
-        after_source_sequence=10,
+        FrontendWorkflowEventCursor.from_legacy_source_sequence(10),
         limit=1,
     )
 
@@ -287,6 +321,61 @@ def test_list_frontend_events_reads_only_projection_table() -> None:
         "knowledge_extraction_",
     ):
         assert forbidden_table not in source
+
+
+@pytest.mark.asyncio
+async def test_list_frontend_events_composite_cursor_continues_same_sequence() -> None:
+    connection = FakeConnection()
+    first = _event_with_order(sequence=11, projection_type="a", version=1, suffix="a")
+    second = _event_with_order(sequence=11, projection_type="b", version=1, suffix="b")
+    connection.rows = {
+        event.projection_event_id: _event_row(event) for event in (first, second)
+    }
+    repository = PostgresFrontendWorkflowEventRepository(
+        cast(asyncpg.Connection, connection)
+    )
+
+    events = await repository.list_frontend_events(
+        "workflow-1",
+        FrontendWorkflowEventCursor.from_event(first),
+        limit=10,
+    )
+
+    assert tuple(event.projection_event_id for event in events) == ("projection-b",)
+
+
+@pytest.mark.asyncio
+async def test_list_frontend_events_pages_250_events_within_one_sequence() -> None:
+    connection = FakeConnection()
+    events = tuple(
+        _event_with_order(
+            sequence=42,
+            projection_type="workflow_source_units_created",
+            version=1,
+            suffix=f"{index:03d}",
+        )
+        for index in range(250)
+    )
+    connection.rows = {event.projection_event_id: _event_row(event) for event in events}
+    repository = PostgresFrontendWorkflowEventRepository(
+        cast(asyncpg.Connection, connection)
+    )
+
+    first_page = await repository.list_frontend_events(
+        "workflow-1",
+        FrontendWorkflowEventCursor.beginning(),
+        limit=200,
+    )
+    second_page = await repository.list_frontend_events(
+        "workflow-1",
+        FrontendWorkflowEventCursor.from_event(first_page[-1]),
+        limit=200,
+    )
+
+    assert len(first_page) == 200
+    assert len(second_page) == 50
+    assert first_page[-1].projection_event_id == "projection-199"
+    assert second_page[0].projection_event_id == "projection-200"
 
 
 def _event_with_order(

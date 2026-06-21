@@ -5,6 +5,9 @@ from typing import Protocol
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event_cursor import (
+    FrontendWorkflowEventCursor,
+)
 
 
 class FrontendWorkflowEventRepositoryPort(Protocol):
@@ -13,6 +16,6 @@ class FrontendWorkflowEventRepositoryPort(Protocol):
     async def list_frontend_events(
         self,
         workflow_run_id: str,
-        after_source_sequence: int,
+        after_cursor: FrontendWorkflowEventCursor,
         limit: int,
     ) -> tuple[FrontendWorkflowEvent, ...]: ...

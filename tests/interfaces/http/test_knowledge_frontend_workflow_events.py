@@ -12,6 +12,9 @@ from starlette.responses import StreamingResponse
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event_cursor import (
+    FrontendWorkflowEventCursor,
+)
 from src.interfaces.http import dependencies, knowledge
 from tests.api.test_knowledge import _FakeProjectRepo, _user_repo
 
@@ -54,7 +57,7 @@ class FakePool:
 
 class FakeFrontendWorkflowEventRepository:
     events: tuple[FrontendWorkflowEvent, ...] = ()
-    calls: list[tuple[str, int, int]] = []
+    calls: list[tuple[str, FrontendWorkflowEventCursor, int]] = []
 
     def __init__(self, connection: object) -> None:
         del connection
@@ -62,17 +65,17 @@ class FakeFrontendWorkflowEventRepository:
     async def list_frontend_events(
         self,
         workflow_run_id: str,
-        after_source_sequence: int,
+        after_cursor: FrontendWorkflowEventCursor,
         limit: int,
     ) -> tuple[FrontendWorkflowEvent, ...]:
-        self.calls.append((workflow_run_id, after_source_sequence, limit))
+        self.calls.append((workflow_run_id, after_cursor, limit))
         return tuple(
             sorted(
                 (
                     event
                     for event in self.events
                     if event.workflow_run_id == workflow_run_id
-                    and event.source_sequence_number > after_source_sequence
+                    and _event_is_after_cursor(event, after_cursor)
                 ),
                 key=lambda event: (
                     event.source_sequence_number,
@@ -82,6 +85,25 @@ class FakeFrontendWorkflowEventRepository:
                 ),
             )[:limit]
         )
+
+
+def _event_is_after_cursor(
+    event: FrontendWorkflowEvent,
+    after_cursor: FrontendWorkflowEventCursor,
+) -> bool:
+    if after_cursor.sequence_only:
+        return event.source_sequence_number > after_cursor.source_sequence_number
+    return (
+        event.source_sequence_number,
+        event.projection_type,
+        event.projection_version,
+        event.projection_event_id,
+    ) > (
+        after_cursor.source_sequence_number,
+        after_cursor.projection_type,
+        after_cursor.projection_version,
+        after_cursor.projection_event_id,
+    )
 
 
 class FakeRequest:
@@ -130,7 +152,16 @@ async def test_frontend_workflow_events_endpoint_returns_projection_events(
         user_repo=_user_repo(),
     )
 
-    assert FakeFrontendWorkflowEventRepository.calls == [("workflow-1", 10, 25)]
+    assert FakeFrontendWorkflowEventRepository.calls == [
+        (
+            "workflow-1",
+            FrontendWorkflowEventCursor.from_legacy_source_sequence(10),
+            25,
+        )
+    ]
+    assert response["after_source_sequence"] == 10
+    assert response["after_cursor"] is None
+    assert response["next_cursor"] is not None
     assert response["events"] == [
         {
             "projection_event_id": "projection-1",
@@ -232,6 +263,8 @@ async def test_frontend_workflow_events_endpoint_returns_empty_list_without_drai
     assert response == {
         "workflow_run_id": "workflow-1",
         "after_source_sequence": 0,
+        "after_cursor": None,
+        "next_cursor": None,
         "events": [],
     }
 
@@ -313,7 +346,13 @@ async def test_frontend_workflow_event_stream_replays_in_composite_order(
         "projection-b",
         "projection-c",
     )
-    assert FakeFrontendWorkflowEventRepository.calls == [("workflow-1", 10, 200)]
+    assert FakeFrontendWorkflowEventRepository.calls == [
+        (
+            "workflow-1",
+            FrontendWorkflowEventCursor.from_legacy_source_sequence(10),
+            200,
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -443,8 +482,16 @@ async def test_frontend_workflow_event_stream_polls_after_empty_backlog(
     assert text.startswith(": keepalive\n\n")
     assert "id: projection-after-wait" in text
     assert FakeFrontendWorkflowEventRepository.calls == [
-        ("workflow-1", 0, 200),
-        ("workflow-1", 0, 200),
+        (
+            "workflow-1",
+            FrontendWorkflowEventCursor.from_legacy_source_sequence(0),
+            200,
+        ),
+        (
+            "workflow-1",
+            FrontendWorkflowEventCursor.from_legacy_source_sequence(0),
+            200,
+        ),
     ]
 
 
@@ -463,3 +510,207 @@ def test_frontend_workflow_event_stream_is_projection_only_source_guard() -> Non
         "add_listener",
     ):
         assert forbidden_marker not in source
+
+
+@pytest.mark.asyncio
+async def test_frontend_workflow_events_legacy_after_source_sequence_still_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    FakeFrontendWorkflowEventRepository.events = (
+        _event(projection_event_id="seq-10-a", source_sequence_number=10),
+        _event(projection_event_id="seq-11-a", source_sequence_number=11),
+    )
+    monkeypatch.setattr(dependencies, "get_current_user_id", _allow_auth)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresFrontendWorkflowEventRepository",
+        FakeFrontendWorkflowEventRepository,
+    )
+
+    response = await knowledge.list_knowledge_frontend_workflow_events(
+        project_id="project-1",
+        document_id="document-1",
+        workflow_run_id="workflow-1",
+        after_source_sequence=10,
+        limit=100,
+        authorization="Bearer token",
+        pool=FakePool(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert [event["projection_event_id"] for event in response["events"]] == [
+        "seq-11-a"
+    ]
+    assert response["after_cursor"] is None
+
+
+@pytest.mark.asyncio
+async def test_frontend_workflow_events_composite_cursor_continues_same_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _event(
+        projection_event_id="projection-a",
+        source_sequence_number=11,
+        projection_type="a",
+    )
+    second = _event(
+        projection_event_id="projection-b",
+        source_sequence_number=11,
+        projection_type="b",
+    )
+    FakeFrontendWorkflowEventRepository.events = (first, second)
+    monkeypatch.setattr(dependencies, "get_current_user_id", _allow_auth)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresFrontendWorkflowEventRepository",
+        FakeFrontendWorkflowEventRepository,
+    )
+
+    after_cursor = FrontendWorkflowEventCursor.from_event(first).serialize()
+    response = await knowledge.list_knowledge_frontend_workflow_events(
+        project_id="project-1",
+        document_id="document-1",
+        workflow_run_id="workflow-1",
+        after_cursor=after_cursor,
+        after_source_sequence=99,
+        limit=100,
+        authorization="Bearer token",
+        pool=FakePool(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert [event["projection_event_id"] for event in response["events"]] == [
+        "projection-b"
+    ]
+    assert FakeFrontendWorkflowEventRepository.calls[0][1] == (
+        FrontendWorkflowEventCursor.parse(after_cursor)
+    )
+
+
+@pytest.mark.asyncio
+async def test_frontend_workflow_events_pages_within_one_source_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events = tuple(
+        _event(
+            projection_event_id=f"projection-{index:03d}",
+            source_sequence_number=42,
+            projection_type="workflow_source_units_created",
+            projection_version=1,
+        )
+        for index in range(250)
+    )
+    FakeFrontendWorkflowEventRepository.events = events
+    monkeypatch.setattr(dependencies, "get_current_user_id", _allow_auth)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresFrontendWorkflowEventRepository",
+        FakeFrontendWorkflowEventRepository,
+    )
+
+    first_page = await knowledge.list_knowledge_frontend_workflow_events(
+        project_id="project-1",
+        document_id="document-1",
+        workflow_run_id="workflow-1",
+        after_source_sequence=0,
+        limit=200,
+        authorization="Bearer token",
+        pool=FakePool(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert len(first_page["events"]) == 200
+    assert first_page["next_cursor"] is not None
+
+    second_page = await knowledge.list_knowledge_frontend_workflow_events(
+        project_id="project-1",
+        document_id="document-1",
+        workflow_run_id="workflow-1",
+        after_cursor=first_page["next_cursor"],
+        limit=200,
+        authorization="Bearer token",
+        pool=FakePool(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert len(second_page["events"]) == 50
+    assert second_page["next_cursor"] is not None
+    assert first_page["events"][-1]["projection_event_id"] == "projection-199"
+    assert second_page["events"][0]["projection_event_id"] == "projection-200"
+
+
+@pytest.mark.asyncio
+async def test_frontend_workflow_events_rejects_invalid_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(dependencies, "get_current_user_id", _allow_auth)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresFrontendWorkflowEventRepository",
+        FakeFrontendWorkflowEventRepository,
+    )
+
+    with pytest.raises(knowledge.HTTPException) as exc_info:
+        await knowledge.list_knowledge_frontend_workflow_events(
+            project_id="project-1",
+            document_id="document-1",
+            workflow_run_id="workflow-1",
+            after_cursor="not-a-valid-cursor",
+            limit=100,
+            authorization="Bearer token",
+            pool=FakePool(),
+            project_repo=_FakeProjectRepo(has_role=True),
+            user_repo=_user_repo(),
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_frontend_workflow_event_stream_uses_composite_cursor_for_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _event(
+        projection_event_id="projection-a",
+        source_sequence_number=11,
+        projection_type="a",
+    )
+    second = _event(
+        projection_event_id="projection-b",
+        source_sequence_number=11,
+        projection_type="b",
+    )
+    FakeFrontendWorkflowEventRepository.events = (first, second)
+    monkeypatch.setattr(dependencies, "get_current_user_id", _allow_auth)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresFrontendWorkflowEventRepository",
+        FakeFrontendWorkflowEventRepository,
+    )
+
+    after_cursor = FrontendWorkflowEventCursor.from_event(first).serialize()
+    response = await knowledge.stream_knowledge_frontend_workflow_events(
+        project_id="project-1",
+        document_id="document-1",
+        workflow_run_id="workflow-1",
+        request=cast(Request, FakeRequest()),
+        after_cursor=after_cursor,
+        authorization="Bearer token",
+        pool=FakePool(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    chunks = [chunk async for chunk in response.body_iterator]
+    text = "".join(
+        chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks
+    )
+    assert "id: projection-b" in text
+    assert "id: projection-a" not in text
+    assert FakeFrontendWorkflowEventRepository.calls[0][1] == (
+        FrontendWorkflowEventCursor.parse(after_cursor)
+    )
