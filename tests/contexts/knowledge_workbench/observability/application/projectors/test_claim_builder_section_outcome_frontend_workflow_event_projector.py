@@ -154,6 +154,29 @@ def test_projects_extracted_to_versioned_envelope() -> None:
         projected.payload["targeted_read_kind"]
         == "draft_claims_by_work_item_or_source_unit"
     )
+    rows = projected.payload["draft_claim_observation_rows"]
+    assert isinstance(rows, dict)
+    assert rows["surface_kind"] == "draft_claim_observation"
+    assert rows["availability"] == "available"
+    assert rows["row_count"] == 1
+    parent_scope = rows["parent_scope"]
+    assert isinstance(parent_scope, dict)
+    assert parent_scope == {
+        "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_ref": "unit-1",
+        "work_item_id": "work-1",
+        "dispatch_attempt_id": "work-1:attempt:1",
+    }
+    targeted_read = rows["targeted_read"]
+    assert isinstance(targeted_read, dict)
+    assert targeted_read["kind"] == "draft_claims_by_work_item_or_source_unit"
+    assert targeted_read["params"] == {
+        "workflow_run_id": _workflow_run_id(),
+        "source_unit_ref": "unit-1",
+        "work_item_id": "work-1",
+        "dispatch_attempt_id": "work-1:attempt:1",
+    }
     attempt_outcome = projected.payload["attempt_outcome"]
     assert isinstance(attempt_outcome, dict)
     assert attempt_outcome["attempt_scope"]["dispatch_attempt_id"] == (
@@ -300,6 +323,9 @@ def test_valid_empty_accepted_is_visible_as_attempt_outcome() -> None:
         == "passed_valid_empty"
     )
     assert attempt_outcome["validation_outcome"]["valid_empty_accepted"] is True
+    assert projected.payload["draft_claims_available"] is False
+    assert "draft_claim_observation_rows" not in projected.payload
+    assert "targeted_read_kind" not in projected.payload
     assert attempt_outcome["persistence_outcome"]["persistence_status"] == "skipped"
     assert attempt_outcome["persistence_outcome"]["draft_claims_available"] is False
     assert attempt_outcome["targeted_read_hint"]["available"] is False
@@ -386,6 +412,57 @@ def test_attempt_outcome_excludes_forbidden_retry_timer_fields() -> None:
     for nested_value in attempt_outcome.values():
         if isinstance(nested_value, dict):
             assert forbidden_keys.isdisjoint(nested_value.keys())
+
+
+def test_retryable_and_terminal_outcomes_do_not_expose_draft_claim_rows() -> None:
+    for event_type, payload in (
+        (
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value,
+            _item_owned_retryable_failed_payload(),
+        ),
+        (
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_TERMINAL_FAILED.value,
+            _terminal_failed_payload(),
+        ),
+    ):
+        projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
+            _event(event_type=event_type, payload=payload)
+        )
+
+        assert projected is not None
+        assert "draft_claim_observation_rows" not in projected.payload
+        assert "targeted_read_kind" not in projected.payload
+
+
+def test_draft_claim_observation_rows_do_not_carry_claim_body_fields() -> None:
+    projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value
+            ),
+            payload={
+                **_extracted_payload(),
+                "claim": "Do not project claim body",
+                "possible_questions": ["Do not project questions"],
+                "exclusion_scope": "Do not project exclusion scope",
+                "evidence_block": "Do not project evidence block",
+            },
+        )
+    )
+
+    assert projected is not None
+    rows = projected.payload["draft_claim_observation_rows"]
+    assert isinstance(rows, dict)
+    forbidden_body_fields = {
+        "claim",
+        "possible_questions",
+        "exclusion_scope",
+        "evidence_block",
+    }
+    assert forbidden_body_fields.isdisjoint(rows.keys())
+    for value in rows.values():
+        if isinstance(value, dict):
+            assert forbidden_body_fields.isdisjoint(value.keys())
 
 
 def test_deferred_event_type_is_not_projected() -> None:

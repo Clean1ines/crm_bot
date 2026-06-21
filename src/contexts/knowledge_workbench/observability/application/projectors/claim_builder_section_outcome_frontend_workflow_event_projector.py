@@ -109,6 +109,11 @@ def _extracted_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
         payload,
         "persisted_draft_claim_count",
     )
+    draft_claim_observation_rows = _draft_claim_observation_rows_patch(
+        payload,
+        row_count=persisted_count,
+    )
+    draft_claims_available = draft_claim_observation_rows is not None
     patch: dict[str, object] = {
         "workflow_run_id": workflow_run_id,
         "source_document_ref": source_document_ref,
@@ -119,7 +124,7 @@ def _extracted_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
         "work_item_state": "completed",
         "dispatch_attempt_state": "completed",
         "persisted_draft_claim_count": persisted_count,
-        "draft_claims_available": True,
+        "draft_claims_available": draft_claims_available,
         "draft_claims_count": persisted_count,
         "draft_claims_scope": {
             "workflow_run_id": workflow_run_id,
@@ -128,8 +133,10 @@ def _extracted_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
             "work_item_id": work_item_id,
             "dispatch_attempt_id": dispatch_attempt_id,
         },
-        "targeted_read_kind": "draft_claims_by_work_item_or_source_unit",
     }
+    if draft_claim_observation_rows is not None:
+        patch["draft_claim_observation_rows"] = draft_claim_observation_rows
+        patch["targeted_read_kind"] = "draft_claims_by_work_item_or_source_unit"
     validated_claim_count = _optional_payload_int(payload, "validated_claim_count")
     if validated_claim_count is not None:
         patch["validated_claim_count"] = validated_claim_count
@@ -207,6 +214,31 @@ def _terminal_failed_patch(payload: Mapping[str, object]) -> Mapping[str, object
             patch[key] = value
     patch["attempt_outcome"] = _attempt_outcome_patch("terminal_failed", payload)
     return patch
+
+
+def _draft_claim_observation_rows_patch(
+    payload: Mapping[str, object],
+    *,
+    row_count: int,
+) -> Mapping[str, object] | None:
+    if row_count <= 0 or _valid_empty_accepted(payload):
+        return None
+    return {
+        "surface_kind": "draft_claim_observation",
+        "availability": "available",
+        "row_count": row_count,
+        "parent_scope": {
+            "workflow_run_id": _payload_text(payload, "workflow_run_id"),
+            "source_document_ref": _payload_text(payload, "source_document_ref"),
+            "source_unit_ref": _payload_text(payload, "source_unit_ref"),
+            "work_item_id": _payload_text(payload, "work_item_id"),
+            "dispatch_attempt_id": _payload_text(payload, "dispatch_attempt_id"),
+        },
+        "targeted_read": {
+            "kind": "draft_claims_by_work_item_or_source_unit",
+            "params": _draft_claims_scope_patch(payload),
+        },
+    }
 
 
 def _failure_patch(payload: Mapping[str, object]) -> dict[str, object]:

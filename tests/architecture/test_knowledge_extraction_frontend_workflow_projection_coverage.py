@@ -173,8 +173,44 @@ def test_early_claim_builder_projection_contract_is_not_count_only() -> None:
     assert "persistence_outcome" in outcome
     assert "work_item_outcome" in outcome
     assert "targeted_read_hint" in outcome
+    assert "draft_claim_observation_rows" in outcome
+    assert "surface_kind" in outcome
+    assert "draft_claim_observation" in outcome
+    assert "targeted_read" in outcome
     assert "retry_owner" not in outcome
     assert "_validated_claims" not in outcome
+
+
+def test_draft_claim_observation_rows_are_projection_only_not_canonical_events() -> (
+    None
+):
+    workflow_definition = WORKFLOW_DEFINITION_PATH.read_text(encoding="utf-8")
+    outcome = CLAIM_BUILDER_OUTCOME_PROJECTOR_PATH.read_text(encoding="utf-8")
+
+    assert "draft_claim_observation_rows" in outcome
+    for forbidden_event in (
+        "DraftClaimObservationPersisted",
+        "DraftClaimObservationsPersisted",
+        "DraftClaimObservationsAvailable",
+    ):
+        assert forbidden_event not in workflow_definition
+
+
+def test_draft_claim_observation_rows_do_not_project_claim_body() -> None:
+    outcome = CLAIM_BUILDER_OUTCOME_PROJECTOR_PATH.read_text(encoding="utf-8")
+    rows_start = outcome.index("def _draft_claim_observation_rows_patch(")
+    rows_end = outcome.index("def _failure_patch(")
+    rows_region = outcome[rows_start:rows_end]
+
+    assert "targeted_read" in rows_region
+    for forbidden_body_field in (
+        '"claim"',
+        '"possible_questions"',
+        '"exclusion_scope"',
+        '"evidence_block"',
+        '"observation_refs"',
+    ):
+        assert forbidden_body_field not in rows_region
 
 
 def test_item_retry_projection_does_not_own_capacity_reset_timing() -> None:

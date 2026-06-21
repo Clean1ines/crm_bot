@@ -236,6 +236,65 @@ reset remains CapacityWindow-owned, `RETRYABLE` means
 `retry_owner`, `work_item_retry_timer`, provider reset as item retry, or
 `_validated_claims`.
 
+## 2.3 Patch 18A DraftClaimObservation document-card rows
+
+Patch 18A makes `DraftClaimObservation` an explicit document-card artifact
+surface after successful claim-builder extraction.
+
+The corrected document-card chain is:
+
+```text
+Document card
+├── SourceUnit rows
+│   └── WorkItem overlay / claim-builder attempts
+└── DraftClaimObservation rows
+```
+
+`DraftClaimObservation` rows are not nested SourceUnit details. They are
+separate document-card rows that reference `source_unit_ref`, `work_item_id`
+and `dispatch_attempt_id` for provenance and correlation.
+
+Patch 18A keeps `ClaimBuilderSectionExtracted` as the canonical source event.
+No `DraftClaimObservationPersisted`, `DraftClaimObservationsPersisted` or
+per-claim canonical event is added. The final claim-builder extracted event
+already proves that draft claim persistence completed and carries
+`persisted_draft_claim_count`.
+
+The `workflow_claim_builder_section_extracted` projection now carries an
+explicit row availability block:
+
+| field | Meaning |
+| --- | --- |
+| `draft_claim_observation_rows.surface_kind` | Always `draft_claim_observation`. |
+| `draft_claim_observation_rows.availability` | `available` only when persisted rows exist. |
+| `draft_claim_observation_rows.row_count` | Number of newly available draft claim rows for the extracted attempt. |
+| `draft_claim_observation_rows.parent_scope` | `workflow_run_id`, `source_document_ref`, `source_unit_ref`, `work_item_id`, `dispatch_attempt_id`. |
+| `draft_claim_observation_rows.targeted_read` | Event-triggered targeted read contract for loading row bodies. |
+
+Claim bodies stay out of the projection payload. The projection must not carry
+`claim`, `possible_questions`, `exclusion_scope` or `evidence_block`; those are
+loaded through Patch 17B targeted read:
+
+```text
+GET /api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/draft-claims
+  ?source_unit_ref=...
+  &work_item_id=...
+  &dispatch_attempt_id=...
+```
+
+Valid-empty extraction does not expose available DraftClaimObservation rows.
+Retryable and terminal claim-builder outcomes also do not expose row
+availability.
+
+Embedding status overlay remains later. Current draft-claim embedding events are
+aggregate-level and do not prove per-observation embedding status. Cluster rows
+also remain later and should attach to DraftClaimObservation rows by
+`observation_ref` after targeted read has loaded those rows.
+
+Reducer work remains later; Patch 18A only prepares the backend/frontend
+projection contract for document-card DraftClaimObservation rows.
+
+
 ## 3. Canonical workflow phases
 
 Источник:
