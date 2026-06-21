@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import inspect
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import cast
@@ -107,6 +108,32 @@ class FakeConnection:
 
         raise AssertionError(query)
 
+    async def fetch(
+        self,
+        query: str,
+        *args: object,
+    ) -> list[Mapping[str, object]]:
+        if "FROM frontend_workflow_events" not in query:
+            raise AssertionError(query)
+        workflow_run_id = _arg_str(args, 0)
+        after_source_sequence = _arg_int(args, 1)
+        limit = _arg_int(args, 2)
+        rows = (
+            row
+            for row in self.rows.values()
+            if row["workflow_run_id"] == workflow_run_id
+            and _row_int(row, "source_sequence_number") > after_source_sequence
+        )
+        return sorted(
+            rows,
+            key=lambda row: (
+                _row_int(row, "source_sequence_number"),
+                _row_str(row, "projection_type"),
+                _row_int(row, "projection_version"),
+                _row_str(row, "projection_event_id"),
+            ),
+        )[:limit]
+
 
 def _arg_str(args: tuple[object, ...], index: int) -> str:
     value = args[index]
@@ -119,6 +146,20 @@ def _arg_int(args: tuple[object, ...], index: int) -> int:
     value = args[index]
     if not isinstance(value, int) or isinstance(value, bool):
         raise TypeError("expected int argument")
+    return value
+
+
+def _row_str(row: Mapping[str, object], key: str) -> str:
+    value = row[key]
+    if not isinstance(value, str):
+        raise TypeError("expected string row value")
+    return value
+
+
+def _row_int(row: Mapping[str, object], key: str) -> int:
+    value = row[key]
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise TypeError("expected int row value")
     return value
 
 
@@ -177,3 +218,118 @@ async def test_append_rejects_non_finite_payload_before_database_write() -> None
         await repository.append(_event(payload={"source_unit_count": math.nan}))
 
     assert connection.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_list_frontend_events_uses_deterministic_composite_order() -> None:
+    connection = FakeConnection()
+    connection.rows = {
+        event.projection_event_id: _event_row(event)
+        for event in (
+            _event_with_order(sequence=12, projection_type="z", version=1, suffix="c"),
+            _event_with_order(sequence=11, projection_type="z", version=1, suffix="b"),
+            _event_with_order(sequence=11, projection_type="a", version=2, suffix="d"),
+            _event_with_order(sequence=11, projection_type="a", version=1, suffix="a"),
+        )
+    }
+    repository = PostgresFrontendWorkflowEventRepository(
+        cast(asyncpg.Connection, connection)
+    )
+
+    events = await repository.list_frontend_events(
+        "workflow-1",
+        after_source_sequence=0,
+        limit=10,
+    )
+
+    assert tuple(event.projection_event_id for event in events) == (
+        "projection-a",
+        "projection-d",
+        "projection-b",
+        "projection-c",
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_frontend_events_applies_after_source_sequence_and_limit() -> None:
+    connection = FakeConnection()
+    connection.rows = {
+        event.projection_event_id: _event_row(event)
+        for event in (
+            _event_with_order(sequence=10, projection_type="a", version=1, suffix="a"),
+            _event_with_order(sequence=11, projection_type="a", version=1, suffix="b"),
+            _event_with_order(sequence=12, projection_type="a", version=1, suffix="c"),
+        )
+    }
+    repository = PostgresFrontendWorkflowEventRepository(
+        cast(asyncpg.Connection, connection)
+    )
+
+    events = await repository.list_frontend_events(
+        "workflow-1",
+        after_source_sequence=10,
+        limit=1,
+    )
+
+    assert tuple(event.source_sequence_number for event in events) == (11,)
+
+
+def test_list_frontend_events_reads_only_projection_table() -> None:
+    source = inspect.getsource(
+        PostgresFrontendWorkflowEventRepository.list_frontend_events
+    )
+
+    assert "FROM frontend_workflow_events" in source
+    for forbidden_table in (
+        "execution_",
+        "capacity_",
+        "workflow_runtime_",
+        "knowledge_extraction_",
+    ):
+        assert forbidden_table not in source
+
+
+def _event_with_order(
+    *,
+    sequence: int,
+    projection_type: str,
+    version: int,
+    suffix: str,
+) -> FrontendWorkflowEvent:
+    return FrontendWorkflowEvent(
+        projection_event_id=f"projection-{suffix}",
+        source_event_id=f"source-{suffix}",
+        source_sequence_number=sequence,
+        projection_version=version,
+        projection_type=projection_type,
+        event_type="SourceUnitsCreated",
+        operation_key="ingest_source_document",
+        canonical_phase="SOURCE_INGESTION",
+        workflow_run_id="workflow-1",
+        project_id="project-1",
+        document_id="document-1",
+        payload={"source_unit_count": 3},
+        occurred_at=_now(),
+        projected_at=_now(),
+    )
+
+
+def _event_row(event: FrontendWorkflowEvent) -> dict[str, object]:
+    return {
+        "projection_event_id": event.projection_event_id,
+        "source_event_id": event.source_event_id,
+        "source_sequence_number": event.source_sequence_number,
+        "projection_version": event.projection_version,
+        "projection_type": event.projection_type,
+        "event_type": event.event_type,
+        "operation_key": event.operation_key,
+        "canonical_phase": event.canonical_phase,
+        "workflow_run_id": event.workflow_run_id,
+        "project_id": event.project_id,
+        "document_id": event.document_id,
+        "payload": dict(event.payload),
+        "occurred_at": event.occurred_at,
+        "causation_command_id": event.causation_command_id,
+        "correlation_id": event.correlation_id,
+        "projected_at": event.projected_at,
+    }

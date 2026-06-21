@@ -59,6 +59,12 @@ from src.contexts.knowledge_workbench.application.sagas.delete_knowledge_extract
 from src.contexts.knowledge_workbench.infrastructure.postgres.postgres_workbench_document_run_cleanup_repository import (
     PostgresWorkbenchDocumentRunCleanupRepository,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
+    PostgresFrontendWorkflowEventRepository,
+)
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
 )
@@ -1077,6 +1083,77 @@ async def source_ingestion_source_units(
         "source_document_ref": document_ref.value,
         "source_unit_count": len(source_units),
         "source_units": [_source_unit_read_model(unit) for unit in source_units],
+    }
+
+
+@router.get(
+    "/source-documents/{document_id}/workflows/{workflow_run_id}/frontend-events"
+)
+async def list_knowledge_frontend_workflow_events(
+    project_id: str,
+    document_id: str,
+    workflow_run_id: str,
+    after_source_sequence: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    """Returns projection-only workflow events for one document workflow."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
+        repository = PostgresFrontendWorkflowEventRepository(
+            cast(asyncpg.Connection, raw_connection)
+        )
+        events = await repository.list_frontend_events(
+            workflow_run_id,
+            after_source_sequence,
+            limit,
+        )
+
+    visible_events = (
+        event
+        for event in events
+        if event.project_id == project_id
+        and event.document_id == document_id
+        and event.workflow_run_id == workflow_run_id
+    )
+    return {
+        "workflow_run_id": workflow_run_id,
+        "after_source_sequence": after_source_sequence,
+        "events": [
+            _frontend_workflow_event_read_model(event) for event in visible_events
+        ],
+    }
+
+
+def _frontend_workflow_event_read_model(
+    event: FrontendWorkflowEvent,
+) -> dict[str, object]:
+    return {
+        "projection_event_id": event.projection_event_id,
+        "source_event_id": event.source_event_id,
+        "source_sequence_number": event.source_sequence_number,
+        "projection_version": event.projection_version,
+        "projection_type": event.projection_type,
+        "event_type": event.event_type,
+        "operation_key": event.operation_key,
+        "canonical_phase": event.canonical_phase,
+        "workflow_run_id": event.workflow_run_id,
+        "project_id": event.project_id,
+        "document_id": event.document_id,
+        "payload": dict(event.payload),
+        "occurred_at": event.occurred_at.isoformat(),
+        "causation_command_id": event.causation_command_id,
+        "correlation_id": event.correlation_id,
     }
 
 

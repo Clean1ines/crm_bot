@@ -9,3 +9,10 @@ from src.contexts.knowledge_workbench.observability.application.models.frontend_
 
 class FrontendWorkflowEventRepositoryPort(Protocol):
     async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent: ...
+
+    async def list_frontend_events(
+        self,
+        workflow_run_id: str,
+        after_source_sequence: int,
+        limit: int,
+    ) -> tuple[FrontendWorkflowEvent, ...]: ...

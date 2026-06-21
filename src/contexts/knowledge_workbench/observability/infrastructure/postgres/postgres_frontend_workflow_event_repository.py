@@ -90,6 +90,63 @@ class PostgresFrontendWorkflowEventRepository(FrontendWorkflowEventRepositoryPor
         _assert_idempotent_projection_is_same(event, existing)
         return existing
 
+    async def list_frontend_events(
+        self,
+        workflow_run_id: str,
+        after_source_sequence: int,
+        limit: int,
+    ) -> tuple[FrontendWorkflowEvent, ...]:
+        if not isinstance(workflow_run_id, str) or not workflow_run_id.strip():
+            raise ValueError("workflow_run_id must be non-empty")
+        if (
+            not isinstance(after_source_sequence, int)
+            or isinstance(after_source_sequence, bool)
+            or after_source_sequence < 0
+        ):
+            raise ValueError("after_source_sequence must be a non-negative int")
+        if (
+            not isinstance(limit, int)
+            or isinstance(limit, bool)
+            or limit < 1
+            or limit > 200
+        ):
+            raise ValueError("limit must be between 1 and 200")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT
+                projection_event_id,
+                source_event_id,
+                source_sequence_number,
+                projection_version,
+                projection_type,
+                event_type,
+                operation_key,
+                canonical_phase,
+                workflow_run_id,
+                project_id,
+                document_id,
+                payload,
+                occurred_at,
+                causation_command_id,
+                correlation_id,
+                projected_at
+            FROM frontend_workflow_events
+            WHERE workflow_run_id = $1
+              AND source_sequence_number > $2
+            ORDER BY
+                source_sequence_number ASC,
+                projection_type ASC,
+                projection_version ASC,
+                projection_event_id ASC
+            LIMIT $3
+            """,
+            workflow_run_id,
+            after_source_sequence,
+            limit,
+        )
+        return tuple(_hydrate_event(row) for row in rows)
+
     async def _load_by_identity(
         self,
         event: FrontendWorkflowEvent,
