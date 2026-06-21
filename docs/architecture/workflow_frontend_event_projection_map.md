@@ -400,7 +400,7 @@ bootstrap/recovery/debug/manual refresh.
 часть сигналов существует как `LlmProviderCapacityObserved`, `capacity_retry_at`,
 timeline-only записи, logs и capacity wakeup command.
 
-| target capacity event                      | Current evidence                                                       | Minimal payload                                                                     | Frontend target                | Gap                                                                 |
+| target capacity event                      | Current evidence                                                       | Payload expectation                                                                     | Frontend target                | Gap                                                                 |
 | ------------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------- |
 | `CapacityWindowObserved`                   | `LlmProviderCapacityObserved`, observation repository                  | window id, provider/account/model, remaining requests/tokens, reset_at, observed_at | capacity badge/attempt details | Нужен отдельный typed projection name/window id.                    |
 | `CapacityWindowExhausted`                  | `_minute_window_exhausted`, zero dispatch, capacity-throttled timeline | window id, exhausted dimensions, reset_at                                           | waiting banner/countdown       | Нет canonical event.                                                |
@@ -415,6 +415,69 @@ timeline-only записи, logs и capacity wakeup command.
 Рекомендация: selection events можно сохранять как low-volume projection events
 только для реально leased item, а не для каждого просмотренного кандидата. Skipped
 by token estimate нужен, когда он меняет visible state или требует split/action.
+
+## 9.1 CapacityWindow projection events after Patch 17C
+
+Patch 17C adds a reusable CapacityWindow/admission projection boundary for the
+claim-builder path. It should be reused by draft-claim compaction later instead of
+creating a second capacity/admission model.
+
+Implemented frontend projection types:
+
+| frontend projection | Source canonical event | Reducer meaning |
+| --- | --- | --- |
+| `workflow_capacity_window_observed` | `LlmProviderCapacityObserved` | Updates capacity window counters/reset observation and may annotate the dispatch attempt. |
+| `workflow_capacity_window_exhausted` | `CapacityWindowExhausted` | Updates CapacityWindow exhausted/sleeping overlay for a concrete provider/account/model window. |
+| `workflow_capacity_window_scheduled_wakeup` | `CapacityWindowScheduledWakeup` | Updates CapacityWindow wakeup/delivery overlay. `run_after` is command delivery scheduling, not WorkItem retry. |
+| `workflow_capacity_window_leased_work_item` | `CapacityWindowLeasedWorkItem` | Links CapacityWindow/admission selection to the work item and dispatch attempt. |
+
+These events update the CapacityWindow overlay, not a WorkItem retry countdown.
+WorkItem retryable overlay remains passive:
+
+```text
+retry_eligibility = eligible_for_future_admission
+retry_driver = capacity_window_admission
+```
+
+`workflow_capacity_window_observed` is projected from the existing
+`LlmProviderCapacityObserved` event. The Patch 17C CapacityWindow projector handles
+`workflow_capacity_window_exhausted`,
+`workflow_capacity_window_scheduled_wakeup`, and
+`workflow_capacity_window_leased_work_item`.
+
+### Payload expectations
+
+| projection | Stable key | Scope fields | Capacity fields | Causation fields | Forbidden fields |
+| --- | --- | --- | --- | --- | --- |
+| `workflow_capacity_window_observed` | `window_key = provider:account_ref:model_ref` plus `dispatch_attempt_id` | `workflow_run_id`, `dispatch_attempt_id`, `work_item_id` | `provider`, `account_ref`, `model_ref`, `outcome_class`, `observed_at`, `remaining_minute_requests`, `remaining_minute_tokens`, `remaining_daily_requests`, `remaining_daily_tokens`, optional `minute_reset_at`, `daily_reset_at`, `actual_prompt_tokens`, `actual_completion_tokens`, `actual_total_tokens` | source event id/sequence, `causation_command_id`, `correlation_id` | Do not project as item retry countdown; do not add `next_attempt_at`, `retry_owner`, `work_item_retry_timer`. |
+| `workflow_capacity_window_exhausted` | `window_key = provider:account_ref:model_ref` | `workflow_run_id`, optional `work_item_id`, `dispatch_attempt_id`, `source_unit_ref` | `provider`, `account_ref`, `model_ref`, `exhausted_reason`, `exhausted_dimensions`, `reset_at`, optional `observed_at` | `operation_key`, `canonical_phase`, optional `causation_command_id`, source event id/sequence | `next_attempt_at`, `retry_owner`, `work_item_retry_timer`, provider reset as item retry. |
+| `workflow_capacity_window_scheduled_wakeup` | `window_key = provider:account_ref:model_ref`, `wakeup_command_id` | `workflow_run_id` | `provider`, `account_ref`, `model_ref`, `run_after`, `reset_at`, `prepare_command_type`, `wakeup_reason` | `operation_key`, `canonical_phase`, optional `causation_command_id`, source event id/sequence | `next_attempt_at`, `retry_owner`, `work_item_retry_timer`, `lease_expires_at` as retry timer. |
+| `workflow_capacity_window_leased_work_item` | `window_key = provider:account_ref:model_ref`, `dispatch_attempt_id` | `workflow_run_id`, `work_item_id`, `dispatch_attempt_id`, optional `source_unit_ref` | `provider`, `account_ref`, `model_ref`, `lease_expires_at`, `selection_kind`, optional `token_estimate`, `reserved_tokens`, projected `admission_driver=capacity_window_admission` | `operation_key`, `canonical_phase`, optional `causation_command_id`, source event id/sequence | `next_attempt_at`, `retry_owner`, `work_item_retry_timer`, provider reset as item retry. |
+
+The CapacityWindow projector builds allowlisted payloads and defensively prevents
+`next_attempt_at`, `retry_owner`, and `work_item_retry_timer` from appearing in the
+projection payload. If legacy canonical payloads contain those fields, capacity
+projection code must strip or reject them before frontend overlay state is updated.
+
+### Claim-builder now, compaction later
+
+Patch 17C wires CapacityWindow events through the claim-builder prepare/execute
+path. The event/projector model is intentionally generic enough to be reused by
+draft-claim compaction prepare/execute paths. Compaction UI/reducer work was not
+implemented in Patch 17C. Compaction projection wiring was intentionally left for a
+later patch unless already safe through shared builders.
+
+Do not duplicate a second capacity/admission model for compaction. Compaction
+should reuse CapacityWindow observed/exhausted/scheduled-wakeup/leased-work-item
+semantics.
+
+### Legacy compatibility impact
+
+Patch 17C does not remove WorkItem `next_attempt_at`, old live-state retry timer,
+lease SQL behavior, `capacity_retry_at`, or `LlmDispatchExecutionResult.next_attempt_at`.
+These remain compatibility paths until frontend reducer shadow comparison and later
+runtime migration. New frontend capacity semantics should prefer CapacityWindow
+projection events, while old snapshot/live-state fields remain compatibility data.
 
 ## 10. Snapshot dependency audit
 

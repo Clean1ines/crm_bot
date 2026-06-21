@@ -122,6 +122,186 @@ Work item не хранит capacity reset timestamp. Он остаётся `FRE
 `RETRYABLE` является пассивной eligibility state: future execution happens only
 when a CapacityWindow/admission pass selects the item.
 
+## 2.1 Implemented CapacityWindow / admission event boundary after Patch 17C
+
+Patch 17C introduced the implemented boundary between provider/account/model
+capacity timing and passive WorkItem lifecycle state. It did not remove the legacy
+compatibility chain, but it created the canonical/frontend event boundary that new
+frontend capacity semantics must prefer.
+
+Implemented canonical event vocabulary:
+
+| canonical event | Current role |
+| --- | --- |
+| `LlmProviderCapacityObserved` | Existing provider capacity observation event. It records the observed provider/account/model budget, reset timestamps and token usage after an LLM attempt. |
+| `CapacityWindowExhausted` | Proven capacity-owned exhaustion for a concrete provider/account/model window. It is emitted only when the implementation has an exhaustion snapshot/reset, not merely because a dispatch pass leased zero items. |
+| `CapacityWindowScheduledWakeup` | Capacity-owned reset/wakeup command was scheduled. `WorkflowCommand.run_after` is command delivery scheduling; the provider/account/model reset remains CapacityWindow-owned. |
+| `CapacityWindowLeasedWorkItem` | CapacityWindow/admission selected a work item for lease/execution and links the capacity window key to the work item and dispatch attempt. |
+
+Implemented frontend projection types:
+
+| frontend projection type | Source event |
+| --- | --- |
+| `workflow_capacity_window_observed` | `LlmProviderCapacityObserved` |
+| `workflow_capacity_window_exhausted` | `CapacityWindowExhausted` |
+| `workflow_capacity_window_scheduled_wakeup` | `CapacityWindowScheduledWakeup` |
+| `workflow_capacity_window_leased_work_item` | `CapacityWindowLeasedWorkItem` |
+
+`workflow_capacity_window_observed` is handled by the existing LLM provider
+capacity observation projector. The other three projections are handled by the
+CapacityWindow projector added for Patch 17C. Together they form the
+capacity/admission event boundary for claim-builder now and for draft-claim
+compaction later.
+
+Current canonical event payload expectations:
+
+| event/projection | Stable key | Scope fields | Capacity fields | Causation fields | Forbidden fields |
+| --- | --- | --- | --- | --- | --- |
+| `LlmProviderCapacityObserved` / `workflow_capacity_window_observed` | `window_key = provider:account_ref:model_ref` plus `dispatch_attempt_id` | `workflow_run_id`, `dispatch_attempt_id`, `work_item_id` | `provider`, `account_ref`, `model_ref`, `outcome_class`, `observed_at`, `remaining_minute_requests`, `remaining_minute_tokens`, `remaining_daily_requests`, `remaining_daily_tokens`, optional `minute_reset_at`, `daily_reset_at`, `actual_prompt_tokens`, `actual_completion_tokens`, `actual_total_tokens` | source event `causation_command_id`, `correlation_id` | Must not be used as WorkItem retry countdown. |
+| `CapacityWindowExhausted` / `workflow_capacity_window_exhausted` | `window_key = provider:account_ref:model_ref` and event/correlation id | `workflow_run_id`, optional `work_item_id`, `dispatch_attempt_id`, `source_unit_ref` | `provider`, `account_ref`, `model_ref`, `exhausted_reason`, `exhausted_dimensions`, `reset_at`, optional `observed_at` | `operation_key`, `canonical_phase`, optional `causation_command_id` | `next_attempt_at`, `retry_owner`, `work_item_retry_timer`, provider reset as item retry. |
+| `CapacityWindowScheduledWakeup` / `workflow_capacity_window_scheduled_wakeup` | `window_key = provider:account_ref:model_ref` plus `wakeup_command_id` | `workflow_run_id` | `provider`, `account_ref`, `model_ref`, `run_after`, `reset_at`, `prepare_command_type`, `wakeup_reason` | `operation_key`, `canonical_phase`, `wakeup_command_id`, optional `causation_command_id` | `next_attempt_at`, `retry_owner`, `work_item_retry_timer`, `lease_expires_at` as retry timer. |
+| `CapacityWindowLeasedWorkItem` / `workflow_capacity_window_leased_work_item` | `window_key = provider:account_ref:model_ref` plus `dispatch_attempt_id` | `workflow_run_id`, `work_item_id`, `dispatch_attempt_id`, optional `source_unit_ref` | `provider`, `account_ref`, `model_ref`, `lease_expires_at`, `selection_kind`, optional `token_estimate`, `reserved_tokens`, projected `admission_driver=capacity_window_admission` | `operation_key`, `canonical_phase`, optional `causation_command_id` | `next_attempt_at`, `retry_owner`, `work_item_retry_timer`, provider reset as item retry. |
+
+The CapacityWindow projector defensively constructs an allowlisted patch and checks
+that `next_attempt_at`, `retry_owner`, and `work_item_retry_timer` are not present
+in the projected payload. These fields are forbidden in the CapacityWindow overlay
+because they describe the old item-owned retry timer model. If a legacy canonical
+payload still contains old retry fields, new capacity projections must not forward
+them.
+
+Patch 17C implemented claim-builder wiring:
+
+* prepare path emits `CapacityWindowLeasedWorkItem` for admitted/leased items;
+* prepare path may emit `CapacityWindowExhausted` on a proven capacity-owned zero
+  dispatch;
+* execute path emits existing `LlmProviderCapacityObserved`;
+* execute path may emit `CapacityWindowExhausted` from a provider capacity
+  observation;
+* execute path may append a capacity-owned prepare wakeup and emit
+  `CapacityWindowScheduledWakeup`.
+
+Patch 17C did not implement compaction UI/reducer work and did not prove full
+compaction projection wiring through the new capacity projections. The reusable
+event contract is intentionally generic enough for draft-claim compaction
+prepare/execute paths, but that wiring remains a future migration unless already
+covered through shared builders. Do not duplicate a second capacity/admission model
+for compaction: compaction should reuse the same CapacityWindow observed,
+exhausted, scheduled-wakeup and leased-work-item semantics.
+
+## 2.2 Ownership rules after Patch 17C
+
+The implemented boundary is:
+
+```text
+CapacityWindow/admission owns provider/account/model reset, wakeup and admission.
+WorkItem remains passive queue/lifecycle state.
+RETRYABLE means eligible_for_future_admission.
+Provider reset must never be modeled as WorkItem retry timer.
+```
+
+Explicit ownership:
+
+| Field / concept | Owner after Patch 17C |
+| --- | --- |
+| `minute_reset_at` | CapacityWindow/provider-account-model observation. |
+| `daily_reset_at` | CapacityWindow/provider-account-model observation. |
+| `reset_at` | CapacityWindow exhausted/wakeup overlay. |
+| `run_after` | Workflow command delivery scheduling. It may deliver a capacity-owned wakeup command but is not the source of truth for item retry. |
+| `lease_expires_at` | ExecutionRuntime lease ownership. It is not capacity reset and not retry backoff. |
+| `retry_eligibility` | Passive WorkItem overlay. |
+| `retry_driver` | Describes the active driver that may select the item later; the WorkItem does not own that driver. |
+| `selection_kind` | Capacity/admission selection metadata carried from the pre-lease WorkItem state. |
+
+Forbidden model:
+
+```text
+retry_owner=work_item
+work_item_retry_timer
+provider reset as WorkItem.next_attempt_at
+CapacityWindowScheduledWakeup as item retry
+lease_expires_at as retry timer
+zero dispatch always means capacity exhausted
+```
+
+`CapacityWindowScheduledWakeup` means a capacity-owned reset/wakeup command was
+scheduled. It does not mean the WorkItem scheduled itself. `lease_expires_at`
+means an ExecutionRuntime lease can expire/reclaim; it must not be shown as retry
+countdown. `run_after` belongs to command delivery and must not be reinterpreted as
+provider reset ownership by WorkItem.
+
+## 2.3 Admission pass semantics after Patch 17C
+
+An admission pass must distinguish these states:
+
+| State | Meaning | Event behavior |
+| --- | --- | --- |
+| `capacity_exhausted` | Due/admission-eligible work exists, no item was leased, and a capacity-owned exhaustion snapshot/reset is known. | Only this state may emit `CapacityWindowExhausted`. |
+| `no_due_work_items_no_active_leases` | There are no due work items visible to this admission pass and no active leased items are known at this boundary. | Must not be modeled as capacity exhaustion. |
+| `no_due_work_items_with_active_leases` | No due items are available because work is already leased/running elsewhere. | Must not imply phase completion or permanent idle. |
+| `leased_work_item` | Capacity/admission selected and leased a work item. | Emits `CapacityWindowLeasedWorkItem` for each admitted/leased item. |
+| `scheduled_capacity_wakeup` | Capacity-owned reset/wakeup command was scheduled for provider/account/model window. | Emits `CapacityWindowScheduledWakeup` when the wakeup is appended. |
+
+No due work items is not capacity exhaustion. Zero dispatched items is not
+sufficient evidence of capacity exhaustion. The prepare handler only emits
+`CapacityWindowExhausted` when the result carries a `capacity_window_exhaustion`
+snapshot; otherwise zero dispatch remains a zero-dispatch/no-due/idle condition,
+not a capacity-owned exhausted window.
+
+No dedicated event was added in Patch 17C for
+`no_due_work_items_with_active_leases` because active leased count is not exposed
+at that boundary. The invariant is still required: do not model this state as
+exhausted or complete.
+
+Leased outcomes may immediately create retryable work, split child source units,
+fallback work, or reconcile-triggered work. `CapacityWindowLeasedWorkItem` records
+that CapacityWindow/admission admitted the work item for this attempt; it is not a
+guarantee that the attempt will complete, persist claims, or finish the phase.
+
+## 2.4 `selection_kind` contract extension after Patch 17C
+
+Patch 17C added an explicit contract extension for admission selection:
+
+```text
+pre-lease WorkItemStatus.READY → selection_kind=fresh
+pre-lease WorkItemStatus.RETRYABLE_FAILED → selection_kind=retryable
+```
+
+Rules:
+
+* `selection_kind` is carried from the original pre-lease WorkItem state.
+* `selection_kind` is not inferred after leasing.
+* `selection_kind` is not derived from `attempt_count`.
+* `selection_kind` is not derived from `retry_plan`.
+* generic `LeaseLlmAdmittedWorkItems` receives explicit `pre_lease_due_records`.
+* generic `LeaseLlmAdmittedWorkItems` no longer performs hidden
+  `peek_due_work_items`.
+* if a leased `work_item_id` is missing from `pre_lease_due_records`, this is a
+  contract error.
+
+The current prepare hot path still performs the concrete due-record peek in
+`PrepareLlmDispatchBatch`, where the transaction needs the due candidates for
+admission and selection. The generic LLM admitted lease composition is intentionally
+kept explicit: due records are supplied by the caller and selection metadata is
+bound before/at the lease boundary, not reconstructed later.
+
+## 2.5 Legacy compatibility chain still exists after Patch 17C
+
+Patch 17C does not remove the compatibility path. Specifically, it does not:
+
+* remove `WorkItem.next_attempt_at`;
+* rewrite lease SQL around a final first-class CapacityWindow table;
+* remove workflow-live-state `retry_timer`;
+* remove `LlmDispatchExecutionResult.next_attempt_at`;
+* remove `capacity_retry_at` from prepare result;
+* remove old command `run_after` compatibility scheduling for capacity retry cases;
+* remove provider reset timestamps from all legacy outcome payloads.
+
+These compatibility paths remain until the frontend reducer, shadow comparison and
+later runtime migration can safely prefer the reusable CapacityWindow event
+contract everywhere. New code must prefer CapacityWindow events for frontend
+capacity semantics and must not extend the old provider reset → WorkItem retry
+timer model.
+
 ## 3. Timing classification rules
 
 | Timing source                                                                   | Ownership                                                                                      |
@@ -180,7 +360,7 @@ No single frontend `retry_timer` may combine these domains.
 
 ## 5. Capacity event model
 
-Рекомендуемый минимальный event family:
+Target event family before and after the implemented boundary:
 
 | event                                      | Required payload                                                                                |
 | ------------------------------------------ | ----------------------------------------------------------------------------------------------- |
@@ -255,6 +435,32 @@ Target UI:
 
 Старый единый `retry_timer` нельзя механически перенести: он сейчас выбирает
 `next_attempt_at or lease_expires_at` и смешивает три разных ownership domain.
+
+## 8.1 Patch 17C guard coverage
+
+Patch 17C is guarded by these existing test areas:
+
+| Test area | Guard intent |
+| --- | --- |
+| capacity window frontend projector tests | CapacityWindow projections expose window-owned payloads and do not carry WorkItem retry timer semantics. |
+| prepare claim-builder dispatch handler tests | Zero dispatch is not always capacity exhaustion; capacity exhaustion requires a concrete exhaustion snapshot. |
+| execute claim-builder section handler tests | Provider capacity observation, exhausted-window events and scheduled wakeup events are emitted on the claim-builder execute path. |
+| capacity wakeup helper tests | Capacity wakeup uses provider/account/model reset as window-owned command delivery, not item retry. |
+| lease admitted work items composition tests | Generic lease composition does not hide `peek_due_work_items`; `selection_kind` comes from explicit pre-lease due records. |
+| prepare LLM dispatch batch boundary tests | The concrete prepare hot path carries selection kind from admitted candidates and keeps provider/env/projector concerns out of the composition. |
+| architecture boundary tests | Capacity projections do not carry `next_attempt_at`, `retry_owner`, `work_item_retry_timer`; claim-builder retryable projection remains passive. |
+
+Specific protected invariants:
+
+```text
+no hidden peek_due_work_items in generic lease composition
+selection_kind comes from pre-lease due records
+zero dispatch is not always capacity exhausted
+capacity projections do not carry WorkItem retry timer semantics
+claim-builder retryable projection remains passive
+retry_eligibility = eligible_for_future_admission
+retry_driver = capacity_window_admission
+```
 
 ## 9. Open questions
 
