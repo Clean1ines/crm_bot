@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+import inspect
 
 import pytest
 
@@ -24,6 +25,16 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_draft_cla
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
+    KnowledgeExtractionCanonicalPhase,
+)
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.llm_provider_capacity_observed_frontend_workflow_event_projector import (
+    LlmProviderCapacityObservedFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_attempt_input import (
     DraftClaimCompactionExpectedOutputKind,
@@ -163,10 +174,22 @@ class FakeCommandLog:
 @dataclass(slots=True)
 class FakeOutbox:
     events: list[WorkflowEvent] = field(default_factory=list)
+    _next_sequence_number: int = 1
 
     async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
-        self.events.append(event)
-        return event
+        persisted_event = WorkflowEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            workflow_run_id=event.workflow_run_id,
+            payload=event.payload,
+            occurred_at=event.occurred_at,
+            sequence_number=self._next_sequence_number,
+            causation_command_id=event.causation_command_id,
+            correlation_id=event.correlation_id,
+        )
+        self.events.append(persisted_event)
+        self._next_sequence_number += 1
+        return persisted_event
 
     async def list_events_after(
         self,
@@ -264,6 +287,18 @@ class FakeWorkflowUnitOfWork:
 
     async def rollback(self) -> None:
         raise AssertionError("handler must not rollback")
+
+
+@dataclass(slots=True)
+class InMemoryFrontendWorkflowEventRepository:
+    events: dict[str, FrontendWorkflowEvent] = field(default_factory=dict)
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        existing = self.events.get(event.projection_event_id)
+        if existing is not None:
+            return existing
+        self.events[event.projection_event_id] = event
+        return event
 
 
 def _dispatch_payload() -> dict[str, object]:
@@ -437,6 +472,11 @@ async def test_handler_success_creates_apply_command_and_records_capacity() -> N
         KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED.value,
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ATTEMPT_COMPLETED.value,
     ]
+    capacity_event = workflow_uow.outbox.events[0]
+    assert capacity_event.payload["operation_key"] == "execute_draft_claim_compaction"
+    assert capacity_event.payload["canonical_phase"] == (
+        KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value
+    )
     assert len(capacity_repository.observations) == 1
     assert len(workflow_uow.command_log.pending_commands) == 1
     assert workflow_uow.command_log.pending_commands[0].command_type == (
@@ -451,6 +491,72 @@ async def test_handler_success_creates_apply_command_and_records_capacity() -> N
     assert workflow_uow.progress_snapshots.snapshot is not None
     assert len(workflow_uow.timeline.entries) == 1
     assert workflow_uow.command_log.completed == [_command().command_id]
+
+
+@pytest.mark.asyncio
+async def test_projects_llm_provider_capacity_observed_event_once() -> None:
+    validator = DraftClaimCompactionLlmDispatchOutputValidator(
+        expected_output_kind=DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS,
+        output_validator=DraftClaimCompactionOutputValidator(),
+        source_claim_refs=("claim-a", "claim-b"),
+    )
+    validation = validator.validate(
+        dispatch_payload=_dispatch_payload(),
+        output_payload={"raw_text": _valid_compacted_raw_text()},
+        llm_status=LlmDispatchExecutionStatus.SUCCEEDED,
+        finished_at=_now(),
+        attempt_number=1,
+    )
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=LlmProviderCapacityObservedFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+    workflow_uow = FakeWorkflowUnitOfWork()
+
+    await HandleExecuteDraftClaimCompactionCommandHandler().execute(
+        HandleExecuteDraftClaimCompactionCommand(workflow_command=_command()),
+        execute_prepared_llm_dispatch_attempt=FakeExecutePreparedDispatchAttempt(
+            _execution_result(
+                status=LlmDispatchExecutionStatus.SUCCEEDED,
+                output_payload={"raw_text": _valid_compacted_raw_text()},
+                validation_metadata=validation.metadata,
+            )
+        ),
+        capacity_observation_repository=FakeCapacityObservationRepository(),
+        draft_claim_compaction_output_validator=DraftClaimCompactionOutputValidator(),
+        workflow_unit_of_work=workflow_uow,
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert len(repository.events) == 1
+    projected = next(iter(repository.events.values()))
+    assert projected.projection_type == "workflow_capacity_window_observed"
+    assert projected.operation_key == "execute_draft_claim_compaction"
+    assert projected.payload["window_key"] == (
+        "groq:groq_org_primary:openai/gpt-oss-120b"
+    )
+
+
+def test_compaction_execute_handler_projects_after_canonical_outbox_append() -> None:
+    source = inspect.getsource(HandleExecuteDraftClaimCompactionCommandHandler.execute)
+
+    append_index = source.index("outbox.append_event")
+    projection_index = source.index("frontend_event_projection_writer.execute")
+    assert append_index < projection_index
+
+
+def test_compaction_execute_handler_does_not_touch_live_state_for_projection() -> None:
+    source = inspect.getsource(HandleExecuteDraftClaimCompactionCommandHandler.execute)
+
+    for forbidden_marker in (
+        "live_state",
+        "fetch_workbench",
+        "drain",
+        "workflow_runner",
+        "frontend_workflow_events",
+    ):
+        assert forbidden_marker not in source
 
 
 @pytest.mark.asyncio

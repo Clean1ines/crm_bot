@@ -18,6 +18,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 from src.contexts.knowledge_workbench.application.sagas.append_capacity_window_prepare_wakeup import (
     append_capacity_window_prepare_wakeup,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_apply_result import (
     raw_claim_node_ref,
 )
@@ -194,6 +197,7 @@ class HandleExecuteDraftClaimCompactionCommandHandler:
         capacity_observation_repository: LlmAttemptCapacityObservationRepositoryPort,
         draft_claim_compaction_output_validator: DraftClaimCompactionOutputValidator,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleExecuteDraftClaimCompactionResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -249,7 +253,7 @@ class HandleExecuteDraftClaimCompactionCommandHandler:
             await capacity_observation_repository.record_observation(
                 capacity_observation
             )
-            await workflow_unit_of_work.outbox.append_event(
+            persisted_capacity_event = await workflow_unit_of_work.outbox.append_event(
                 _capacity_observed_event(
                     workflow_command=workflow_command,
                     workflow_run_id=workflow_run_id,
@@ -259,6 +263,10 @@ class HandleExecuteDraftClaimCompactionCommandHandler:
                     occurred_at=finished_at,
                 )
             )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(
+                    persisted_capacity_event,
+                )
             appended_event_count += 1
             wakeup = await append_capacity_window_prepare_wakeup(
                 workflow_unit_of_work=workflow_unit_of_work,
@@ -753,6 +761,10 @@ def _capacity_observed_event(
             "workflow_run_id": workflow_run_id,
             "dispatch_attempt_id": dispatch_attempt_id,
             "work_item_id": work_item_id,
+            "operation_key": "execute_draft_claim_compaction",
+            "canonical_phase": (
+                KnowledgeExtractionCanonicalPhase.DRAFT_CLAIM_CLUSTERING.value
+            ),
             **capacity_observation.to_event_payload(),
         },
         occurred_at=occurred_at,

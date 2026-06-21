@@ -46,3 +46,80 @@ def test_routes_dispatch_batch_prepared_to_dispatch_projector() -> None:
 
     assert projected is not None
     assert projected.projection_type == "workflow_dispatch_batch_prepared"
+
+
+def test_routes_capacity_observed_to_capacity_projector() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:capacity-observed"),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED.value
+        ),
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "dispatch_attempt_id": "work-1:attempt:1",
+            "work_item_id": "work-1",
+            "operation_key": "execute_claim_builder_section",
+            "canonical_phase": "CLAIM_BUILDER_SECTION_EXTRACTION",
+            "provider": "groq",
+            "account_ref": "groq_org_primary",
+            "model_ref": "qwen/qwen3-32b",
+            "outcome_class": "succeeded",
+            "observed_at": _now().isoformat(),
+        },
+        occurred_at=_now(),
+        sequence_number=4,
+    )
+
+    projected = ClaimBuilderFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_capacity_window_observed"
+
+
+def test_routes_section_extracted_to_outcome_projector() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:section-extracted"),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value
+        ),
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "dispatch_attempt_id": "work-1:attempt:1",
+            "work_item_id": "work-1",
+            "operation_key": "execute_claim_builder_section",
+            "canonical_phase": "CLAIM_BUILDER_SECTION_EXTRACTION",
+            "persisted_draft_claim_count": 1,
+        },
+        occurred_at=_now(),
+        sequence_number=5,
+    )
+
+    projected = ClaimBuilderFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_claim_builder_section_extracted"
+
+
+def test_routes_deferred_event_type_to_none() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:section-deferred"),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_DEFERRED.value
+        ),
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "dispatch_attempt_id": "work-1:attempt:1",
+            "work_item_id": "work-1",
+            "operation_key": "execute_claim_builder_section",
+            "canonical_phase": "CLAIM_BUILDER_SECTION_EXTRACTION",
+        },
+        occurred_at=_now(),
+        sequence_number=6,
+    )
+
+    projected = ClaimBuilderFrontendWorkflowEventProjector().project(event)
+
+    assert projected is None

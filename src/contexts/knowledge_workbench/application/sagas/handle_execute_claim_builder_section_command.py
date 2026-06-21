@@ -42,9 +42,13 @@ from src.contexts.knowledge_workbench.extraction.application.ports.validated_dra
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
+    KnowledgeExtractionCanonicalPhase,
 )
 from src.contexts.knowledge_workbench.application.sagas.append_capacity_window_prepare_wakeup import (
     append_capacity_window_prepare_wakeup,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
@@ -252,6 +256,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         claim_builder_output_validation_policy: ClaimBuilderOutputValidationPolicy,
         draft_claim_observation_persistence: PersistValidatedDraftClaimObservationsPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleExecuteClaimBuilderSectionResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -335,7 +340,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                 else None,
                 outcome_class=capacity_observation.outcome_class,
             )
-            await workflow_unit_of_work.outbox.append_event(
+            persisted_capacity_event = await workflow_unit_of_work.outbox.append_event(
                 _capacity_observed_event(
                     workflow_command=workflow_command,
                     workflow_run_id=workflow_run_id,
@@ -345,6 +350,10 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                     occurred_at=finished_at,
                 ),
             )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(
+                    persisted_capacity_event,
+                )
             appended_event_count += 1
             wakeup = await append_capacity_window_prepare_wakeup(
                 workflow_unit_of_work=workflow_unit_of_work,
@@ -384,7 +393,11 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             validation_metadata=attempt_action_metadata,
             persisted_draft_claim_count=persisted_draft_claim_count,
         )
-        await workflow_unit_of_work.outbox.append_event(outcome_event)
+        persisted_outcome_event = await workflow_unit_of_work.outbox.append_event(
+            outcome_event,
+        )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(persisted_outcome_event)
         appended_event_count += 1
 
         next_command = _reconcile_claim_builder_progress_command(
@@ -496,7 +509,7 @@ def _synthetic_validation_failure(
     failure_reason: ClaimBuilderOutputValidationFailureReason,
 ) -> ClaimBuilderOutputValidationResult:
     return ClaimBuilderOutputValidationResult(
-        decision=ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL,
+        decision=ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE,
         claims=(),
         failure_reason=failure_reason,
     )
@@ -664,7 +677,7 @@ def _apply_validation_counters(
         return
 
     if decision in {
-        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL.value,
+        ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE.value,
         ClaimBuilderOutputValidationDecision.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value,
         ClaimBuilderOutputValidationDecision.RETRY_FALLBACK_MODEL.value,
         ClaimBuilderOutputValidationDecision.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
@@ -705,7 +718,7 @@ def _apply_next_action_counters(
         return
 
     if action_kind in {
-        ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value,
+        ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE.value,
         ClaimBuilderAttemptNextActionKind.RETRY_EMPTY_CLAIMS_CHECK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_FALLBACK_MODEL.value,
         ClaimBuilderAttemptNextActionKind.RETRY_LARGER_OUTPUT_LIMIT_MODEL.value,
@@ -905,7 +918,7 @@ def _provider_retry_metadata(
             return None
         return {
             "claim_builder_attempt_outcome_kind": (
-                ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL.value
+                ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE.value
             ),
             "claim_builder_attempt_next_action_kind": (
                 ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
@@ -1003,10 +1016,10 @@ def _provider_retry_metadata(
     }:
         return {
             "claim_builder_attempt_outcome_kind": (
-                ClaimBuilderAttemptOutcomeKind.RETRY_SAME_MODEL.value
+                ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE.value
             ),
             "claim_builder_attempt_next_action_kind": (
-                ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value
+                ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE.value
             ),
             "claim_builder_attempt_next_action_reason": error_kind,
             "claim_builder_attempt_next_model_strategy": (
@@ -1285,6 +1298,10 @@ def _capacity_observed_event(
         "workflow_run_id": workflow_run_id,
         "dispatch_attempt_id": dispatch_attempt_id,
         "work_item_id": work_item_id,
+        "operation_key": "execute_claim_builder_section",
+        "canonical_phase": (
+            KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+        ),
         **capacity_observation.to_event_payload(),
     }
     return WorkflowEvent(
@@ -1370,6 +1387,10 @@ def _event_payload(
         "workflow_run_id": workflow_run_id,
         "dispatch_attempt_id": dispatch_attempt_id,
         "work_item_id": work_item_id,
+        "operation_key": "execute_claim_builder_section",
+        "canonical_phase": (
+            KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+        ),
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "outcome_status": execution_result.llm_result.status.value,
         "error_kind": execution_result.llm_result.error_kind,

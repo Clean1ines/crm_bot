@@ -351,6 +351,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     draft_claim_compaction_output_validator
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,
@@ -396,6 +397,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     draft_claim_observation_persistence
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

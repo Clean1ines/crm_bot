@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import cast
+import inspect
 
 import pytest
 from pathlib import Path
@@ -28,6 +29,7 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_bui
     HandleExecuteClaimBuilderSectionCommand,
     HandleExecuteClaimBuilderSectionCommandHandler,
     HandleExecuteClaimBuilderSectionResult,
+    _event_type_for_status,
     _source_context_text,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
@@ -45,6 +47,19 @@ from src.contexts.knowledge_workbench.extraction.application.ports.validated_dra
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
+    KnowledgeExtractionCanonicalPhase,
+)
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_frontend_workflow_event_projector import (
+    ClaimBuilderFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.llm_provider_capacity_observed_frontend_workflow_event_projector import (
+    LlmProviderCapacityObservedFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutionResult,
@@ -384,10 +399,22 @@ class FakeCommandLogRepository:
 @dataclass(slots=True)
 class FakeOutboxRepository:
     events: list[WorkflowEvent] = field(default_factory=list)
+    _next_sequence_number: int = 1
 
     async def append_event(self, event: WorkflowEvent) -> WorkflowEvent:
-        self.events.append(event)
-        return event
+        persisted_event = WorkflowEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            workflow_run_id=event.workflow_run_id,
+            payload=event.payload,
+            occurred_at=event.occurred_at,
+            sequence_number=self._next_sequence_number,
+            causation_command_id=event.causation_command_id,
+            correlation_id=event.correlation_id,
+        )
+        self.events.append(persisted_event)
+        self._next_sequence_number += 1
+        return persisted_event
 
     async def list_events_after(
         self,
@@ -515,10 +542,23 @@ class FakeWorkflowRuntimeUnitOfWork:
         raise AssertionError("handler must not own transaction rollback")
 
 
+@dataclass(slots=True)
+class InMemoryFrontendWorkflowEventRepository:
+    events: dict[str, FrontendWorkflowEvent] = field(default_factory=dict)
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        existing = self.events.get(event.projection_event_id)
+        if existing is not None:
+            return existing
+        self.events[event.projection_event_id] = event
+        return event
+
+
 async def _execute(
     *,
     workflow_command: WorkflowCommand | None = None,
     execution_result: ExecutePreparedLlmDispatchAttemptResult | None = None,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
 ) -> tuple[
     HandleExecuteClaimBuilderSectionResult,
     FakeExecutePreparedLlmDispatchAttempt,
@@ -547,6 +587,7 @@ async def _execute(
             WorkflowRuntimeUnitOfWorkPort,
             workflow_unit_of_work,
         ),
+        frontend_event_projection_writer=frontend_event_projection_writer,
     )
     return (
         result,
@@ -617,7 +658,16 @@ async def test_appends_outcome_and_capacity_events() -> None:
         KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED.value,
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value,
     )
+    capacity_event = workflow_unit_of_work.outbox.events[0]
+    assert capacity_event.payload["operation_key"] == "execute_claim_builder_section"
+    assert capacity_event.payload["canonical_phase"] == (
+        KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+    )
     outcome_event = workflow_unit_of_work.outbox.events[1]
+    assert outcome_event.payload["operation_key"] == "execute_claim_builder_section"
+    assert outcome_event.payload["canonical_phase"] == (
+        KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+    )
     assert outcome_event.payload["dispatch_attempt_id"] == _attempt_id()
     assert outcome_event.payload["work_item_id"] == _work_item_id()
     assert outcome_event.payload["outcome_status"] == "succeeded"
@@ -639,6 +689,267 @@ async def test_appends_outcome_and_capacity_events() -> None:
     )
     assert outcome_event.payload["claim_builder_requires_source_split"] is False
     assert outcome_event.payload["claim_builder_next_run_after"] is None
+
+
+@pytest.mark.asyncio
+async def test_projects_llm_provider_capacity_observed_event_once() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=LlmProviderCapacityObservedFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, _, _, workflow_unit_of_work, _ = await _execute(
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    capacity_event = workflow_unit_of_work.outbox.events[0]
+    assert (
+        capacity_event.event_type
+        == KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED.value
+    )
+    assert len(repository.events) == 1
+    projected = next(iter(repository.events.values()))
+    assert projected.projection_type == "workflow_capacity_window_observed"
+    assert projected.payload["window_key"] == "groq:groq_org_primary:qwen/qwen3-32b"
+    assert projected.payload["account_ref"] == "groq_org_primary"
+
+
+@pytest.mark.asyncio
+async def test_projects_claim_builder_section_extracted_event_once() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(frontend_event_projection_writer=projection_writer)
+
+    extracted = [
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_section_extracted"
+    ]
+    assert len(extracted) == 1
+    assert extracted[0].operation_key == "execute_claim_builder_section"
+
+
+@pytest.mark.asyncio
+async def test_projects_claim_builder_section_retryable_failed_event_once() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(
+        execution_result=_execution_result(LlmDispatchExecutionStatus.RETRYABLE_FAILED),
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    retryable = [
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_section_retryable_failed"
+    ]
+    assert len(retryable) == 1
+    assert "next_attempt_at" not in retryable[0].payload
+    assert "claim_builder_next_run_after" not in retryable[0].payload
+    assert (
+        retryable[0].payload.get("claim_builder_attempt_next_action_kind")
+        != ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_capacity_owned_minute_limit_does_not_project_item_retryable_failed() -> (
+    None
+):
+    execution_result = ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+            finished_at=_finished_at(),
+            error_kind="minute_limit",
+            next_attempt_at=_finished_at() + timedelta(seconds=30),
+            capacity_observation={
+                **_capacity_payload(),
+                "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
+            },
+        ),
+        outcome_result=RecordWorkItemAttemptOutcomeResult(
+            work_item=WorkItem(
+                work_item_id=_work_item_id(),
+                work_kind=WorkKind(
+                    "knowledge_workbench.claim_builder.section_extraction"
+                ),
+                status=WorkItemStatus.RETRYABLE_FAILED,
+            )
+        ),
+    )
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(
+        execution_result=execution_result,
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    retryable = [
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_section_retryable_failed"
+    ]
+    capacity = [
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_capacity_window_observed"
+    ]
+    assert len(retryable) == 0
+    assert len(capacity) == 1
+
+
+@pytest.mark.asyncio
+async def test_projects_claim_builder_section_terminal_failed_event_once() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    await _execute(
+        execution_result=_execution_result(LlmDispatchExecutionStatus.TERMINAL_FAILED),
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    terminal = [
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_section_terminal_failed"
+    ]
+    assert len(terminal) == 1
+
+
+@pytest.mark.asyncio
+async def test_reprojects_section_outcome_idempotently() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=ClaimBuilderFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, _, _, workflow_unit_of_work, _ = await _execute(
+        frontend_event_projection_writer=projection_writer,
+    )
+    persisted_outcome_event = workflow_unit_of_work.outbox.events[1]
+    await projection_writer.execute(persisted_outcome_event)
+    await projection_writer.execute(persisted_outcome_event)
+
+    extracted = [
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_section_extracted"
+    ]
+    assert len(extracted) == 1
+
+
+def test_deferred_status_does_not_emit_deferred_canonical_event() -> None:
+    assert (
+        _event_type_for_status(LlmDispatchExecutionStatus.DEFERRED)
+        is not KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_DEFERRED
+    )
+
+
+def test_outcome_handler_projects_after_canonical_outbox_append() -> None:
+    source = inspect.getsource(HandleExecuteClaimBuilderSectionCommandHandler.execute)
+
+    outcome_append_index = source.index("persisted_outcome_event =")
+    outcome_projection_index = source.index(
+        "frontend_event_projection_writer.execute(persisted_outcome_event)",
+    )
+    assert outcome_append_index < outcome_projection_index
+
+
+@pytest.mark.asyncio
+async def test_reprojects_capacity_observed_idempotently() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=LlmProviderCapacityObservedFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+
+    _, _, _, workflow_unit_of_work, _ = await _execute(
+        frontend_event_projection_writer=projection_writer,
+    )
+    persisted_event = workflow_unit_of_work.outbox.events[0]
+    await projection_writer.execute(persisted_event)
+    await projection_writer.execute(persisted_event)
+
+    assert len(repository.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_no_capacity_observation_does_not_create_capacity_projection() -> None:
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=LlmProviderCapacityObservedFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+    base_result = _execution_result()
+    execution_result = ExecutePreparedLlmDispatchAttemptResult(
+        dispatch=base_result.dispatch,
+        llm_result=LlmDispatchExecutionResult(
+            status=base_result.llm_result.status,
+            finished_at=base_result.llm_result.finished_at,
+            output_payload=base_result.llm_result.output_payload,
+            capacity_observation=None,
+        ),
+        outcome_result=base_result.outcome_result,
+        validation_metadata=base_result.validation_metadata,
+    )
+
+    await _execute(
+        execution_result=execution_result,
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    assert repository.events == {}
+
+
+@pytest.mark.asyncio
+async def test_handler_without_projection_writer_preserves_existing_behavior() -> None:
+    _, _, _, workflow_unit_of_work, _ = await _execute()
+
+    assert tuple(event.event_type for event in workflow_unit_of_work.outbox.events) == (
+        KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value,
+    )
+
+
+def test_execute_handler_projects_after_canonical_outbox_append() -> None:
+    source = inspect.getsource(HandleExecuteClaimBuilderSectionCommandHandler.execute)
+
+    append_index = source.index("outbox.append_event")
+    projection_index = source.index("frontend_event_projection_writer.execute")
+    assert append_index < projection_index
+
+
+def test_execute_handler_does_not_touch_live_state_or_capacity_reads_for_projection() -> (
+    None
+):
+    source = inspect.getsource(HandleExecuteClaimBuilderSectionCommandHandler.execute)
+
+    for forbidden_marker in (
+        "live_state",
+        "fetch_workbench",
+        "drain",
+        "workflow_runner",
+        "frontend_workflow_events",
+    ):
+        assert forbidden_marker not in source
 
 
 @pytest.mark.asyncio
@@ -1148,13 +1459,13 @@ def test_invalid_json_without_truncation_retries_same_model() -> None:
 
     assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
     assert result.metadata["validation_decision"] == (
-        ClaimBuilderOutputValidationDecision.RETRY_SAME_MODEL.value
+        ClaimBuilderOutputValidationDecision.RETRY_SAME_ROUTE.value
     )
     assert result.metadata["validation_failure_reason"] == (
         ClaimBuilderOutputValidationFailureReason.INVALID_JSON_RETRY_REQUIRED.value
     )
     assert result.metadata["claim_builder_attempt_next_action_kind"] == (
-        ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value
+        ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE.value
     )
     assert result.metadata["claim_builder_attempt_next_model_strategy"] == "SAME_MODEL"
     assert result.metadata["claim_builder_should_persist_claims"] is False
@@ -1186,7 +1497,7 @@ def test_truncated_output_metadata_uses_larger_output_next_action() -> None:
     assert result.metadata["claim_builder_should_persist_claims"] is False
 
 
-def test_retry_same_model_metadata_uses_retry_same_model_next_action() -> None:
+def test_retry_same_route_metadata_uses_retry_same_route_next_action() -> None:
     validator = ClaimBuilderLlmDispatchOutputValidator(
         policy=ClaimBuilderOutputValidationPolicy(),
     )
@@ -1201,7 +1512,7 @@ def test_retry_same_model_metadata_uses_retry_same_model_next_action() -> None:
 
     assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
     assert result.metadata["claim_builder_attempt_next_action_kind"] == (
-        ClaimBuilderAttemptNextActionKind.RETRY_SAME_MODEL.value
+        ClaimBuilderAttemptNextActionKind.RETRY_SAME_ROUTE.value
     )
     assert result.metadata["claim_builder_attempt_next_model_strategy"] == "SAME_MODEL"
     assert result.metadata["claim_builder_should_persist_claims"] is False
