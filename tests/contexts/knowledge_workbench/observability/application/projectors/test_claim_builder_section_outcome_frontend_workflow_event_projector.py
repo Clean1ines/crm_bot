@@ -64,6 +64,8 @@ def _event(
 def _extracted_payload() -> dict[str, object]:
     return {
         "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_ref": "unit-1",
         "dispatch_attempt_id": "work-1:attempt:1",
         "work_item_id": "work-1",
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
@@ -79,6 +81,8 @@ def _extracted_payload() -> dict[str, object]:
 def _item_owned_retryable_failed_payload() -> dict[str, object]:
     return {
         "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_ref": "unit-1",
         "dispatch_attempt_id": "work-1:attempt:1",
         "work_item_id": "work-1",
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
@@ -93,6 +97,8 @@ def _item_owned_retryable_failed_payload() -> dict[str, object]:
 def _capacity_owned_retryable_failed_payload() -> dict[str, object]:
     return {
         "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_ref": "unit-1",
         "dispatch_attempt_id": "work-1:attempt:1",
         "work_item_id": "work-1",
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
@@ -108,6 +114,8 @@ def _capacity_owned_retryable_failed_payload() -> dict[str, object]:
 def _terminal_failed_payload() -> dict[str, object]:
     return {
         "workflow_run_id": _workflow_run_id(),
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_ref": "unit-1",
         "dispatch_attempt_id": "work-1:attempt:1",
         "work_item_id": "work-1",
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
@@ -137,6 +145,13 @@ def test_projects_extracted_to_versioned_envelope() -> None:
     assert projected.payload["persisted_draft_claim_count"] == 1
     assert projected.payload["validated_claim_count"] == 1
     assert projected.payload["actual_total_tokens"] == 15
+    assert projected.payload["work_item_state"] == "completed"
+    assert projected.payload["dispatch_attempt_state"] == "completed"
+    assert projected.payload["draft_claims_available"] is True
+    assert (
+        projected.payload["targeted_read_kind"]
+        == "draft_claims_by_work_item_or_source_unit"
+    )
 
 
 def test_projects_item_owned_retryable_failed_to_versioned_envelope() -> None:
@@ -158,6 +173,8 @@ def test_projects_item_owned_retryable_failed_to_versioned_envelope() -> None:
         "RETRY_SAME_MODEL"
     )
     assert "DEFER_UNTIL_CAPACITY_RESET" not in projected.payload.values()
+    assert projected.payload["work_item_state"] == "retryable_failed"
+    assert projected.payload["retry_driver"] == "capacity_window_admission"
 
 
 def test_capacity_owned_minute_limit_retryable_failed_is_not_projected() -> None:
@@ -206,6 +223,8 @@ def test_projects_terminal_failed_to_versioned_envelope() -> None:
     assert projected is not None
     assert projected.projection_type == "workflow_claim_builder_section_terminal_failed"
     assert projected.payload["validation_failure_reason"] == "CLAIM_FIELD_SET_INVALID"
+    assert projected.payload["work_item_state"] == "terminal_failed"
+    assert projected.payload["retry_eligibility"] == "not_eligible"
 
 
 def test_deferred_event_type_is_not_projected() -> None:

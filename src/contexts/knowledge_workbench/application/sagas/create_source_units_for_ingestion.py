@@ -112,6 +112,7 @@ class CreateSourceUnitsForIngestionResult:
     source_document_ref: str
     source_unit_count: int
     source_units_checkpoint_status: KnowledgeExtractionPhaseStatus
+    source_units: tuple[SourceUnit, ...] = ()
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.workflow_run_id, field_name="workflow_run_id")
@@ -130,6 +131,13 @@ class CreateSourceUnitsForIngestionResult:
             raise TypeError(
                 "source_units_checkpoint_status must be KnowledgeExtractionPhaseStatus",
             )
+        if not isinstance(self.source_units, tuple):
+            raise TypeError("source_units must be tuple")
+        if self.source_units and len(self.source_units) != self.source_unit_count:
+            raise ValueError("source_units length must equal source_unit_count")
+        for source_unit in self.source_units:
+            if not isinstance(source_unit, SourceUnit):
+                raise TypeError("source_units must contain SourceUnit")
 
 
 class CreateSourceUnitsForIngestion:
@@ -197,6 +205,7 @@ class CreateSourceUnitsForIngestion:
             source_document_ref=command.source_document_ref,
             source_unit_count=len(units),
             source_units_checkpoint_status=checkpoint.phase_status,
+            source_units=units,
         )
 
 

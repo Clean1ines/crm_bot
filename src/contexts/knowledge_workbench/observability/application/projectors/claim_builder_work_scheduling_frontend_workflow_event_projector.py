@@ -29,15 +29,24 @@ class ClaimBuilderWorkSchedulingFrontendWorkflowEventProjector:
             )
 
         source_document_ref = _payload_text(event.payload, "source_document_ref")
+        is_item_event = (
+            event.event_type
+            == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_WORK_ITEM_SCHEDULED.value
+        )
+        projection_type = (
+            "workflow_claim_builder_work_item_scheduled"
+            if is_item_event
+            else "workflow_work_items_scheduled"
+        )
         return FrontendWorkflowEvent(
             projection_event_id=(
                 f"frontend-workflow-event:{event.event_id.value}:"
-                f"workflow_work_items_scheduled:v{PROJECTION_VERSION}"
+                f"{projection_type}:v{PROJECTION_VERSION}"
             ),
             source_event_id=event.event_id.value,
             source_sequence_number=event.sequence_number,
             projection_version=PROJECTION_VERSION,
-            projection_type="workflow_work_items_scheduled",
+            projection_type=projection_type,
             event_type=event.event_type,
             operation_key="schedule_claim_builder_section_work",
             canonical_phase=(
@@ -46,7 +55,11 @@ class ClaimBuilderWorkSchedulingFrontendWorkflowEventProjector:
             workflow_run_id=event.workflow_run_id,
             project_id=_project_id_from_source_document_ref(source_document_ref),
             document_id=source_document_ref,
-            payload=_scheduled_work_items_patch(event.payload),
+            payload=(
+                _scheduled_work_item_patch(event.payload)
+                if is_item_event
+                else _scheduled_work_items_patch(event.payload)
+            ),
             occurred_at=event.occurred_at,
             causation_command_id=(
                 event.causation_command_id.value
@@ -72,9 +85,32 @@ def _scheduled_work_items_patch(
     }
 
 
+def _scheduled_work_item_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
+    return {
+        "workflow_run_id": _payload_text(payload, "workflow_run_id"),
+        "source_document_ref": _payload_text(payload, "source_document_ref"),
+        "source_unit_ref": _payload_text(payload, "source_unit_ref"),
+        "source_unit_ordinal": _payload_non_negative_int(
+            payload,
+            "source_unit_ordinal",
+        ),
+        "work_item_id": _payload_text(payload, "work_item_id"),
+        "work_kind": _payload_text(payload, "work_kind"),
+        "initial_work_item_state": _payload_text(
+            payload,
+            "initial_work_item_state",
+        ),
+        "attempt_count": _payload_non_negative_int(payload, "attempt_count"),
+        "schedule_status": _payload_text(payload, "schedule_status"),
+        "retry_eligibility": _payload_text(payload, "retry_eligibility"),
+        "retry_driver": payload.get("retry_driver"),
+    }
+
+
 _SUPPORTED_EVENT_TYPES = frozenset(
     {
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_WORK_SCHEDULED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_WORK_ITEM_SCHEDULED.value,
     }
 )
 

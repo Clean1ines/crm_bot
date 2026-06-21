@@ -1212,6 +1212,16 @@ def _source_unit_ref(dispatch_payload: Mapping[str, object]) -> str:
     raise ValueError("source_unit_ref missing from claim builder dispatch payload")
 
 
+def _source_document_ref(dispatch_payload: Mapping[str, object]) -> str:
+    schedule_payload = _dispatch_schedule_payload(dispatch_payload)
+    value = _optional_mapping_text(schedule_payload, "source_document_ref")
+    if value is None:
+        raise ValueError(
+            "source_document_ref missing from claim builder dispatch payload"
+        )
+    return value
+
+
 def _validation_decision_text(
     validation_metadata: Mapping[str, object] | None,
 ) -> str:
@@ -1385,6 +1395,10 @@ def _event_payload(
     )
     payload: dict[str, object] = {
         "workflow_run_id": workflow_run_id,
+        "source_document_ref": _source_document_ref(
+            execution_result.dispatch.dispatch_payload
+        ),
+        "source_unit_ref": _source_unit_ref(execution_result.dispatch.dispatch_payload),
         "dispatch_attempt_id": dispatch_attempt_id,
         "work_item_id": work_item_id,
         "operation_key": "execute_claim_builder_section",

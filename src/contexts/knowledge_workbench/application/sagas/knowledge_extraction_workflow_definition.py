@@ -44,8 +44,11 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     KNOWLEDGE_EXTRACTION_WORKFLOW_STARTED = "KnowledgeExtractionWorkflowStarted"
     SOURCE_DOCUMENT_PERSISTED = "SourceDocumentPersisted"
     SOURCE_UNITS_CREATED = "SourceUnitsCreated"
+    SOURCE_UNIT_CREATED = "SourceUnitCreated"
     CLAIM_BUILDER_SECTION_WORK_SCHEDULED = "ClaimBuilderSectionWorkScheduled"
+    CLAIM_BUILDER_WORK_ITEM_SCHEDULED = "ClaimBuilderWorkItemScheduled"
     CLAIM_BUILDER_DISPATCH_BATCH_PREPARED = "ClaimBuilderDispatchBatchPrepared"
+    CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED = "ClaimBuilderDispatchAttemptPrepared"
     CLAIM_BUILDER_SECTION_EXTRACTION_STARTED = "ClaimBuilderSectionExtractionStarted"
     CLAIM_BUILDER_SECTION_EXTRACTED = "ClaimBuilderSectionExtracted"
     CLAIM_BUILDER_SECTION_EXTRACTION_DEFERRED = "ClaimBuilderSectionExtractionDeferred"
@@ -222,6 +225,7 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             success_event_type=KnowledgeExtractionCanonicalEventType.SOURCE_UNITS_CREATED,
             intermediate_event_types=(
                 KnowledgeExtractionCanonicalEventType.SOURCE_DOCUMENT_PERSISTED,
+                KnowledgeExtractionCanonicalEventType.SOURCE_UNIT_CREATED,
             ),
             failure_event_types=(),
             next_command_types=(
@@ -251,6 +255,9 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             idempotency_key_template="claim-builder-section-work:{workflow_run_id}",
             success_event_type=(
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_WORK_SCHEDULED
+            ),
+            intermediate_event_types=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_WORK_ITEM_SCHEDULED,
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH,
@@ -282,6 +289,7 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_BATCH_PREPARED
             ),
             intermediate_event_types=(
+                KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED,
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED,
             ),
             next_command_types=(

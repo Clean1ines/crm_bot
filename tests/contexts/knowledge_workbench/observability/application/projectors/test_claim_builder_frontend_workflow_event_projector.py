@@ -57,6 +57,8 @@ def test_routes_capacity_observed_to_capacity_projector() -> None:
         workflow_run_id="knowledge-extraction:source-document:project-1:abc",
         payload={
             "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "source_document_ref": "source-document:project-1:abc",
+            "source_unit_ref": "unit-1",
             "dispatch_attempt_id": "work-1:attempt:1",
             "work_item_id": "work-1",
             "operation_key": "execute_claim_builder_section",
@@ -86,6 +88,8 @@ def test_routes_section_extracted_to_outcome_projector() -> None:
         workflow_run_id="knowledge-extraction:source-document:project-1:abc",
         payload={
             "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "source_document_ref": "source-document:project-1:abc",
+            "source_unit_ref": "unit-1",
             "dispatch_attempt_id": "work-1:attempt:1",
             "work_item_id": "work-1",
             "operation_key": "execute_claim_builder_section",

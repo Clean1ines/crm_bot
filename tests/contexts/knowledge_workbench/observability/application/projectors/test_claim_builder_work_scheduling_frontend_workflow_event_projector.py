@@ -77,15 +77,44 @@ def test_projection_payload_uses_only_canonical_event_fields() -> None:
     }
 
 
-def test_documents_missing_per_item_fields_as_known_limitation() -> None:
+def test_projects_claim_builder_work_item_scheduled_overlay() -> None:
+    parent = _event()
+    event = WorkflowEvent(
+        event_id=WorkflowEventId(
+            "workflow-event:knowledge-extraction:source-document:project-1:abc:"
+            "ClaimBuilderWorkItemScheduled:work-1"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_WORK_ITEM_SCHEDULED.value
+        ),
+        workflow_run_id=parent.workflow_run_id,
+        payload={
+            "workflow_run_id": parent.workflow_run_id,
+            "source_document_ref": "source-document:project-1:abc",
+            "source_unit_ref": "unit-1",
+            "source_unit_ordinal": 0,
+            "work_item_id": "work-1",
+            "work_kind": "knowledge_workbench.claim_builder.section_extraction",
+            "initial_work_item_state": "ready",
+            "attempt_count": 0,
+            "schedule_status": "created",
+            "retry_eligibility": "not_applicable",
+            "retry_driver": None,
+        },
+        occurred_at=parent.occurred_at,
+        sequence_number=22,
+    )
+
     projected = ClaimBuilderWorkSchedulingFrontendWorkflowEventProjector().project(
-        _event()
+        event
     )
 
     assert projected is not None
-    assert "work_kind" not in projected.payload
-    assert "scheduled_items" not in projected.payload
-    assert "source_unit_ref" not in projected.payload
+    assert projected.projection_type == "workflow_claim_builder_work_item_scheduled"
+    assert projected.payload["source_unit_ref"] == "unit-1"
+    assert projected.payload["work_item_id"] == "work-1"
+    assert projected.payload["initial_work_item_state"] == "ready"
+    assert projected.payload["retry_driver"] is None
 
 
 def test_ignores_unsupported_workflow_event() -> None:

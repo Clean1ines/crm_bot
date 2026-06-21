@@ -12,6 +12,7 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalEventType,
 )
 from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_section_work import (
+    ClaimBuilderScheduledWorkItemSummary,
     ScheduleClaimBuilderSectionWork,
     ScheduleClaimBuilderSectionWorkCommand,
 )
@@ -136,6 +137,20 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
         )
         if frontend_event_projection_writer is not None:
             await frontend_event_projection_writer.execute(persisted_scheduled_event)
+        appended_event_count = 1
+        for scheduled_item in scheduling_result.scheduled_items:
+            item_event = _claim_builder_work_item_scheduled_event(
+                workflow_run_id=workflow_run_id,
+                source_document_ref=source_document_ref,
+                scheduled_item=scheduled_item,
+                occurred_at=occurred_at,
+            )
+            persisted_item_event = await workflow_unit_of_work.outbox.append_event(
+                item_event
+            )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_item_event)
+            appended_event_count += 1
 
         next_command = _prepare_dispatch_batch_command(
             workflow_run_id=workflow_run_id,
@@ -170,7 +185,7 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
         return HandleScheduleClaimBuilderSectionWorkResult(
             workflow_run_id=workflow_run_id,
             scheduled_work_item_count=scheduled_work_item_count,
-            appended_event_count=1,
+            appended_event_count=appended_event_count,
             appended_next_command_count=1,
             completed_command_id=workflow_command.command_id,
         )
@@ -210,6 +225,41 @@ def _claim_builder_work_scheduled_event(
             "workflow_run_id": workflow_run_id,
             "source_document_ref": source_document_ref.value,
             "scheduled_work_item_count": scheduled_work_item_count,
+        },
+        occurred_at=occurred_at,
+    )
+
+
+def _claim_builder_work_item_scheduled_event(
+    *,
+    workflow_run_id: str,
+    source_document_ref: SourceDocumentRef,
+    scheduled_item: ClaimBuilderScheduledWorkItemSummary,
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    return WorkflowEvent(
+        event_id=WorkflowEventId(
+            "workflow-event:"
+            f"{workflow_run_id}:"
+            f"{KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_WORK_ITEM_SCHEDULED.value}:"
+            f"{scheduled_item.work_item_id}"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_WORK_ITEM_SCHEDULED.value
+        ),
+        workflow_run_id=workflow_run_id,
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "source_document_ref": source_document_ref.value,
+            "source_unit_ref": scheduled_item.source_unit_ref,
+            "source_unit_ordinal": scheduled_item.source_unit_ordinal,
+            "work_item_id": scheduled_item.work_item_id,
+            "work_kind": scheduled_item.work_kind,
+            "initial_work_item_state": "ready",
+            "attempt_count": 0,
+            "schedule_status": scheduled_item.schedule_status,
+            "retry_eligibility": "not_applicable",
+            "retry_driver": None,
         },
         occurred_at=occurred_at,
     )

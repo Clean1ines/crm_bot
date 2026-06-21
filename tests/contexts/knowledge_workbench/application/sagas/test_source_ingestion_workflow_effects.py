@@ -14,8 +14,29 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_workflo
     BuildSourceIngestionWorkflowEffectsCommand,
     SourceIngestionWorkflowEffectType,
 )
+from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
+    SourceUnit,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.heading_path import (
+    HeadingPath,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
+    SourceDocumentRef,
+)
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_kind import (
+    SourceUnitKind,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_lineage import (
+    SourceUnitLineage,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
+    SourceUnitRef,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_text import (
+    SourceUnitText,
 )
 
 
@@ -41,6 +62,19 @@ def _command(
 
 def _effects():
     return BuildSourceIngestionWorkflowEffects().execute(_command())
+
+
+def _source_unit() -> SourceUnit:
+    return SourceUnit(
+        unit_ref=SourceUnitRef("source-document:project-1:abc.unit.0"),
+        document_ref=SourceDocumentRef("source-document:project-1:abc"),
+        unit_kind=SourceUnitKind.SECTION,
+        text=SourceUnitText("# Overview\n\nText"),
+        heading_path=HeadingPath(("Overview",)),
+        lineage=SourceUnitLineage(),
+        ordinal=0,
+        created_at=_now(),
+    )
 
 
 def test_effect_type_vocabulary() -> None:
@@ -77,6 +111,36 @@ def test_builds_source_units_created_event_effect() -> None:
     )
     assert effect.payload["source_unit_count"] == 3
     assert effect.payload["source_format"] == "markdown"
+
+
+def test_builds_source_unit_created_event_effect_per_persisted_unit() -> None:
+    command = BuildSourceIngestionWorkflowEffectsCommand(
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        project_id="project-1",
+        source_document_ref="source-document:project-1:abc",
+        source_unit_count=1,
+        source_format=SourceFormat.MARKDOWN,
+        content_hash="sha256:abc",
+        occurred_at=_now(),
+        source_units=(_source_unit(),),
+    )
+
+    effects = BuildSourceIngestionWorkflowEffects().execute(command)
+
+    assert len(effects.event_effects) == 3
+    effect = effects.event_effects[2]
+    assert (
+        effect.event_type is KnowledgeExtractionCanonicalEventType.SOURCE_UNIT_CREATED
+    )
+    assert effect.payload == {
+        "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+        "project_id": "project-1",
+        "source_document_ref": "source-document:project-1:abc",
+        "source_unit_ref": "source-document:project-1:abc.unit.0",
+        "source_unit_ordinal": 0,
+        "unit_kind": "section",
+        "heading_path": ("Overview",),
+    }
 
 
 def test_builds_schedule_claim_builder_section_work_next_command() -> None:

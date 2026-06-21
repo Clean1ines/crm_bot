@@ -14,6 +14,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_format import (
     SourceFormat,
 )
+from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
+    SourceUnit,
+)
 
 
 class SourceIngestionWorkflowEffectType(StrEnum):
@@ -123,6 +126,7 @@ class BuildSourceIngestionWorkflowEffectsCommand:
     source_format: SourceFormat
     content_hash: str
     occurred_at: datetime
+    source_units: tuple[SourceUnit, ...] = ()
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.workflow_run_id, field_name="workflow_run_id")
@@ -136,6 +140,10 @@ class BuildSourceIngestionWorkflowEffectsCommand:
             raise TypeError("source_format must be SourceFormat")
         _require_non_empty_text(self.content_hash, field_name="content_hash")
         _require_timezone_aware(self.occurred_at, field_name="occurred_at")
+        if not isinstance(self.source_units, tuple):
+            raise TypeError("source_units must be tuple")
+        if self.source_units and len(self.source_units) != self.source_unit_count:
+            raise ValueError("source_units length must equal source_unit_count")
 
 
 class BuildSourceIngestionWorkflowEffects:
@@ -166,6 +174,10 @@ class BuildSourceIngestionWorkflowEffects:
                     workflow_run_id=command.workflow_run_id,
                     payload=base_payload,
                     occurred_at=command.occurred_at,
+                ),
+                *tuple(
+                    _source_unit_created_effect(command, unit)
+                    for unit in command.source_units
                 ),
             ),
             next_command_effects=(
@@ -221,6 +233,29 @@ def _base_payload(
         "source_unit_count": command.source_unit_count,
         "source_format": command.source_format.value,
     }
+
+
+def _source_unit_created_effect(
+    command: BuildSourceIngestionWorkflowEffectsCommand,
+    unit: SourceUnit,
+) -> SourceIngestionWorkflowEventEffect:
+    payload: dict[str, object] = {
+        "workflow_run_id": command.workflow_run_id,
+        "project_id": command.project_id,
+        "source_document_ref": command.source_document_ref,
+        "source_unit_ref": unit.unit_ref.value,
+        "source_unit_ordinal": unit.ordinal,
+        "unit_kind": unit.unit_kind.value,
+        "heading_path": unit.heading_path.parts,
+    }
+    if unit.lineage.parent_refs:
+        payload["parent_source_unit_ref"] = unit.lineage.parent_refs[-1].value
+    return SourceIngestionWorkflowEventEffect(
+        event_type=KnowledgeExtractionCanonicalEventType.SOURCE_UNIT_CREATED,
+        workflow_run_id=command.workflow_run_id,
+        payload=payload,
+        occurred_at=command.occurred_at,
+    )
 
 
 def _freeze_payload(payload: Mapping[str, object]) -> Mapping[str, object]:

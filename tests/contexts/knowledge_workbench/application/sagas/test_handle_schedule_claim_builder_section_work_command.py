@@ -452,13 +452,19 @@ async def test_schedules_one_work_item_per_source_unit() -> None:
 async def test_appends_claim_builder_section_work_scheduled_event() -> None:
     result, _, _, workflow_unit_of_work = await _execute()
 
-    assert result.appended_event_count == 1
+    assert result.appended_event_count == 3
     assert tuple(event.event_type for event in workflow_unit_of_work.outbox.events) == (
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_WORK_SCHEDULED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_WORK_ITEM_SCHEDULED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_WORK_ITEM_SCHEDULED.value,
     )
     assert (
         workflow_unit_of_work.outbox.events[0].payload["scheduled_work_item_count"] == 2
     )
+    assert workflow_unit_of_work.outbox.events[1].payload["source_unit_ref"] == (
+        f"{_document_ref().value}.unit.0"
+    )
+    assert workflow_unit_of_work.outbox.events[1].payload["attempt_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -541,7 +547,18 @@ class FakePrepareLlmDispatchBatch:
                         attempt_id="work-1:attempt:1",
                         work_item_id="work-1",
                         attempt_number=1,
-                        dispatch_payload={"work_item_id": "work-1"},
+                        dispatch_payload={
+                            "work_item_id": "work-1",
+                            "schedule_payload": {
+                                "source_document_ref": _document_ref().value,
+                                "source_unit_ref": f"{_document_ref().value}.unit.0",
+                            },
+                            "llm_allocation": {
+                                "provider": "groq",
+                                "account_ref": "groq_org_primary",
+                                "model_ref": "qwen/qwen3-32b",
+                            },
+                        },
                     ),
                 ),
             ),
@@ -632,9 +649,13 @@ async def test_projects_claim_builder_section_work_scheduled_event_once() -> Non
         frontend_event_projection_writer=projection_writer,
     )
 
-    assert len(workflow_unit_of_work.outbox.events) == 1
-    assert len(repository.events) == 1
-    projected = next(iter(repository.events.values()))
+    assert len(workflow_unit_of_work.outbox.events) == 3
+    assert len(repository.events) == 3
+    projected = next(
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_work_items_scheduled"
+    )
     assert projected.projection_type == "workflow_work_items_scheduled"
     assert projected.source_sequence_number == 1
     assert projected.payload == {
@@ -642,6 +663,13 @@ async def test_projects_claim_builder_section_work_scheduled_event_once() -> Non
         "source_document_ref": _document_ref().value,
         "scheduled_work_item_count": 2,
     }
+    item_projections = tuple(
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_work_item_scheduled"
+    )
+    assert len(item_projections) == 2
+    assert item_projections[0].payload["source_unit_ordinal"] == 0
 
 
 @pytest.mark.asyncio
@@ -654,7 +682,7 @@ async def test_appends_canonical_event_before_frontend_projection() -> None:
 
     await _execute(frontend_event_projection_writer=projection_writer)
 
-    assert tuple(repository.events) == (
+    assert tuple(repository.events)[:1] == (
         "frontend-workflow-event:"
         "workflow-event:knowledge-extraction:source-document:project-1:abc:"
         "ClaimBuilderSectionWorkScheduled:source-document:project-1:abc:"
@@ -677,7 +705,7 @@ async def test_reprojects_claim_builder_section_work_scheduled_idempotently() ->
     await projection_writer.execute(persisted_event)
     await projection_writer.execute(persisted_event)
 
-    assert len(repository.events) == 1
+    assert len(repository.events) == 3
 
 
 @pytest.mark.asyncio
@@ -686,7 +714,7 @@ async def test_handler_without_projection_writer_preserves_existing_behavior() -
 
     assert result.scheduled_work_item_count == 2
     assert len(scheduling_repository.saved) == 2
-    assert len(workflow_unit_of_work.outbox.events) == 1
+    assert len(workflow_unit_of_work.outbox.events) == 3
 
 
 def test_schedule_handler_projects_after_canonical_outbox_append() -> None:

@@ -212,6 +212,19 @@ def _event_id_from_event_effect(
 ) -> WorkflowEventId:
     if (
         event_effect.event_type
+        is KnowledgeExtractionCanonicalEventType.SOURCE_UNIT_CREATED
+    ):
+        source_unit_ref = event_effect.payload.get("source_unit_ref")
+        if not isinstance(source_unit_ref, str) or not source_unit_ref.strip():
+            raise ValueError("SourceUnitCreated payload requires source_unit_ref")
+        return WorkflowEventId(
+            "workflow-event:"
+            f"{effects.workflow_run_id}:"
+            f"{event_effect.event_type.value}:"
+            f"{source_unit_ref}"
+        )
+    if (
+        event_effect.event_type
         is KnowledgeExtractionCanonicalEventType.SOURCE_UNITS_CREATED
     ):
         return WorkflowEventId(

@@ -149,7 +149,15 @@ def _attempt(index: int) -> StartedLlmAdmittedAttempt:
         attempt_number=1,
         dispatch_payload={
             "work_item_id": f"work-{index}",
-            "schedule_payload": {"source_unit_ref": f"unit-{index}"},
+            "schedule_payload": {
+                "source_document_ref": "source-document:project-1:abc",
+                "source_unit_ref": f"unit-{index}",
+            },
+            "llm_allocation": {
+                "provider": "groq",
+                "account_ref": "groq_org_primary",
+                "model_ref": "qwen/qwen3-32b",
+            },
         },
     )
 
@@ -498,7 +506,7 @@ async def test_calls_existing_prepare_llm_dispatch_batch_for_claim_builder_work_
 async def test_appends_claim_builder_dispatch_batch_prepared_event() -> None:
     result, _, workflow_unit_of_work = await _execute()
 
-    assert result.appended_event_count == 1
+    assert result.appended_event_count == 3
     event = workflow_unit_of_work.outbox.events[0]
     assert (
         event.event_type
@@ -512,6 +520,17 @@ async def test_appends_claim_builder_dispatch_batch_prepared_event() -> None:
         "work-2:attempt:1",
     )
     assert event.payload["work_item_ids"] == ("work-1", "work-2")
+    assert tuple(
+        event.event_type for event in workflow_unit_of_work.outbox.events[1:]
+    ) == (
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value,
+    )
+    assert workflow_unit_of_work.outbox.events[1].payload["source_unit_ref"] == "unit-1"
+    assert (
+        workflow_unit_of_work.outbox.events[1].payload["dispatch_attempt_id"]
+        == "work-1:attempt:1"
+    )
 
 
 @pytest.mark.asyncio
@@ -888,11 +907,22 @@ async def test_projects_claim_builder_dispatch_batch_prepared_event_once() -> No
         frontend_event_projection_writer=projection_writer,
     )
 
-    assert len(workflow_unit_of_work.outbox.events) == 1
-    assert len(repository.events) == 1
-    projected = next(iter(repository.events.values()))
+    assert len(workflow_unit_of_work.outbox.events) == 3
+    assert len(repository.events) == 3
+    projected = next(
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_dispatch_batch_prepared"
+    )
     assert projected.projection_type == "workflow_dispatch_batch_prepared"
     assert projected.payload["prepared_dispatch_count"] == 2
+    attempt_projections = tuple(
+        event
+        for event in repository.events.values()
+        if event.projection_type == "workflow_claim_builder_dispatch_attempt_prepared"
+    )
+    assert len(attempt_projections) == 2
+    assert attempt_projections[0].payload["provider"] == "groq"
 
 
 @pytest.mark.asyncio
@@ -910,7 +940,7 @@ async def test_reprojects_dispatch_batch_prepared_idempotently() -> None:
     await projection_writer.execute(persisted_event)
     await projection_writer.execute(persisted_event)
 
-    assert len(repository.events) == 1
+    assert len(repository.events) == 3
 
 
 @pytest.mark.asyncio
@@ -966,7 +996,7 @@ async def test_handler_without_projection_writer_preserves_existing_behavior() -
     result, _, workflow_unit_of_work = await _execute()
 
     assert result.prepared_dispatch_count == 2
-    assert len(workflow_unit_of_work.outbox.events) == 1
+    assert len(workflow_unit_of_work.outbox.events) == 3
 
 
 def test_prepare_handler_projects_after_canonical_outbox_append() -> None:

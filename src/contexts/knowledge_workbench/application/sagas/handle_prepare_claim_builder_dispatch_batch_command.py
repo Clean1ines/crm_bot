@@ -113,12 +113,13 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             raise ValueError("payload workflow_run_id must match workflow command")
 
         occurred_at = _execution_occurred_at(workflow_command)
+        prepare_command = _prepare_llm_dispatch_batch_command(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            occurred_at=occurred_at,
+        )
         prepare_result = await prepare_llm_dispatch_batch.execute(
-            _prepare_llm_dispatch_batch_command(
-                workflow_command=workflow_command,
-                workflow_run_id=workflow_run_id,
-                occurred_at=occurred_at,
-            ),
+            prepare_command,
         )
         typed_prepare_result = cast(
             PrepareLlmDispatchBatchResult,
@@ -176,6 +177,20 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             if frontend_event_projection_writer is not None:
                 await frontend_event_projection_writer.execute(persisted_prepared_event)
             appended_event_count = 1
+            for attempt_event in _claim_builder_dispatch_attempt_prepared_events(
+                workflow_run_id=workflow_run_id,
+                started_attempts=started_attempts,
+                lease_expires_at=prepare_command.lease_expires_at,
+                occurred_at=occurred_at,
+            ):
+                persisted_attempt_event = (
+                    await workflow_unit_of_work.outbox.append_event(attempt_event)
+                )
+                if frontend_event_projection_writer is not None:
+                    await frontend_event_projection_writer.execute(
+                        persisted_attempt_event
+                    )
+                appended_event_count += 1
 
             next_commands = _execute_claim_builder_section_commands(
                 workflow_command=workflow_command,
@@ -814,6 +829,63 @@ def _claim_builder_dispatch_batch_prepared_event(
     )
 
 
+def _claim_builder_dispatch_attempt_prepared_events(
+    *,
+    workflow_run_id: str,
+    started_attempts: Sequence[object],
+    lease_expires_at: datetime,
+    occurred_at: datetime,
+) -> tuple[WorkflowEvent, ...]:
+    events: list[WorkflowEvent] = []
+    for attempt in started_attempts:
+        dispatch_payload = _attempt_mapping(attempt, "dispatch_payload")
+        schedule_payload = dispatch_payload.get("schedule_payload")
+        allocation = dispatch_payload.get("llm_allocation")
+        if not isinstance(schedule_payload, Mapping):
+            raise ValueError("dispatch attempt schedule_payload must be mapping")
+        if not isinstance(allocation, Mapping):
+            raise ValueError("dispatch attempt llm_allocation must be mapping")
+        attempt_id = _attempt_text(attempt, "attempt_id")
+        work_item_id = _attempt_text(attempt, "work_item_id")
+        attempt_number = _attempt_positive_int(attempt, "attempt_number")
+        events.append(
+            WorkflowEvent(
+                event_id=WorkflowEventId(
+                    "workflow-event:"
+                    f"{workflow_run_id}:"
+                    f"{KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value}:"
+                    f"{attempt_id}"
+                ),
+                event_type=(
+                    KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value
+                ),
+                workflow_run_id=workflow_run_id,
+                payload={
+                    "workflow_run_id": workflow_run_id,
+                    "source_document_ref": _payload_text(
+                        schedule_payload,
+                        "source_document_ref",
+                    ),
+                    "source_unit_ref": _payload_text(
+                        schedule_payload,
+                        "source_unit_ref",
+                    ),
+                    "work_item_id": work_item_id,
+                    "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+                    "dispatch_attempt_id": attempt_id,
+                    "attempt_number": attempt_number,
+                    "attempt_state": "leased",
+                    "provider": _payload_text(allocation, "provider"),
+                    "account_ref": _payload_text(allocation, "account_ref"),
+                    "model_ref": _payload_text(allocation, "model_ref"),
+                    "lease_expires_at": lease_expires_at.isoformat(),
+                },
+                occurred_at=occurred_at,
+            )
+        )
+    return tuple(events)
+
+
 def _next_prepare_claim_builder_dispatch_batch_command(
     *,
     workflow_command: WorkflowCommand,
@@ -1066,6 +1138,23 @@ def _attempt_text(attempt: object, field_name: str) -> str:
     value = getattr(attempt, field_name)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"started attempt {field_name} must be non-empty")
+    return value
+
+
+def _attempt_positive_int(attempt: object, field_name: str) -> int:
+    value = getattr(attempt, field_name)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"started attempt {field_name} must be positive int")
+    return value
+
+
+def _attempt_mapping(
+    attempt: object,
+    field_name: str,
+) -> Mapping[str, object]:
+    value = getattr(attempt, field_name)
+    if not isinstance(value, Mapping):
+        raise ValueError(f"started attempt {field_name} must be mapping")
     return value
 
 

@@ -732,6 +732,14 @@ async def test_projects_claim_builder_section_extracted_event_once() -> None:
     ]
     assert len(extracted) == 1
     assert extracted[0].operation_key == "execute_claim_builder_section"
+    assert extracted[0].payload["source_document_ref"] == (
+        "source-document:project-1:abc"
+    )
+    assert extracted[0].payload["source_unit_ref"] == "section-1"
+    assert extracted[0].payload["draft_claims_available"] is True
+    assert extracted[0].payload["draft_claims_scope"]["work_item_id"] == (
+        _work_item_id()
+    )
 
 
 @pytest.mark.asyncio
@@ -755,6 +763,10 @@ async def test_projects_claim_builder_section_retryable_failed_event_once() -> N
     assert len(retryable) == 1
     assert "next_attempt_at" not in retryable[0].payload
     assert "claim_builder_next_run_after" not in retryable[0].payload
+    assert retryable[0].payload["source_unit_ref"] == "section-1"
+    assert retryable[0].payload["retry_eligibility"] == "eligible_for_future_admission"
+    assert retryable[0].payload["retry_driver"] == "capacity_window_admission"
+    assert "retry_owner" not in retryable[0].payload
     assert (
         retryable[0].payload.get("claim_builder_attempt_next_action_kind")
         != ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
@@ -831,6 +843,9 @@ async def test_projects_claim_builder_section_terminal_failed_event_once() -> No
         if event.projection_type == "workflow_claim_builder_section_terminal_failed"
     ]
     assert len(terminal) == 1
+    assert terminal[0].payload["source_unit_ref"] == "section-1"
+    assert terminal[0].payload["retry_eligibility"] == "not_eligible"
+    assert "terminal_reason_category" in terminal[0].payload
 
 
 @pytest.mark.asyncio

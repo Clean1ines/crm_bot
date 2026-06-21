@@ -70,6 +70,39 @@ def test_projects_source_units_created_with_minimal_patch_payload() -> None:
     }
 
 
+def test_projects_source_unit_created_as_addressable_surface() -> None:
+    event = _event(KnowledgeExtractionCanonicalEventType.SOURCE_UNIT_CREATED)
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:SourceUnitCreated:unit-1"),
+        event_type=event.event_type,
+        workflow_run_id=event.workflow_run_id,
+        payload={
+            "project_id": "project-1",
+            "source_document_ref": "document-1",
+            "source_unit_ref": "unit-1",
+            "source_unit_ordinal": 0,
+            "unit_kind": "section",
+            "heading_path": ("Overview",),
+            "parent_source_unit_ref": None,
+        },
+        occurred_at=event.occurred_at,
+        sequence_number=18,
+    )
+
+    projected = SourceIngestionFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_source_unit_created"
+    assert projected.payload == {
+        "workflow_run_id": "workflow-1",
+        "source_document_ref": "document-1",
+        "source_unit_ref": "unit-1",
+        "source_unit_ordinal": 0,
+        "unit_kind": "section",
+        "heading_path": ("Overview",),
+    }
+
+
 def test_ignores_unsupported_workflow_event() -> None:
     projected = SourceIngestionFrontendWorkflowEventProjector().project(
         WorkflowEvent(

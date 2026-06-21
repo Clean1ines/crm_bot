@@ -29,16 +29,25 @@ class ClaimBuilderDispatchBatchFrontendWorkflowEventProjector:
             )
 
         workflow_run_id = _payload_text(event.payload, "workflow_run_id")
+        is_attempt_event = (
+            event.event_type
+            == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value
+        )
         project_id, document_id = _document_scope_from_workflow_run_id(workflow_run_id)
+        projection_type = (
+            "workflow_claim_builder_dispatch_attempt_prepared"
+            if is_attempt_event
+            else "workflow_dispatch_batch_prepared"
+        )
         return FrontendWorkflowEvent(
             projection_event_id=(
                 f"frontend-workflow-event:{event.event_id.value}:"
-                f"workflow_dispatch_batch_prepared:v{PROJECTION_VERSION}"
+                f"{projection_type}:v{PROJECTION_VERSION}"
             ),
             source_event_id=event.event_id.value,
             source_sequence_number=event.sequence_number,
             projection_version=PROJECTION_VERSION,
-            projection_type="workflow_dispatch_batch_prepared",
+            projection_type=projection_type,
             event_type=event.event_type,
             operation_key="prepare_claim_builder_dispatch_batch",
             canonical_phase=(
@@ -47,7 +56,11 @@ class ClaimBuilderDispatchBatchFrontendWorkflowEventProjector:
             workflow_run_id=event.workflow_run_id,
             project_id=project_id,
             document_id=document_id,
-            payload=_dispatch_batch_prepared_patch(event.payload),
+            payload=(
+                _dispatch_attempt_prepared_patch(event.payload)
+                if is_attempt_event
+                else _dispatch_batch_prepared_patch(event.payload)
+            ),
             occurred_at=event.occurred_at,
             causation_command_id=(
                 event.causation_command_id.value
@@ -101,9 +114,32 @@ def _dispatch_batch_prepared_patch(
     return patch
 
 
+def _dispatch_attempt_prepared_patch(
+    payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    patch: dict[str, object] = {
+        "workflow_run_id": _payload_text(payload, "workflow_run_id"),
+        "source_document_ref": _payload_text(payload, "source_document_ref"),
+        "source_unit_ref": _payload_text(payload, "source_unit_ref"),
+        "work_item_id": _payload_text(payload, "work_item_id"),
+        "work_kind": _payload_text(payload, "work_kind"),
+        "dispatch_attempt_id": _payload_text(payload, "dispatch_attempt_id"),
+        "attempt_number": _payload_non_negative_int(payload, "attempt_number"),
+        "attempt_state": _payload_text(payload, "attempt_state"),
+        "provider": _payload_text(payload, "provider"),
+        "account_ref": _payload_text(payload, "account_ref"),
+        "model_ref": _payload_text(payload, "model_ref"),
+    }
+    lease_expires_at = _optional_payload_text(payload, "lease_expires_at")
+    if lease_expires_at is not None:
+        patch["lease_expires_at"] = lease_expires_at
+    return patch
+
+
 _SUPPORTED_EVENT_TYPES = frozenset(
     {
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_BATCH_PREPARED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value,
     }
 )
 

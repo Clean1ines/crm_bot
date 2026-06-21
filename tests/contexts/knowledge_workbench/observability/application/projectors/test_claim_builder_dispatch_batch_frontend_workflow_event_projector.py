@@ -101,16 +101,45 @@ def test_projection_payload_uses_only_canonical_event_fields() -> None:
     }
 
 
-def test_documents_missing_provider_account_and_lease_fields() -> None:
-    projected = ClaimBuilderDispatchBatchFrontendWorkflowEventProjector().project(
-        _event()
+def test_projects_claim_builder_dispatch_attempt_prepared_overlay() -> None:
+    parent = _event()
+    event = WorkflowEvent(
+        event_id=WorkflowEventId(
+            f"workflow-event:{_workflow_run_id()}:"
+            "ClaimBuilderDispatchAttemptPrepared:work-1:attempt:1"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_DISPATCH_ATTEMPT_PREPARED.value
+        ),
+        workflow_run_id=_workflow_run_id(),
+        payload={
+            "workflow_run_id": _workflow_run_id(),
+            "source_document_ref": "source-document:project-1:abc",
+            "source_unit_ref": "unit-1",
+            "work_item_id": "work-1",
+            "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+            "dispatch_attempt_id": "work-1:attempt:1",
+            "attempt_number": 1,
+            "attempt_state": "leased",
+            "provider": "groq",
+            "account_ref": "groq_org_primary",
+            "model_ref": "qwen/qwen3-32b",
+            "lease_expires_at": "2026-06-21T12:01:30+00:00",
+        },
+        occurred_at=parent.occurred_at,
+        sequence_number=23,
     )
 
+    projected = ClaimBuilderDispatchBatchFrontendWorkflowEventProjector().project(event)
+
     assert projected is not None
-    assert "provider" not in projected.payload
-    assert "account_ref" not in projected.payload
-    assert "lease_token" not in projected.payload
-    assert "started_at" not in projected.payload
+    assert (
+        projected.projection_type == "workflow_claim_builder_dispatch_attempt_prepared"
+    )
+    assert projected.payload["dispatch_attempt_id"] == "work-1:attempt:1"
+    assert projected.payload["provider"] == "groq"
+    assert projected.payload["account_ref"] == "groq_org_primary"
+    assert projected.payload["attempt_state"] == "leased"
 
 
 def test_ignores_unsupported_workflow_event() -> None:

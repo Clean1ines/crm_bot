@@ -202,6 +202,7 @@ class RunSourceIngestionFirstPhase:
                 source_format=accepted_plan.source_format,
                 content_hash=accepted_plan.content_hash,
                 occurred_at=command.occurred_at,
+                source_units=source_units_result.source_units,
             )
         )
 

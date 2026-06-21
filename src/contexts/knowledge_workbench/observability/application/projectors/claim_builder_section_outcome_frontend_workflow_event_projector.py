@@ -100,19 +100,36 @@ def _outcome_patch(
 
 
 def _extracted_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
+    workflow_run_id = _payload_text(payload, "workflow_run_id")
+    source_document_ref = _payload_text(payload, "source_document_ref")
+    source_unit_ref = _payload_text(payload, "source_unit_ref")
+    work_item_id = _payload_text(payload, "work_item_id")
+    dispatch_attempt_id = _payload_text(payload, "dispatch_attempt_id")
+    persisted_count = _payload_non_negative_int(
+        payload,
+        "persisted_draft_claim_count",
+    )
     patch: dict[str, object] = {
-        "workflow_run_id": _payload_text(payload, "workflow_run_id"),
-        "dispatch_attempt_id": _payload_text(payload, "dispatch_attempt_id"),
-        "work_item_id": _payload_text(payload, "work_item_id"),
-        "persisted_draft_claim_count": _payload_non_negative_int(
-            payload,
-            "persisted_draft_claim_count",
-        ),
+        "workflow_run_id": workflow_run_id,
+        "source_document_ref": source_document_ref,
+        "source_unit_ref": source_unit_ref,
+        "dispatch_attempt_id": dispatch_attempt_id,
+        "work_item_id": work_item_id,
+        "source_unit_claim_builder_status": "completed",
+        "work_item_state": "completed",
+        "dispatch_attempt_state": "completed",
+        "persisted_draft_claim_count": persisted_count,
+        "draft_claims_available": True,
+        "draft_claims_count": persisted_count,
+        "draft_claims_scope": {
+            "workflow_run_id": workflow_run_id,
+            "source_document_ref": source_document_ref,
+            "source_unit_ref": source_unit_ref,
+            "work_item_id": work_item_id,
+            "dispatch_attempt_id": dispatch_attempt_id,
+        },
+        "targeted_read_kind": "draft_claims_by_work_item_or_source_unit",
     }
-    for key in ("source_document_ref", "source_unit_ref"):
-        value = _optional_payload_text(payload, key)
-        if value is not None:
-            patch[key] = value
     validated_claim_count = _optional_payload_int(payload, "validated_claim_count")
     if validated_claim_count is not None:
         patch["validated_claim_count"] = validated_claim_count
@@ -128,11 +145,29 @@ def _extracted_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
         token_value = payload.get(token_key)
         if isinstance(token_value, int) and not isinstance(token_value, bool):
             patch[token_key] = token_value
+    for key in (
+        "validation_decision",
+        "claim_builder_attempt_outcome_kind",
+        "claim_builder_attempt_next_action_kind",
+    ):
+        value = _optional_payload_text(payload, key)
+        if value is not None:
+            patch[key] = value
     return patch
 
 
 def _retryable_failed_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
     patch = dict(_failure_patch(payload))
+    patch.update(
+        {
+            "source_unit_claim_builder_status": "retryable",
+            "work_item_state": "retryable_failed",
+            "dispatch_attempt_state": "retryable_failed",
+            "retry_eligibility": "eligible_for_future_admission",
+            "retry_driver": "capacity_window_admission",
+            "failure_reason_category": _failure_reason_category(payload),
+        }
+    )
     for key in (
         "claim_builder_attempt_next_action_kind",
         "claim_builder_attempt_next_action_reason",
@@ -149,6 +184,17 @@ def _retryable_failed_patch(payload: Mapping[str, object]) -> Mapping[str, objec
 
 def _terminal_failed_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
     patch = dict(_failure_patch(payload))
+    reason_category = _failure_reason_category(payload)
+    patch.update(
+        {
+            "source_unit_claim_builder_status": "terminal_failed",
+            "work_item_state": "terminal_failed",
+            "dispatch_attempt_state": "terminal_failed",
+            "retry_eligibility": "not_eligible",
+            "failure_reason_category": reason_category,
+            "terminal_reason_category": reason_category,
+        }
+    )
     for key in (
         "claim_builder_attempt_next_action_kind",
         "claim_builder_attempt_next_action_reason",
@@ -163,12 +209,11 @@ def _terminal_failed_patch(payload: Mapping[str, object]) -> Mapping[str, object
 def _failure_patch(payload: Mapping[str, object]) -> dict[str, object]:
     patch: dict[str, object] = {
         "workflow_run_id": _payload_text(payload, "workflow_run_id"),
+        "source_document_ref": _payload_text(payload, "source_document_ref"),
+        "source_unit_ref": _payload_text(payload, "source_unit_ref"),
         "dispatch_attempt_id": _payload_text(payload, "dispatch_attempt_id"),
         "work_item_id": _payload_text(payload, "work_item_id"),
     }
-    source_unit_ref = _optional_payload_text(payload, "source_unit_ref")
-    if source_unit_ref is not None:
-        patch["source_unit_ref"] = source_unit_ref
     for key in ("error_kind", "validation_failure_reason"):
         value = _optional_payload_text(payload, key)
         if value is not None:
@@ -177,6 +222,22 @@ def _failure_patch(payload: Mapping[str, object]) -> dict[str, object]:
     if attempt_number is not None:
         patch["attempt_number"] = attempt_number
     return patch
+
+
+def _failure_reason_category(payload: Mapping[str, object]) -> str:
+    if _optional_payload_text(payload, "validation_failure_reason") is not None:
+        return "validation"
+    error_kind = _optional_payload_text(payload, "error_kind")
+    if error_kind in {
+        "provider_error",
+        "auth_error",
+        "request_too_large",
+        "output_too_large",
+    }:
+        return "provider_execution"
+    if error_kind is not None and "persist" in error_kind:
+        return "persistence"
+    return "workflow_policy"
 
 
 _CAPACITY_OWNED_RETRY_ACTION_KINDS = frozenset(
