@@ -12,6 +12,7 @@ Patch 18D: active frontier + origin_set + origin-level separation correctness
 Patch 18E: compaction frontier read contract
 Patch 18F: compaction CapacityWindow correlation
 Patch 19A: compaction document-card reducer contract and ClaimBuilder-style attempt append readiness
+Patch 19B: frontend projection-event client + pure compaction shadow reducer foundation
 
 Patch 19A is a backend/projection/read-contract + docs + guards patch. It does not implement React reducer, React UI, projection stream consumer, SSE replacement, curation, publication, cross-cluster triple reconciliation, or CapacityWindow dashboard UI.
 
@@ -25,8 +26,9 @@ ResultApplied is generated-node/frontier availability, not merely attempt succes
 NextWorkScheduled triggers pending/frontier targeted read, not fake batch creation.
 CapacityWindow owns reset/admission timing.
 Capacity dashboard is a separate future surface.
-Frontend reducer is later.
-React UI is later.
+Pure frontend shadow reducer foundation exists after Patch 19B.
+Projection stream hookup into KnowledgePage is later.
+Visible React UI/data-source switch is later.
 Curation/publication are later.
 
 Projection payloads may expose safe attachment fields:
@@ -109,8 +111,9 @@ pending reduction work	yes, through frontier read	yes	optional dedicated endpoin
 attempt history	event replay / snapshot today	partial	targeted attempt history later if needed
 capacity window current state	event replay / snapshot today	partial	dashboard read later
 9. What remains later
-frontend reducer implementation
-React document-card rendering
+KnowledgePage projection stream hookup
+shadow parity/debug comparison with old workflow-live-state
+visible React document-card data-source switch
 CapacityWindow dashboard UI
 projection stream consumer in KnowledgePage
 curation/publication
@@ -124,3 +127,59 @@ Do not put provider reset into WorkItem retry overlay.
 Do not put heavy generated bodies into projection payload.
 Do not replace full frontend with reducer in this patch.
 Do not touch curation/publication.
+
+## 11. Patch 19B — Frontend projection-event client + pure shadow reducer foundation
+
+Patch 19B starts the frontend-side preparation for the event-to-entity reducer path.
+
+Implemented frontend-side foundation:
+
+```text
+frontend_workflow_event envelope
+→ typed frontend client
+→ idempotent event-to-entity patch
+→ pure DraftClaimCompaction shadow reducer state
+→ targeted read requests / recovery hints
+
+Patch 19B adds:
+
+FrontendWorkflowEventEnvelope
+FrontendWorkflowEventsResponse
+FrontendWorkflowEventsQuery
+getFrontendWorkflowEvents(...)
+streamFrontendWorkflowEvents(...)
+createEmptyCompactionShadowState()
+reduceCompactionProjectionEvent(...)
+
+Patch 19B shadow reducer state uses the same entity keys as Patch 19A:
+
+cluster_groups[group_ref]
+cluster_batches[batch_ref]
+compaction_frontier_nodes[node_ref]
+pending_reduction_work[work_item_id]
+compaction_attempts[dispatch_attempt_id]
+capacity_windows[window_key]
+
+Patch 19B reducer rules:
+
+idempotency is by projection_event_id
+attempt rows are deduped by dispatch_attempt_id
+retry attempts append under pending_reduction_work[work_item_id]
+AttemptCompleted must not create generated frontier nodes
+ResultApplied marks generated nodes/frontier dirty and requests targeted reads
+NextWorkScheduled requests pending/frontier targeted reads and must not create fake ClusterBatch rows
+capacity events update capacity_windows[window_key]
+capacity events with compaction_context, work_item_id or dispatch_attempt_id can link pending work and attempts
+provider reset remains CapacityWindow-owned and must not become WorkItem retry overlay
+
+Patch 19B deliberately does not connect the projection stream to KnowledgePage.
+It also does not change KnowledgeDocumentCard rendering and does not remove workflow-live-state.
+
+Remaining later:
+
+KnowledgePage projection stream hookup
+shadow parity/debug comparison with old workflow-live-state
+visible DocumentCard data-source switch
+CapacityWindow dashboard UI
+curation/publication
+cross-cluster triple reconciliation

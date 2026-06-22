@@ -894,3 +894,49 @@ NextWorkScheduled triggers pending/frontier targeted read, not fake batch creati
 CapacityWindow events update capacity_windows[window_key] and linked pending work when compaction_context.work_item_id is present.
 Heavy generated bodies stay behind targeted reads.
 Frontend reducer, React UI, curation and publication remain later.
+
+Patch 19B — Frontend projection-event client and compaction shadow reducer
+
+Patch 19B adds the frontend foundation for consuming projection events without switching the visible UI.
+
+New frontend client contract:
+
+GET frontend-events
+SSE frontend-events/stream
+FrontendWorkflowEventEnvelope
+FrontendWorkflowEventsResponse
+FrontendWorkflowEventsQuery
+
+New pure shadow reducer contract:
+
+frontend_workflow_event envelope
+→ idempotent event-to-entity patch
+→ shadow reducer state
+→ targeted read requests / recovery hints
+
+Reducer-owned shadow entities:
+
+cluster_groups[group_ref]
+cluster_batches[batch_ref]
+compaction_frontier_nodes[node_ref]
+pending_reduction_work[work_item_id]
+compaction_attempts[dispatch_attempt_id]
+capacity_windows[window_key]
+
+Patch 19B keeps the current compatibility path:
+
+workflow-live-state snapshot
+streamWorkflowLiveState
+KnowledgePage visible behavior
+KnowledgeDocumentCard rendering
+
+These remain untouched and are still used for visible UI. The projection stream is not hooked into KnowledgePage in Patch 19B. The shadow reducer is pure TypeScript, has no React imports, no DOM/API calls, and is ready for later stream hookup and snapshot parity/debug comparison.
+
+Patch 19B does not implement:
+
+visible UI replacement
+DocumentCard rendering switch
+CapacityWindow dashboard UI
+curation
+publication
+cross-cluster triple reconciliation

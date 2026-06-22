@@ -442,6 +442,38 @@ export type WorkbenchWorkflowLiveState = {
   actions: WorkbenchWorkflowActionLiveState[];
 };
 
+export type FrontendWorkflowEventEnvelope = {
+  projection_event_id: string;
+  source_event_id: string;
+  source_sequence_number: number;
+  projection_version: number;
+  projection_type: string;
+  event_type: string;
+  operation_key: string | null;
+  canonical_phase: string | null;
+  workflow_run_id: string;
+  project_id: string;
+  document_id: string;
+  payload: Record<string, unknown>;
+  occurred_at: string;
+  causation_command_id: string | null;
+  correlation_id: string | null;
+};
+
+export type FrontendWorkflowEventsResponse = {
+  workflow_run_id: string;
+  after_source_sequence: number | null;
+  after_cursor: string | null;
+  next_cursor: string | null;
+  events: FrontendWorkflowEventEnvelope[];
+};
+
+export type FrontendWorkflowEventsQuery = {
+  after_cursor?: string | null;
+  after_source_sequence?: number | null;
+  limit?: number;
+};
+
 export type WorkbenchWorkflowLiveStateResponse = {
   document_id: string;
   project_id: string;
@@ -450,6 +482,14 @@ export type WorkbenchWorkflowLiveStateResponse = {
   current_processing_run_id?: string | null;
   workflow: WorkbenchWorkflowLiveState;
 };
+
+export type FrontendWorkflowEventStreamStop = () => void;
+
+export type FrontendWorkflowEventStreamMessageHandler = (
+  payload: FrontendWorkflowEventEnvelope,
+) => void;
+
+export type FrontendWorkflowEventStreamErrorHandler = (error: unknown) => void;
 
 export type WorkflowLiveStateStreamStop = () => void;
 
@@ -473,6 +513,75 @@ const parseSsePayloads = (buffer: string): { payloads: string[]; rest: string } 
     .filter((payload) => payload.trim() !== "");
 
   return { payloads, rest };
+};
+
+const frontendWorkflowEventsQueryString = (
+  query: FrontendWorkflowEventsQuery = {},
+): string => {
+  const params = new URLSearchParams();
+  if (query.after_cursor && query.after_cursor.trim()) {
+    params.set('after_cursor', query.after_cursor.trim());
+  }
+  if (typeof query.after_source_sequence === 'number') {
+    params.set('after_source_sequence', String(query.after_source_sequence));
+  }
+  if (typeof query.limit === 'number') {
+    params.set('limit', String(query.limit));
+  }
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : '';
+};
+
+const streamFrontendWorkflowEvents = (
+  projectId: string,
+  documentId: string,
+  workflowRunId: string,
+  query: FrontendWorkflowEventsQuery | undefined,
+  onMessage: FrontendWorkflowEventStreamMessageHandler,
+  onError?: FrontendWorkflowEventStreamErrorHandler,
+): FrontendWorkflowEventStreamStop => {
+  const controller = new AbortController();
+  const queryString = frontendWorkflowEventsQueryString(query);
+
+  void (async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/projects/${projectId}/knowledge/source-documents/${encodeURIComponent(documentId)}/workflows/${encodeURIComponent(workflowRunId)}/frontend-events/stream${queryString}`,
+        {
+          method: 'GET',
+          headers: createAuthHeaders(null),
+          signal: controller.signal,
+        },
+      );
+
+      if (!response.ok || !response.body) {
+        throw new Error(`Frontend workflow event stream failed: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parsed = parseSsePayloads(buffer);
+        buffer = parsed.rest;
+
+        for (const payload of parsed.payloads) {
+          onMessage(JSON.parse(payload) as FrontendWorkflowEventEnvelope);
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        onError?.(error);
+      }
+    }
+  })();
+
+  return () => controller.abort();
 };
 
 const streamWorkflowLiveState = (
@@ -1475,6 +1584,21 @@ export const knowledgeApi = {
         method: 'POST',
       },
     ),
+
+  getFrontendWorkflowEvents: (
+    projectId: string,
+    documentId: string,
+    workflowRunId: string,
+    query: FrontendWorkflowEventsQuery = {},
+  ) =>
+    authedJsonRequest<FrontendWorkflowEventsResponse>(
+      `/api/projects/${projectId}/knowledge/source-documents/${encodeURIComponent(documentId)}/workflows/${encodeURIComponent(workflowRunId)}/frontend-events${frontendWorkflowEventsQueryString(query)}`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  streamFrontendWorkflowEvents,
 
   workflowLiveState: (projectId: string, documentId: string) =>
     authedJsonRequest<WorkbenchWorkflowLiveStateResponse>(

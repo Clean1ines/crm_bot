@@ -602,3 +602,76 @@ def test_patch_19a_frontend_api_has_pending_work_targeted_read_alias() -> None:
         in frontend_source
     )
     assert "include_inactive: true" in frontend_source
+
+
+def test_patch_19b_frontend_projection_event_client_exists() -> None:
+    frontend_source = (
+        ROOT / "frontend" / "src" / "shared" / "api" / "modules" / "knowledge.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "FrontendWorkflowEventEnvelope" in frontend_source
+    assert "FrontendWorkflowEventsResponse" in frontend_source
+    assert "FrontendWorkflowEventsQuery" in frontend_source
+    assert "getFrontendWorkflowEvents" in frontend_source
+    assert "streamFrontendWorkflowEvents" in frontend_source
+    assert "frontend-events/stream" in frontend_source
+    assert "streamWorkflowLiveState" in frontend_source
+
+
+def test_patch_19b_compaction_shadow_reducer_exists_and_is_pure_frontend_foundation() -> (
+    None
+):
+    reducer_path = (
+        ROOT
+        / "frontend"
+        / "src"
+        / "pages"
+        / "knowledge"
+        / "shadow"
+        / "compactionProjectionShadowReducer.ts"
+    )
+    reducer = reducer_path.read_text(encoding="utf-8")
+
+    assert "createEmptyCompactionShadowState" in reducer
+    assert "reduceCompactionProjectionEvent" in reducer
+    assert "appliedProjectionEventIds" in reducer
+    assert "pendingReductionWork" in reducer
+    assert "capacityWindows" in reducer
+    assert "targetedReadRequests" in reducer
+    assert "workflow_draft_claim_compaction_result_applied" in reducer
+    assert "workflow_capacity_window_leased_work_item" in reducer
+
+    for forbidden_marker in (
+        "from 'react'",
+        'from "react"',
+        "KnowledgeDocumentCard",
+        "KnowledgePage",
+        "streamWorkflowLiveState",
+        "workflow-live-state",
+        "fetch(",
+        "authedJsonRequest",
+    ):
+        assert forbidden_marker not in reducer
+
+
+def test_patch_19b_visible_knowledge_page_and_document_card_are_not_switched_to_projection_stream() -> (
+    None
+):
+    page = (
+        ROOT / "frontend" / "src" / "pages" / "knowledge" / "KnowledgePage.tsx"
+    ).read_text(encoding="utf-8")
+    card = (
+        ROOT
+        / "frontend"
+        / "src"
+        / "pages"
+        / "knowledge"
+        / "components"
+        / "KnowledgeDocumentCard.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert "streamWorkflowLiveState" in page
+    assert "streamFrontendWorkflowEvents" not in page
+    assert "reduceCompactionProjectionEvent" not in page
+    assert "WorkbenchWorkflowLiveStateResponse" in card
+    assert "CompactionShadowState" not in card

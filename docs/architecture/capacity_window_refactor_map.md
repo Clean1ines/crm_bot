@@ -529,3 +529,29 @@ API keys or secret account data;
 provider reset as WorkItem retry countdown;
 next_attempt_at, retry_owner, work_item_retry_timer in CapacityWindow overlay;
 fake ClusterBatch rows for dynamic compaction work.
+
+Patch 19B — CapacityWindow shadow reducer readiness
+
+Patch 19B does not add a CapacityWindow dashboard UI.
+
+It adds frontend shadow reducer readiness for capacity events:
+
+workflow_capacity_window_observed
+workflow_capacity_window_exhausted
+workflow_capacity_window_scheduled_wakeup
+workflow_capacity_window_leased_work_item
+→ capacity_windows[window_key]
+
+If a capacity projection payload includes compaction_context, work_item_id or dispatch_attempt_id, the shadow reducer may link:
+
+capacity_windows[window_key]
+→ pending_reduction_work[work_item_id]
+→ compaction_attempts[dispatch_attempt_id]
+
+Ownership remains unchanged:
+
+CapacityWindow owns provider/account/model reset, wakeup and admission.
+WorkItem remains passive queue/lifecycle state.
+Provider reset must not become WorkItem retry overlay.
+
+Dashboard-specific read models and visible UI remain later. Patch 19B stores enough shadow state to support later dashboard experiments, but does not render it.
