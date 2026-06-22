@@ -496,12 +496,53 @@ def _dispatch_batch_prepared_event(
             "prepared_dispatch_count": len(dispatch_attempt_ids),
             "dispatch_attempt_ids": dispatch_attempt_ids,
             "work_item_ids": work_item_ids,
+            "dispatch_contexts": _dispatch_contexts(started_attempts),
             **preflight_metadata,
         },
         occurred_at=occurred_at,
         causation_command_id=workflow_command.command_id,
         correlation_id=workflow_command.command_id.value,
     )
+
+
+def _dispatch_contexts(started_attempts: Sequence[object]) -> list[dict[str, object]]:
+    contexts: list[dict[str, object]] = []
+    for attempt in started_attempts:
+        dispatch_attempt_id = _attempt_text(attempt, "attempt_id")
+        work_item_id = _attempt_text(attempt, "work_item_id")
+        schedule_payload = _attempt_schedule_payload(attempt)
+        context: dict[str, object] = {
+            "dispatch_attempt_id": dispatch_attempt_id,
+            "work_item_id": work_item_id,
+            "group_ref": _mapping_text(schedule_payload, "group_ref"),
+            "batch_ref": _mapping_text(schedule_payload, "batch_ref"),
+            "round_index": _mapping_int(schedule_payload, "round_index", fallback=0),
+            "expected_output_kind": _mapping_text(
+                schedule_payload,
+                "expected_output_kind",
+                fallback="compacted_claims",
+            ),
+        }
+
+        for source_key, target_key in (
+            ("source_node_refs", "input_node_refs"),
+            ("compared_node_refs", "input_node_refs"),
+            ("node_refs", "input_node_refs"),
+            ("source_claim_refs", "input_claim_refs"),
+        ):
+            if source_key in schedule_payload and target_key not in context:
+                context[target_key] = _mapping_text_list(schedule_payload, source_key)
+
+        left_node_ref = schedule_payload.get("left_node_ref")
+        right_node_ref = schedule_payload.get("right_node_ref")
+        if "input_node_refs" not in context and isinstance(left_node_ref, str):
+            input_node_refs = [left_node_ref]
+            if isinstance(right_node_ref, str):
+                input_node_refs.append(right_node_ref)
+            context["input_node_refs"] = input_node_refs
+
+        contexts.append(context)
+    return contexts
 
 
 async def _save_progress_snapshot(

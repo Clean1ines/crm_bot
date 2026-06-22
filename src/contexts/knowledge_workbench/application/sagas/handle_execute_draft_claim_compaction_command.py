@@ -291,6 +291,7 @@ class HandleExecuteDraftClaimCompactionCommandHandler:
             work_item_id=work_item_id,
             execution_result=execution_result,
             capacity_observation=capacity_observation,
+            workflow_command_payload=workflow_command.payload,
         )
         await workflow_unit_of_work.outbox.append_event(outcome_event)
         appended_event_count += 1
@@ -805,6 +806,7 @@ def _attempt_outcome_event(
     work_item_id: str,
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
     capacity_observation: LlmAttemptCapacityObservation | None,
+    workflow_command_payload: Mapping[str, object],
 ) -> WorkflowEvent:
     event_type = _event_type_for_status(execution_result.llm_result.status)
     return WorkflowEvent(
@@ -819,6 +821,7 @@ def _attempt_outcome_event(
             work_item_id=work_item_id,
             execution_result=execution_result,
             capacity_observation=capacity_observation,
+            workflow_command_payload=workflow_command_payload,
         ),
         occurred_at=execution_result.llm_result.finished_at,
         causation_command_id=workflow_command.command_id,
@@ -843,6 +846,7 @@ def _event_payload(
     work_item_id: str,
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
     capacity_observation: LlmAttemptCapacityObservation | None,
+    workflow_command_payload: Mapping[str, object],
 ) -> JsonObject:
     capacity_payload = (
         capacity_observation.to_event_payload()
@@ -854,6 +858,13 @@ def _event_payload(
         "dispatch_attempt_id": dispatch_attempt_id,
         "work_item_id": work_item_id,
         "work_kind": DRAFT_CLAIM_COMPACTION_WORK_KIND,
+        "group_ref": _payload_text(workflow_command_payload, "group_ref"),
+        "batch_ref": _payload_text(workflow_command_payload, "batch_ref"),
+        "round_index": _payload_int(workflow_command_payload, "round_index"),
+        "expected_output_kind": _payload_text(
+            workflow_command_payload,
+            "expected_output_kind",
+        ),
         "outcome_status": execution_result.llm_result.status.value,
         "error_kind": execution_result.llm_result.error_kind,
         "next_attempt_at": _datetime_payload(
@@ -875,6 +886,25 @@ def _event_payload(
             "actual_total_tokens",
         ),
     }
+    for refs_key in (
+        "source_claim_refs",
+        "source_node_refs",
+        "compared_node_refs",
+        "node_refs",
+    ):
+        refs = _payload_text_tuple(
+            workflow_command_payload,
+            refs_key,
+            allow_missing=True,
+        )
+        if refs:
+            payload[refs_key] = list(refs)
+
+    for text_key in ("left_node_ref", "right_node_ref"):
+        value = _payload_optional_text(workflow_command_payload, text_key)
+        if value is not None:
+            payload[text_key] = value
+
     if execution_result.validation_metadata is not None:
         payload.update(
             _public_validation_metadata(execution_result.validation_metadata)
@@ -1006,6 +1036,7 @@ def _timeline_entry(
             work_item_id=work_item_id,
             execution_result=execution_result,
             capacity_observation=capacity_observation,
+            workflow_command_payload=workflow_command.payload,
         ),
         occurred_at=execution_result.llm_result.finished_at,
         source_ref=workflow_command.command_type,

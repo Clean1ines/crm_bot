@@ -39,6 +39,10 @@ def test_completed_attempt_projects_sanitized_attempt_outcome() -> None:
                 "workflow_run_id": "workflow-1",
                 "work_item_id": "claim-compaction:workflow-1:batch-1",
                 "dispatch_attempt_id": "attempt-1",
+                "group_ref": "group-1",
+                "batch_ref": "batch-1",
+                "source_node_refs": ["node-1", "node-2"],
+                "source_claim_refs": ["claim-1", "claim-2"],
                 "work_kind": "knowledge_workbench.draft_claim_compaction",
                 "outcome_status": "succeeded",
                 "provider": "groq",
@@ -60,7 +64,14 @@ def test_completed_attempt_projects_sanitized_attempt_outcome() -> None:
         projected.projection_type == "workflow_draft_claim_compaction_attempt_completed"
     )
     assert outcome["attempt_scope"]["dispatch_attempt_id"] == "attempt-1"
+    assert outcome["attempt_scope"]["group_ref"] == "group-1"
     assert outcome["attempt_scope"]["batch_ref"] == "batch-1"
+    assert outcome["attempt_scope"]["input_node_refs"] == ["node-1", "node-2"]
+    assert outcome["attempt_scope"]["input_claim_refs"] == ["claim-1", "claim-2"]
+    assert projected.payload["pending_reduction_work"]["row_key"] == (
+        "claim-compaction:workflow-1:batch-1"
+    )
+    assert projected.payload["compaction_attempt"]["history_key"] == "attempt-1"
     assert outcome["provider_outcome"]["total_tokens"] == 24
     assert outcome["validation_outcome"]["expected_output_kind"] == "compacted_node"
     assert outcome["work_item_outcome"]["completed"] is True

@@ -523,3 +523,82 @@ def test_patch_18f_compaction_capacity_window_correlation_is_attachable_without_
     assert "pending reduction work" in docs
     assert "fake ClusterBatch" in docs
     assert "Frontend reducer, React UI, curation, publication" in docs
+
+
+def test_patch_19a_compaction_attempt_append_contract_uses_work_item_and_dispatch_attempt_keys() -> (
+    None
+):
+    projector = (
+        PROJECTORS_DIR / "draft_claim_compaction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"pending_reduction_work"' in projector
+    assert '"compaction_attempt"' in projector
+    assert '"row_key": work_item_id' in projector
+    assert '"history_key": dispatch_attempt_id' in projector
+    assert (
+        '"attempts_append_under": "pending_reduction_work[work_item_id]"' in projector
+    )
+    assert '"attempt_history_key": "dispatch_attempt_id"' in projector
+
+
+def test_patch_19a_compaction_next_work_triggers_pending_and_frontier_reads_without_fake_batch_creation() -> (
+    None
+):
+    projector = (
+        PROJECTORS_DIR / "draft_claim_compaction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"does_not_create_cluster_batch_rows": True' in projector
+    assert "draft_claim_compaction_pending_work_by_workflow_or_group" in projector
+    assert "draft_claim_compaction_frontier_by_workflow_or_group" in projector
+
+
+def test_patch_19a_result_applied_is_generated_node_and_frontier_boundary() -> None:
+    projector = (
+        PROJECTORS_DIR / "draft_claim_compaction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"frontier_update"' in projector
+    assert '"reason": "result_applied"' in projector
+    assert '"generated_nodes_available": True' in projector
+    assert "draft_claim_compaction_nodes_by_workflow_or_group" in projector
+    assert "draft_claim_compaction_frontier_by_workflow_or_group" in projector
+
+
+def test_patch_19a_compaction_reducer_contract_uses_explicit_attachment_fields_not_prefix_parsing() -> (
+    None
+):
+    projector = (
+        PROJECTORS_DIR / "draft_claim_compaction_frontend_workflow_event_projector.py"
+    ).read_text(encoding="utf-8")
+
+    assert "_batch_ref_from_work_item_id" not in projector
+
+    attempt_start = projector.index("def _attempt_payload(")
+    attempt_end = projector.index("def _result_applied_payload(")
+    attempt_region = projector[attempt_start:attempt_end]
+
+    contract_start = projector.index("def _compaction_entity_contract(")
+    contract_end = projector.index("def _nodes_targeted_read(")
+    contract_region = projector[contract_start:contract_end]
+
+    assert "removeprefix" not in attempt_region
+    assert "removeprefix" not in contract_region
+    assert '"group_ref"' in projector
+    assert '"batch_ref"' in projector
+    assert "input_node_refs" in projector
+    assert "input_claim_refs" in projector
+
+
+def test_patch_19a_frontend_api_has_pending_work_targeted_read_alias() -> None:
+    frontend_source = (
+        ROOT / "frontend" / "src" / "shared" / "api" / "modules" / "knowledge.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "getDraftClaimCompactionPendingWorkByWorkflow" in frontend_source
+    assert (
+        "getDraftClaimCompactionFrontierByWorkflow(projectId, workflowRunId"
+        in frontend_source
+    )
+    assert "include_inactive: true" in frontend_source

@@ -868,3 +868,29 @@ invent persisted ClusterBatch rows. `run_after` is workflow command delivery for
 scheduled wakeups, not WorkItem retry ownership. `lease_expires_at` remains lease
 ownership, not a retry timer. Frontend reducer, React UI, curation, publication,
 and cross-cluster triple reconciliation remain later.
+
+Patch 19A — DraftClaimCompaction document-card reducer contract
+
+Patch 19A hardens the compaction document-card reducer contract before frontend reducer/UI work.
+
+Contract:
+
+cluster_groups[group_ref]
+cluster_batches[batch_ref]                 # initial batch surface only
+compaction_frontier_nodes[node_ref]
+pending_reduction_work[work_item_id]
+compaction_attempts[dispatch_attempt_id]
+capacity_windows[window_key]
+
+Rules:
+
+ClusterBatch is an initial batch surface only.
+Dynamic reduction work is not a fake ClusterBatch.
+Dynamic reduction work row key is work_item_id.
+Attempt history key is dispatch_attempt_id.
+Attempts append under pending_reduction_work[work_item_id].
+ResultApplied is generated-node/frontier availability, not merely attempt success.
+NextWorkScheduled triggers pending/frontier targeted read, not fake batch creation.
+CapacityWindow events update capacity_windows[window_key] and linked pending work when compaction_context.work_item_id is present.
+Heavy generated bodies stay behind targeted reads.
+Frontend reducer, React UI, curation and publication remain later.

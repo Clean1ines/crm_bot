@@ -504,3 +504,28 @@ invent persisted ClusterBatch rows. `run_after` is workflow command delivery for
 scheduled wakeups, not WorkItem retry ownership. `lease_expires_at` remains lease
 ownership, not a retry timer. Frontend reducer, React UI, curation, publication,
 and cross-cluster triple reconciliation remain later.
+
+Patch 19A — CapacityWindow dashboard source model for compaction
+
+Patch 19A keeps the ownership model:
+
+CapacityWindow owns provider/account/model reset and admission.
+WorkItem remains passive queue/lifecycle state.
+
+For draft-claim compaction, CapacityWindow projection payload may include:
+
+capacity_windows[window_key]
+→ linked pending_reduction_work[work_item_id]
+→ compaction_attempts[dispatch_attempt_id]
+
+Safe frontend fields include window_key, provider, account_ref, model_ref,
+remaining request/token budgets, reset_at, linked work_item_id,
+linked dispatch_attempt_id, and optional group_ref, batch_ref,
+input_node_refs, input_claim_refs.
+
+Forbidden:
+
+API keys or secret account data;
+provider reset as WorkItem retry countdown;
+next_attempt_at, retry_owner, work_item_retry_timer in CapacityWindow overlay;
+fake ClusterBatch rows for dynamic compaction work.

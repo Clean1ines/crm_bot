@@ -217,6 +217,20 @@ def _copy_optional_compaction_context(
             context[key] = refs
     if context:
         projected_payload["compaction_context"] = context
+        projected_payload["capacity_window_overlay"] = {
+            "entity": "capacity_windows",
+            "key_field": "window_key",
+            "linked_pending_reduction_work_key": context.get("work_item_id"),
+            "capacity_window_owns_reset_and_admission": True,
+        }
+        projected_payload["linked_pending_reduction_work"] = {
+            "entity": "pending_reduction_work",
+            "key_field": "work_item_id",
+            "work_item_id": context.get("work_item_id"),
+            "dispatch_attempt_id": context.get("dispatch_attempt_id"),
+            "group_ref": context.get("group_ref"),
+            "batch_ref": context.get("batch_ref"),
+        }
         projected_payload["targeted_read"] = {
             "kind": "draft_claim_compaction_pending_work_by_workflow_or_group",
             "params": {

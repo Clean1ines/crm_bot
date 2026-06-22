@@ -211,10 +211,10 @@ def _attempt_payload(
     workflow_run_id = _payload_text(payload, "workflow_run_id")
     work_item_id = _payload_text(payload, "work_item_id")
     dispatch_attempt_id = _payload_text(payload, "dispatch_attempt_id")
-    batch_ref = _batch_ref_from_work_item_id(
-        workflow_run_id=workflow_run_id,
-        work_item_id=work_item_id,
-    )
+    group_ref = _optional_payload_text(payload, "group_ref")
+    batch_ref = _optional_payload_text(payload, "batch_ref")
+    input_node_refs = _input_node_refs_from_payload(payload)
+    input_claim_refs = _payload_text_list(payload, "source_claim_refs")
     outcome_status = (
         _optional_payload_text(payload, "outcome_status") or work_item_state
     )
@@ -228,13 +228,42 @@ def _attempt_payload(
         "dispatch_attempt_id": dispatch_attempt_id,
         "work_kind": _optional_payload_text(payload, "work_kind")
         or _COMPACTION_WORK_KIND,
+        "entity_contract": _compaction_entity_contract(),
+        "pending_reduction_work": {
+            "surface_kind": "draft_claim_compaction_pending_reduction_work",
+            "row_key": work_item_id,
+            "key_field": "work_item_id",
+            "attempt_history_key_field": "dispatch_attempt_id",
+            "append_attempt": True,
+            "workflow_run_id": workflow_run_id,
+            "group_ref": group_ref,
+            "batch_ref": batch_ref,
+            "input_node_refs": input_node_refs,
+            "input_claim_refs": input_claim_refs,
+            "targeted_read": _pending_work_targeted_read(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                work_item_id=work_item_id,
+            ),
+        },
+        "compaction_attempt": {
+            "surface_kind": "draft_claim_compaction_attempt",
+            "history_key": dispatch_attempt_id,
+            "key_field": "dispatch_attempt_id",
+            "parent_work_item_id": work_item_id,
+            "append_only": True,
+            "workflow_run_id": workflow_run_id,
+        },
         "attempt_outcome": {
             "attempt_scope": _drop_none(
                 {
                     "workflow_run_id": workflow_run_id,
                     "work_item_id": work_item_id,
                     "dispatch_attempt_id": dispatch_attempt_id,
+                    "group_ref": group_ref,
                     "batch_ref": batch_ref,
+                    "input_node_refs": input_node_refs or None,
+                    "input_claim_refs": input_claim_refs or None,
                 }
             ),
             "provider_outcome": _drop_none(
@@ -318,6 +347,26 @@ def _result_applied_payload(payload: Mapping[str, object]) -> dict[str, object]:
             work_item_id=work_item_id,
             created_node_refs=created_node_refs,
         ),
+        "frontier_update": {
+            "availability": "changed",
+            "reason": "result_applied",
+            "generated_nodes_available": True,
+            "targeted_read": _frontier_targeted_read(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+            ),
+        },
+        "targeted_reads": [
+            _nodes_targeted_read(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                active_only=False,
+            ),
+            _frontier_targeted_read(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+            ),
+        ],
     }
     _assert_no_forbidden_payload(patch)
     return patch
@@ -340,14 +389,11 @@ def _generated_nodes_patch(
             "batch_ref": batch_ref,
             "work_item_id": work_item_id,
         },
-        "targeted_read": {
-            "kind": "draft_claim_compaction_nodes_by_workflow_or_group",
-            "params": {
-                "workflow_run_id": workflow_run_id,
-                "group_ref": group_ref,
-                "active_only": False,
-            },
-        },
+        "targeted_read": _nodes_targeted_read(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            active_only=False,
+        ),
     }
     if created_node_refs:
         result["created_node_refs"] = created_node_refs
@@ -381,14 +427,20 @@ def _next_work_payload(payload: Mapping[str, object]) -> dict[str, object]:
                 "group_ref": group_ref,
             },
             "does_not_create_cluster_batch_rows": True,
-            "targeted_read": {
-                "kind": "draft_claim_compaction_nodes_by_workflow_or_group",
-                "params": {
-                    "workflow_run_id": workflow_run_id,
-                    "group_ref": group_ref,
-                    "active_only": False,
-                },
-            },
+            "targeted_read": _pending_work_targeted_read(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+            ),
+            "targeted_reads": [
+                _pending_work_targeted_read(
+                    workflow_run_id=workflow_run_id,
+                    group_ref=group_ref,
+                ),
+                _frontier_targeted_read(
+                    workflow_run_id=workflow_run_id,
+                    group_ref=group_ref,
+                ),
+            ],
         },
     }
 
@@ -448,6 +500,7 @@ def _dispatch_prepared_payload(payload: Mapping[str, object]) -> dict[str, objec
     workflow_run_id = _payload_text(payload, "workflow_run_id")
     dispatch_attempt_ids = _payload_text_list(payload, "dispatch_attempt_ids")
     work_item_ids = _payload_text_list(payload, "work_item_ids")
+    dispatch_contexts = _payload_mapping_list(payload, "dispatch_contexts")
     return {
         "workflow_run_id": workflow_run_id,
         "work_kind": _optional_payload_text(payload, "work_kind")
@@ -460,6 +513,28 @@ def _dispatch_prepared_payload(payload: Mapping[str, object]) -> dict[str, objec
             "workflow_run_id": workflow_run_id,
             "capacity_window_owned": True,
         },
+        "entity_contract": _compaction_entity_contract(),
+        "pending_reduction_work_rows": {
+            "surface_kind": "draft_claim_compaction_pending_reduction_work",
+            "row_key_field": "work_item_id",
+            "attempt_history_key_field": "dispatch_attempt_id",
+            "availability": "prepared",
+            "rows": dispatch_contexts,
+            "targeted_read": _pending_work_targeted_read(
+                workflow_run_id=workflow_run_id,
+            ),
+        },
+        "compaction_attempt_rows": {
+            "surface_kind": "draft_claim_compaction_attempt",
+            "row_key_field": "dispatch_attempt_id",
+            "parent_key_field": "work_item_id",
+            "append_only": True,
+            "dispatch_attempt_ids": dispatch_attempt_ids,
+        },
+        "targeted_reads": [
+            _pending_work_targeted_read(workflow_run_id=workflow_run_id),
+            _frontier_targeted_read(workflow_run_id=workflow_run_id),
+        ],
     }
 
 
@@ -482,13 +557,111 @@ def _safe_compaction_result_kind(value: object) -> str | None:
     return value
 
 
-def _batch_ref_from_work_item_id(
-    *, workflow_run_id: str, work_item_id: str
-) -> str | None:
-    prefix = f"claim-compaction:{workflow_run_id}:"
-    if work_item_id.startswith(prefix):
-        return work_item_id.removeprefix(prefix)
-    return None
+def _compaction_entity_contract() -> dict[str, object]:
+    return {
+        "cluster_group_key": "group_ref",
+        "initial_cluster_batch_key": "batch_ref",
+        "dynamic_reduction_work_key": "work_item_id",
+        "attempt_history_key": "dispatch_attempt_id",
+        "capacity_window_key": "window_key",
+        "frontier_artifact_key": "node_ref",
+        "attempts_append_under": "pending_reduction_work[work_item_id]",
+        "cluster_batch_is_initial_surface_only": True,
+        "dynamic_work_is_not_fake_cluster_batch": True,
+    }
+
+
+def _nodes_targeted_read(
+    *,
+    workflow_run_id: str,
+    group_ref: str | None,
+    active_only: bool,
+) -> dict[str, object]:
+    return {
+        "kind": "draft_claim_compaction_nodes_by_workflow_or_group",
+        "params": _drop_none(
+            {
+                "workflow_run_id": workflow_run_id,
+                "group_ref": group_ref,
+                "active_only": active_only,
+            }
+        ),
+    }
+
+
+def _frontier_targeted_read(
+    *,
+    workflow_run_id: str,
+    group_ref: str | None = None,
+) -> dict[str, object]:
+    return {
+        "kind": "draft_claim_compaction_frontier_by_workflow_or_group",
+        "params": _drop_none(
+            {
+                "workflow_run_id": workflow_run_id,
+                "group_ref": group_ref,
+                "include_inactive": True,
+            }
+        ),
+    }
+
+
+def _pending_work_targeted_read(
+    *,
+    workflow_run_id: str,
+    group_ref: str | None = None,
+    work_item_id: str | None = None,
+) -> dict[str, object]:
+    return {
+        "kind": "draft_claim_compaction_pending_work_by_workflow_or_group",
+        "params": _drop_none(
+            {
+                "workflow_run_id": workflow_run_id,
+                "group_ref": group_ref,
+                "work_item_id": work_item_id,
+            }
+        ),
+    }
+
+
+def _input_node_refs_from_payload(payload: Mapping[str, object]) -> list[str]:
+    for key in ("source_node_refs", "compared_node_refs", "node_refs"):
+        refs = _payload_text_list(payload, key)
+        if refs:
+            return refs
+    left_node_ref = _optional_payload_text(payload, "left_node_ref")
+    right_node_ref = _optional_payload_text(payload, "right_node_ref")
+    if left_node_ref is None:
+        return []
+    result = [left_node_ref]
+    if right_node_ref is not None:
+        result.append(right_node_ref)
+    return result
+
+
+def _payload_mapping_list(
+    payload: Mapping[str, object],
+    key: str,
+) -> list[dict[str, object]]:
+    value = payload.get(key, [])
+    if value is None:
+        return []
+    if not isinstance(value, list | tuple):
+        raise ValueError(f"event payload {key} must be list")
+    result: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ValueError(f"event payload {key} must contain mappings")
+        row: dict[str, object] = {}
+        for row_key, row_value in item.items():
+            if not isinstance(row_key, str):
+                continue
+            if row_key in _HEAVY_OUTPUT_KEYS or row_key in _FORBIDDEN_TIMER_KEYS:
+                continue
+            if _is_json_value(row_value):
+                row[row_key] = row_value
+        result.append(row)
+    return result
 
 
 def _safe_summary_payload(payload: Mapping[str, object]) -> dict[str, object]:

@@ -1348,6 +1348,16 @@ export const knowledgeApi = {
     );
   },
 
+  getDraftClaimCompactionPendingWorkByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    query: Pick<WorkflowDraftClaimCompactionFrontierQuery, 'group_ref' | 'limit' | 'offset'> = {},
+  ) =>
+    knowledgeApi.getDraftClaimCompactionFrontierByWorkflow(projectId, workflowRunId, {
+      ...query,
+      include_inactive: true,
+    }),
+
   getDraftClaimCompactionNodesByWorkflow: (
     projectId: string,
     workflowRunId: string,
