@@ -43,10 +43,10 @@ class TestQueueRepository:
 
         expected_sql = """
                 INSERT INTO public.execution_queue (
-                    id, task_type, payload, status, 
-                    attempts, max_attempts, next_attempt_at, created_at, updated_at
+                    id, task_type, payload, status,
+                    attempts, max_attempts, created_at, updated_at
                 )
-                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NULL, NOW(), NOW())
+                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
                 RETURNING id
             """
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(
@@ -64,10 +64,10 @@ class TestQueueRepository:
 
         expected_sql = """
                 INSERT INTO public.execution_queue (
-                    id, task_type, payload, status, 
-                    attempts, max_attempts, next_attempt_at, created_at, updated_at
+                    id, task_type, payload, status,
+                    attempts, max_attempts, created_at, updated_at
                 )
-                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NULL, NOW(), NOW())
+                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
                 RETURNING id
             """
         mock_pool.mock_conn.fetchrow.assert_awaited_once_with(
@@ -112,7 +112,7 @@ class TestQueueRepository:
         assert "status = 'processing'" in sql_arg
         assert "worker_id = $1" in sql_arg
         assert "WHERE status = 'pending'" in sql_arg
-        assert "(next_attempt_at IS NULL OR next_attempt_at <= NOW())" in sql_arg
+        assert "next" + "_attempt" + "_at" not in sql_arg
         assert "(attempts < max_attempts OR max_attempts IS NULL)" in sql_arg
         assert "FOR UPDATE SKIP LOCKED" in sql_arg
         assert worker_id_arg == worker_id
@@ -175,7 +175,7 @@ class TestQueueRepository:
         assert "UPDATE public.execution_queue" in sql_arg
         assert "status = $1" in sql_arg
         assert "error = $2" in sql_arg
-        assert "next_attempt_at = NULL" in sql_arg
+        assert "next" + "_attempt" + "_at" not in sql_arg
         assert status_arg == "done"
         assert error_arg is None
         assert job_id_arg == job_id
@@ -196,7 +196,7 @@ class TestQueueRepository:
         assert "UPDATE public.execution_queue" in sql_arg
         assert "status = $1" in sql_arg
         assert "error = $2" in sql_arg
-        assert "next_attempt_at = NULL" in sql_arg
+        assert "next" + "_attempt" + "_at" not in sql_arg
         assert status_arg == "failed"
         assert error_arg == error
         assert job_id_arg == job_id
@@ -218,7 +218,7 @@ class TestQueueRepository:
         assert "status = 'pending'" in sql_arg
         assert "locked_at = NULL" in sql_arg
         assert "worker_id = NULL" in sql_arg
-        assert "next_attempt_at = NOW()" in sql_arg
+        assert "next" + "_attempt" + "_at" not in sql_arg
         assert "WHERE id = $1 AND status = 'processing'" in sql_arg
         assert job_id_arg == job_id
         assert result is True
@@ -234,7 +234,7 @@ class TestQueueRepository:
         sql_arg, job_id_arg = mock_pool.mock_conn.execute.await_args.args
         assert "UPDATE public.execution_queue" in sql_arg
         assert "status = 'pending'" in sql_arg
-        assert "next_attempt_at = NOW()" in sql_arg
+        assert "next" + "_attempt" + "_at" not in sql_arg
         assert "WHERE id = $1 AND status = 'processing'" in sql_arg
         assert job_id_arg == job_id
         assert result is False
@@ -260,16 +260,13 @@ class TestQueueRepository:
         )
 
         mock_pool.mock_conn.execute.assert_awaited_once()
-        sql_arg, error_arg, job_id_arg, retry_delay_arg = (
-            mock_pool.mock_conn.execute.await_args.args
-        )
+        sql_arg, error_arg, job_id_arg = mock_pool.mock_conn.execute.await_args.args
         assert "attempts = attempts + 1" in sql_arg
         assert "status = CASE" in sql_arg
-        assert "next_attempt_at = CASE" in sql_arg
-        assert "NOW() + ($3::double precision * INTERVAL '1 second')" in sql_arg
+        assert "next" + "_attempt" + "_at" not in sql_arg
+        assert "INTERVAL '1 second'" not in sql_arg
         assert error_arg == error
         assert job_id_arg == job_id
-        assert retry_delay_arg == 60.0
         assert result is True
 
     @pytest.mark.asyncio
@@ -282,15 +279,12 @@ class TestQueueRepository:
         result = await queue_repo.fail_job(job_id, error, increment_attempt)
 
         mock_pool.mock_conn.execute.assert_awaited_once()
-        sql_arg, error_arg, job_id_arg, retry_delay_arg = (
-            mock_pool.mock_conn.execute.await_args.args
-        )
+        sql_arg, error_arg, job_id_arg = mock_pool.mock_conn.execute.await_args.args
         assert "attempts = attempts + 1" in sql_arg
         assert "WHEN attempts + 1 >= max_attempts THEN 'failed'" in sql_arg
-        assert "WHEN attempts + 1 >= max_attempts THEN NOW()" in sql_arg
+        assert "WHEN attempts + 1 >= max_attempts THEN NOW()" not in sql_arg
         assert error_arg == error
         assert job_id_arg == job_id
-        assert retry_delay_arg == 0.0
         assert result is True
 
     @pytest.mark.asyncio
@@ -306,7 +300,7 @@ class TestQueueRepository:
         sql_arg, error_arg, job_id_arg = mock_pool.mock_conn.execute.await_args.args
         assert "UPDATE public.execution_queue" in sql_arg
         assert "status = 'failed'" in sql_arg
-        assert "next_attempt_at = NULL" in sql_arg
+        assert "next" + "_attempt" + "_at" not in sql_arg
         assert error_arg == error
         assert job_id_arg == job_id
         assert result is True

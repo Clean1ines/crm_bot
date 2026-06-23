@@ -12,6 +12,13 @@ FORBIDDEN_CANONICAL_ROOTS = (
     ROOT / "tests" / "interfaces" / "composition",
 )
 
+ALLOWED_RETRY_TIMER_REMOVAL_MIGRATIONS = frozenset(
+    {
+        "098_drop_execution_work_item_next_attempt_at.sql",
+        "099_drop_legacy_execution_queue_next_attempt_at.sql",
+    }
+)
+
 
 def _text_files(root: Path) -> tuple[Path, ...]:
     if not root.exists():
@@ -32,6 +39,8 @@ def test_execution_work_item_canonical_code_does_not_mention_removed_retry_timer
     for root in FORBIDDEN_CANONICAL_ROOTS:
         for file_path in _text_files(root):
             text = file_path.read_text(encoding="utf-8")
+            if file_path.name in ALLOWED_RETRY_TIMER_REMOVAL_MIGRATIONS:
+                continue
             if "next_attempt_at" in text:
                 offenders.append(str(file_path.relative_to(ROOT)))
 

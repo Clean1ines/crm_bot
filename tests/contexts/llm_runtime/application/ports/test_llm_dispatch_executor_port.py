@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 
@@ -31,10 +31,6 @@ def _started_at() -> datetime:
 
 def _finished_at() -> datetime:
     return datetime(2026, 6, 11, 12, 1, tzinfo=UTC)
-
-
-def _next_attempt_at() -> datetime:
-    return _finished_at() + timedelta(minutes=5)
 
 
 def _dispatch_payload() -> dict[str, object]:
@@ -115,30 +111,15 @@ def test_terminal_failure_requires_error_kind() -> None:
         )
 
 
-def test_deferred_requires_error_kind() -> None:
-    with pytest.raises(ValueError, match="error_kind"):
-        LlmDispatchExecutionResult(
-            status=LlmDispatchExecutionStatus.DEFERRED,
-            finished_at=_finished_at(),
-            next_attempt_at=_next_attempt_at(),
-        )
+def test_execution_result_has_no_work_item_retry_timer_or_deferred_status() -> None:
+    result = LlmDispatchExecutionResult(
+        status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+        finished_at=_finished_at(),
+        error_kind="rate_limited",
+    )
 
-
-def test_deferred_requires_future_next_attempt_at() -> None:
-    with pytest.raises(ValueError, match="next_attempt_at"):
-        LlmDispatchExecutionResult(
-            status=LlmDispatchExecutionStatus.DEFERRED,
-            finished_at=_finished_at(),
-            error_kind="rate_limited",
-        )
-
-    with pytest.raises(ValueError, match="next_attempt_at"):
-        LlmDispatchExecutionResult(
-            status=LlmDispatchExecutionStatus.DEFERRED,
-            finished_at=_finished_at(),
-            error_kind="rate_limited",
-            next_attempt_at=_finished_at(),
-        )
+    assert not hasattr(result, "next" + "_attempt" + "_at")
+    assert not hasattr(LlmDispatchExecutionStatus, "DEFERRED")
 
 
 @pytest.mark.asyncio

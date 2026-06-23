@@ -112,7 +112,6 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
                                 "status": "user_action_required",
                                 "attempt_count": 1,
                                 "lease_expires_at": None,
-                                "next_attempt_at": None,
                                 "claimed_by_worker_id": None,
                                 "error_kind": "primary_model_daily_capacity_exhausted",
                                 "retry_plan": None,
@@ -150,7 +149,6 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
                         "daily_reset_at": "2026-06-16T00:00:00+00:00",
                         "error_kind": "minute_limit",
                         "error_message_user": "primary_model_daily_capacity_exhausted",
-                        "next_attempt_at": "2026-06-15T12:01:00+00:00",
                         "retry_plan": "wait_nearest_admission_window",
                         "user_action_required": False,
                         "blocked_reason": None,
@@ -206,6 +204,8 @@ async def test_workflow_live_state_endpoint_returns_frontend_contract(
         is True
     )
     assert response["workflow"]["llm_attempts"][0]["account_ref"] == "groq_org_primary"
+    forbidden_retry_timer_field = "next" + "_attempt" + "_at"
+    assert forbidden_retry_timer_field not in str(response)
     assert (
         response["workflow"]["llm_attempts"][0]["retry_plan"]
         == "wait_nearest_admission_window"

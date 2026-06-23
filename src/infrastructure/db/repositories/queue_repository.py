@@ -43,10 +43,10 @@ class QueueRepository:
             row = await conn.fetchrow(
                 """
                 INSERT INTO public.execution_queue (
-                    id, task_type, payload, status, 
-                    attempts, max_attempts, next_attempt_at, created_at, updated_at
+                    id, task_type, payload, status,
+                    attempts, max_attempts, created_at, updated_at
                 )
-                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NULL, NOW(), NOW())
+                VALUES (gen_random_uuid(), $1, $2, 'pending', 0, $3, NOW(), NOW())
                 RETURNING id
             """,
                 task_type,
@@ -75,7 +75,6 @@ class QueueRepository:
                     SELECT id
                     FROM public.execution_queue
                     WHERE status = 'pending'
-                    AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
                     AND (attempts < max_attempts OR max_attempts IS NULL)
                     ORDER BY created_at ASC
                     LIMIT 1
@@ -131,8 +130,7 @@ class QueueRepository:
                     updated_at = NOW(),
                     locked_at = NULL,
                     worker_id = NULL,
-                    error = $2,
-                    next_attempt_at = NULL
+                    error = $2
                 WHERE id = $3
             """,
                 new_status,
@@ -153,8 +151,7 @@ class QueueRepository:
                     status = 'pending',
                     updated_at = NOW(),
                     locked_at = NULL,
-                    worker_id = NULL,
-                    next_attempt_at = NOW()
+                    worker_id = NULL
                 WHERE id = $1 AND status = 'processing'
             """,
                 job_id,
@@ -176,15 +173,12 @@ class QueueRepository:
         error: str,
         retry_delay_seconds: float | None = None,
     ) -> bool:
-        delay_seconds = (
-            0.0 if retry_delay_seconds is None else max(0.0, float(retry_delay_seconds))
-        )
         logger.info(
-            "Scheduling job retry without attempt increment",
+            "Requeueing job retry without attempt increment",
             extra={
                 "job_id": job_id,
                 "error": error,
-                "retry_delay_seconds": delay_seconds,
+                "retry_delay_seconds": retry_delay_seconds,
             },
         )
         async with self.pool.acquire() as conn:
@@ -196,13 +190,11 @@ class QueueRepository:
                     updated_at = NOW(),
                     locked_at = NULL,
                     worker_id = NULL,
-                    status = 'pending',
-                    next_attempt_at = NOW() + ($3::double precision * INTERVAL '1 second')
+                    status = 'pending'
                 WHERE id = $2 AND status = 'processing'
             """,
                 error,
                 job_id,
-                delay_seconds,
             )
 
             updated = result == "UPDATE 1"
@@ -245,19 +237,14 @@ class QueueRepository:
                         updated_at = NOW(),
                         locked_at = NULL,
                         worker_id = NULL,
-                        status = CASE 
+                        status = CASE
                             WHEN attempts + 1 >= max_attempts THEN 'failed'
                             ELSE 'pending'
-                        END,
-                        next_attempt_at = CASE
-                            WHEN attempts + 1 >= max_attempts THEN NOW()
-                            ELSE NOW() + ($3::double precision * INTERVAL '1 second')
                         END
                     WHERE id = $2
                 """,
                     error,
                     job_id,
-                    0.0 if retry_delay_seconds is None else float(retry_delay_seconds),
                 )
             else:
                 result = await conn.execute(
@@ -268,8 +255,7 @@ class QueueRepository:
                         updated_at = NOW(),
                         locked_at = NULL,
                         worker_id = NULL,
-                        status = 'failed',
-                        next_attempt_at = NULL
+                        status = 'failed'
                     WHERE id = $2
                 """,
                     error,

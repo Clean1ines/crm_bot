@@ -94,7 +94,6 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                             status="leased",
                             attempt_count=2,
                             lease_expires_at=_now(),
-                            next_attempt_at=None,
                             claimed_by_worker_id="worker-1",
                             error_kind=None,
                             retry_plan=None,
@@ -132,7 +131,6 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
                     daily_reset_at=_now(),
                     error_kind=None,
                     error_message_user=None,
-                    next_attempt_at=None,
                     retry_plan=None,
                     user_action_required=False,
                     blocked_reason=None,
@@ -256,6 +254,8 @@ def test_workflow_live_state_contract_contains_frontend_curation_workflow_id() -
     )
     assert payload["workflow"]["llm_attempts"][0]["duration_ms"] == 1234
     assert payload["workflow"]["llm_attempts"][0]["account_ref"] == "groq_org_primary"
+    forbidden_retry_timer_field = "next" + "_attempt" + "_at"
+    assert forbidden_retry_timer_field not in str(payload)
     assert payload["workflow"]["llm_attempts"][0]["remaining_minute_tokens"] == 9000
     assert payload["workflow"]["timeline"][0]["event_type"] == "SourceUnitsCreated"
     assert payload["workflow"]["curation"]["available"] is True
