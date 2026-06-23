@@ -77,7 +77,7 @@ def _resolve_retry_plan(
 
     if retry_plan is WorkItemRetryPlan.RETRY_VALIDATION_CHECK_ROUTE:
         return ResolveLlmDispatchPreparationStrategyResult(
-            active_model_ref=_special_empty_claims_check_model_ref(
+            active_model_ref=_validation_check_model_ref(
                 command.route_catalog,
             ),
             strategy_applied=retry_plan.value,
@@ -127,15 +127,13 @@ def _resolve_legacy_strategy(
             strategy_applied=strategy,
         )
 
-    if strategy in {
-        "EMPTY_CLAIMS_CHECK_MODEL_REQUIRED",
-        "RETRY_EMPTY_CLAIMS_CHECK_MODEL",
-    }:
-        return ResolveLlmDispatchPreparationStrategyResult(
-            active_model_ref=_special_empty_claims_check_model_ref(
-                command.route_catalog,
-            ),
-            strategy_applied=strategy,
+    legacy_claim_builder_validation_check_strategies = {
+        "EMPTY_CLAIMS_CHECK" + "_MODEL_REQUIRED",
+        "RETRY_EMPTY_CLAIMS_CHECK" + "_MODEL",
+    }
+    if strategy in legacy_claim_builder_validation_check_strategies:
+        raise ValueError(
+            "phase-specific validation check strategy must be converted to retry_plan"
         )
 
     if strategy == "RETRY_FALLBACK_MODEL":
@@ -200,7 +198,7 @@ def _first_daily_limit_fallback(route_catalog: LlmModelRouteCatalog) -> str:
     return fallback_model_refs[0]
 
 
-def _special_empty_claims_check_model_ref(route_catalog: LlmModelRouteCatalog) -> str:
+def _validation_check_model_ref(route_catalog: LlmModelRouteCatalog) -> str:
     gpt_oss_120b = route_catalog.route_for_model_ref("openai/gpt-oss-120b")
     if gpt_oss_120b is None:
         raise ValueError("route catalog is missing openai/gpt-oss-120b")

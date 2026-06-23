@@ -14,6 +14,7 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
     LlmAttemptCapacityObservation,
     LlmAttemptCapacityObservationRepositoryPort,
 )
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.shared.json_value import JsonInputValue
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_attempt_decision_policy import (
     ClaimBuilderAttemptDecision,
@@ -109,6 +110,13 @@ class ExecutePreparedLlmDispatchAttemptPort(Protocol):
     async def execute(
         self,
         command: ExecutePreparedLlmDispatchAttemptCommand,
+    ) -> object: ...
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
     ) -> object: ...
 
 
@@ -459,6 +467,12 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         if frontend_event_projection_writer is not None:
             await frontend_event_projection_writer.execute(persisted_outcome_event)
         appended_event_count += 1
+
+        if _should_mark_work_item_completed(attempt_action_metadata):
+            await execute_prepared_llm_dispatch_attempt.complete_work_item_after_domain_apply(
+                work_item_id=work_item_id,
+                lease_token=execution_result.dispatch.lease_token,
+            )
 
         next_command = _reconcile_claim_builder_progress_command(
             workflow_command=workflow_command,
@@ -1116,6 +1130,16 @@ def _provider_retry_metadata(
             "retry_recommended": False,
         }
     return None
+
+
+def _should_mark_work_item_completed(
+    validation_metadata: Mapping[str, object] | None,
+) -> bool:
+    if validation_metadata is None:
+        return False
+    return (
+        validation_metadata.get("claim_builder_should_mark_work_item_completed") is True
+    )
 
 
 def _should_persist_claims(

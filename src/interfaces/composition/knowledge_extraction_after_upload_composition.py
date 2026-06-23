@@ -9,6 +9,7 @@ from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissi
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
     RecordWorkItemAttemptOutcome,
 )
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
     EmbeddingGenerationPort,
 )
@@ -107,6 +108,24 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
                     finalized_at=result.llm_result.finished_at,
                 )
                 return result
+        finally:
+            await self.pool.release(connection)
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
+    ) -> object:
+        connection = await self.pool.acquire()
+        try:
+            async with connection.transaction():
+                return await PostgresWorkItemAttemptOutcomeRepository(
+                    cast(asyncpg.Connection, connection),
+                ).complete_work_item_after_domain_apply(
+                    work_item_id=work_item_id,
+                    lease_token=lease_token,
+                )
         finally:
             await self.pool.release(connection)
 

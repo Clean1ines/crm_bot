@@ -17,6 +17,7 @@ from src.contexts.execution_runtime.application.ports.work_item_attempt_outcome_
     WorkItemAttemptOutcomeRepositoryPort,
     WorkItemAttemptOutcomeStatus,
 )
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
@@ -112,6 +113,17 @@ class ExecutePreparedLlmDispatchAttempt:
     llm_executor: LlmDispatchExecutorPort
     outcome_recorder: RecordWorkItemAttemptOutcome
     recorded_outcome_reader: WorkItemAttemptOutcomeRepositoryPort | None = None
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
+    ) -> object:
+        return await self.outcome_recorder.repository.complete_work_item_after_domain_apply(
+            work_item_id=work_item_id,
+            lease_token=lease_token,
+        )
 
     async def execute(
         self,

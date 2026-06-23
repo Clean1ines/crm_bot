@@ -135,13 +135,13 @@ def _work_item_update_args(connection: FakeConnection) -> tuple[object, ...]:
 
 
 @pytest.mark.asyncio
-async def test_succeeded_updates_attempt_and_completes_work_item() -> None:
+async def test_succeeded_updates_attempt_and_leaves_work_item_leased() -> None:
     connection = FakeConnection(row=_leased_row())
 
     work_item = await _execute(connection, _record())
 
-    assert work_item.status is WorkItemStatus.COMPLETED
-    assert work_item.lease_token is None
+    assert work_item.status is WorkItemStatus.LEASED
+    assert work_item.lease_token == LeaseToken("lease-token-1")
     assert _attempt_update_args(connection) == (
         "attempt-1",
         _finished_at(),
@@ -153,10 +153,10 @@ async def test_succeeded_updates_attempt_and_completes_work_item() -> None:
         1,
     )
     work_item_args = _work_item_update_args(connection)
-    assert work_item_args[1] == "completed"
-    assert work_item_args[3] is None
-    assert work_item_args[4] is None
-    assert work_item_args[5] is None
+    assert work_item_args[1] == "leased"
+    assert work_item_args[3] == "worker-1"
+    assert work_item_args[4] == "lease-token-1"
+    assert work_item_args[5] == _finished_at() + timedelta(minutes=10)
     assert work_item_args[6] is None
     assert work_item_args[8] is None
 
@@ -175,7 +175,7 @@ async def test_succeeded_updates_attempt_with_validation_metadata() -> None:
         ),
     )
 
-    assert work_item.status is WorkItemStatus.COMPLETED
+    assert work_item.status is WorkItemStatus.LEASED
     assert _attempt_update_args(connection) == (
         "attempt-1",
         _finished_at(),
@@ -189,6 +189,27 @@ async def test_succeeded_updates_attempt_with_validation_metadata() -> None:
         "work-1",
         1,
     )
+
+
+@pytest.mark.asyncio
+async def test_explicit_success_completion_after_domain_apply_completes_work_item() -> (
+    None
+):
+    connection = FakeConnection(row=_leased_row())
+
+    work_item = await PostgresWorkItemAttemptOutcomeRepository(
+        connection=connection,
+    ).complete_work_item_after_domain_apply(
+        work_item_id="work-1",
+        lease_token=LeaseToken("lease-token-1"),
+    )
+
+    assert work_item.status is WorkItemStatus.COMPLETED
+    work_item_args = _work_item_update_args(connection)
+    assert work_item_args[1] == "completed"
+    assert work_item_args[3] is None
+    assert work_item_args[4] is None
+    assert work_item_args[5] is None
 
 
 @pytest.mark.asyncio

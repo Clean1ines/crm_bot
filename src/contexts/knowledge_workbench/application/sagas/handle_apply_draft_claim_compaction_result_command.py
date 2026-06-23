@@ -15,6 +15,7 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
     WorkItemSchedulePlan,
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -89,6 +90,15 @@ class DraftClaimCompactionApplyResultUseCasePort(Protocol):
     ) -> DraftClaimCompactionApplyResultOutcome: ...
 
 
+class DraftClaimCompactionWorkItemCompletionPort(Protocol):
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
+    ) -> object: ...
+
+
 WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
 DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
 DRAFT_CLAIM_COMPACTION_WORKER_REF = (
@@ -128,6 +138,7 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
         ),
         draft_claim_observation_read_repository: DraftClaimObservationReadRepositoryPort,
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
+        work_item_completion: DraftClaimCompactionWorkItemCompletionPort,
     ) -> HandleApplyDraftClaimCompactionResult:
         workflow_command = command.workflow_command
         if (
@@ -188,6 +199,12 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
             workflow_command=workflow_command,
             apply_command=apply_command,
             outcome=outcome,
+        )
+        await work_item_completion.complete_work_item_after_domain_apply(
+            work_item_id=apply_command.work_item_id,
+            lease_token=LeaseToken(
+                _payload_text(workflow_command.payload, "lease_token")
+            ),
         )
         await _append_next_event(
             workflow_unit_of_work=workflow_unit_of_work,

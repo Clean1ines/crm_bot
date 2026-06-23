@@ -73,7 +73,6 @@ class WorkItemAttemptOutcomeRecord:
             Mapping,
         ):
             raise TypeError("llm_output_payload must be Mapping when provided")
-
         if self.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
             if self.error_kind is not None:
                 raise ValueError("error_kind must be None for succeeded outcome")
@@ -228,6 +227,13 @@ class WorkItemAttemptOutcomeRepositoryPort(Protocol):
     async def record_attempt_outcome(
         self,
         record: WorkItemAttemptOutcomeRecord,
+    ) -> WorkItem: ...
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
     ) -> WorkItem: ...
 
 

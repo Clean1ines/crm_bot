@@ -17,6 +17,7 @@ from src.contexts.execution_runtime.application.use_cases.record_work_item_attem
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
@@ -24,6 +25,7 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_status import
     WorkItemStatus,
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutionInput,
     LlmDispatchExecutionResult,
@@ -103,13 +105,66 @@ class FakeOutcomeRepository:
         del attempt_id
         return self.recorded
 
+    completed_work_item_ids: list[str]
+
     async def record_attempt_outcome(
         self,
         record: WorkItemAttemptOutcomeRecord,
     ) -> WorkItem:
         self.records.append(record)
+        if record.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
+            return WorkItem(
+                work_item_id=record.work_item_id,
+                work_kind=WorkKind("execution.test"),
+                status=WorkItemStatus.LEASED,
+                leased_by=WorkerRef("worker-1"),
+                lease_token=record.lease_token,
+                lease_expires_at=record.finished_at + timedelta(minutes=10),
+            )
+
+        if record.outcome_status is WorkItemAttemptOutcomeStatus.TERMINAL_FAILED:
+            return WorkItem(
+                work_item_id=record.work_item_id,
+                work_kind=WorkKind("execution.test"),
+                status=WorkItemStatus.TERMINAL_FAILED,
+                last_error_kind=record.error_kind,
+            )
+
+        if record.next_attempt_at is None:
+            raise AssertionError(
+                "retryable/deferred fake outcome requires next_attempt_at"
+            )
+
+        if record.outcome_status is WorkItemAttemptOutcomeStatus.DEFERRED:
+            return WorkItem(
+                work_item_id=record.work_item_id,
+                work_kind=WorkKind("execution.test"),
+                status=WorkItemStatus.DEFERRED,
+                next_attempt_at=WaitUntil(record.next_attempt_at),
+                last_error_kind=record.error_kind,
+                retry_plan=record.retry_plan,
+            )
+
         return WorkItem(
             work_item_id=record.work_item_id,
+            work_kind=WorkKind("execution.test"),
+            status=WorkItemStatus.RETRYABLE_FAILED,
+            next_attempt_at=WaitUntil(record.next_attempt_at),
+            last_error_kind=record.error_kind,
+            retry_plan=record.retry_plan,
+        )
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
+    ) -> WorkItem:
+        if not hasattr(self, "completed_work_item_ids"):
+            self.completed_work_item_ids = []
+        self.completed_work_item_ids.append(work_item_id)
+        return WorkItem(
+            work_item_id=work_item_id,
             work_kind=WorkKind("execution.test"),
             status=WorkItemStatus.COMPLETED,
         )
@@ -183,7 +238,9 @@ async def _execute(
 
 
 @pytest.mark.asyncio
-async def test_success_result_maps_to_successful_outcome() -> None:
+async def test_llm_attempt_success_does_not_complete_work_item_without_workbench_apply() -> (
+    None
+):
     result, _, repository = await _execute(
         llm_result=LlmDispatchExecutionResult(
             status=LlmDispatchExecutionStatus.SUCCEEDED,
@@ -192,7 +249,7 @@ async def test_success_result_maps_to_successful_outcome() -> None:
         ),
     )
 
-    assert result.outcome_result.work_item.status is WorkItemStatus.COMPLETED
+    assert result.outcome_result.work_item.status is WorkItemStatus.LEASED
     assert (
         repository.records[0].outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED
     )
@@ -437,3 +494,25 @@ async def test_recorded_attempt_outcome_replays_validation_metadata() -> None:
     assert llm_executor.inputs == []
     assert result.validation_metadata == metadata
     assert result.llm_result.output_payload == {"already_recorded": True}
+
+
+@pytest.mark.asyncio
+async def test_workbench_can_complete_work_item_after_domain_apply() -> None:
+    repository = FakeOutcomeRepository()
+    runner = _runner(
+        dispatch=_dispatch(),
+        llm_result=LlmDispatchExecutionResult(
+            status=LlmDispatchExecutionStatus.SUCCEEDED,
+            finished_at=_finished_at(),
+            output_payload={"raw_text": "{}"},
+        ),
+        outcome_repository=repository,
+    )
+
+    completed = await runner.complete_work_item_after_domain_apply(
+        work_item_id="work-1",
+        lease_token=LeaseToken("lease-token-1"),
+    )
+
+    assert completed.status is WorkItemStatus.COMPLETED
+    assert repository.completed_work_item_ids == ["work-1"]

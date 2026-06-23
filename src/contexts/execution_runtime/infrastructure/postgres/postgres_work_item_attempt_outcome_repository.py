@@ -203,6 +203,69 @@ class PostgresWorkItemAttemptOutcomeRepository(
 
         return transitioned
 
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
+    ) -> WorkItem:
+        row = await self._connection.fetchrow(
+            """
+            SELECT
+                work_item_id,
+                work_kind,
+                status,
+                attempt_count,
+                leased_by,
+                lease_token,
+                lease_expires_at,
+                next_attempt_at,
+                last_error_kind,
+                retry_plan
+            FROM execution_work_items
+            WHERE work_item_id = $1
+            FOR UPDATE
+            """,
+            work_item_id,
+        )
+        if row is None:
+            raise ValueError("work item does not exist")
+
+        current = _hydrate_work_item(row)
+        _validate_completion_lease(current, lease_token)
+        transitioned = WorkItemStateMachine.complete_leased(current)
+
+        work_item_result = await self._connection.execute(
+            """
+            UPDATE execution_work_items
+            SET
+                status = $2,
+                attempt_count = $3,
+                leased_by = $4,
+                lease_token = $5,
+                lease_expires_at = $6,
+                next_attempt_at = $7,
+                last_error_kind = $8,
+                retry_plan = $9,
+                updated_at = now()
+            WHERE work_item_id = $1
+            """,
+            transitioned.work_item_id,
+            transitioned.status.value,
+            transitioned.attempt_count,
+            _worker_ref_value(transitioned.leased_by),
+            _lease_token_value(transitioned.lease_token),
+            transitioned.lease_expires_at,
+            _wait_until_value(transitioned.next_attempt_at),
+            transitioned.last_error_kind,
+            _retry_plan_value(transitioned.retry_plan),
+        )
+        _require_one_updated_row(
+            work_item_result,
+            message="work item domain completion update must affect exactly one row",
+        )
+        return transitioned
+
 
 def _jsonb_payload(payload: Mapping[str, object] | None) -> str | None:
     if payload is None:
@@ -249,12 +312,22 @@ def _validate_current_lease(
         )
 
 
+def _validate_completion_lease(
+    current: WorkItem,
+    lease_token: LeaseToken,
+) -> None:
+    if current.status is not WorkItemStatus.LEASED:
+        raise ValueError("work item must be leased to complete after domain apply")
+    if current.lease_token != lease_token:
+        raise ValueError("lease_token does not match current work item lease")
+
+
 def _transition_work_item(
     current: WorkItem,
     record: WorkItemAttemptOutcomeRecord,
 ) -> WorkItem:
     if record.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
-        return WorkItemStateMachine.complete_leased(current)
+        return current
 
     if record.error_kind is None:
         raise ValueError("error_kind is required for failed/deferred outcomes")

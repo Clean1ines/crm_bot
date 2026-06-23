@@ -24,6 +24,7 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_status import
     WorkItemStatus,
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ClaimBuilderLlmDispatchOutputValidator,
     HandleExecuteClaimBuilderSectionCommand,
@@ -244,6 +245,28 @@ def _dispatch(
     )
 
 
+def _work_item_for_execution_result(
+    *,
+    work_status: WorkItemStatus,
+    dispatch: WorkItemAttemptDispatchForExecution,
+) -> WorkItem:
+    work_kind = WorkKind("knowledge_workbench.claim_builder.section_extraction")
+    if work_status is WorkItemStatus.LEASED:
+        return WorkItem(
+            work_item_id=_work_item_id(),
+            work_kind=work_kind,
+            status=WorkItemStatus.LEASED,
+            leased_by=WorkerRef(dispatch.worker_ref),
+            lease_token=dispatch.lease_token,
+            lease_expires_at=_finished_at() + timedelta(minutes=10),
+        )
+    return WorkItem(
+        work_item_id=_work_item_id(),
+        work_kind=work_kind,
+        status=work_status,
+    )
+
+
 def _execution_result(
     status: LlmDispatchExecutionStatus = LlmDispatchExecutionStatus.SUCCEEDED,
     *,
@@ -264,7 +287,7 @@ def _execution_result(
             },
             capacity_observation=_capacity_payload(),
         )
-        work_status = WorkItemStatus.COMPLETED
+        work_status = WorkItemStatus.LEASED
     else:
         llm_result = LlmDispatchExecutionResult(
             status=status,
@@ -285,12 +308,9 @@ def _execution_result(
         dispatch=prepared_dispatch,
         llm_result=llm_result,
         outcome_result=RecordWorkItemAttemptOutcomeResult(
-            work_item=WorkItem(
-                work_item_id=_work_item_id(),
-                work_kind=WorkKind(
-                    "knowledge_workbench.claim_builder.section_extraction"
-                ),
-                status=work_status,
+            work_item=_work_item_for_execution_result(
+                work_status=work_status,
+                dispatch=prepared_dispatch,
             )
         ),
     )
@@ -302,6 +322,7 @@ class FakeExecutePreparedLlmDispatchAttempt:
         default_factory=_execution_result,
     )
     calls: list[ExecutePreparedLlmDispatchAttemptCommand] = field(default_factory=list)
+    completed_work_items: list[tuple[str, LeaseToken]] = field(default_factory=list)
 
     async def execute(
         self, command: ExecutePreparedLlmDispatchAttemptCommand
@@ -333,6 +354,19 @@ class FakeExecutePreparedLlmDispatchAttempt:
             ),
             outcome_result=self.result.outcome_result,
             validation_metadata=dict(validation_result.metadata),
+        )
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
+    ) -> object:
+        self.completed_work_items.append((work_item_id, lease_token))
+        return WorkItem(
+            work_item_id=work_item_id,
+            work_kind=WorkKind("knowledge_workbench.claim_builder.section_extraction"),
+            status=WorkItemStatus.COMPLETED,
         )
 
 
@@ -636,6 +670,22 @@ async def test_calls_existing_execute_prepared_llm_dispatch_attempt() -> None:
     assert len(executor.calls) == 1
     assert executor.calls[0].attempt_id == _attempt_id()
     assert executor.calls[0].output_validator is not None
+
+
+@pytest.mark.asyncio
+async def test_claim_builder_completes_work_item_only_after_domain_outcome_marker() -> (
+    None
+):
+    _, executor, _, workflow_unit_of_work, draft_persistence = await _execute()
+
+    assert draft_persistence.candidates
+    assert tuple(event.event_type for event in workflow_unit_of_work.outbox.events) == (
+        KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED.value,
+        KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value,
+    )
+    assert executor.completed_work_items == [
+        (_work_item_id(), LeaseToken("lease-token-1")),
+    ]
 
 
 @pytest.mark.asyncio

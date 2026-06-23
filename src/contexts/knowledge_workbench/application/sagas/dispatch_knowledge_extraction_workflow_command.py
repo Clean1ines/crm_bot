@@ -662,6 +662,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             if (
                 draft_claim_compaction_reduction_state_repository is None
                 or draft_claim_observation_read_repository is None
+                or execute_prepared_llm_dispatch_attempt is None
             ):
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
@@ -685,6 +686,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     draft_claim_observation_read_repository
                 ),
                 work_item_scheduling_repository=knowledge_unit_of_work,
+                work_item_completion=execute_prepared_llm_dispatch_attempt,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

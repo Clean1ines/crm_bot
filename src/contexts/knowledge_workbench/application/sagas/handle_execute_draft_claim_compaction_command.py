@@ -481,6 +481,7 @@ def _next_command(
             expected_output_kind=expected_output_kind,
             validation_metadata=_required_validation_metadata(execution_result),
             dispatch_payload=dispatch_payload,
+            lease_token=execution_result.dispatch.lease_token.value,
             occurred_at=occurred_at,
         )
     return _reconcile_progress_command(
@@ -504,6 +505,7 @@ def _apply_result_command(
     expected_output_kind: DraftClaimCompactionExpectedOutputKind,
     validation_metadata: Mapping[str, object],
     dispatch_payload: Mapping[str, object],
+    lease_token: str,
     occurred_at: datetime,
 ) -> WorkflowCommand:
     idempotency_key = (
@@ -520,6 +522,7 @@ def _apply_result_command(
         expected_output_kind=expected_output_kind,
         validation_metadata=validation_metadata,
         dispatch_payload=dispatch_payload,
+        lease_token=lease_token,
     )
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
@@ -547,6 +550,7 @@ def _apply_result_payload(
     expected_output_kind: DraftClaimCompactionExpectedOutputKind,
     validation_metadata: Mapping[str, object],
     dispatch_payload: Mapping[str, object],
+    lease_token: str,
 ) -> JsonObject:
     compared_node_refs = _derived_compared_node_refs(
         workflow_run_id,
@@ -565,6 +569,7 @@ def _apply_result_payload(
             "group_ref": group_ref,
             "batch_ref": batch_ref,
             "work_item_id": work_item_id,
+            "lease_token": lease_token,
             "round_index": round_index,
             "output_kind": DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS.value,
             "compared_node_refs": list(compared_node_refs),
@@ -579,6 +584,7 @@ def _apply_result_payload(
         "group_ref": group_ref,
         "batch_ref": batch_ref,
         "work_item_id": work_item_id,
+        "lease_token": lease_token,
         "round_index": round_index,
         "output_kind": DraftClaimCompactionExpectedOutputKind.REDUCED_REWRITE.value,
         "compared_node_refs": list(compared_node_refs),
