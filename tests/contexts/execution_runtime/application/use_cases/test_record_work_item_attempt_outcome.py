@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 
@@ -14,10 +14,10 @@ from src.contexts.execution_runtime.application.use_cases.record_work_item_attem
 )
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
+from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 
 
 class FakeRepository:
@@ -35,10 +35,6 @@ class FakeRepository:
 
 def _finished_at() -> datetime:
     return datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
-
-
-def _next_attempt_at() -> datetime:
-    return _finished_at() + timedelta(minutes=5)
 
 
 def _lease_token() -> LeaseToken:
@@ -59,7 +55,6 @@ def _command(
         WorkItemAttemptOutcomeStatus.SUCCEEDED
     ),
     error_kind: str | None = None,
-    next_attempt_at: datetime | None = None,
     retry_plan: WorkItemRetryPlan | None = None,
 ) -> RecordWorkItemAttemptOutcomeCommand:
     return RecordWorkItemAttemptOutcomeCommand(
@@ -70,7 +65,6 @@ def _command(
         finished_at=finished_at or _finished_at(),
         outcome_status=outcome_status,
         error_kind=error_kind,
-        next_attempt_at=next_attempt_at,
         retry_plan=retry_plan,
     )
 
@@ -129,7 +123,7 @@ async def test_rejects_failed_without_error_kind() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retryable_without_next_attempt_at_is_immediate_retry() -> None:
+async def test_retryable_failure_does_not_write_work_item_retry_timing() -> None:
     repository = FakeRepository(work_item=_work_item())
 
     result = await RecordWorkItemAttemptOutcome(repository=repository).execute(
@@ -141,7 +135,7 @@ async def test_retryable_without_next_attempt_at_is_immediate_retry() -> None:
     )
 
     assert result.work_item == repository.work_item
-    assert repository.records[0].next_attempt_at is None
+    assert repository.records[0].retry_plan is WorkItemRetryPlan.RETRY_SAME_ROUTE
 
 
 @pytest.mark.asyncio
@@ -153,33 +147,5 @@ async def test_rejects_retryable_without_retry_plan() -> None:
             _command(
                 outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
                 error_kind="validation_failed",
-            ),
-        )
-
-
-@pytest.mark.asyncio
-async def test_rejects_deferred_without_next_attempt_at() -> None:
-    repository = FakeRepository(work_item=_work_item())
-
-    with pytest.raises(ValueError, match="next_attempt_at"):
-        await RecordWorkItemAttemptOutcome(repository=repository).execute(
-            _command(
-                outcome_status=WorkItemAttemptOutcomeStatus.DEFERRED,
-                error_kind="not_ready",
-            ),
-        )
-
-
-@pytest.mark.asyncio
-async def test_rejects_next_attempt_at_not_after_finished_at() -> None:
-    repository = FakeRepository(work_item=_work_item())
-
-    with pytest.raises(ValueError, match="next_attempt_at"):
-        await RecordWorkItemAttemptOutcome(repository=repository).execute(
-            _command(
-                outcome_status=WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED,
-                error_kind="rate_limit",
-                next_attempt_at=_finished_at(),
-                retry_plan=WorkItemRetryPlan.RETRY_SAME_ROUTE,
             ),
         )

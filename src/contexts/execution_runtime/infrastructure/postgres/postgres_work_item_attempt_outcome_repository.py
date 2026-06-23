@@ -17,7 +17,6 @@ from src.contexts.execution_runtime.domain.state_machines.work_item_state_machin
     WorkItemStateMachine,
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
@@ -54,7 +53,6 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 w.leased_by,
                 w.lease_token,
                 w.lease_expires_at,
-                w.next_attempt_at,
                 w.last_error_kind,
                 w.retry_plan,
                 a.attempt_id AS recorded_attempt_id,
@@ -84,10 +82,6 @@ class PostgresWorkItemAttemptOutcomeRepository(
         if not isinstance(attempt_number, int):
             raise TypeError("recorded_attempt_number must be int")
 
-        next_attempt_at = row["next_attempt_at"]
-        if next_attempt_at is not None and not isinstance(next_attempt_at, datetime):
-            raise TypeError("next_attempt_at must be datetime or None")
-
         return RecordedWorkItemAttemptOutcome(
             attempt_id=str(row["recorded_attempt_id"]),
             work_item_id=str(row["work_item_id"]),
@@ -101,7 +95,6 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 if row["recorded_error_kind"] is not None
                 else None
             ),
-            next_attempt_at=next_attempt_at,
             validation_metadata=_json_object_from_row(
                 row["recorded_validation_metadata"],
                 field_name="validation_metadata",
@@ -127,7 +120,6 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 leased_by,
                 lease_token,
                 lease_expires_at,
-                next_attempt_at,
                 last_error_kind,
                 retry_plan
             FROM execution_work_items
@@ -180,9 +172,8 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 leased_by = $4,
                 lease_token = $5,
                 lease_expires_at = $6,
-                next_attempt_at = $7,
-                last_error_kind = $8,
-                retry_plan = $9,
+                last_error_kind = $7,
+                retry_plan = $8,
                 updated_at = now()
             WHERE work_item_id = $1
             """,
@@ -192,7 +183,6 @@ class PostgresWorkItemAttemptOutcomeRepository(
             _worker_ref_value(transitioned.leased_by),
             _lease_token_value(transitioned.lease_token),
             transitioned.lease_expires_at,
-            _wait_until_value(transitioned.next_attempt_at),
             transitioned.last_error_kind,
             _retry_plan_value(transitioned.retry_plan),
         )
@@ -219,7 +209,6 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 leased_by,
                 lease_token,
                 lease_expires_at,
-                next_attempt_at,
                 last_error_kind,
                 retry_plan
             FROM execution_work_items
@@ -244,9 +233,8 @@ class PostgresWorkItemAttemptOutcomeRepository(
                 leased_by = $4,
                 lease_token = $5,
                 lease_expires_at = $6,
-                next_attempt_at = $7,
-                last_error_kind = $8,
-                retry_plan = $9,
+                last_error_kind = $7,
+                retry_plan = $8,
                 updated_at = now()
             WHERE work_item_id = $1
             """,
@@ -256,7 +244,6 @@ class PostgresWorkItemAttemptOutcomeRepository(
             _worker_ref_value(transitioned.leased_by),
             _lease_token_value(transitioned.lease_token),
             transitioned.lease_expires_at,
-            _wait_until_value(transitioned.next_attempt_at),
             transitioned.last_error_kind,
             _retry_plan_value(transitioned.retry_plan),
         )
@@ -336,9 +323,6 @@ def _transition_work_item(
         return WorkItemStateMachine.fail_leased_retryable(
             current,
             error_kind=record.error_kind,
-            next_attempt_at=WaitUntil(record.next_attempt_at)
-            if record.next_attempt_at is not None
-            else None,
             retry_plan=_required_retry_plan(record.retry_plan),
         )
 
@@ -348,21 +332,10 @@ def _transition_work_item(
             error_kind=record.error_kind,
         )
 
-    if record.outcome_status is WorkItemAttemptOutcomeStatus.DEFERRED:
-        if record.next_attempt_at is None:
-            raise ValueError("next_attempt_at is required for deferred outcome")
-        return WorkItemStateMachine.fail_leased_retryable(
-            current,
-            error_kind=record.error_kind,
-            next_attempt_at=WaitUntil(record.next_attempt_at),
-            retry_plan=_required_retry_plan(record.retry_plan),
-        )
-
     raise ValueError("unsupported attempt outcome status")
 
 
 def _hydrate_work_item(row: asyncpg.Record) -> WorkItem:
-    next_attempt_at = row["next_attempt_at"]
     return WorkItem(
         work_item_id=row["work_item_id"],
         work_kind=WorkKind(row["work_kind"]),
@@ -371,9 +344,6 @@ def _hydrate_work_item(row: asyncpg.Record) -> WorkItem:
         leased_by=_worker_ref(row["leased_by"]),
         lease_token=_lease_token(row["lease_token"]),
         lease_expires_at=row["lease_expires_at"],
-        next_attempt_at=WaitUntil(next_attempt_at)
-        if next_attempt_at is not None
-        else None,
         last_error_kind=row["last_error_kind"],
         retry_plan=_retry_plan(row.get("retry_plan")),
     )
@@ -410,12 +380,6 @@ def _worker_ref_value(value: WorkerRef | None) -> str | None:
 
 
 def _lease_token_value(value: LeaseToken | None) -> str | None:
-    if value is None:
-        return None
-    return value.value
-
-
-def _wait_until_value(value: WaitUntil | None) -> datetime | None:
     if value is None:
         return None
     return value.value

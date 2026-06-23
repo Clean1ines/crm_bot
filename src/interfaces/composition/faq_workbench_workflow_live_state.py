@@ -262,7 +262,6 @@ class WorkbenchWorkflowLiveStateQuery:
                 wi.status,
                 wi.leased_by AS claimed_by_worker_id,
                 wi.lease_expires_at,
-                wi.next_attempt_at,
                 wi.last_error_kind AS error_kind,
                 wi.retry_plan,
                 COALESCE(wi.attempt_count, 0) AS attempt_count
@@ -342,7 +341,6 @@ class WorkbenchWorkflowLiveStateQuery:
                 )::int AS total_tokens,
                 a.error_kind,
                 wi.last_error_kind AS error_message_user,
-                wi.next_attempt_at,
                 wi.retry_plan,
                 wi.status AS work_item_status,
                 obs.remaining_minute_requests,
@@ -1319,8 +1317,7 @@ def _text_lines(row: Mapping[str, object], key: str) -> tuple[str, ...]:
 
 def _queue_item(row: Mapping[str, object]) -> WorkbenchSectionQueueItemLiveView:
     lease_expires_at = _optional_datetime(row, "lease_expires_at")
-    next_attempt_at = _optional_datetime(row, "next_attempt_at")
-    retry_available_at = next_attempt_at or lease_expires_at
+    retry_available_at = lease_expires_at
     retry_seconds = None
     if retry_available_at is not None:
         retry_seconds = max(
@@ -1336,7 +1333,6 @@ def _queue_item(row: Mapping[str, object]) -> WorkbenchSectionQueueItemLiveView:
         status=status,
         attempt_count=_int(row, "attempt_count"),
         lease_expires_at=lease_expires_at,
-        next_attempt_at=next_attempt_at,
         claimed_by_worker_id=_optional_str(row, "claimed_by_worker_id"),
         error_kind=error_kind,
         retry_plan=_optional_str(row, "retry_plan"),
@@ -1443,7 +1439,6 @@ def _attempt(row: Mapping[str, object]) -> WorkbenchLlmAttemptLiveView:
         daily_reset_at=_optional_datetime(row, "daily_reset_at"),
         error_kind=_optional_str(row, "error_kind"),
         error_message_user=last_error_kind,
-        next_attempt_at=_optional_datetime(row, "next_attempt_at"),
         retry_plan=_optional_str(row, "retry_plan"),
         user_action_required=work_item_status == "user_action_required",
         blocked_reason=last_error_kind

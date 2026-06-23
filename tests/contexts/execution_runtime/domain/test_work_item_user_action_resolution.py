@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -12,84 +12,56 @@ from src.contexts.execution_runtime.domain.state_machines.work_item_state_machin
     InvalidWorkItemTransition,
     WorkItemStateMachine,
 )
-from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
-from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 
 
 def _now() -> datetime:
-    return datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
+    return datetime(2026, 6, 23, 12, 0, tzinfo=timezone.utc)
 
 
 def _user_action_required_item() -> WorkItem:
-    now = _now()
-    leased = WorkItemStateMachine.lease_ready(
-        WorkItem(
-            work_item_id="work-1",
-            work_kind=WorkKind("knowledge_workbench.claim_extraction"),
-        ),
-        worker=WorkerRef("worker-1"),
-        lease_token=LeaseToken("lease-1"),
-        lease_expires_at=now + timedelta(seconds=30),
-        now=now,
-    )
-    return WorkItemStateMachine.require_user_action_leased(
-        leased,
-        error_kind="daily_limit",
+    return WorkItem(
+        work_item_id="work-1",
+        work_kind=WorkKind("execution.test"),
+        status=WorkItemStatus.USER_ACTION_REQUIRED,
+        last_error_kind="needs_user_choice",
     )
 
 
-def test_resolve_user_action_required_to_ready_requeues_work_item() -> None:
-    item = _user_action_required_item()
-
+def test_user_action_can_resolve_to_ready_without_retry_timer() -> None:
     resolved = WorkItemStateMachine.resolve_user_action_required_to_ready(
-        item,
-        reason="continue_with_degraded_model",
+        _user_action_required_item(),
+        reason="user_selected_wait",
     )
 
     assert resolved.status is WorkItemStatus.READY
-    assert resolved.next_attempt_at is None
-    assert resolved.last_error_kind == "continue_with_degraded_model"
-    assert resolved.leased_by is None
-    assert resolved.lease_token is None
-    assert resolved.lease_expires_at is None
+    assert resolved.last_error_kind == "user_selected_wait"
 
 
-def test_resolve_user_action_required_to_retryable_failed_waits_until_reset() -> None:
-    item = _user_action_required_item()
-    wait_until = WaitUntil(_now() + timedelta(hours=12))
-
+def test_user_action_can_resolve_to_immediate_retryable_failed() -> None:
     resolved = WorkItemStateMachine.resolve_user_action_required_to_retryable_failed(
-        item,
-        wait_until=wait_until,
-        reason="resume_after_daily_reset",
+        _user_action_required_item(),
+        reason="user_selected_continue",
     )
 
     assert resolved.status is WorkItemStatus.RETRYABLE_FAILED
-    assert resolved.next_attempt_at == wait_until
-    assert resolved.last_error_kind == "resume_after_daily_reset"
-    assert not resolved.is_due(_now())
-    assert resolved.is_due(_now() + timedelta(hours=13))
+    assert resolved.is_due(_now())
 
 
-def test_user_action_resolution_requires_user_action_required_item() -> None:
+def test_user_action_resolution_rejects_non_user_action_item() -> None:
     ready = WorkItem(
         work_item_id="work-1",
-        work_kind=WorkKind("knowledge_workbench.claim_extraction"),
+        work_kind=WorkKind("execution.test"),
     )
 
     with pytest.raises(InvalidWorkItemTransition):
         WorkItemStateMachine.resolve_user_action_required_to_ready(ready)
 
     with pytest.raises(InvalidWorkItemTransition):
-        WorkItemStateMachine.resolve_user_action_required_to_retryable_failed(
-            ready,
-            wait_until=WaitUntil(_now() + timedelta(hours=12)),
-        )
+        WorkItemStateMachine.resolve_user_action_required_to_retryable_failed(ready)
 
 
 def test_user_action_resolved_event_records_decision() -> None:

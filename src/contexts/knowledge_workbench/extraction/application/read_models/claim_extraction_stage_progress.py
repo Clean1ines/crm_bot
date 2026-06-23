@@ -150,7 +150,7 @@ class ClaimExtractionStageProgressReadModel:
 
         ready_count = _count_status(work_items, WorkItemStatus.READY)
         leased_count = _count_status(work_items, WorkItemStatus.LEASED)
-        deferred_count = _count_status(work_items, WorkItemStatus.DEFERRED)
+        deferred_count = 0
         completed_count = _count_status(work_items, WorkItemStatus.COMPLETED)
         retryable_failed_count = _count_status(
             work_items,
@@ -208,19 +208,8 @@ def _count_status(work_items: tuple[WorkItem, ...], status: WorkItemStatus) -> i
 
 
 def _nearest_wait_until(work_items: tuple[WorkItem, ...]) -> datetime | None:
-    waits = tuple(
-        item.next_attempt_at.value
-        for item in work_items
-        if item.status
-        in {
-            WorkItemStatus.DEFERRED,
-            WorkItemStatus.RETRYABLE_FAILED,
-        }
-        and item.next_attempt_at is not None
-    )
-    if not waits:
-        return None
-    return min(waits)
+    del work_items
+    return None
 
 
 def _progress_status(
@@ -258,7 +247,7 @@ def _progress_status(
     if completed_total == total_count:
         return ClaimExtractionStageProgressStatus.COMPLETED
 
-    if deferred_count > 0 or retryable_failed_count > 0:
+    if retryable_failed_count > 0:
         return ClaimExtractionStageProgressStatus.WAITING
 
     if ready_count > 0:
@@ -317,26 +306,7 @@ def _first_with_status(
 
 
 def _first_waiting_item(work_items: tuple[WorkItem, ...]) -> WorkItem | None:
-    waiting_items = tuple(
-        item
-        for item in work_items
-        if item.status
-        in {
-            WorkItemStatus.DEFERRED,
-            WorkItemStatus.RETRYABLE_FAILED,
-        }
-    )
-    if not waiting_items:
-        return None
-
-    return min(
-        waiting_items,
-        key=lambda item: (
-            item.next_attempt_at.value
-            if item.next_attempt_at is not None
-            else datetime.max
-        ),
-    )
+    return _first_with_status(work_items, WorkItemStatus.RETRYABLE_FAILED)
 
 
 def _user_action_required_interpretation(

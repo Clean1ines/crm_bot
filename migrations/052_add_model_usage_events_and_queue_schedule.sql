@@ -23,11 +23,8 @@ CREATE INDEX IF NOT EXISTS idx_model_usage_events_project_created_at
 CREATE INDEX IF NOT EXISTS idx_model_usage_events_project_source
     ON model_usage_events(project_id, source, usage_type);
 
-ALTER TABLE execution_queue
-    ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;
-
-CREATE INDEX IF NOT EXISTS idx_queue_status_next_attempt_at
-    ON execution_queue(status, next_attempt_at, created_at)
+CREATE INDEX IF NOT EXISTS idx_queue_status_created_at
+    ON execution_queue(status, created_at)
     WHERE status = 'pending';
 
 ANALYZE model_usage_events;

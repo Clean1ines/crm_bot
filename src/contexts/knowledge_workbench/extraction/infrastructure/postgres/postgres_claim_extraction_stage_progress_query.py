@@ -6,7 +6,6 @@ from typing import Protocol
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -36,7 +35,6 @@ class ExecutionWorkItemRow:
     leased_by: str | None
     lease_token: str | None
     lease_expires_at: datetime | None
-    next_attempt_at: datetime | None
     last_error_kind: str | None
 
 
@@ -68,7 +66,6 @@ class PostgresClaimExtractionStageProgressQuery(
                 wi.leased_by,
                 wi.lease_token,
                 wi.lease_expires_at,
-                wi.next_attempt_at,
                 wi.last_error_kind
             FROM claim_extraction_stage_work_items AS stage_items
             JOIN execution_work_items AS wi
@@ -113,9 +110,6 @@ def _row_to_work_item(row: StageProgressRowLike) -> WorkItem:
         leased_by=WorkerRef(item_row.leased_by) if item_row.leased_by else None,
         lease_token=LeaseToken(item_row.lease_token) if item_row.lease_token else None,
         lease_expires_at=item_row.lease_expires_at,
-        next_attempt_at=WaitUntil(item_row.next_attempt_at)
-        if item_row.next_attempt_at
-        else None,
         last_error_kind=item_row.last_error_kind,
     )
 
@@ -129,7 +123,6 @@ def _execution_work_item_row(row: StageProgressRowLike) -> ExecutionWorkItemRow:
         leased_by=_optional_str(row, "leased_by"),
         lease_token=_optional_str(row, "lease_token"),
         lease_expires_at=_optional_datetime(row, "lease_expires_at"),
-        next_attempt_at=_optional_datetime(row, "next_attempt_at"),
         last_error_kind=_optional_str(row, "last_error_kind"),
     )
 

@@ -143,7 +143,6 @@ class ClaimBuilderLlmDispatchOutputValidator:
             return LlmDispatchOutputValidationResult(
                 status=llm_status,
                 error_kind=None,
-                next_attempt_at=None,
                 metadata={
                     "validation_decision": None,
                     "validated_claim_count": 0,
@@ -323,9 +322,6 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             work_item_id=work_item_id,
             outcome_status=outcome_status,
             error_kind=execution_result.llm_result.error_kind,
-            next_attempt_at=execution_result.llm_result.next_attempt_at.isoformat()
-            if execution_result.llm_result.next_attempt_at is not None
-            else None,
             has_output_payload=execution_result.llm_result.output_payload is not None,
             validation_metadata=attempt_action_metadata,
         )
@@ -660,7 +656,6 @@ def _decision_to_dispatch_result(
         return LlmDispatchOutputValidationResult(
             status=LlmDispatchExecutionStatus.SUCCEEDED,
             error_kind=None,
-            next_attempt_at=None,
             metadata=metadata,
         )
 
@@ -668,14 +663,12 @@ def _decision_to_dispatch_result(
         return LlmDispatchOutputValidationResult(
             status=LlmDispatchExecutionStatus.TERMINAL_FAILED,
             error_kind="claim_builder_output_validation_failed",
-            next_attempt_at=None,
             metadata=metadata,
         )
 
     return LlmDispatchOutputValidationResult(
         status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
         error_kind="claim_builder_output_validation_failed",
-        next_attempt_at=None,
         metadata=metadata,
     )
 
@@ -986,10 +979,7 @@ def _provider_retry_metadata(
     execution_result: ExecutePreparedLlmDispatchAttemptResult,
 ) -> dict[str, object] | None:
     error_kind = execution_result.llm_result.error_kind
-    next_attempt_at = execution_result.llm_result.next_attempt_at
     if error_kind == MINUTE_LIMIT_ERROR_KIND:
-        if next_attempt_at is None:
-            return None
         return {
             "claim_builder_attempt_outcome_kind": (
                 ClaimBuilderAttemptOutcomeKind.RETRY_SAME_ROUTE.value
@@ -1004,7 +994,7 @@ def _provider_retry_metadata(
             "claim_builder_should_persist_claims": False,
             "claim_builder_should_mark_work_item_completed": False,
             "claim_builder_requires_source_split": False,
-            "claim_builder_next_run_after": next_attempt_at.isoformat(),
+            "claim_builder_next_run_after": None,
             "validation_decision": None,
             "validation_failure_reason": None,
             "validated_claim_count": 0,
@@ -1041,7 +1031,7 @@ def _provider_retry_metadata(
             "claim_builder_attempt_next_action_kind": (
                 ClaimBuilderAttemptNextActionKind.RETRY_LARGER_INPUT_LIMIT_MODEL.value
             ),
-            "claim_builder_attempt_next_action_reason": (REQUEST_TOO_LARGE_ERROR_KIND),
+            "claim_builder_attempt_next_action_reason": REQUEST_TOO_LARGE_ERROR_KIND,
             "claim_builder_attempt_next_model_strategy": (
                 ClaimBuilderNextModelStrategy.LARGER_INPUT_LIMIT_MODEL_REQUIRED.value
             ),
@@ -1453,8 +1443,6 @@ def _event_type_for_status(
 ) -> KnowledgeExtractionCanonicalEventType:
     if status is LlmDispatchExecutionStatus.SUCCEEDED:
         return KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED
-    if status is LlmDispatchExecutionStatus.DEFERRED:
-        return KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED
     if status is LlmDispatchExecutionStatus.RETRYABLE_FAILED:
         return KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED
     if status is LlmDispatchExecutionStatus.TERMINAL_FAILED:
@@ -1492,9 +1480,6 @@ def _event_payload(
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "outcome_status": execution_result.llm_result.status.value,
         "error_kind": execution_result.llm_result.error_kind,
-        "next_attempt_at": _datetime_payload(
-            execution_result.llm_result.next_attempt_at
-        ),
         "provider": capacity_payload.get("provider"),
         "account_ref": capacity_payload.get("account_ref"),
         "model_ref": capacity_payload.get("model_ref"),
@@ -1617,7 +1602,7 @@ async def _save_progress_snapshot(
         )
 
     completed_delta = 1 if status is LlmDispatchExecutionStatus.SUCCEEDED else 0
-    deferred_delta = 1 if status is LlmDispatchExecutionStatus.DEFERRED else 0
+    deferred_delta = 0
     retryable_delta = 1 if status is LlmDispatchExecutionStatus.RETRYABLE_FAILED else 0
     terminal_delta = 1 if status is LlmDispatchExecutionStatus.TERMINAL_FAILED else 0
 
@@ -1703,10 +1688,7 @@ def _severity_for_status(
 ) -> WorkflowTimelineSeverity:
     if status is LlmDispatchExecutionStatus.SUCCEEDED:
         return WorkflowTimelineSeverity.INFO
-    if status in {
-        LlmDispatchExecutionStatus.DEFERRED,
-        LlmDispatchExecutionStatus.RETRYABLE_FAILED,
-    }:
+    if status is LlmDispatchExecutionStatus.RETRYABLE_FAILED:
         return WorkflowTimelineSeverity.WARNING
     return WorkflowTimelineSeverity.ERROR
 

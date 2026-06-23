@@ -10,7 +10,6 @@ from src.contexts.execution_runtime.domain.state_machines.work_item_state_machin
     WorkItemStateMachine,
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
@@ -43,19 +42,10 @@ def _leased_item() -> WorkItem:
     )
 
 
-def _deferred_item() -> WorkItem:
-    return WorkItemStateMachine.defer_leased(
-        _leased_item(),
-        wait_until=WaitUntil(_now() + timedelta(seconds=60)),
-        error_kind="minute_limit",
-    )
-
-
 def _retryable_failed_item() -> WorkItem:
     return WorkItemStateMachine.fail_leased_retryable(
         _leased_item(),
         error_kind="network_timeout",
-        next_attempt_at=WaitUntil(_now() + timedelta(seconds=10)),
     )
 
 
@@ -70,7 +60,6 @@ def test_work_item_statuses_are_canonical_and_business_agnostic() -> None:
     assert {status.value for status in WorkItemStatus} == {
         "ready",
         "leased",
-        "deferred",
         "completed",
         "retryable_failed",
         "terminal_failed",
@@ -80,6 +69,7 @@ def test_work_item_statuses_are_canonical_and_business_agnostic() -> None:
     }
 
     forbidden_legacy_statuses = {
+        "deferred",
         "claim_observations_persisted",
         "registry_application_queued",
         "registry_application_applied",
@@ -91,17 +81,11 @@ def test_work_item_statuses_are_canonical_and_business_agnostic() -> None:
     )
 
 
-def test_legacy_deferred_status_is_not_waiting_and_never_due() -> None:
-    legacy_deferred = WorkItem(
-        work_item_id="legacy-deferred-work",
-        work_kind=WorkKind("knowledge_workbench.claim_extraction"),
-        status=WorkItemStatus.DEFERRED,
-        next_attempt_at=WaitUntil(_now() - timedelta(seconds=1)),
-        last_error_kind="legacy_capacity_wait",
-    )
+def test_retryable_failed_work_items_are_immediately_eligible() -> None:
+    retryable = _retryable_failed_item()
 
-    assert WorkItemStatus.DEFERRED.is_waiting is False
-    assert legacy_deferred.is_due(_now()) is False
+    assert retryable.status is WorkItemStatus.RETRYABLE_FAILED
+    assert retryable.is_due(_now())
 
 
 def test_lease_ready_item_sets_lease_fields_and_increments_attempt_count() -> None:
@@ -135,49 +119,33 @@ def test_complete_requires_leased_item_and_clears_lease_fields() -> None:
         WorkItemStateMachine.complete_leased(_ready_item())
 
 
-def test_defer_leased_item_marks_retryable_with_wait_until_and_clears_lease() -> None:
-    leased = _leased_item()
-    wait_until = WaitUntil(_now() + timedelta(seconds=60))
-
-    deferred = WorkItemStateMachine.defer_leased(
-        leased,
-        wait_until=wait_until,
-        error_kind="minute_limit",
-    )
-
-    assert deferred.status is WorkItemStatus.RETRYABLE_FAILED
-    assert deferred.next_attempt_at == wait_until
-    assert deferred.last_error_kind == "minute_limit"
-    assert deferred.retry_plan is WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW
-    assert deferred.leased_by is None
-    assert deferred.lease_token is None
-    assert not deferred.is_due(_now())
-    assert deferred.is_due(_now() + timedelta(seconds=61))
-
-
-def test_retryable_and_terminal_failures_are_explicit_transitions() -> None:
+def test_retryable_failure_is_immediate_requeue_and_clears_lease() -> None:
     leased = _leased_item()
 
     retryable = WorkItemStateMachine.fail_leased_retryable(
         leased,
         error_kind="network_timeout",
-        next_attempt_at=WaitUntil(_now() + timedelta(seconds=10)),
         retry_plan=WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE,
     )
 
     assert retryable.status is WorkItemStatus.RETRYABLE_FAILED
     assert retryable.last_error_kind == "network_timeout"
-    assert retryable.next_attempt_at == WaitUntil(_now() + timedelta(seconds=10))
     assert retryable.retry_plan is WorkItemRetryPlan.RETRY_ALTERNATE_ROUTE
+    assert retryable.leased_by is None
+    assert retryable.lease_token is None
+    assert retryable.lease_expires_at is None
+    assert retryable.is_due(_now())
 
+
+def test_terminal_failure_is_explicit_transition() -> None:
     terminal = WorkItemStateMachine.fail_leased_terminal(
-        leased,
+        _leased_item(),
         error_kind="invalid_work_payload",
     )
 
     assert terminal.status is WorkItemStatus.TERMINAL_FAILED
     assert terminal.last_error_kind == "invalid_work_payload"
-    assert terminal.next_attempt_at is None
+    assert terminal.retry_plan is None
 
 
 def test_cancel_clears_lease_and_marks_item_terminal() -> None:
@@ -195,11 +163,12 @@ def test_cancel_clears_lease_and_marks_item_terminal() -> None:
         WorkItemStateMachine.cancel(cancelled)
 
 
-def test_split_superseded_is_not_fake_completed_empty_success() -> None:
+def test_split_superseded_replaces_parent_with_child_work_items() -> None:
     superseded = WorkItemStateMachine.mark_split_superseded_leased(_leased_item())
 
     assert superseded.status is WorkItemStatus.SPLIT_SUPERSEDED
     assert superseded.status.is_terminal
+    assert superseded.retry_plan is None
 
 
 def test_reclaim_expired_lease_returns_work_to_ready_without_attempt_increment() -> (
@@ -241,15 +210,6 @@ def test_mark_split_superseded_waiting_accepts_ready_item() -> None:
     assert superseded.leased_by is None
     assert superseded.lease_token is None
     assert superseded.lease_expires_at is None
-    assert superseded.next_attempt_at is None
-    assert superseded.last_error_kind is None
-
-
-def test_mark_split_superseded_waiting_accepts_retryable_capacity_wait_item() -> None:
-    superseded = WorkItemStateMachine.mark_split_superseded_waiting(_deferred_item())
-
-    assert superseded.status is WorkItemStatus.SPLIT_SUPERSEDED
-    assert superseded.next_attempt_at is None
     assert superseded.last_error_kind is None
 
 
@@ -259,7 +219,6 @@ def test_mark_split_superseded_waiting_accepts_retryable_failed_item() -> None:
     )
 
     assert superseded.status is WorkItemStatus.SPLIT_SUPERSEDED
-    assert superseded.next_attempt_at is None
     assert superseded.last_error_kind is None
 
 

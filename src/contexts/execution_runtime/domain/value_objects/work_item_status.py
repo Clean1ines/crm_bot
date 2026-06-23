@@ -12,9 +12,6 @@ class WorkItemStatus(StrEnum):
 
     READY = "ready"
     LEASED = "leased"
-    # Legacy compatibility only: new retry/capacity semantics must use
-    # RETRYABLE_FAILED + next_attempt_at/retry action instead of DEFERRED.
-    DEFERRED = "deferred"
     COMPLETED = "completed"
     RETRYABLE_FAILED = "retryable_failed"
     TERMINAL_FAILED = "terminal_failed"

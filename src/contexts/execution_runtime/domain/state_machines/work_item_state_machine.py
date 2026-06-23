@@ -5,7 +5,6 @@ from datetime import datetime
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
@@ -39,11 +38,6 @@ class WorkItemStateMachine:
                 f"Cannot lease work item from status {item.status}"
             )
 
-        if item.next_attempt_at is not None and item.next_attempt_at.value > now:
-            raise InvalidWorkItemTransition(
-                "Cannot lease work item before next_attempt_at"
-            )
-
         if lease_expires_at <= now:
             raise InvalidWorkItemTransition("lease_expires_at must be in the future")
 
@@ -54,7 +48,6 @@ class WorkItemStateMachine:
             leased_by=worker,
             lease_token=lease_token,
             lease_expires_at=lease_expires_at,
-            next_attempt_at=None,
             last_error_kind=None,
             retry_plan=None,
         )
@@ -68,27 +61,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind=None,
-        )
-
-    @staticmethod
-    def defer_leased(
-        item: WorkItem,
-        *,
-        wait_until: WaitUntil,
-        error_kind: str | None = None,
-    ) -> WorkItem:
-        WorkItemStateMachine._require_leased(item, "defer")
-        return replace(
-            item,
-            status=WorkItemStatus.RETRYABLE_FAILED,
-            leased_by=None,
-            lease_token=None,
-            lease_expires_at=None,
-            next_attempt_at=wait_until,
-            last_error_kind=error_kind,
-            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
+            retry_plan=None,
         )
 
     @staticmethod
@@ -96,7 +70,6 @@ class WorkItemStateMachine:
         item: WorkItem,
         *,
         error_kind: str,
-        next_attempt_at: WaitUntil | None,
         retry_plan: WorkItemRetryPlan = WorkItemRetryPlan.RETRY_SAME_ROUTE,
     ) -> WorkItem:
         WorkItemStateMachine._require_leased(item, "mark retryable failed")
@@ -108,7 +81,6 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=next_attempt_at,
             last_error_kind=error_kind,
             retry_plan=retry_plan,
         )
@@ -124,8 +96,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind=error_kind,
+            retry_plan=None,
         )
 
     @staticmethod
@@ -143,8 +115,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind=error_kind,
+            retry_plan=None,
         )
 
     @staticmethod
@@ -156,8 +128,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind=None,
+            retry_plan=None,
         )
 
     @staticmethod
@@ -172,8 +144,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind=None,
+            retry_plan=None,
         )
 
     @staticmethod
@@ -191,8 +163,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind=error_kind,
+            retry_plan=None,
         )
 
     @staticmethod
@@ -210,16 +182,16 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind=reason,
+            retry_plan=None,
         )
 
     @staticmethod
     def resolve_user_action_required_to_retryable_failed(
         item: WorkItem,
         *,
-        wait_until: WaitUntil,
         reason: str | None = None,
+        retry_plan: WorkItemRetryPlan = WorkItemRetryPlan.RETRY_SAME_ROUTE,
     ) -> WorkItem:
         WorkItemStateMachine._require_user_action_required(
             item,
@@ -233,9 +205,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=wait_until,
             last_error_kind=reason,
-            retry_plan=WorkItemRetryPlan.WAIT_NEAREST_ADMISSION_WINDOW,
+            retry_plan=retry_plan,
         )
 
     @staticmethod
@@ -253,8 +224,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind=reason,
+            retry_plan=None,
         )
 
     @staticmethod
@@ -273,8 +244,8 @@ class WorkItemStateMachine:
             leased_by=None,
             lease_token=None,
             lease_expires_at=None,
-            next_attempt_at=None,
             last_error_kind="lease_expired",
+            retry_plan=None,
         )
 
     @staticmethod

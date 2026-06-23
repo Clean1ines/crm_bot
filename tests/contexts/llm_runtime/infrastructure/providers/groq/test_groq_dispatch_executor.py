@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 
@@ -191,9 +191,11 @@ async def test_minute_limit_with_wait_until_maps_to_retryable_failed() -> None:
 
     assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
     assert result.error_kind == "minute_limit"
-    assert result.next_attempt_at is not None
-    assert result.next_attempt_at > result.finished_at
-    assert result.next_attempt_at <= result.finished_at + timedelta(seconds=2)
+    assert not hasattr(result, "next" + "_attempt" + "_at")
+    assert result.capacity_observation is not None
+    assert result.capacity_observation["outcome_class"] == (
+        LlmDispatchExecutionStatus.RETRYABLE_FAILED.value
+    )
 
 
 @pytest.mark.asyncio

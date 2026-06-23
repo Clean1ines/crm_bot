@@ -25,7 +25,6 @@ class RecordWorkItemAttemptOutcomeCommand:
     finished_at: datetime
     outcome_status: WorkItemAttemptOutcomeStatus
     error_kind: str | None = None
-    next_attempt_at: datetime | None = None
     retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
     llm_output_payload: Mapping[str, object] | None = None
@@ -52,7 +51,6 @@ class RecordWorkItemAttemptOutcome:
             finished_at=command.finished_at,
             outcome_status=command.outcome_status,
             error_kind=command.error_kind,
-            next_attempt_at=command.next_attempt_at,
             retry_plan=command.retry_plan,
             validation_metadata=command.validation_metadata,
             llm_output_payload=command.llm_output_payload,

@@ -122,7 +122,7 @@ class CancelClaimExtractionStage:
             if item.status in {
                 WorkItemStatus.READY,
                 WorkItemStatus.LEASED,
-                WorkItemStatus.DEFERRED,
+                WorkItemStatus.RETRYABLE_FAILED,
                 WorkItemStatus.USER_ACTION_REQUIRED,
             }:
                 cancelled_items.append(_cancel_item(item, reason=command.reason))

@@ -33,7 +33,7 @@ class PostgresWorkItemProgressReadRepository(WorkItemProgressReadRepositoryPort)
             SELECT
                 COUNT(*) FILTER (WHERE wi.status = 'ready') AS ready_count,
                 COUNT(*) FILTER (WHERE wi.status = 'leased') AS leased_count,
-                COUNT(*) FILTER (WHERE wi.status = 'deferred') AS deferred_count,
+                0 AS deferred_count,
                 COUNT(*) FILTER (WHERE wi.status = 'retryable_failed') AS retryable_failed_count,
                 COUNT(*) FILTER (WHERE wi.status = 'completed') AS completed_count,
                 COUNT(*) FILTER (WHERE wi.status = 'terminal_failed') AS terminal_failed_count,
@@ -41,19 +41,9 @@ class PostgresWorkItemProgressReadRepository(WorkItemProgressReadRepositoryPort)
                 COUNT(*) FILTER (WHERE wi.status = 'split_superseded') AS split_superseded_count,
                 COUNT(*) FILTER (WHERE wi.status = 'user_action_required') AS user_action_required_count,
                 COUNT(*) AS total_count,
-                MIN(wi.next_attempt_at) FILTER (
-                    WHERE wi.status = 'retryable_failed'
-                      AND wi.next_attempt_at IS NOT NULL
-                      AND wi.next_attempt_at > $3
-                ) AS next_due_at,
-                COUNT(*) FILTER (
-                    WHERE wi.status = 'deferred'
-                      AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $3)
-                ) AS due_deferred_count,
-                COUNT(*) FILTER (
-                    WHERE wi.status = 'retryable_failed'
-                      AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $3)
-                ) AS due_retryable_failed_count
+                NULL::timestamptz AS next_due_at,
+                0 AS due_deferred_count,
+                COUNT(*) FILTER (WHERE wi.status = 'retryable_failed') AS due_retryable_failed_count
             FROM execution_work_items wi
             JOIN execution_work_item_schedules wis
               ON wis.work_item_id = wi.work_item_id
@@ -62,7 +52,6 @@ class PostgresWorkItemProgressReadRepository(WorkItemProgressReadRepositoryPort)
             """,
             work_kind.value,
             workflow_run_id,
-            now,
         )
         if row is None:
             return WorkItemProgressSummary(
@@ -94,7 +83,7 @@ def _summary_from_row(row: Mapping[str, object]) -> WorkItemProgressSummary:
         split_superseded_count=_row_int(row, "split_superseded_count"),
         user_action_required_count=_row_int(row, "user_action_required_count"),
         total_count=_row_int(row, "total_count"),
-        next_due_at=_row_optional_datetime(row, "next_due_at"),
+        next_due_at=None,
         due_deferred_count=_row_int(row, "due_deferred_count"),
         due_retryable_failed_count=_row_int(row, "due_retryable_failed_count"),
     )
@@ -104,13 +93,4 @@ def _row_int(row: Mapping[str, object], key: str) -> int:
     value = row[key]
     if not isinstance(value, int):
         raise TypeError(f"{key} must be int")
-    return value
-
-
-def _row_optional_datetime(row: Mapping[str, object], key: str) -> datetime | None:
-    value = row[key]
-    if value is None:
-        return None
-    if not isinstance(value, datetime):
-        raise TypeError(f"{key} must be datetime or None")
     return value

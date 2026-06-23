@@ -73,7 +73,6 @@ class PostgresExpiredLeaseRecoveryRepository:
                     leased_by = NULL,
                     lease_token = NULL,
                     lease_expires_at = NULL,
-                    next_attempt_at = NULL,
                     last_error_kind = 'lease_expired',
                     retry_plan = NULL,
                     updated_at = GREATEST($1, wi.created_at)

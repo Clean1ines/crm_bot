@@ -139,7 +139,7 @@ def claim_extraction_stage_readiness(
 
     ready_count = _count_status(work_items, WorkItemStatus.READY)
     leased_count = _count_status(work_items, WorkItemStatus.LEASED)
-    deferred_count = _count_status(work_items, WorkItemStatus.DEFERRED)
+    deferred_count = 0
     retryable_failed_count = _count_status(work_items, WorkItemStatus.RETRYABLE_FAILED)
     user_action_required_count = _count_status(
         work_items,
@@ -215,7 +215,7 @@ def _stage_status(
     if user_action_required_count > 0:
         return ClaimExtractionStageStatus.USER_ACTION_REQUIRED
 
-    if deferred_count > 0 or retryable_failed_count > 0:
+    if retryable_failed_count > 0:
         return ClaimExtractionStageStatus.WAITING
 
     if leased_count > 0:

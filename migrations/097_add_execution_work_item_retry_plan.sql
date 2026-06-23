@@ -32,6 +32,6 @@ BEGIN
     END IF;
 END $$;
 
-CREATE INDEX IF NOT EXISTS idx_execution_work_items_due_retry_plan
-    ON execution_work_items (work_kind, status, retry_plan, next_attempt_at, updated_at)
+CREATE INDEX IF NOT EXISTS idx_execution_work_items_retry_plan
+    ON execution_work_items (work_kind, status, retry_plan, updated_at, work_item_id)
     WHERE status = 'retryable_failed';

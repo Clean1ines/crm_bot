@@ -144,7 +144,6 @@ class WorkbenchSectionQueueItemLiveView:
     status: str
     attempt_count: int
     lease_expires_at: datetime | None
-    next_attempt_at: datetime | None
     claimed_by_worker_id: str | None
     error_kind: str | None
     retry_plan: str | None
@@ -161,7 +160,6 @@ class WorkbenchSectionQueueItemLiveView:
             "status": self.status,
             "attempt_count": self.attempt_count,
             "lease_expires_at": _dt(self.lease_expires_at),
-            "next_attempt_at": _dt(self.next_attempt_at),
             "claimed_by_worker_id": self.claimed_by_worker_id,
             "error_kind": self.error_kind,
             "retry_plan": self.retry_plan,
@@ -223,7 +221,6 @@ class WorkbenchLlmAttemptLiveView:
     daily_reset_at: datetime | None
     error_kind: str | None
     error_message_user: str | None
-    next_attempt_at: datetime | None
     retry_plan: str | None
     user_action_required: bool
     blocked_reason: str | None
@@ -252,7 +249,6 @@ class WorkbenchLlmAttemptLiveView:
             "daily_reset_at": _dt(self.daily_reset_at),
             "error_kind": self.error_kind,
             "error_message_user": self.error_message_user,
-            "next_attempt_at": _dt(self.next_attempt_at),
             "retry_plan": self.retry_plan,
             "user_action_required": self.user_action_required,
             "blocked_reason": self.blocked_reason,

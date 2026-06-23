@@ -12,7 +12,6 @@ from src.contexts.execution_runtime.domain.events.work_item_events import WorkIt
 from src.contexts.execution_runtime.domain.state_machines.work_item_state_machine import (
     WorkItemStateMachine,
 )
-from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -29,20 +28,12 @@ class FailWorkItemCommand:
     mode: WorkItemFailureMode
     error_kind: str
     occurred_at: datetime
-    next_attempt_at: WaitUntil | None = None
 
     def __post_init__(self) -> None:
         if not self.error_kind or not self.error_kind.strip():
             raise ValueError("error_kind must be non-empty")
         if self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None:
             raise ValueError("occurred_at must be timezone-aware")
-        if self.mode is WorkItemFailureMode.RETRYABLE and self.next_attempt_at is None:
-            raise ValueError("retryable failure requires next_attempt_at")
-        if (
-            self.mode is WorkItemFailureMode.TERMINAL
-            and self.next_attempt_at is not None
-        ):
-            raise ValueError("terminal failure must not have next_attempt_at")
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,12 +50,9 @@ class FailWorkItem:
 
     def execute(self, command: FailWorkItemCommand) -> FailWorkItemResult:
         if command.mode is WorkItemFailureMode.RETRYABLE:
-            if command.next_attempt_at is None:
-                raise ValueError("retryable failure requires next_attempt_at")
             failed_item = WorkItemStateMachine.fail_leased_retryable(
                 command.item,
                 error_kind=command.error_kind,
-                next_attempt_at=command.next_attempt_at,
             )
         else:
             failed_item = WorkItemStateMachine.fail_leased_terminal(

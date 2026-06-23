@@ -17,7 +17,6 @@ class WorkItemAttemptOutcomeStatus(StrEnum):
     SUCCEEDED = "succeeded"
     RETRYABLE_FAILED = "retryable_failed"
     TERMINAL_FAILED = "terminal_failed"
-    DEFERRED = "deferred"
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +28,6 @@ class WorkItemAttemptOutcomeRecord:
     finished_at: datetime
     outcome_status: WorkItemAttemptOutcomeStatus
     error_kind: str | None = None
-    next_attempt_at: datetime | None = None
     retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
     llm_output_payload: Mapping[str, object] | None = None
@@ -57,12 +55,6 @@ class WorkItemAttemptOutcomeRecord:
         ):
             raise TypeError("retry_plan must be WorkItemRetryPlan when provided")
 
-        if self.retry_plan is not None and not isinstance(
-            self.retry_plan,
-            WorkItemRetryPlan,
-        ):
-            raise TypeError("retry_plan must be WorkItemRetryPlan when provided")
-
         if self.validation_metadata is not None and not isinstance(
             self.validation_metadata,
             Mapping,
@@ -73,24 +65,19 @@ class WorkItemAttemptOutcomeRecord:
             Mapping,
         ):
             raise TypeError("llm_output_payload must be Mapping when provided")
+
         if self.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
             if self.error_kind is not None:
                 raise ValueError("error_kind must be None for succeeded outcome")
-            if self.next_attempt_at is not None:
-                raise ValueError("next_attempt_at must be None for succeeded outcome")
             if self.retry_plan is not None:
                 raise ValueError("retry_plan must be None for succeeded outcome")
             return
 
         if self.error_kind is None:
-            raise ValueError("error_kind is required for failed/deferred outcomes")
+            raise ValueError("error_kind is required for failed outcomes")
         _require_non_empty_text(self.error_kind, field_name="error_kind")
 
         if self.outcome_status is WorkItemAttemptOutcomeStatus.TERMINAL_FAILED:
-            if self.next_attempt_at is not None:
-                raise ValueError(
-                    "next_attempt_at must be None for terminal failed outcome",
-                )
             if self.retry_plan is not None:
                 raise ValueError(
                     "retry_plan must be None for terminal failed outcome",
@@ -98,34 +85,11 @@ class WorkItemAttemptOutcomeRecord:
             return
 
         if self.outcome_status is WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED:
-            if self.next_attempt_at is not None:
-                _require_timezone_aware(
-                    self.next_attempt_at,
-                    field_name="next_attempt_at",
-                )
-                if self.next_attempt_at <= self.finished_at:
-                    raise ValueError("next_attempt_at must be after finished_at")
             if self.retry_plan is None:
                 raise ValueError(
                     "retry_plan is required for retryable outcomes",
                 )
             return
-
-        if self.outcome_status is WorkItemAttemptOutcomeStatus.DEFERRED:
-            if self.next_attempt_at is None:
-                raise ValueError(
-                    "next_attempt_at is required for deferred outcomes",
-                )
-            _require_timezone_aware(
-                self.next_attempt_at,
-                field_name="next_attempt_at",
-            )
-            if self.next_attempt_at <= self.finished_at:
-                raise ValueError("next_attempt_at must be after finished_at")
-            if self.retry_plan is None:
-                raise ValueError(
-                    "retry_plan is required for deferred outcomes",
-                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +101,6 @@ class RecordedWorkItemAttemptOutcome:
     outcome_status: WorkItemAttemptOutcomeStatus
     work_item: WorkItem
     error_kind: str | None = None
-    next_attempt_at: datetime | None = None
     retry_plan: WorkItemRetryPlan | None = None
     validation_metadata: Mapping[str, object] | None = None
     llm_output_payload: Mapping[str, object] | None = None
@@ -173,48 +136,20 @@ class RecordedWorkItemAttemptOutcome:
         if self.outcome_status is WorkItemAttemptOutcomeStatus.SUCCEEDED:
             if self.error_kind is not None:
                 raise ValueError("error_kind must be None for succeeded outcome")
-            if self.next_attempt_at is not None:
-                raise ValueError("next_attempt_at must be None for succeeded outcome")
             if self.retry_plan is not None:
                 raise ValueError("retry_plan must be None for succeeded outcome")
             return
 
         if self.error_kind is None:
-            raise ValueError("error_kind is required for failed/deferred outcomes")
+            raise ValueError("error_kind is required for failed outcomes")
         _require_non_empty_text(self.error_kind, field_name="error_kind")
 
         if self.outcome_status is WorkItemAttemptOutcomeStatus.TERMINAL_FAILED:
-            if self.next_attempt_at is not None:
-                raise ValueError(
-                    "next_attempt_at must be None for terminal failed outcome",
-                )
             if self.retry_plan is not None:
                 raise ValueError(
                     "retry_plan must be None for terminal failed outcome",
                 )
             return
-
-        if self.outcome_status is WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED:
-            if self.next_attempt_at is not None:
-                _require_timezone_aware(
-                    self.next_attempt_at,
-                    field_name="next_attempt_at",
-                )
-                if self.next_attempt_at <= self.finished_at:
-                    raise ValueError("next_attempt_at must be after finished_at")
-            return
-
-        if self.outcome_status is WorkItemAttemptOutcomeStatus.DEFERRED:
-            if self.next_attempt_at is None:
-                raise ValueError(
-                    "next_attempt_at is required for deferred outcomes",
-                )
-            _require_timezone_aware(
-                self.next_attempt_at,
-                field_name="next_attempt_at",
-            )
-            if self.next_attempt_at <= self.finished_at:
-                raise ValueError("next_attempt_at must be after finished_at")
 
 
 class WorkItemAttemptOutcomeRepositoryPort(Protocol):

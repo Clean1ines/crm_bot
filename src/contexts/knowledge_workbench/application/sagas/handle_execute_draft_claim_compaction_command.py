@@ -104,7 +104,6 @@ class DraftClaimCompactionLlmDispatchOutputValidator:
             return LlmDispatchOutputValidationResult(
                 status=llm_status,
                 error_kind=None,
-                next_attempt_at=None,
                 metadata={
                     "draft_claim_compaction_validation_decision": None,
                     "expected_output_kind": self.expected_output_kind.value,
@@ -129,7 +128,6 @@ class DraftClaimCompactionLlmDispatchOutputValidator:
                 return LlmDispatchOutputValidationResult(
                     status=LlmDispatchExecutionStatus.SUCCEEDED,
                     error_kind=None,
-                    next_attempt_at=None,
                     metadata={
                         "draft_claim_compaction_validation_decision": "valid_output",
                         "expected_output_kind": self.expected_output_kind.value,
@@ -151,7 +149,6 @@ class DraftClaimCompactionLlmDispatchOutputValidator:
             return LlmDispatchOutputValidationResult(
                 status=LlmDispatchExecutionStatus.SUCCEEDED,
                 error_kind=None,
-                next_attempt_at=None,
                 metadata={
                     "draft_claim_compaction_validation_decision": "valid_output",
                     "expected_output_kind": self.expected_output_kind.value,
@@ -165,7 +162,6 @@ class DraftClaimCompactionLlmDispatchOutputValidator:
             return LlmDispatchOutputValidationResult(
                 status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
                 error_kind="draft_claim_compaction_output_validation_failed",
-                next_attempt_at=None,
                 metadata={
                     "draft_claim_compaction_validation_decision": "invalid_output",
                     "expected_output_kind": self.expected_output_kind.value,
@@ -873,9 +869,6 @@ def _event_payload(
         ),
         "outcome_status": execution_result.llm_result.status.value,
         "error_kind": execution_result.llm_result.error_kind,
-        "next_attempt_at": _datetime_payload(
-            execution_result.llm_result.next_attempt_at
-        ),
         "provider": _json_payload_value(capacity_payload, "provider"),
         "account_ref": _json_payload_value(capacity_payload, "account_ref"),
         "model_ref": _json_payload_value(capacity_payload, "model_ref"),
@@ -955,7 +948,7 @@ async def _save_progress_snapshot(
     )
 
     completed_delta = 1 if status is LlmDispatchExecutionStatus.SUCCEEDED else 0
-    deferred_delta = 1 if status is LlmDispatchExecutionStatus.DEFERRED else 0
+    deferred_delta = 0
     retryable_delta = 1 if status is LlmDispatchExecutionStatus.RETRYABLE_FAILED else 0
     terminal_delta = 1 if status is LlmDispatchExecutionStatus.TERMINAL_FAILED else 0
     running_before = existing.running_work_items if existing is not None else 0
@@ -1056,10 +1049,7 @@ def _severity_for_status(
 ) -> WorkflowTimelineSeverity:
     if status is LlmDispatchExecutionStatus.SUCCEEDED:
         return WorkflowTimelineSeverity.INFO
-    if status in {
-        LlmDispatchExecutionStatus.DEFERRED,
-        LlmDispatchExecutionStatus.RETRYABLE_FAILED,
-    }:
+    if status is LlmDispatchExecutionStatus.RETRYABLE_FAILED:
         return WorkflowTimelineSeverity.WARNING
     return WorkflowTimelineSeverity.ERROR
 

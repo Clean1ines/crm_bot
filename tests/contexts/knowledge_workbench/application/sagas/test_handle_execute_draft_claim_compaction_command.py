@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import inspect
 
 import pytest
@@ -347,9 +347,6 @@ def _execution_result(
             error_kind=None
             if status is LlmDispatchExecutionStatus.SUCCEEDED
             else "provider_error",
-            next_attempt_at=_now() + timedelta(seconds=60)
-            if status is LlmDispatchExecutionStatus.DEFERRED
-            else None,
             capacity_observation={
                 "provider": "groq",
                 "account_ref": "groq_org_primary",

@@ -41,7 +41,6 @@ LOGGER = structlog.get_logger(__name__)
 class LlmDispatchOutputValidationResult:
     status: LlmDispatchExecutionStatus
     error_kind: str | None
-    next_attempt_at: datetime | None
     metadata: Mapping[str, object]
 
     def __post_init__(self) -> None:
@@ -49,26 +48,16 @@ class LlmDispatchOutputValidationResult:
             raise TypeError("status must be LlmDispatchExecutionStatus")
         if self.error_kind is not None:
             _require_non_empty_text(self.error_kind, field_name="error_kind")
-        if self.next_attempt_at is not None:
-            _require_timezone_aware(self.next_attempt_at, field_name="next_attempt_at")
         if not isinstance(self.metadata, Mapping):
             raise TypeError("metadata must be Mapping")
 
         if self.status is LlmDispatchExecutionStatus.SUCCEEDED:
             if self.error_kind is not None:
                 raise ValueError("error_kind must be None for succeeded validation")
-            if self.next_attempt_at is not None:
-                raise ValueError(
-                    "next_attempt_at must be None for succeeded validation"
-                )
             return
 
         if self.error_kind is None:
             raise ValueError("error_kind is required for non-succeeded validation")
-
-        if self.status is LlmDispatchExecutionStatus.DEFERRED:
-            if self.next_attempt_at is None:
-                raise ValueError("next_attempt_at is required for deferred validation")
 
 
 class LlmDispatchOutputValidationPort(Protocol):
@@ -183,9 +172,6 @@ class ExecutePreparedLlmDispatchAttempt:
             attempt_number=dispatch.attempt_number,
             provider_status=provider_llm_result.status.value,
             provider_error_kind=provider_llm_result.error_kind,
-            provider_next_attempt_at=provider_llm_result.next_attempt_at.isoformat()
-            if provider_llm_result.next_attempt_at is not None
-            else None,
             has_output_payload=provider_llm_result.output_payload is not None,
             has_capacity_observation=provider_llm_result.capacity_observation
             is not None,
@@ -207,9 +193,6 @@ class ExecutePreparedLlmDispatchAttempt:
             attempt_number=dispatch.attempt_number,
             effective_status=llm_result.status.value,
             effective_error_kind=llm_result.error_kind,
-            effective_next_attempt_at=llm_result.next_attempt_at.isoformat()
-            if llm_result.next_attempt_at is not None
-            else None,
             validation_status=validation_result.status.value
             if validation_result is not None
             else None,
@@ -230,7 +213,6 @@ class ExecutePreparedLlmDispatchAttempt:
                 finished_at=llm_result.finished_at,
                 outcome_status=_map_status(llm_result.status),
                 error_kind=llm_result.error_kind,
-                next_attempt_at=llm_result.next_attempt_at,
                 retry_plan=_retry_plan_for_result(
                     llm_result=llm_result,
                     validation_metadata=(
@@ -298,7 +280,6 @@ def _llm_result_from_recorded_outcome(
         if status is LlmDispatchExecutionStatus.SUCCEEDED
         else None,
         error_kind=recorded_outcome.error_kind,
-        next_attempt_at=recorded_outcome.next_attempt_at,
     )
 
 
@@ -311,8 +292,6 @@ def _map_recorded_outcome_status(
         return LlmDispatchExecutionStatus.RETRYABLE_FAILED
     if status is WorkItemAttemptOutcomeStatus.TERMINAL_FAILED:
         return LlmDispatchExecutionStatus.TERMINAL_FAILED
-    if status is WorkItemAttemptOutcomeStatus.DEFERRED:
-        return LlmDispatchExecutionStatus.RETRYABLE_FAILED
     raise ValueError("unsupported recorded attempt outcome status")
 
 
@@ -387,7 +366,6 @@ def _effective_llm_result(
         finished_at=provider_llm_result.finished_at,
         output_payload=provider_llm_result.output_payload,
         error_kind=validation_result.error_kind,
-        next_attempt_at=validation_result.next_attempt_at,
         capacity_observation=provider_llm_result.capacity_observation,
     )
 
@@ -401,8 +379,6 @@ def _map_status(
         return WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED
     if status is LlmDispatchExecutionStatus.TERMINAL_FAILED:
         return WorkItemAttemptOutcomeStatus.TERMINAL_FAILED
-    if status is LlmDispatchExecutionStatus.DEFERRED:
-        return WorkItemAttemptOutcomeStatus.RETRYABLE_FAILED
     raise ValueError("unsupported LLM dispatch execution status")
 
 

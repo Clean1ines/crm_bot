@@ -11,7 +11,6 @@ class LlmDispatchExecutionStatus(StrEnum):
     SUCCEEDED = "succeeded"
     RETRYABLE_FAILED = "retryable_failed"
     TERMINAL_FAILED = "terminal_failed"
-    DEFERRED = "deferred"
 
 
 _REQUIRED_DISPATCH_PAYLOAD_KEYS = frozenset(
@@ -62,7 +61,6 @@ class LlmDispatchExecutionResult:
     finished_at: datetime
     output_payload: Mapping[str, object] | None = None
     error_kind: str | None = None
-    next_attempt_at: datetime | None = None
     capacity_observation: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
@@ -79,14 +77,6 @@ class LlmDispatchExecutionResult:
         if self.error_kind is not None:
             _require_non_empty_text(self.error_kind, field_name="error_kind")
 
-        if self.next_attempt_at is not None:
-            _require_timezone_aware(
-                self.next_attempt_at,
-                field_name="next_attempt_at",
-            )
-            if self.next_attempt_at <= self.finished_at:
-                raise ValueError("next_attempt_at must be after finished_at")
-
         if self.capacity_observation is not None and not isinstance(
             self.capacity_observation,
             Mapping,
@@ -98,18 +88,10 @@ class LlmDispatchExecutionResult:
                 raise ValueError("output_payload is required for succeeded result")
             if self.error_kind is not None:
                 raise ValueError("error_kind must be None for succeeded result")
-            if self.next_attempt_at is not None:
-                raise ValueError("next_attempt_at must be None for succeeded result")
             return
 
         if self.error_kind is None:
-            raise ValueError("error_kind is required for failed/deferred results")
-
-        if (
-            self.status is LlmDispatchExecutionStatus.DEFERRED
-            and self.next_attempt_at is None
-        ):
-            raise ValueError("next_attempt_at is required for deferred result")
+            raise ValueError("error_kind is required for failed results")
 
 
 class LlmDispatchExecutorPort(Protocol):

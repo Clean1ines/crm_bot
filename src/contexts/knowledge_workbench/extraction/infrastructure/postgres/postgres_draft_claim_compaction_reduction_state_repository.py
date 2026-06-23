@@ -140,7 +140,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             SELECT
                 COUNT(*) FILTER (WHERE status = 'ready') AS ready_work_item_count,
                 COUNT(*) FILTER (WHERE status = 'leased') AS leased_work_item_count,
-                COUNT(*) FILTER (WHERE status = 'deferred') AS deferred_work_item_count,
+                0::int AS deferred_work_item_count,
                 COUNT(*) FILTER (
                     WHERE status = 'retryable_failed'
                 ) AS retryable_failed_work_item_count,
@@ -154,24 +154,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     WHERE status IN (
                         'ready',
                         'leased',
-                        'deferred',
                         'retryable_failed'
                     )
                 ) AS active_work_item_count,
                 COUNT(*) FILTER (
-                    WHERE status = 'ready'
-                       OR (
-                           status IN ('deferred', 'retryable_failed')
-                           AND (
-                               next_attempt_at IS NULL
-                               OR next_attempt_at <= now()
-                           )
-                       )
+                    WHERE status IN ('ready', 'retryable_failed')
                 ) AS due_waiting_work_item_count,
-                MIN(next_attempt_at) FILTER (
-                    WHERE status IN ('deferred', 'retryable_failed')
-                      AND next_attempt_at > now()
-                ) AS next_due_at
+                NULL::timestamptz AS next_due_at
             FROM execution_work_items
             WHERE work_kind = 'knowledge_workbench.draft_claim_compaction'
               AND work_item_id LIKE $1
@@ -455,7 +444,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             pending_work_item_count=sum(
                 1
                 for item in pending_work_items
-                if item.work_item_status in {"ready", "deferred", "retryable_failed"}
+                if item.work_item_status in {"ready", "retryable_failed"}
             ),
             leased_or_running_count=sum(
                 1 for item in pending_work_items if item.work_item_status == "leased"
@@ -512,7 +501,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rows = await self._connection.fetch(
             """
             SELECT wi.work_item_id, wi.status, wi.created_at, wi.updated_at,
-                   wi.next_attempt_at, ws.payload AS schedule_payload,
+                   ws.payload AS schedule_payload,
                    latest_dispatch.attempt_id AS dispatch_attempt_id,
                    latest_dispatch.llm_allocation_payload AS llm_allocation_payload
             FROM execution_work_items AS wi
@@ -528,7 +517,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             WHERE wi.work_kind = 'knowledge_workbench.draft_claim_compaction'
               AND wi.work_item_id LIKE $1
               AND wi.status IN (
-                'ready', 'leased', 'deferred', 'retryable_failed',
+                'ready', 'leased', 'retryable_failed',
                 'user_action_required'
               )
               AND ($2::text IS NULL OR ws.payload->>'group_ref' = $2)
@@ -1640,7 +1629,7 @@ def _pending_reduction_work_read_model(
         work_item_status=status,
         dispatch_attempt_id=_optional_row_text(row, "dispatch_attempt_id"),
         capacity_window_key=capacity_window_key,
-        capacity_waiting=status in {"deferred", "retryable_failed"},
+        capacity_waiting=False,
         provider=provider,
         account_ref=account_ref,
         model_id=model_id,
@@ -1688,8 +1677,8 @@ def _text_tuple_from_payload(
 
 
 def _waiting_reason_from_status(status: str) -> str | None:
-    if status in {"deferred", "retryable_failed"}:
-        return "capacity_or_retry_wait"
+    if status == "retryable_failed":
+        return "retryable_failure_ready_for_admission"
     if status == "leased":
         return "leased_or_running"
     if status == "ready":

@@ -9,7 +9,6 @@ CREATE TABLE IF NOT EXISTS execution_work_items (
     leased_by text NULL,
     lease_token text NULL,
     lease_expires_at timestamptz NULL,
-    next_attempt_at timestamptz NULL,
     last_error_kind text NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -25,7 +24,6 @@ CREATE TABLE IF NOT EXISTS execution_work_items (
             status IN (
                 'ready',
                 'leased',
-                'deferred',
                 'retryable_failed',
                 'terminal_failed',
                 'completed',
@@ -53,18 +51,6 @@ CREATE TABLE IF NOT EXISTS execution_work_items (
                 AND lease_token IS NULL
                 AND lease_expires_at IS NULL
             )
-        ),
-
-    CONSTRAINT chk_execution_work_items_terminal_no_next_attempt
-        CHECK (
-            status NOT IN (
-                'terminal_failed',
-                'completed',
-                'cancelled',
-                'split_superseded',
-                'user_action_required'
-            )
-            OR next_attempt_at IS NULL
         ),
 
     CONSTRAINT chk_execution_work_items_updated_after_created
@@ -97,8 +83,9 @@ CREATE TABLE IF NOT EXISTS execution_work_item_attempts (
         UNIQUE (work_item_id, attempt_number)
 );
 
-CREATE INDEX IF NOT EXISTS idx_execution_work_items_ready_due
-    ON execution_work_items (work_kind, status, next_attempt_at, updated_at);
+CREATE INDEX IF NOT EXISTS idx_execution_work_items_ready_retry_priority
+    ON execution_work_items (work_kind, status, updated_at, work_item_id)
+    WHERE status IN ('retryable_failed', 'ready');
 
 CREATE INDEX IF NOT EXISTS idx_execution_work_items_lease_expiry
     ON execution_work_items (status, lease_expires_at)

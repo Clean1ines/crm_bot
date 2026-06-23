@@ -19,7 +19,7 @@ class WorkItemProgressSummary:
     split_superseded_count: int
     user_action_required_count: int
     total_count: int
-    next_due_at: datetime | None
+    next_due_at: datetime | None = None
     due_deferred_count: int = 0
     due_retryable_failed_count: int = 0
 
@@ -65,7 +65,7 @@ class WorkItemProgressSummary:
 
     @property
     def due_waiting_count(self) -> int:
-        return self.ready_count + self.due_retryable_failed_count
+        return self.ready_count + self.retryable_failed_count
 
     @property
     def terminal_coverage_count(self) -> int:
@@ -79,8 +79,7 @@ class WorkItemProgressSummary:
 
     @property
     def has_future_waiting_work(self) -> bool:
-        future_retryable = self.retryable_failed_count - self.due_retryable_failed_count
-        return future_retryable > 0
+        return False
 
     def to_payload(self) -> dict[str, object]:
         return {
@@ -94,9 +93,7 @@ class WorkItemProgressSummary:
             "split_superseded_count": self.split_superseded_count,
             "user_action_required_count": self.user_action_required_count,
             "total_count": self.total_count,
-            "next_due_at": self.next_due_at.isoformat()
-            if self.next_due_at is not None
-            else None,
+            "next_due_at": None,
             "due_deferred_count": self.due_deferred_count,
             "due_retryable_failed_count": self.due_retryable_failed_count,
         }
@@ -120,7 +117,5 @@ def _require_non_negative_int(value: int, field_name: str) -> None:
 
 
 def _require_timezone_aware(value: datetime, field_name: str) -> None:
-    if not isinstance(value, datetime):
-        raise TypeError(f"{field_name} must be datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")

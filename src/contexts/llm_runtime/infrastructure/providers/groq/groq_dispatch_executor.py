@@ -246,8 +246,6 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             error_kind=error_kind,
             wait_until=wait_until,
         )
-        next_attempt_at = wait_until if isinstance(wait_until, datetime) else None
-
         LOGGER.warning(
             "knowledge_llm_groq_execution_failed",
             attempt_id=execution_input.attempt_id,
@@ -257,15 +255,14 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             model_ref=parsed.model_ref,
             error_kind=error_kind.value,
             mapped_status=status.value,
-            next_attempt_at=next_attempt_at.isoformat()
-            if next_attempt_at is not None
+            provider_wait_until=wait_until.isoformat()
+            if isinstance(wait_until, datetime)
             else None,
         )
         return LlmDispatchExecutionResult(
             status=status,
             finished_at=observed_at,
             error_kind=error_kind.value,
-            next_attempt_at=next_attempt_at,
             capacity_observation=_capacity_observation_payload(
                 parsed=parsed,
                 mapped=mapped,

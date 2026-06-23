@@ -30,7 +30,6 @@ from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_bui
     HandleExecuteClaimBuilderSectionCommand,
     HandleExecuteClaimBuilderSectionCommandHandler,
     HandleExecuteClaimBuilderSectionResult,
-    _event_type_for_status,
     _source_context_text,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
@@ -293,9 +292,6 @@ def _execution_result(
             status=status,
             finished_at=_finished_at(),
             error_kind="provider_error",
-            next_attempt_at=_finished_at() + timedelta(minutes=1)
-            if status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
-            else None,
             capacity_observation={**_capacity_payload(), "outcome_class": status.value},
         )
         work_status = (
@@ -349,7 +345,6 @@ class FakeExecutePreparedLlmDispatchAttempt:
                 finished_at=self.result.llm_result.finished_at,
                 output_payload=self.result.llm_result.output_payload,
                 error_kind=validation_result.error_kind,
-                next_attempt_at=validation_result.next_attempt_at,
                 capacity_observation=self.result.llm_result.capacity_observation,
             ),
             outcome_result=self.result.outcome_result,
@@ -811,7 +806,6 @@ async def test_projects_claim_builder_section_retryable_failed_event_once() -> N
         if event.projection_type == "workflow_claim_builder_section_retryable_failed"
     ]
     assert len(retryable) == 1
-    assert "next_attempt_at" not in retryable[0].payload
     assert "claim_builder_next_run_after" not in retryable[0].payload
     assert retryable[0].payload["source_unit_ref"] == "section-1"
     assert retryable[0].payload["retry_eligibility"] == "eligible_for_future_admission"
@@ -833,7 +827,6 @@ async def test_capacity_owned_minute_limit_does_not_project_item_retryable_faile
             status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
             finished_at=_finished_at(),
             error_kind="minute_limit",
-            next_attempt_at=_finished_at() + timedelta(seconds=30),
             capacity_observation={
                 **_capacity_payload(),
                 "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
@@ -922,10 +915,7 @@ async def test_reprojects_section_outcome_idempotently() -> None:
 
 
 def test_deferred_status_does_not_emit_deferred_canonical_event() -> None:
-    assert (
-        _event_type_for_status(LlmDispatchExecutionStatus.DEFERRED)
-        is not KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_DEFERRED
-    )
+    assert not hasattr(LlmDispatchExecutionStatus, "DEFERRED")
 
 
 def test_outcome_handler_projects_after_canonical_outbox_append() -> None:
@@ -1124,7 +1114,6 @@ async def test_llm_succeeded_invalid_claim_output_becomes_retryable_failed() -> 
             finished_at=_finished_at(),
             output_payload={"raw_text": '{"claims":[]}'},
             error_kind="claim_builder_output_validation_failed",
-            next_attempt_at=None,
             capacity_observation={
                 **_capacity_payload(),
                 "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
@@ -1440,7 +1429,6 @@ async def test_invalid_retry_decision_persists_zero_draft_claims() -> None:
             finished_at=_finished_at(),
             output_payload={"raw_text": '{"claims":[]}'},
             error_kind="claim_builder_output_validation_failed",
-            next_attempt_at=None,
             capacity_observation={
                 **_capacity_payload(),
                 "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
@@ -1602,7 +1590,6 @@ async def test_provider_minute_limit_maps_to_capacity_wait_action() -> None:
             status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
             finished_at=_finished_at(),
             error_kind="minute_limit",
-            next_attempt_at=_finished_at() + timedelta(seconds=30),
             capacity_observation={
                 **_capacity_payload(),
                 "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
@@ -1628,9 +1615,12 @@ async def test_provider_minute_limit_maps_to_capacity_wait_action() -> None:
         ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
     )
     assert event_payload["claim_builder_attempt_next_model_strategy"] == "SAME_MODEL"
+    assert event_payload["claim_builder_next_run_after"] is None
+
+    capacity_payload = workflow_unit_of_work.outbox.events[0].payload
     assert (
-        event_payload["claim_builder_next_run_after"]
-        == (_finished_at() + timedelta(seconds=30)).isoformat()
+        capacity_payload["minute_reset_at"]
+        == (_finished_at() + timedelta(minutes=1)).isoformat()
     )
 
 
@@ -1642,7 +1632,6 @@ async def test_provider_request_too_large_maps_to_larger_input_retry_metadata() 
             status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
             finished_at=_finished_at(),
             error_kind="request_too_large",
-            next_attempt_at=None,
             capacity_observation={
                 **_capacity_payload(),
                 "outcome_class": LlmDispatchExecutionStatus.RETRYABLE_FAILED.value,
@@ -1809,7 +1798,6 @@ async def test_provider_rate_limit_emits_capacity_window_exhausted() -> None:
     assert payload["reset_at"]
     assert payload["window_key"] == "groq:groq_org_primary:qwen/qwen3-32b"
     assert "minute_requests" in payload["exhausted_dimensions"]
-    assert "next_attempt_at" not in payload
     assert "retry_owner" not in payload
 
 
@@ -1848,7 +1836,6 @@ async def test_provider_rate_limit_may_emit_capacity_window_scheduled_wakeup() -
     assert wakeup_payload["run_after"]
     assert wakeup_payload["reset_at"]
     assert wakeup_payload["wakeup_reason"] == "provider_minute_reset"
-    assert "next_attempt_at" not in wakeup_payload
     assert "retry_owner" not in wakeup_payload
 
 

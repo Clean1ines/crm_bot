@@ -37,30 +37,34 @@ class DeferWorkItemResult:
 
 
 class DeferWorkItem:
-    """Defer a leased work item and commit the lifecycle event atomically."""
+    """Compatibility wrapper for old callers.
+
+    Canonical Execution Runtime no longer stores per-WorkItem retry timing.
+    The work item is returned to RETRYABLE_FAILED immediately; capacity/window
+    timing belongs to Workflow Runtime wakeups and Capacity Runtime observations.
+    """
 
     def __init__(self, *, unit_of_work: WorkItemUnitOfWorkPort) -> None:
         self._unit_of_work = unit_of_work
 
     def execute(self, command: DeferWorkItemCommand) -> DeferWorkItemResult:
-        deferred_item = WorkItemStateMachine.defer_leased(
+        retryable_item = WorkItemStateMachine.fail_leased_retryable(
             command.item,
-            wait_until=command.wait_until,
-            error_kind=command.error_kind,
+            error_kind=command.error_kind or "deferred_by_legacy_caller",
         )
         event = WorkItemDeferred(
-            work_item_id=deferred_item.work_item_id,
+            work_item_id=retryable_item.work_item_id,
             wait_until=command.wait_until.value,
             error_kind=command.error_kind,
             occurred_at=command.occurred_at,
         )
 
         try:
-            self._unit_of_work.save_work_item(deferred_item)
+            self._unit_of_work.save_work_item(retryable_item)
             self._unit_of_work.append_event(event)
             self._unit_of_work.commit()
         except Exception:
             self._unit_of_work.rollback()
             raise
 
-        return DeferWorkItemResult(item=deferred_item, event=event)
+        return DeferWorkItemResult(item=retryable_item, event=event)

@@ -18,7 +18,6 @@ from src.contexts.execution_runtime.domain.state_machines.work_item_state_machin
     WorkItemStateMachine,
 )
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
     WorkItemStatus,
 )
@@ -58,7 +57,6 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
                 wi.leased_by,
                 wi.lease_token,
                 wi.lease_expires_at,
-                wi.next_attempt_at,
                 wi.last_error_kind,
                 wi.created_at,
                 wi.updated_at,
@@ -68,20 +66,17 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
               ON wis.work_item_id = wi.work_item_id
             WHERE wi.work_kind = $1
               AND wi.status IN ('ready', 'retryable_failed')
-              AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $2)
             ORDER BY
               CASE wi.status
                 WHEN 'retryable_failed' THEN 0
                 WHEN 'ready' THEN 1
                 ELSE 2
               END,
-              wi.next_attempt_at NULLS FIRST,
               wi.updated_at,
               wi.work_item_id
             LIMIT $3
             """,
             work_kind.value,
-            now,
             requested_items,
         )
         return tuple(
@@ -111,7 +106,6 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
                 wi.leased_by,
                 wi.lease_token,
                 wi.lease_expires_at,
-                wi.next_attempt_at,
                 wi.last_error_kind,
                 wi.created_at,
                 wi.updated_at,
@@ -121,21 +115,18 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
               ON wis.work_item_id = wi.work_item_id
             WHERE wi.work_kind = $1
               AND wi.status IN ('ready', 'retryable_failed')
-              AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $2)
             ORDER BY
               CASE wi.status
                 WHEN 'retryable_failed' THEN 0
                 WHEN 'ready' THEN 1
                 ELSE 2
               END,
-              wi.next_attempt_at NULLS FIRST,
               wi.updated_at,
               wi.work_item_id
             FOR UPDATE SKIP LOCKED
             LIMIT 1
             """,
             work_kind.value,
-            now,
         )
         if row is None:
             return None
@@ -159,7 +150,6 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
                 leased_by = $4,
                 lease_token = $5,
                 lease_expires_at = $6,
-                next_attempt_at = NULL,
                 last_error_kind = NULL,
                 updated_at = GREATEST($7, created_at)
             WHERE work_item_id = $1
@@ -205,7 +195,6 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
                 wi.leased_by,
                 wi.lease_token,
                 wi.lease_expires_at,
-                wi.next_attempt_at,
                 wi.last_error_kind,
                 wi.created_at,
                 wi.updated_at,
@@ -216,13 +205,11 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
             WHERE wi.work_kind = $1
               AND wi.work_item_id = $2
               AND wi.status IN ('ready', 'retryable_failed')
-              AND (wi.next_attempt_at IS NULL OR wi.next_attempt_at <= $3)
             FOR UPDATE SKIP LOCKED
             LIMIT 1
             """,
             work_kind.value,
             work_item_id,
-            now,
         )
         if row is None:
             return None
@@ -246,7 +233,6 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
                 leased_by = $4,
                 lease_token = $5,
                 lease_expires_at = $6,
-                next_attempt_at = NULL,
                 last_error_kind = NULL,
                 updated_at = GREATEST($7, created_at)
             WHERE work_item_id = $1
@@ -277,10 +263,6 @@ def _hydrate_work_item(row: Mapping[str, object]) -> WorkItem:
     if lease_expires_at is not None and not isinstance(lease_expires_at, datetime):
         raise TypeError("lease_expires_at must be datetime or None")
 
-    next_attempt_at = row["next_attempt_at"]
-    if next_attempt_at is not None and not isinstance(next_attempt_at, datetime):
-        raise TypeError("next_attempt_at must be datetime or None")
-
     leased_by = row["leased_by"]
     lease_token = row["lease_token"]
     last_error_kind = row["last_error_kind"]
@@ -293,9 +275,6 @@ def _hydrate_work_item(row: Mapping[str, object]) -> WorkItem:
         leased_by=WorkerRef(str(leased_by)) if leased_by is not None else None,
         lease_token=LeaseToken(str(lease_token)) if lease_token is not None else None,
         lease_expires_at=lease_expires_at,
-        next_attempt_at=WaitUntil(next_attempt_at)
-        if next_attempt_at is not None
-        else None,
         last_error_kind=str(last_error_kind) if last_error_kind is not None else None,
     )
 

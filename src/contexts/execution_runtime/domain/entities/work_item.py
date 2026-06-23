@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
-from src.contexts.execution_runtime.domain.value_objects.wait_until import WaitUntil
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
@@ -20,7 +19,7 @@ class WorkItem:
     """Canonical generic unit of executable work.
 
     WorkItem is intentionally context-agnostic. It owns execution lifecycle only:
-    readiness, leasing, retry/defer/failure/cancellation and terminal completion.
+    readiness, leasing, retry/failure/cancellation and terminal completion.
     """
 
     work_item_id: str
@@ -30,7 +29,6 @@ class WorkItem:
     leased_by: WorkerRef | None = None
     lease_token: LeaseToken | None = None
     lease_expires_at: datetime | None = None
-    next_attempt_at: WaitUntil | None = None
     last_error_kind: str | None = None
     retry_plan: WorkItemRetryPlan | None = None
 
@@ -61,9 +59,6 @@ class WorkItem:
             ):
                 raise ValueError("Only LEASED WorkItem may carry lease fields")
 
-        if self.status.is_terminal and self.next_attempt_at is not None:
-            raise ValueError("Terminal WorkItem must not have next_attempt_at")
-
     def has_active_lease(self, now: datetime) -> bool:
         if self.status is not WorkItemStatus.LEASED or self.lease_expires_at is None:
             return False
@@ -74,8 +69,7 @@ class WorkItem:
     def is_due(self, now: datetime) -> bool:
         if now.tzinfo is None or now.utcoffset() is None:
             raise ValueError("now must be timezone-aware")
-        if self.status is WorkItemStatus.READY:
-            return True
-        if self.status is WorkItemStatus.RETRYABLE_FAILED:
-            return self.next_attempt_at is None or self.next_attempt_at.value <= now
-        return False
+        return self.status in {
+            WorkItemStatus.READY,
+            WorkItemStatus.RETRYABLE_FAILED,
+        }
