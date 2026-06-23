@@ -1,0 +1,317 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ARCH_DOC_PATH = (
+    REPO_ROOT
+    / "docs/architecture/provider_agnostic_capacity_and_budget_policy_model.md"
+)
+
+TEXT_SUFFIXES = {
+    ".py",
+    ".ts",
+    ".tsx",
+    ".sql",
+    ".md",
+    ".txt",
+    ".toml",
+    ".yaml",
+    ".yml",
+}
+
+SCAN_ROOTS = (
+    "src",
+    "frontend/src",
+    "migrations",
+    "dev_scripts",
+)
+
+SKIPPED_PARTS = {
+    ".git",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+}
+
+ARCH_ALLOWLIST_PREFIXES = (
+    "docs/architecture/",
+    "tests/architecture/",
+    "src/contexts/llm_runtime/infrastructure/providers/groq/",
+)
+
+PROVIDER_PROFILE_ALLOWLIST_PREFIXES = (
+    "src/contexts/llm_runtime/infrastructure/config/",
+    "src/contexts/llm_runtime/infrastructure/providers/groq/",
+)
+
+GROQ_FREE_FACT_MARKERS = (
+    "qwen/qwen3-32b",
+    "openai/gpt-oss-120b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "meta-llama/llama-4-scout",
+    "GPT_OSS_FREE_PLAN_TPM",
+    "CLAIM_BUILDER_MODEL_TPM_TOKENS",
+    "DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF",
+)
+
+KNOWN_GROQ_FREE_FACT_VIOLATION_PATHS = {
+    "frontend/src/shared/api/generated/schema.ts",
+    "frontend/src/shared/api/modules/aiPlayground.ts",
+    "src/agent/nodes/intent_extractor.py",
+    "src/application/ai_playground/contracts.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_apply_draft_claim_compaction_result_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_cluster_draft_claims_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_prepare_claim_builder_dispatch_batch_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_prepare_draft_claim_compaction_dispatch_batch_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_reconcile_draft_claim_compaction_progress_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py",
+    "src/contexts/knowledge_workbench/application/sagas/repair_knowledge_extraction_command_payload.py",
+    "src/contexts/knowledge_workbench/extraction/application/models/draft_claim_compaction_reduction_models.py",
+    "src/contexts/knowledge_workbench/extraction/application/policies/draft_claim_compaction_batch_budget_policy.py",
+    "src/contexts/knowledge_workbench/extraction/application/policies/draft_claim_compaction_reduction_planner_policy.py",
+    "src/contexts/knowledge_workbench/rag_eval/application/policies/workbench_rag_eval_question_generation_route_policy.py",
+    "src/contexts/knowledge_workbench/rag_eval/application/use_cases/generate_workbench_rag_eval_questions_batch.py",
+    "src/contexts/llm_runtime/application/capacity/resolve_llm_dispatch_preparation_strategy.py",
+    "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
+    "src/infrastructure/config/settings.py",
+    "src/interfaces/http/knowledge.py",
+}
+
+PROVIDER_GROQ_PATTERN = re.compile(r"provider\s*=\s*['\"]groq['\"]")
+
+KNOWN_PROVIDER_GROQ_VIOLATION_PATHS = {
+    "src/application/ai_playground/contracts.py",
+    "src/application/ai_playground/run_ai_playground.py",
+    "src/contexts/knowledge_workbench/application/sagas/append_capacity_window_prepare_wakeup.py",
+    "src/contexts/knowledge_workbench/application/sagas/claim_builder_dispatch_preparation.py",
+    "src/contexts/knowledge_workbench/application/sagas/repair_knowledge_extraction_command_payload.py",
+    "src/contexts/knowledge_workbench/rag_eval/application/policies/workbench_rag_eval_question_generation_route_policy.py",
+    "src/contexts/llm_runtime/application/capacity/resolve_llm_dispatch_preparation_strategy.py",
+    "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
+    "src/infrastructure/config/settings.py",
+    "src/interfaces/composition/ai_playground.py",
+    "src/interfaces/composition/knowledge_extraction_after_upload_composition.py",
+    "src/interfaces/composition/knowledge_extraction_workflow_resume.py",
+    "src/interfaces/composition/llm_dispatch_executor.py",
+    "src/interfaces/composition/prepare_llm_dispatch_batch.py",
+    "src/interfaces/http/limits.py",
+}
+
+RESERVED_OUTPUT_TOKEN_TARGET_TERMS = (
+    "estimated_output_tokens",
+    "request_output_cap_tokens",
+    "reserved_total_tokens",
+    "segmentation_input_safety_gap_tokens",
+)
+
+KNOWN_RESERVED_OUTPUT_TOKENS_PATHS = {
+    "src/contexts/knowledge_workbench/application/sagas/claim_builder_dispatch_preparation.py",
+    "src/contexts/knowledge_workbench/application/sagas/create_source_units_for_ingestion.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_apply_draft_claim_compaction_result_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_cluster_draft_claims_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/llm_provider_message_capacity_estimate.py",
+    "src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py",
+    "src/contexts/knowledge_workbench/application/sagas/source_ingestion_segmentation_profiles.py",
+    "src/contexts/knowledge_workbench/document_segmentation/domain/segmentation_budget.py",
+    "src/contexts/llm_runtime/application/policies/llm_quota_availability_policy.py",
+    "src/contexts/llm_runtime/infrastructure/providers/groq/groq_dispatch_executor.py",
+    "src/interfaces/composition/knowledge_extraction_degraded_fallback_confirmation.py",
+    "src/interfaces/composition/prepare_llm_dispatch_batch.py",
+    "src/interfaces/composition/source_ingestion_first_phase.py",
+}
+
+COMPACTION_FIT_BY_GROQ_TPM_MARKERS = (
+    "GPT_OSS_FREE_PLAN_TPM",
+    "_work_item_fits_primary_tpm",
+    "prompt_tokens + task_tokens + task_tokens",
+    "prompt + task + task",
+)
+
+KNOWN_COMPACTION_FIT_BY_GROQ_TPM_PATHS = {
+    "src/contexts/knowledge_workbench/extraction/application/policies/draft_claim_compaction_reduction_planner_policy.py",
+}
+
+DEFAULT_GROQ_CATALOG_MARKERS = (
+    "default_groq_llm_model_route_catalog",
+    "build_groq_free_plan_model_profiles",
+)
+
+KNOWN_DEFAULT_GROQ_CATALOG_PATHS = {
+    "src/contexts/knowledge_workbench/rag_eval/application/policies/workbench_rag_eval_question_generation_route_policy.py",
+    "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
+    "src/interfaces/composition/knowledge_extraction_after_upload_composition.py",
+    "src/interfaces/composition/knowledge_extraction_workflow_resume.py",
+    "src/interfaces/composition/prepare_llm_dispatch_batch.py",
+    "src/interfaces/http/limits.py",
+}
+
+
+def _repo_relative(path: Path) -> str:
+    return path.relative_to(REPO_ROOT).as_posix()
+
+
+def _has_allowed_prefix(path: Path, prefixes: tuple[str, ...]) -> bool:
+    rel = _repo_relative(path)
+    return any(rel.startswith(prefix) for prefix in prefixes)
+
+
+def _iter_text_files() -> tuple[Path, ...]:
+    files: list[Path] = []
+    for root_name in SCAN_ROOTS:
+        root = REPO_ROOT / root_name
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            if path.suffix not in TEXT_SUFFIXES:
+                continue
+            rel_parts = path.relative_to(REPO_ROOT).parts
+            if any(part in SKIPPED_PARTS for part in rel_parts):
+                continue
+            if path.name.startswith(".env"):
+                continue
+            files.append(path)
+    return tuple(files)
+
+
+def _read(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def _unknown_marker_paths(
+    *,
+    markers: tuple[str, ...],
+    known_paths: set[str],
+    extra_allowed_prefixes: tuple[str, ...] = (),
+) -> list[str]:
+    allowed_prefixes = ARCH_ALLOWLIST_PREFIXES + extra_allowed_prefixes
+    offenders: list[str] = []
+
+    for path in _iter_text_files():
+        if _has_allowed_prefix(path, allowed_prefixes):
+            continue
+        rel = _repo_relative(path)
+        source = _read(path)
+        matched = tuple(marker for marker in markers if marker in source)
+        if matched and rel not in known_paths:
+            offenders.append(f"{rel}: {', '.join(matched)}")
+
+    return offenders
+
+
+def test_architecture_document_contains_b0_boundary_contract() -> None:
+    source = _read(ARCH_DOC_PATH)
+
+    required_markers = (
+        "Groq Free is an exotic provider/deployment profile.",
+        "It must be implemented as a provider profile/policy implementation.",
+        "It must not define the domain model of Workbench, Execution Runtime,",
+        "DocumentSegmentationPolicy",
+        "SourceUnitSplitPolicy",
+        "PhaseTokenBudgetPolicy",
+        "ProviderCapacityAccountingPolicy",
+        "RequestOutputCapPolicy",
+        "RouteSelectionPolicy",
+        "AdmissionPolicy",
+        "RetryEstimatePolicy",
+        "AttemptDecisionPolicy",
+        "CompactionBatchingPolicy",
+        "CompactionReductionPolicy",
+        "PhaseCompletionPolicy",
+        "UserChoicePolicy",
+        "prompt_tokens      = input",
+        "completion_tokens  = output / answer",
+        "total_tokens       = input + output",
+        "max_completion_tokens = max output / max answer",
+        "reserved_output_tokens` is a legacy ambiguous symbol",
+        "GroqFreeCombinedTpmProfile owns:",
+        "OpenAI paid",
+        "DeepSeek cheap",
+        "Local GPU",
+        "B1a: vocabulary contract + compatibility mapping, no behavior change",
+        "B1b: request output cap policy, no admitted uncapped Groq requests",
+        "B1c: claim-builder estimate rename/split",
+        "B1d: estimator unification",
+    )
+
+    missing = [marker for marker in required_markers if marker not in source]
+    assert not missing, "\n".join(missing)
+
+
+def test_no_new_groq_free_facts_outside_profile_and_known_violations() -> None:
+    offenders = _unknown_marker_paths(
+        markers=GROQ_FREE_FACT_MARKERS,
+        known_paths=KNOWN_GROQ_FREE_FACT_VIOLATION_PATHS,
+    )
+
+    assert not offenders, "\n".join(offenders)
+
+
+def test_no_provider_groq_literal_in_generic_composition_or_admission_code() -> None:
+    offenders: list[str] = []
+
+    for path in _iter_text_files():
+        if _has_allowed_prefix(
+            path,
+            ARCH_ALLOWLIST_PREFIXES + PROVIDER_PROFILE_ALLOWLIST_PREFIXES,
+        ):
+            continue
+        rel = _repo_relative(path)
+        if rel in KNOWN_PROVIDER_GROQ_VIOLATION_PATHS:
+            continue
+        if PROVIDER_GROQ_PATTERN.search(_read(path)):
+            offenders.append(rel)
+
+    assert not offenders, "\n".join(offenders)
+
+
+def test_reserved_output_tokens_remains_legacy_only() -> None:
+    offenders = _unknown_marker_paths(
+        markers=("reserved_output_tokens",),
+        known_paths=KNOWN_RESERVED_OUTPUT_TOKENS_PATHS,
+    )
+
+    assert not offenders, "\n".join(offenders)
+
+    source = _read(ARCH_DOC_PATH)
+    for target_term in RESERVED_OUTPUT_TOKEN_TARGET_TERMS:
+        assert target_term in source
+
+
+def test_groq_admitted_request_requires_explicit_max_completion_tokens_marker() -> None:
+    source = _read(ARCH_DOC_PATH)
+
+    required_markers = (
+        "No admitted Groq request without explicit `max_completion_tokens`.",
+        "groq_dispatch_executor._resolve_max_completion_tokens",
+        "groq_chat_request_builder",
+    )
+
+    missing = [marker for marker in required_markers if marker not in source]
+    assert not missing, "\n".join(missing)
+
+
+def test_no_new_compaction_fit_by_groq_tpm_domain_policy() -> None:
+    offenders = _unknown_marker_paths(
+        markers=COMPACTION_FIT_BY_GROQ_TPM_MARKERS,
+        known_paths=KNOWN_COMPACTION_FIT_BY_GROQ_TPM_PATHS,
+    )
+
+    assert not offenders, "\n".join(offenders)
+
+
+def test_default_groq_catalog_is_not_generic_default() -> None:
+    offenders = _unknown_marker_paths(
+        markers=DEFAULT_GROQ_CATALOG_MARKERS,
+        known_paths=KNOWN_DEFAULT_GROQ_CATALOG_PATHS,
+        extra_allowed_prefixes=PROVIDER_PROFILE_ALLOWLIST_PREFIXES,
+    )
+
+    assert not offenders, "\n".join(offenders)
