@@ -1,5 +1,20 @@
 # Capacity Window Refactor Map
 
+Current status note after 924d8eda:
+The old WorkItem-owned next_attempt_at / DEFERRED model has now been removed
+from canonical runtime code and schema. Sections below that describe
+LlmDispatchExecutionResult.next_attempt_at, WorkItem.next_attempt_at,
+DEFERRED, or dual-write compatibility are historical migration context unless
+explicitly marked as still current. The current source of truth is
+current_workflow_frontend_capacity_cutover_checkpoint.md.
+
+CapacityWindow-specific supersession after 924d8eda:
+Patch 17C remains useful as historical baseline for the capacity/event boundary,
+but it is not the current final state. Section 2.5, "Legacy compatibility chain
+still exists after Patch 17C", is superseded by the runtime cutover in commit
+924d8eda: canonical WorkItem / LLM dispatch / execution outcome retry timers have
+been removed. Keep the section only as migration history.
+
 ## 1. Purpose
 
 Карта отделяет:
@@ -284,7 +299,12 @@ admission and selection. The generic LLM admitted lease composition is intention
 kept explicit: due records are supplied by the caller and selection metadata is
 bound before/at the lease boundary, not reconstructed later.
 
-## 2.5 Legacy compatibility chain still exists after Patch 17C
+## 2.5 Legacy compatibility chain still exists after Patch 17C (historical; superseded after 924d8eda)
+
+Superseded after 924d8eda: this section describes the Patch 17C baseline before
+the canonical next_attempt_at / DEFERRED removal. It is retained as migration
+history only. Current runtime source of truth is
+current_workflow_frontend_capacity_cutover_checkpoint.md.
 
 Patch 17C does not remove the compatibility path. Specifically, it does not:
 

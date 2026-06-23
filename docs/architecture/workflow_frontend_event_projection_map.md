@@ -1,5 +1,13 @@
 # Workflow Frontend Event Projection Map
 
+Current status note after 924d8eda:
+The old WorkItem-owned next_attempt_at / DEFERRED model has now been removed
+from canonical runtime code and schema. Sections below that describe
+LlmDispatchExecutionResult.next_attempt_at, WorkItem.next_attempt_at,
+DEFERRED, or dual-write compatibility are historical migration context unless
+explicitly marked as still current. The current source of truth is
+current_workflow_frontend_capacity_cutover_checkpoint.md.
+
 ## 1. Executive summary
 
 Текущий realtime-контур не передаёт frontend канонические workflow events. Любой
