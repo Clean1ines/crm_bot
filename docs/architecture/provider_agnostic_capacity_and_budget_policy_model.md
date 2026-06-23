@@ -1,7 +1,7 @@
 
 # Provider-agnostic capacity and budget policy model
 
-Status: B0 boundary contract.
+Status: B0 boundary contract + B1a compatibility map.
 
 This document freezes the boundary model before behavioral refactors. It does not migrate runtime code, token names, segmentation, compaction, capacity storage, or provider execution.
 
@@ -241,7 +241,91 @@ Expected differences:
 9. Fallback/user-choice/special route arrays may be empty.
 10. Hard provider limits and soft quality/business limits are separate concepts.
 
-## 8. B1 roadmap, explicitly split
+## 8. B1 compatibility map
+
+B1a is a documentation and guard-marker slice only. It does not rename runtime
+fields, rewrite payloads, change admission behavior, change request payloads, or
+change provider execution.
+
+B1a makes the legacy vocabulary compatibility contract explicit so B1b/B1c/B1d
+cannot continue treating `reserved_output_tokens` as a multi-meaning concept.
+
+### Legacy to target mapping
+
+| Legacy symbol / location | Current B0 meaning | Target vocabulary | Migration slice |
+| --- | --- | --- | --- |
+| legacy `reserved_output_tokens` in segmentation budget | input-side safety gap subtracted from source segment capacity | `segmentation_input_safety_gap_tokens` | B1d or dedicated segmentation vocabulary cleanup after B1a/B1b/B1c |
+| legacy `reserved_output_tokens` in claim-builder schedule payload | expected model answer size for the section | `estimated_output_tokens` | B1c |
+| legacy `reserved_output_tokens` in admission minimum output | minimum output that must fit the selected capacity window | `estimated_output_tokens` used as `minimum_output_tokens` | B1b/B1c boundary |
+| legacy `reserved_output_tokens` in Groq request executor | source used to derive the concrete Groq output cap | `request_output_cap_tokens` / output cap source | B1b |
+| legacy `estimated_prompt_tokens` in `LlmTaskCapacityProfile` | estimated prompt/input/context tokens | `estimated_input_tokens` | B1c/B1d compatibility rename |
+| legacy `estimated_completion_tokens` in `LlmTaskCapacityProfile` | estimated answer/completion tokens | `estimated_output_tokens` | B1c/B1d compatibility rename |
+| legacy `actual_prompt_tokens` in capacity observations | provider-reported input usage | `actual_input_tokens` | compatibility mapping before storage/API rename |
+| legacy `actual_completion_tokens` in capacity observations | provider-reported output usage | `actual_output_tokens` | compatibility mapping before storage/API rename |
+
+Required exact compatibility statements:
+
+legacy reserved_output_tokens in segmentation budget → segmentation_input_safety_gap_tokens
+
+legacy reserved_output_tokens in claim-builder schedule payload → estimated_output_tokens
+
+legacy reserved_output_tokens in admission minimum output → estimated_output_tokens used as minimum_output_tokens
+
+legacy reserved_output_tokens in Groq request executor → request_output_cap_tokens / output cap source
+
+legacy estimated_prompt_tokens in LlmTaskCapacityProfile → estimated_input_tokens
+
+legacy estimated_completion_tokens in LlmTaskCapacityProfile → estimated_output_tokens
+
+legacy actual_prompt_tokens in capacity observations → actual_input_tokens
+
+legacy actual_completion_tokens in capacity observations → actual_output_tokens
+
+### B1a target names, documentation only
+
+These names are contract markers for B1 planning. B1a must not implement them as
+runtime behavior unless a later slice explicitly changes code and tests:
+
+* `TokenBudgetCompatibilityMap`
+* `LegacyTokenBudgetFieldMapping`
+* `RequestOutputCapPolicy`
+* `RoughTokenEstimator(multiplier)`
+
+### B1b/B1c/B1d split after compatibility map
+
+B1b:
+
+* introduce `RequestOutputCapPolicy`
+* forbid admitted Groq request without explicit `max_completion_tokens`
+* no runtime uncapped Groq request
+* calculate Groq Free `request_output_cap_tokens` from remaining TPM, estimated input, and request safety gap
+* if `request_output_cap_tokens < estimated_output_tokens`, the WorkItem does not fit this window
+* if `request_output_cap_tokens <= 0`, do not send request
+
+B1c:
+
+* migrate claim-builder schedule payload from `reserved_output_tokens` to `estimated_output_tokens`
+* keep compatibility read for old payloads if needed
+* stop using `reserved_output_tokens` as the claim-builder expected output estimate
+
+B1d:
+
+* introduce single `RoughTokenEstimator(multiplier)`
+* claim_builder multiplier target 3.7
+* compaction multiplier target 3.3
+* remove chars/3.3, chars/4, chars/4+40 drift
+
+B1a success criteria:
+
+* the compatibility map exists
+* the guard test asserts the compatibility map exists
+* no runtime behavior changes
+* no DB migrations
+* no provider API calls
+* no claim that `reserved_output_tokens` or `max_completion_tokens` is fixed
+
+
+## 9. B1 roadmap, explicitly split
 
 B1a: vocabulary contract + compatibility mapping, no behavior change
 B1b: request output cap policy, no admitted uncapped Groq requests

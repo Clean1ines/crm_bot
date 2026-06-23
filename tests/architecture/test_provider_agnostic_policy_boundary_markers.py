@@ -315,3 +315,58 @@ def test_default_groq_catalog_is_not_generic_default() -> None:
     )
 
     assert not offenders, "\n".join(offenders)
+
+
+def test_b1a_compatibility_map_and_followup_split_are_documented() -> None:
+    source = _read(ARCH_DOC_PATH)
+    normalized_source = source.replace("`", "")
+
+    required_markers = (
+        "## 8. B1 compatibility map",
+        "B1a is a documentation and guard-marker slice only.",
+        "B1a makes the legacy vocabulary compatibility contract explicit",
+        "legacy reserved_output_tokens in segmentation budget → segmentation_input_safety_gap_tokens",
+        "legacy reserved_output_tokens in claim-builder schedule payload → estimated_output_tokens",
+        "legacy reserved_output_tokens in admission minimum output → estimated_output_tokens used as minimum_output_tokens",
+        "legacy reserved_output_tokens in Groq request executor → request_output_cap_tokens / output cap source",
+        "legacy estimated_prompt_tokens in LlmTaskCapacityProfile → estimated_input_tokens",
+        "legacy estimated_completion_tokens in LlmTaskCapacityProfile → estimated_output_tokens",
+        "legacy actual_prompt_tokens in capacity observations → actual_input_tokens",
+        "legacy actual_completion_tokens in capacity observations → actual_output_tokens",
+        "TokenBudgetCompatibilityMap",
+        "LegacyTokenBudgetFieldMapping",
+        "RequestOutputCapPolicy",
+        "RoughTokenEstimator(multiplier)",
+        "B1b:",
+        "introduce RequestOutputCapPolicy",
+        "forbid admitted Groq request without explicit max_completion_tokens",
+        "no runtime uncapped Groq request",
+        "request_output_cap_tokens < estimated_output_tokens",
+        "request_output_cap_tokens <= 0",
+        "B1c:",
+        "migrate claim-builder schedule payload from reserved_output_tokens to estimated_output_tokens",
+        "keep compatibility read for old payloads if needed",
+        "B1d:",
+        "introduce single RoughTokenEstimator(multiplier)",
+        "claim_builder multiplier target 3.7",
+        "compaction multiplier target 3.3",
+        "remove chars/3.3, chars/4, chars/4+40 drift",
+    )
+
+    missing = [marker for marker in required_markers if marker not in normalized_source]
+    assert not missing, "\n".join(missing)
+
+
+def test_b1a_does_not_pretend_runtime_token_vocabulary_is_migrated() -> None:
+    source = _read(ARCH_DOC_PATH)
+    normalized_source = source.replace("`", "")
+
+    required_markers = (
+        "no runtime behavior changes",
+        "no DB migrations",
+        "no provider API calls",
+        "no claim that reserved_output_tokens or max_completion_tokens is fixed",
+    )
+
+    missing = [marker for marker in required_markers if marker not in normalized_source]
+    assert not missing, "\n".join(missing)
