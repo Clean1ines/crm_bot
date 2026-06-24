@@ -35,3 +35,23 @@ def test_lease_repository_forbids_deferred_due_selection() -> None:
 
     assert "'deferred'" not in source
     assert "WorkItemStatus." + "DEFERRED" not in source
+
+
+def test_lease_repository_exposes_targeted_lease_by_work_item_id() -> None:
+    source = _source()
+
+    assert "lease_due_work_item_by_id" in source
+    assert "wi.work_item_id = $2" in source
+    assert "FOR UPDATE SKIP LOCKED" in source
+    assert "LIMIT 1" in source
+
+
+def test_work_item_lease_port_exposes_targeted_lease_by_work_item_id() -> None:
+    port_source = (
+        ROOT / "src/contexts/execution_runtime/application/ports/"
+        "work_item_lease_repository_port.py"
+    ).read_text(encoding="utf-8")
+
+    assert "lease_due_work_item_by_id" in port_source
+    assert "work_item_id: str" in port_source
+    assert "LeasedWorkItemRecord | None" in port_source

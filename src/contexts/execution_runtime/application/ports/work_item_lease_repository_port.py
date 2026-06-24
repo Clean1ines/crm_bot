@@ -63,3 +63,14 @@ class WorkItemLeaseRepositoryPort(Protocol):
         lease_expires_at: datetime,
         now: datetime,
     ) -> LeasedWorkItemRecord | None: ...
+
+    async def lease_due_work_item_by_id(
+        self,
+        *,
+        work_kind: WorkKind,
+        work_item_id: str,
+        worker: WorkerRef,
+        lease_token: LeaseToken,
+        lease_expires_at: datetime,
+        now: datetime,
+    ) -> LeasedWorkItemRecord | None: ...
