@@ -68,21 +68,21 @@ def _lease(
     )
 
 
-def _row(*, retry_plan: str | None = None) -> Mapping[str, object]:
+def _row(*, previous_status: str = "ready") -> Mapping[str, object]:
     return {
         "work_item_id": "work-item-1",
         "work_kind": "knowledge.claim_builder",
         "provider": "groq",
         "account_ref": "groq-account-1",
         "model_ref": "llama-3.3-70b-versatile",
+        "previous_status": previous_status,
         "status": "leased",
-        "retry_plan": retry_plan,
     }
 
 
 @pytest.mark.asyncio
 async def test_marks_ready_projection_row_as_leased_and_appends_lane_event() -> None:
-    connection = FakeConnection(_row(retry_plan=None))
+    connection = FakeConnection(_row(previous_status="ready"))
 
     result = await PostgresCapacityAdmissionProjectionAdmitter(
         connection
@@ -121,7 +121,7 @@ async def test_marks_ready_projection_row_as_leased_and_appends_lane_event() -> 
 
 @pytest.mark.asyncio
 async def test_marks_retryable_failed_projection_row_as_leased() -> None:
-    connection = FakeConnection(_row(retry_plan="retry_same_route"))
+    connection = FakeConnection(_row(previous_status="retryable_failed"))
 
     result = await PostgresCapacityAdmissionProjectionAdmitter(
         connection
@@ -170,10 +170,10 @@ async def test_uses_null_safe_account_ref_filter() -> None:
 @pytest.mark.asyncio
 async def test_rejects_malformed_returning_row() -> None:
     row = dict(_row())
-    row["retry_plan"] = ""
+    row["previous_status"] = "leased"
     connection = FakeConnection(row)
 
-    with pytest.raises(ValueError, match="retry_plan"):
+    with pytest.raises(ValueError, match="previous_status"):
         await PostgresCapacityAdmissionProjectionAdmitter(
             connection
         ).admit_projection_work_item(_lease())

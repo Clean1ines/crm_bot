@@ -42,24 +42,48 @@ class PostgresCapacityAdmissionProjectionAdmitter:
     ) -> CapacityAdmissionProjectionLeaseResult | None:
         row = await self._connection.fetchrow(
             """
-            UPDATE capacity_admission_work_items
-            SET
-                status = 'leased',
-                updated_at = $2
-            WHERE work_item_id = $1
-              AND work_kind = $3
-              AND provider = $4
-              AND account_ref IS NOT DISTINCT FROM $5
-              AND model_ref = $6
-              AND status IN ('ready', 'retryable_failed')
-            RETURNING
+            WITH selected AS (
+                SELECT
+                    work_item_id,
+                    work_kind,
+                    provider,
+                    account_ref,
+                    model_ref,
+                    status AS previous_status
+                FROM capacity_admission_work_items
+                WHERE work_item_id = $1
+                  AND work_kind = $3
+                  AND provider = $4
+                  AND account_ref IS NOT DISTINCT FROM $5
+                  AND model_ref = $6
+                  AND status IN ('ready', 'retryable_failed')
+                FOR UPDATE SKIP LOCKED
+            ),
+            updated AS (
+                UPDATE capacity_admission_work_items AS work_items
+                SET
+                    status = 'leased',
+                    updated_at = $2
+                FROM selected
+                WHERE work_items.work_item_id = selected.work_item_id
+                RETURNING
+                    work_items.work_item_id,
+                    work_items.work_kind,
+                    work_items.provider,
+                    work_items.account_ref,
+                    work_items.model_ref,
+                    selected.previous_status,
+                    work_items.status
+            )
+            SELECT
                 work_item_id,
                 work_kind,
                 provider,
                 account_ref,
                 model_ref,
-                status,
-                retry_plan
+                previous_status,
+                status
+            FROM updated
             """,
             lease.work_item_id,
             lease.leased_at,
@@ -135,12 +159,10 @@ def _lane_id(lane_key: CapacityAdmissionLaneKey) -> str:
 
 
 def _required_previous_status(row: Mapping[str, object]) -> str:
-    retry_plan = row.get("retry_plan")
-    if retry_plan is None:
-        return "ready"
-    if isinstance(retry_plan, str) and retry_plan:
-        return "retryable_failed"
-    raise ValueError("retry_plan must be null or non-empty string")
+    value = row.get("previous_status")
+    if value in {"ready", "retryable_failed"}:
+        return str(value)
+    raise ValueError("previous_status must be ready or retryable_failed")
 
 
 def _required_str(row: Mapping[str, object], key: str) -> str:
