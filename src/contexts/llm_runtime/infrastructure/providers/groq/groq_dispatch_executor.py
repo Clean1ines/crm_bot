@@ -103,7 +103,7 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 has_max_completion_tokens="max_completion_tokens" in request.payload,
                 max_completion_tokens=request.payload.get("max_completion_tokens"),
                 estimated_input_tokens=parsed.estimated_input_tokens,
-                reserved_output_tokens=parsed.reserved_output_tokens,
+                effective_output_cap_tokens=parsed.effective_output_cap_tokens,
                 request_output_cap_tokens=parsed.request_output_cap_tokens,
                 response_format=request.payload.get("response_format"),
                 temperature=request.payload.get("temperature"),
@@ -305,7 +305,7 @@ class _ParsedGroqDispatchPayload:
     messages: tuple[GroqChatMessage, ...]
     execution_settings: LlmModelExecutionSettings
     estimated_input_tokens: int
-    reserved_output_tokens: int
+    effective_output_cap_tokens: int
     request_output_cap_tokens: int | None
 
     @classmethod
@@ -349,7 +349,9 @@ class _ParsedGroqDispatchPayload:
                 execution_settings_payload,
             ),
             estimated_input_tokens=_parse_estimated_input_tokens(schedule_payload),
-            reserved_output_tokens=_parse_reserved_output_tokens(schedule_payload),
+            effective_output_cap_tokens=_parse_effective_output_cap_tokens(
+                schedule_payload,
+            ),
             request_output_cap_tokens=_parse_request_output_cap_tokens(
                 schedule_payload,
             ),
@@ -370,7 +372,7 @@ def _resolve_max_completion_tokens(
             )
         return parsed.request_output_cap_tokens
 
-    requested_output_tokens = parsed.reserved_output_tokens - completion_gap_tokens
+    requested_output_tokens = parsed.effective_output_cap_tokens - completion_gap_tokens
     requested_output_tokens = min(
         requested_output_tokens,
         model_profile.max_output_tokens,
@@ -390,13 +392,17 @@ def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int
     return value
 
 
-def _parse_reserved_output_tokens(schedule_payload: Mapping[str, object]) -> int:
+def _parse_effective_output_cap_tokens(schedule_payload: Mapping[str, object]) -> int:
     estimate_payload = _require_mapping(schedule_payload, "llm_capacity_estimate")
-    value = estimate_payload.get("reserved_output_tokens")
+    value = estimate_payload.get("effective_output_cap_tokens")
+    field_name = "effective_output_cap_tokens"
+    if value is None:
+        value = estimate_payload.get("reserved_output_tokens")
+        field_name = "reserved_output_tokens"
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("llm_capacity_estimate.reserved_output_tokens must be int")
+        raise ValueError(f"llm_capacity_estimate.{field_name} must be int")
     if value < 0:
-        raise ValueError("llm_capacity_estimate.reserved_output_tokens must be >= 0")
+        raise ValueError(f"llm_capacity_estimate.{field_name} must be >= 0")
     return value
 
 

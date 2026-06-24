@@ -522,3 +522,20 @@ def test_b1e_actual_token_usage_payload_compatibility() -> None:
     assert '"actual_output_tokens": usage.output_tokens' in groq_executor
     assert '"actual_prompt_tokens": usage.input_tokens' in groq_executor
     assert '"actual_completion_tokens": usage.output_tokens' in groq_executor
+
+
+def test_b1f1_groq_executor_uses_effective_output_cap_as_fallback_source() -> None:
+    doc = _read(ARCH_DOC_PATH)
+    groq_executor = _read(
+        REPO_ROOT / "src/contexts/llm_runtime/infrastructure/providers/groq/"
+        "groq_dispatch_executor.py"
+    )
+
+    assert "B1f-1: Groq executor reads `effective_output_cap_tokens`" in doc
+    assert "effective_output_cap_tokens: int" in groq_executor
+    assert "_parse_effective_output_cap_tokens" in groq_executor
+    assert 'estimate_payload.get("effective_output_cap_tokens")' in groq_executor
+    assert 'estimate_payload.get("reserved_output_tokens")' in groq_executor
+    assert "parsed.effective_output_cap_tokens" in groq_executor
+    assert "parsed.reserved_output_tokens" not in groq_executor
+    assert "def _parse_reserved_output_tokens" not in groq_executor

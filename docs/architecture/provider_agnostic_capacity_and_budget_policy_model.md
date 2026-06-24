@@ -1,7 +1,7 @@
 
 # Provider-agnostic capacity and budget policy model
 
-Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary + B1c claim-builder estimate vocabulary boundary + B1d-1 segmentation vocabulary cleanup + B1d-2 rough estimator targets + B1d-3a profile input/output accessors + B1d-3b claim-builder profile payload compatibility + B1d-3c compaction profile payload compatibility + B1e actual token usage compatibility.
+Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary + B1c claim-builder estimate vocabulary boundary + B1d-1 segmentation vocabulary cleanup + B1d-2 rough estimator targets + B1d-3a profile input/output accessors + B1d-3b claim-builder profile payload compatibility + B1d-3c compaction profile payload compatibility + B1e actual token usage compatibility + B1f-1 Groq executor effective output cap source.
 
 This document freezes the boundary model before behavioral refactors. It does not migrate runtime code, token names, segmentation, compaction, capacity storage, or provider execution.
 
@@ -326,6 +326,7 @@ B1d:
 * B1d-3b: claim-builder dispatch preparation profile payload dual-writes `estimated_input_tokens`/`estimated_output_tokens` while claim-builder prepare reads target keys with legacy fallback.
 * B1d-3c: draft-claim compaction dispatch preparation profile payload dual-writes `estimated_input_tokens`/`estimated_output_tokens` while compaction prepare reads target keys with legacy fallback.
 * B1e: capacity observation payloads dual-write `actual_input_tokens`/`actual_output_tokens` while capacity observation DTOs read target keys with legacy `actual_prompt_tokens`/`actual_completion_tokens` fallback.
+* B1f-1: Groq executor reads `effective_output_cap_tokens` as the fallback output cap source when `request_output_cap_tokens` is absent, with legacy `reserved_output_tokens` accepted only as fallback compatibility.
 
 B1a success criteria:
 
