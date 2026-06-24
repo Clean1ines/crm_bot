@@ -1,7 +1,7 @@
 
 # Provider-agnostic capacity and budget policy model
 
-Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary + B1c claim-builder estimate vocabulary boundary + B1d-1 segmentation vocabulary cleanup + B1d-2 rough estimator targets + B1d-3a profile input/output accessors + B1d-3b claim-builder profile payload compatibility + B1d-3c compaction profile payload compatibility + B1e actual token usage compatibility + B1f-1 Groq executor effective output cap source + B1f-2 compaction schedule estimated output payload + B1f-3a no schedule/executor reserved output legacy.
+Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary + B1c claim-builder estimate vocabulary boundary + B1d-1 segmentation vocabulary cleanup + B1d-2 rough estimator targets + B1d-3a profile input/output accessors + B1d-3b claim-builder profile payload compatibility + B1d-3c compaction profile payload compatibility + B1e actual token usage compatibility + B1f-1 Groq executor effective output cap source + B1f-2 compaction schedule estimated output payload + B1f-3a no schedule/executor reserved output legacy + B1f-3b quota estimated output token need.
 
 This document freezes the boundary model before behavioral refactors. It does not migrate runtime code, token names, segmentation, compaction, capacity storage, or provider execution.
 
@@ -329,6 +329,7 @@ B1d:
 * B1f-1: Groq executor reads `effective_output_cap_tokens` as the fallback output cap source when `request_output_cap_tokens` is absent, with legacy `reserved_output_tokens` accepted only as fallback compatibility.
 * B1f-2: compaction schedule payloads write `estimated_output_tokens` as the expected answer estimate and stop introducing legacy `reserved_output_tokens` as that estimate.
 * B1f-3a: schedule admission and Groq executor no longer write or read `reserved_output_tokens`; `effective_output_cap_tokens` is required for executor fallback output cap resolution when `request_output_cap_tokens` is absent.
+* B1f-3b: quota availability token need uses `estimated_output_tokens` for separate output-token capacity checks and no longer exposes `reserved_output_tokens` in runtime policy code.
 
 B1a success criteria:
 

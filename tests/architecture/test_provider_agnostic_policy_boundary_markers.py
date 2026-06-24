@@ -110,9 +110,7 @@ RESERVED_OUTPUT_TOKEN_TARGET_TERMS = (
     "segmentation_input_safety_gap_tokens",
 )
 
-KNOWN_RESERVED_OUTPUT_TOKENS_PATHS = {
-    "src/contexts/llm_runtime/application/policies/llm_quota_availability_policy.py",
-}
+KNOWN_RESERVED_OUTPUT_TOKENS_PATHS: set[str] = set()
 
 COMPACTION_FIT_BY_GROQ_TPM_MARKERS = (
     "GPT_OSS_FREE_PLAN_TPM",
@@ -592,3 +590,17 @@ def test_b1f3a_no_schedule_or_executor_reserved_output_legacy() -> None:
     assert 'updated_estimate["reserved_output_tokens"]' not in prepare_batch
     assert 'estimate_payload.get("reserved_output_tokens")' not in groq_executor
     assert "reserved_output_tokens" not in estimate
+
+
+def test_b1f3b_quota_estimated_token_need_uses_estimated_output_tokens() -> None:
+    doc = _read(ARCH_DOC_PATH)
+    quota_policy = _read(
+        REPO_ROOT / "src/contexts/llm_runtime/application/policies/"
+        "llm_quota_availability_policy.py"
+    )
+
+    assert "B1f-3b: quota availability token need uses `estimated_output_tokens`" in doc
+    assert "estimated_output_tokens: int" in quota_policy
+    assert "self.estimated_output_tokens" in quota_policy
+    assert "estimated_need.estimated_output_tokens" in quota_policy
+    assert "reserved_output_tokens" not in quota_policy
