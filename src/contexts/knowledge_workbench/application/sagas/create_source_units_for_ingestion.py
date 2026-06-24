@@ -220,7 +220,7 @@ def default_source_ingestion_segmentation_budget() -> DocumentSegmentationBudget
         model=SegmentationModelBudgetProfile(
             profile_name="primary_model",
             max_request_input_tokens=6_000,
-            reserved_output_tokens=100,
+            segmentation_input_safety_gap_tokens=100,
         ),
     )
 

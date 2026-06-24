@@ -25,7 +25,7 @@ class WorkbenchPromptProfile:
 class WorkbenchModelRequestBudgetProfile:
     profile_name: str
     max_request_input_tokens: int
-    reserved_output_tokens: int
+    segmentation_input_safety_gap_tokens: int
 
     def __post_init__(self) -> None:
         if not isinstance(self.profile_name, str) or not self.profile_name.strip():
@@ -34,13 +34,13 @@ class WorkbenchModelRequestBudgetProfile:
             raise TypeError("max_request_input_tokens must be int")
         if self.max_request_input_tokens <= 0:
             raise ValueError("max_request_input_tokens must be > 0")
-        if not isinstance(self.reserved_output_tokens, int):
-            raise TypeError("reserved_output_tokens must be int")
-        if self.reserved_output_tokens < 0:
-            raise ValueError("reserved_output_tokens must be >= 0")
-        if self.reserved_output_tokens >= self.max_request_input_tokens:
+        if not isinstance(self.segmentation_input_safety_gap_tokens, int):
+            raise TypeError("segmentation_input_safety_gap_tokens must be int")
+        if self.segmentation_input_safety_gap_tokens < 0:
+            raise ValueError("segmentation_input_safety_gap_tokens must be >= 0")
+        if self.segmentation_input_safety_gap_tokens >= self.max_request_input_tokens:
             raise ValueError(
-                "reserved_output_tokens must be < max_request_input_tokens"
+                "segmentation_input_safety_gap_tokens must be < max_request_input_tokens"
             )
 
 
@@ -55,11 +55,12 @@ class SourceIngestionSegmentationProfile:
         if not isinstance(self.primary_model, WorkbenchModelRequestBudgetProfile):
             raise TypeError("primary_model must be WorkbenchModelRequestBudgetProfile")
         if (
-            self.prompt.prompt_token_count + self.primary_model.reserved_output_tokens
+            self.prompt.prompt_token_count
+            + self.primary_model.segmentation_input_safety_gap_tokens
             >= self.primary_model.max_request_input_tokens
         ):
             raise ValueError(
-                "prompt_token_count + reserved_output_tokens must be "
+                "prompt_token_count + segmentation_input_safety_gap_tokens must be "
                 "< max_request_input_tokens"
             )
 
@@ -68,7 +69,7 @@ class SourceIngestionSegmentationProfile:
         return (
             self.primary_model.max_request_input_tokens
             - self.prompt.prompt_token_count
-            - self.primary_model.reserved_output_tokens
+            - self.primary_model.segmentation_input_safety_gap_tokens
         )
 
 
@@ -88,6 +89,6 @@ def default_source_ingestion_segmentation_profile() -> (
         primary_model=WorkbenchModelRequestBudgetProfile(
             profile_name="primary_model",
             max_request_input_tokens=6_000,
-            reserved_output_tokens=100,
+            segmentation_input_safety_gap_tokens=100,
         ),
     )

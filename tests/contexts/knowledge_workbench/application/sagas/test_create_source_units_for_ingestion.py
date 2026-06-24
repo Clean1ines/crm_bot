@@ -153,7 +153,7 @@ def _budget(
     prompt_name: str = "test_prompt",
     profile_name: str = "primary_model",
     max_request_input_tokens: int = 100,
-    reserved_output_tokens: int = 0,
+    segmentation_input_safety_gap_tokens: int = 0,
 ) -> DocumentSegmentationBudget:
     return DocumentSegmentationBudget(
         prompt=SegmentationPromptProfile(
@@ -163,7 +163,7 @@ def _budget(
         model=SegmentationModelBudgetProfile(
             profile_name=profile_name,
             max_request_input_tokens=max_request_input_tokens,
-            reserved_output_tokens=reserved_output_tokens,
+            segmentation_input_safety_gap_tokens=segmentation_input_safety_gap_tokens,
         ),
     )
 

@@ -112,18 +112,14 @@ RESERVED_OUTPUT_TOKEN_TARGET_TERMS = (
 
 KNOWN_RESERVED_OUTPUT_TOKENS_PATHS = {
     "src/contexts/knowledge_workbench/application/sagas/claim_builder_dispatch_preparation.py",
-    "src/contexts/knowledge_workbench/application/sagas/create_source_units_for_ingestion.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_apply_draft_claim_compaction_result_command.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_cluster_draft_claims_command.py",
     "src/contexts/knowledge_workbench/application/sagas/llm_provider_message_capacity_estimate.py",
     "src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py",
-    "src/contexts/knowledge_workbench/application/sagas/source_ingestion_segmentation_profiles.py",
-    "src/contexts/knowledge_workbench/document_segmentation/domain/segmentation_budget.py",
     "src/contexts/llm_runtime/application/policies/llm_quota_availability_policy.py",
     "src/contexts/llm_runtime/infrastructure/providers/groq/groq_dispatch_executor.py",
     "src/interfaces/composition/knowledge_extraction_degraded_fallback_confirmation.py",
     "src/interfaces/composition/prepare_llm_dispatch_batch.py",
-    "src/interfaces/composition/source_ingestion_first_phase.py",
 }
 
 COMPACTION_FIT_BY_GROQ_TPM_MARKERS = (
@@ -384,6 +380,23 @@ def test_b1c_claim_builder_schedule_payload_uses_estimated_output_tokens() -> No
     assert "estimate.reserved_output_tokens" not in preparation
     assert "_estimated_output_tokens_from_due_record" in prepare_batch
     assert 'estimate_payload.get("estimated_output_tokens")' in prepare_batch
+
+
+def test_b1d1_segmentation_vocabulary_uses_input_safety_gap_name() -> None:
+    target_paths = (
+        REPO_ROOT / "src/contexts/knowledge_workbench/document_segmentation/domain/"
+        "segmentation_budget.py",
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "source_ingestion_segmentation_profiles.py",
+        REPO_ROOT / "src/interfaces/composition/source_ingestion_first_phase.py",
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "create_source_units_for_ingestion.py",
+    )
+
+    for target_path in target_paths:
+        source = _read(target_path)
+        assert "segmentation_input_safety_gap_tokens" in source
+        assert "reserved_output_tokens" not in source
 
 
 def test_b1a_does_not_pretend_runtime_token_vocabulary_is_migrated() -> None:

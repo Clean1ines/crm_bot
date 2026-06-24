@@ -26,7 +26,7 @@ def _budget(*, max_source_tokens: int) -> DocumentSegmentationBudget:
         model=SegmentationModelBudgetProfile(
             profile_name="primary_model",
             max_request_input_tokens=max_source_tokens,
-            reserved_output_tokens=0,
+            segmentation_input_safety_gap_tokens=0,
         ),
     )
 
@@ -170,7 +170,7 @@ def test_budget_uses_prompt_and_request_numbers_not_runtime_context_window() -> 
         model=SegmentationModelBudgetProfile(
             profile_name="primary_model",
             max_request_input_tokens=20,
-            reserved_output_tokens=5,
+            segmentation_input_safety_gap_tokens=5,
         ),
     )
 
@@ -223,11 +223,13 @@ def test_invalid_budget_shapes_are_rejected() -> None:
     with pytest.raises(ValueError, match="prompt_name must be non-empty"):
         SegmentationPromptProfile(prompt_name=" ", prompt_token_count=0)
 
-    with pytest.raises(ValueError, match="reserved_output_tokens must be <"):
+    with pytest.raises(
+        ValueError, match="segmentation_input_safety_gap_tokens must be <"
+    ):
         SegmentationModelBudgetProfile(
             profile_name="primary_model",
             max_request_input_tokens=10,
-            reserved_output_tokens=10,
+            segmentation_input_safety_gap_tokens=10,
         )
 
 

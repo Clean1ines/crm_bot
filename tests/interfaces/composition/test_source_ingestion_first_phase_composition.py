@@ -425,7 +425,7 @@ def _custom_segmentation_budget() -> DocumentSegmentationBudget:
         model=SegmentationModelBudgetProfile(
             profile_name="custom_primary_model",
             max_request_input_tokens=55,
-            reserved_output_tokens=5,
+            segmentation_input_safety_gap_tokens=5,
         ),
     )
 
@@ -721,7 +721,7 @@ def test_segmentation_config_converts_to_document_segmentation_budget() -> None:
         prompt_token_count=12,
         primary_model_profile_name="custom_primary_model",
         max_request_input_tokens=100,
-        reserved_output_tokens=20,
+        segmentation_input_safety_gap_tokens=20,
     )
 
     budget = config.to_document_segmentation_budget()
@@ -730,7 +730,7 @@ def test_segmentation_config_converts_to_document_segmentation_budget() -> None:
     assert budget.prompt.prompt_token_count == 12
     assert budget.model.profile_name == "custom_primary_model"
     assert budget.model.max_request_input_tokens == 100
-    assert budget.model.reserved_output_tokens == 20
+    assert budget.model.segmentation_input_safety_gap_tokens == 20
     assert budget.max_source_segment_tokens == 68
 
 
@@ -750,7 +750,7 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
     assert budget.prompt.prompt_token_count == expected_prompt_tokens
     assert budget.model.profile_name == "primary_model"
     assert budget.model.max_request_input_tokens == 6_000
-    assert budget.model.reserved_output_tokens == 100
+    assert budget.model.segmentation_input_safety_gap_tokens == 100
     assert budget.max_source_segment_tokens == (6_000 - expected_prompt_tokens - 100)
 
 
@@ -811,7 +811,7 @@ def test_invalid_segmentation_config_is_rejected() -> None:
             prompt_token_count=0,
             primary_model_profile_name="primary_model",
             max_request_input_tokens=10,
-            reserved_output_tokens=1,
+            segmentation_input_safety_gap_tokens=1,
         )
 
     with pytest.raises(ValueError, match="prompt_token_count must be >= 0"):
@@ -820,7 +820,7 @@ def test_invalid_segmentation_config_is_rejected() -> None:
             prompt_token_count=-1,
             primary_model_profile_name="primary_model",
             max_request_input_tokens=10,
-            reserved_output_tokens=1,
+            segmentation_input_safety_gap_tokens=1,
         )
 
     with pytest.raises(ValueError, match="primary_model_profile_name must be"):
@@ -829,7 +829,7 @@ def test_invalid_segmentation_config_is_rejected() -> None:
             prompt_token_count=0,
             primary_model_profile_name=" ",
             max_request_input_tokens=10,
-            reserved_output_tokens=1,
+            segmentation_input_safety_gap_tokens=1,
         )
 
     with pytest.raises(ValueError, match="must be < max_request_input_tokens"):
@@ -838,7 +838,7 @@ def test_invalid_segmentation_config_is_rejected() -> None:
             prompt_token_count=9,
             primary_model_profile_name="primary_model",
             max_request_input_tokens=10,
-            reserved_output_tokens=1,
+            segmentation_input_safety_gap_tokens=1,
         )
 
 
@@ -912,7 +912,10 @@ def test_default_segmentation_config_is_derived_from_profile_catalog(
         config.max_request_input_tokens
         == profile.primary_model.max_request_input_tokens
     )
-    assert config.reserved_output_tokens == profile.primary_model.reserved_output_tokens
+    assert (
+        config.segmentation_input_safety_gap_tokens
+        == profile.primary_model.segmentation_input_safety_gap_tokens
+    )
 
 
 def test_segmentation_config_from_profile_maps_custom_profile() -> None:
@@ -926,7 +929,7 @@ def test_segmentation_config_from_profile_maps_custom_profile() -> None:
         primary_model=WorkbenchModelRequestBudgetProfile(
             profile_name="custom_primary_model",
             max_request_input_tokens=4_000,
-            reserved_output_tokens=500,
+            segmentation_input_safety_gap_tokens=500,
         ),
     )
 
@@ -936,7 +939,7 @@ def test_segmentation_config_from_profile_maps_custom_profile() -> None:
     assert config.prompt_token_count == 123
     assert config.primary_model_profile_name == "custom_primary_model"
     assert config.max_request_input_tokens == 4_000
-    assert config.reserved_output_tokens == 500
+    assert config.segmentation_input_safety_gap_tokens == 500
     assert config.to_document_segmentation_budget().max_source_segment_tokens == 3_377
 
 
@@ -983,7 +986,7 @@ async def test_explicit_segmentation_config_bypasses_prompt_file_loading(
         prompt_token_count=44,
         primary_model_profile_name="explicit_primary_model",
         max_request_input_tokens=500,
-        reserved_output_tokens=50,
+        segmentation_input_safety_gap_tokens=50,
     )
 
     runner = make_source_ingestion_first_phase(

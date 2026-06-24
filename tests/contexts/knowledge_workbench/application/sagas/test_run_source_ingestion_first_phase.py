@@ -117,7 +117,7 @@ def _segmentation_budget() -> DocumentSegmentationBudget:
         model=SegmentationModelBudgetProfile(
             profile_name="custom_primary_model",
             max_request_input_tokens=100,
-            reserved_output_tokens=11,
+            segmentation_input_safety_gap_tokens=11,
         ),
     )
 
