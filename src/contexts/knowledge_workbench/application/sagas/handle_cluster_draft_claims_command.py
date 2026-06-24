@@ -4,6 +4,13 @@ import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    BuildCapacityAdmissionProjectionCandidates,
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -108,6 +115,7 @@ class HandleClusterDraftClaimsResult:
     batch_count: int
     scheduled_work_item_count: int
     already_scheduled_work_item_count: int
+    capacity_admission_projection_persisted_count: int = 0
 
 
 class HandleClusterDraftClaimsCommandHandler:
@@ -117,7 +125,16 @@ class HandleClusterDraftClaimsCommandHandler:
         similarity_policy: DraftClaimHybridSimilarityPolicy | None = None,
         grouping_policy: DraftClaimCompactionGroupingPolicy | None = None,
         batch_budget_policy: DraftClaimCompactionBatchBudgetPolicy | None = None,
+        capacity_admission_projection_writer: CapacityAdmissionProjectionWriterPort
+        | None = None,
+        capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
     ) -> None:
+        if (capacity_admission_projection_writer is None) != (
+            capacity_admission_lane_target is None
+        ):
+            raise ValueError(
+                "capacity admission projection writer and lane target must be provided together"
+            )
         self._similarity_policy = (
             similarity_policy or DraftClaimHybridSimilarityPolicy()
         )
@@ -125,6 +142,10 @@ class HandleClusterDraftClaimsCommandHandler:
         self._batch_budget_policy = (
             batch_budget_policy or DraftClaimCompactionBatchBudgetPolicy()
         )
+        self._capacity_admission_projection_writer = (
+            capacity_admission_projection_writer
+        )
+        self._capacity_admission_lane_target = capacity_admission_lane_target
 
     async def execute(
         self,
@@ -184,22 +205,34 @@ class HandleClusterDraftClaimsCommandHandler:
                 ),
                 created_at=workflow_command.updated_at,
             )
+        schedule_plans = tuple(
+            _plan(
+                workflow_run_id,
+                batch,
+                claims_by_ref=claims_by_ref,
+            )
+            for batch in budget_plan.batches
+        )
         schedule = await EnsureWorkItemsScheduled(
             work_item_scheduling_repository
-        ).execute(
-            EnsureWorkItemsScheduledCommand(
-                plans=tuple(
-                    _plan(
-                        workflow_run_id,
-                        batch,
-                        claims_by_ref=claims_by_ref,
-                    )
-                    for batch in budget_plan.batches
-                )
-            )
-        )
+        ).execute(EnsureWorkItemsScheduledCommand(plans=schedule_plans))
         if schedule.conflict_count:
             raise ValueError("draft claim compaction work item schedule conflict")
+
+        capacity_admission_projection_persisted_count = 0
+        if (
+            self._capacity_admission_projection_writer is not None
+            and self._capacity_admission_lane_target is not None
+        ):
+            projection_candidates = BuildCapacityAdmissionProjectionCandidates(
+                lane_target=self._capacity_admission_lane_target,
+            ).execute(schedule_plans)
+            projection_result = await self._capacity_admission_projection_writer.persist_projection_candidates(
+                projection_candidates,
+            )
+            capacity_admission_projection_persisted_count = (
+                projection_result.persisted_count
+            )
 
         scheduled_work_item_count = (
             schedule.created_count + schedule.already_exists_count
@@ -280,6 +313,9 @@ class HandleClusterDraftClaimsCommandHandler:
             batch_count=len(budget_plan.batches),
             scheduled_work_item_count=schedule.created_count,
             already_scheduled_work_item_count=schedule.already_exists_count,
+            capacity_admission_projection_persisted_count=(
+                capacity_admission_projection_persisted_count
+            ),
         )
 
 

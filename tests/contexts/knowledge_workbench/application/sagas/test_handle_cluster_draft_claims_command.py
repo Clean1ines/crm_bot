@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import inspect
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import cast
 
 import pytest
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionWorkItemProjectionCandidate,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    PersistCapacityAdmissionProjectionResult,
+)
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.knowledge_workbench.application.sagas.handle_cluster_draft_claims_command import (
     DraftClaimCompactionPlanConflictError,
     HandleClusterDraftClaimsCommand,
     HandleClusterDraftClaimsCommandHandler,
+    HandleClusterDraftClaimsResult,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -25,9 +34,11 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
     DraftClaimCompactionPlanPersistenceResult,
+    DraftClaimCompactionPlanRepositoryPort,
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStatePersistenceResult,
+    DraftClaimCompactionReductionStateRepositoryPort,
 )
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionNode,
@@ -36,11 +47,17 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
+from src.contexts.knowledge_workbench.observability.application.ports.frontend_workflow_event_repository_port import (
+    FrontendWorkflowEventRepositoryPort,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.knowledge_extraction_frontend_workflow_event_projector import (
     KnowledgeExtractionFrontendWorkflowEventProjector,
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
+)
+from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
+    WorkflowRuntimeUnitOfWorkPort,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
@@ -202,8 +219,24 @@ class FakeReductionStateRepository:
 
 
 @dataclass(slots=True)
+class FakeCapacityAdmissionProjectionWriter:
+    persisted_batches: list[
+        tuple[CapacityAdmissionWorkItemProjectionCandidate, ...]
+    ] = field(default_factory=list)
+
+    async def persist_projection_candidates(
+        self,
+        candidates: tuple[CapacityAdmissionWorkItemProjectionCandidate, ...],
+    ) -> PersistCapacityAdmissionProjectionResult:
+        self.persisted_batches.append(candidates)
+        return PersistCapacityAdmissionProjectionResult(
+            persisted_count=len(candidates),
+        )
+
+
+@dataclass(slots=True)
 class FakeWorkItemSchedulingRepository:
-    saved_payloads: list[object] = field(default_factory=list)
+    saved_payloads: list[Mapping[str, object]] = field(default_factory=list)
 
     async def get_work_item(self, work_item_id: str) -> WorkItem | None:
         del work_item_id
@@ -222,6 +255,8 @@ class FakeWorkItemSchedulingRepository:
         payload: object,
     ) -> None:
         del item, idempotency_key, payload_hash
+        if not isinstance(payload, Mapping):
+            raise AssertionError("expected mapping schedule payload")
         self.saved_payloads.append(payload)
 
 
@@ -369,6 +404,30 @@ class FakeWorkflowUnitOfWork:
         raise AssertionError("handler must not rollback")
 
 
+def _plan_repository(
+    repository: FakeCompactionRepository,
+) -> DraftClaimCompactionPlanRepositoryPort:
+    return cast(DraftClaimCompactionPlanRepositoryPort, repository)
+
+
+def _workflow_unit_of_work(
+    unit_of_work: FakeWorkflowUnitOfWork,
+) -> WorkflowRuntimeUnitOfWorkPort:
+    return cast(WorkflowRuntimeUnitOfWorkPort, unit_of_work)
+
+
+def _reduction_state_repository(
+    repository: FakeReductionStateRepository,
+) -> DraftClaimCompactionReductionStateRepositoryPort:
+    return cast(DraftClaimCompactionReductionStateRepositoryPort, repository)
+
+
+def _frontend_event_repository(
+    repository: InMemoryFrontendWorkflowEventRepository,
+) -> FrontendWorkflowEventRepositoryPort:
+    return cast(FrontendWorkflowEventRepositoryPort, repository)
+
+
 @dataclass(slots=True)
 class InMemoryFrontendWorkflowEventRepository:
     events: dict[str, FrontendWorkflowEvent] = field(default_factory=dict)
@@ -386,7 +445,10 @@ async def _execute_cluster(
     repository: FakeCompactionRepository | None = None,
     workflow_uow: FakeWorkflowUnitOfWork | None = None,
     frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
-) -> tuple[object, FakeWorkflowUnitOfWork]:
+) -> tuple[
+    HandleClusterDraftClaimsResult,
+    FakeWorkflowUnitOfWork,
+]:
     workflow_uow = workflow_uow or FakeWorkflowUnitOfWork()
     result = await HandleClusterDraftClaimsCommandHandler().execute(
         HandleClusterDraftClaimsCommand(
@@ -394,14 +456,22 @@ async def _execute_cluster(
                 KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
             )
         ),
-        compaction_plan_repository=repository
-        or FakeCompactionRepository((_claim("claim-a"), _claim("claim-b"))),
+        compaction_plan_repository=_plan_repository(
+            repository
+            or FakeCompactionRepository((_claim("claim-a"), _claim("claim-b")))
+        ),
         work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=FakeReductionStateRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(
+            FakeReductionStateRepository()
+        ),
         frontend_event_projection_writer=frontend_event_projection_writer,
     )
     return result, workflow_uow
+
+
+def _message_role(message: Mapping[object, object]) -> object:
+    return message["role"]
 
 
 @pytest.mark.asyncio
@@ -413,10 +483,12 @@ async def test_rejects_wrong_command_type() -> None:
                     KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS
                 )
             ),
-            compaction_plan_repository=FakeCompactionRepository(()),
+            compaction_plan_repository=_plan_repository(FakeCompactionRepository(())),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
-            workflow_unit_of_work=FakeWorkflowUnitOfWork(),
-            compaction_reduction_state_repository=FakeReductionStateRepository(),
+            workflow_unit_of_work=_workflow_unit_of_work(FakeWorkflowUnitOfWork()),
+            compaction_reduction_state_repository=_reduction_state_repository(
+                FakeReductionStateRepository()
+            ),
         )
 
 
@@ -430,10 +502,12 @@ async def test_rejects_non_pending_command() -> None:
                     status=WorkflowCommandStatus.COMPLETED,
                 )
             ),
-            compaction_plan_repository=FakeCompactionRepository(()),
+            compaction_plan_repository=_plan_repository(FakeCompactionRepository(())),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
-            workflow_unit_of_work=FakeWorkflowUnitOfWork(),
-            compaction_reduction_state_repository=FakeReductionStateRepository(),
+            workflow_unit_of_work=_workflow_unit_of_work(FakeWorkflowUnitOfWork()),
+            compaction_reduction_state_repository=_reduction_state_repository(
+                FakeReductionStateRepository()
+            ),
         )
 
 
@@ -450,10 +524,12 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
                 KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
             )
         ),
-        compaction_plan_repository=repository,
+        compaction_plan_repository=_plan_repository(repository),
         work_item_scheduling_repository=scheduling,
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=reduction_state,
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(
+            reduction_state
+        ),
     )
 
     assert result.group_count >= 1
@@ -515,7 +591,12 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
     for payload in scheduling.saved_payloads:
         provider_messages = payload["provider_messages"]
         assert isinstance(provider_messages, list)
-        assert [message["role"] for message in provider_messages] == [
+        message_roles = [
+            _message_role(message)
+            for message in provider_messages
+            if isinstance(message, Mapping)
+        ]
+        assert message_roles == [
             "system",
             "user",
         ]
@@ -541,10 +622,12 @@ async def test_singleton_group_uses_single_claim_enrichment_prompt() -> None:
                 KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
             )
         ),
-        compaction_plan_repository=repository,
+        compaction_plan_repository=_plan_repository(repository),
         work_item_scheduling_repository=scheduling,
-        workflow_unit_of_work=FakeWorkflowUnitOfWork(),
-        compaction_reduction_state_repository=FakeReductionStateRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(FakeWorkflowUnitOfWork()),
+        compaction_reduction_state_repository=_reduction_state_repository(
+            FakeReductionStateRepository()
+        ),
     )
 
     assert len(scheduling.saved_payloads) == 1
@@ -552,7 +635,11 @@ async def test_singleton_group_uses_single_claim_enrichment_prompt() -> None:
     assert payload["prompt_variant"] == "single_draft_claim_enrichment"
     provider_messages = payload["provider_messages"]
     assert isinstance(provider_messages, list)
-    assert "NODE: single_draft_claim_enrichment" in provider_messages[0]["content"]
+    first_message = provider_messages[0]
+    assert isinstance(first_message, Mapping)
+    first_content = first_message["content"]
+    assert isinstance(first_content, str)
+    assert "NODE: single_draft_claim_enrichment" in first_content
 
 
 @pytest.mark.asyncio
@@ -583,10 +670,12 @@ async def test_changed_existing_plan_raises_controlled_conflict_before_outbox() 
                     KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
                 )
             ),
-            compaction_plan_repository=repository,
+            compaction_plan_repository=_plan_repository(repository),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
-            workflow_unit_of_work=workflow_uow,
-            compaction_reduction_state_repository=FakeReductionStateRepository(),
+            workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+            compaction_reduction_state_repository=_reduction_state_repository(
+                FakeReductionStateRepository()
+            ),
         )
 
     assert workflow_uow.outbox.events == []
@@ -615,7 +704,7 @@ async def test_handler_projects_clusters_built_event() -> None:
     repository = InMemoryFrontendWorkflowEventRepository()
     projection_writer = ProjectFrontendWorkflowEvent(
         projector=KnowledgeExtractionFrontendWorkflowEventProjector(),
-        repository=repository,
+        repository=_frontend_event_repository(repository),
     )
 
     _, workflow_uow = await _execute_cluster(
