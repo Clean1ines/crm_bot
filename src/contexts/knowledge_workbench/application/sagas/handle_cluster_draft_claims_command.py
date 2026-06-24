@@ -447,14 +447,14 @@ def _plan(
 def _batch_capacity_estimate(batch) -> dict[str, object]:
     task_input_tokens = max(1, batch.estimated_input_tokens)
     estimated_input_tokens = DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS + task_input_tokens
-    reserved_output_tokens = task_input_tokens
+    estimated_output_tokens = task_input_tokens
     return {
         "estimator": "draft_claim_compaction_batch_budget_policy",
         "prompt_message_tokens": (DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS,),
         "task_input_tokens": task_input_tokens,
         "estimated_input_tokens": estimated_input_tokens,
-        "reserved_output_tokens": reserved_output_tokens,
-        "estimated_total_tokens": estimated_input_tokens + reserved_output_tokens,
+        "estimated_output_tokens": estimated_output_tokens,
+        "estimated_total_tokens": estimated_input_tokens + estimated_output_tokens,
         "prompt_variant": batch.prompt_variant,
         "model_id": batch.model_id,
     }

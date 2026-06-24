@@ -539,3 +539,40 @@ def test_b1f1_groq_executor_uses_effective_output_cap_as_fallback_source() -> No
     assert "parsed.effective_output_cap_tokens" in groq_executor
     assert "parsed.reserved_output_tokens" not in groq_executor
     assert "def _parse_reserved_output_tokens" not in groq_executor
+
+
+def test_b1f2_compaction_schedule_payload_uses_estimated_output_tokens() -> None:
+    doc = _read(ARCH_DOC_PATH)
+    cluster = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "handle_cluster_draft_claims_command.py"
+    )
+    apply_result = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "handle_apply_draft_claim_compaction_result_command.py"
+    )
+    estimate = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "llm_provider_message_capacity_estimate.py"
+    )
+    degraded_confirmation = _read(
+        REPO_ROOT / "src/interfaces/composition/"
+        "knowledge_extraction_degraded_fallback_confirmation.py"
+    )
+
+    assert "B1f-2: compaction schedule payloads write `estimated_output_tokens`" in doc
+    assert '"estimated_output_tokens": estimated_output_tokens' in cluster
+    assert '"reserved_output_tokens": reserved_output_tokens' not in cluster
+    assert '"estimated_output_tokens": next_work_item.estimated_completion_tokens' in (
+        apply_result
+    )
+    assert (
+        '"reserved_output_tokens": next_work_item.estimated_completion_tokens'
+        not in apply_result
+    )
+    assert "estimated_output_tokens: int" in estimate
+    assert "def reserved_output_tokens(self) -> int:" in estimate
+    assert '"estimated_output_tokens": self.estimated_output_tokens' in estimate
+    assert '"reserved_output_tokens": self.reserved_output_tokens' not in estimate
+    assert '"estimated_output_tokens": (' in degraded_confirmation
+    assert '"reserved_output_tokens": (' not in degraded_confirmation

@@ -818,7 +818,7 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     assert scheduled_payload["estimated_requests"] == 1
     assert scheduled_payload["llm_capacity_estimate"] == {
         "estimated_input_tokens": 1,
-        "reserved_output_tokens": 4000,
+        "estimated_output_tokens": 4000,
     }
 
 
@@ -907,7 +907,7 @@ def _expected_next_work_schedule_payload(
         "estimated_requests": 1,
         "llm_capacity_estimate": {
             "estimated_input_tokens": 1,
-            "reserved_output_tokens": 4000,
+            "estimated_output_tokens": 4000,
         },
     }
 

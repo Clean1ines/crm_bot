@@ -385,7 +385,7 @@ async def _schedule_next_work(
             "estimated_requests": next_work_item.estimated_requests,
             "llm_capacity_estimate": {
                 "estimated_input_tokens": next_work_item.estimated_prompt_tokens,
-                "reserved_output_tokens": next_work_item.estimated_completion_tokens,
+                "estimated_output_tokens": next_work_item.estimated_completion_tokens,
             },
         },
     )

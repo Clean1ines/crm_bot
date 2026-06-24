@@ -11,7 +11,7 @@ from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_
 @dataclass(frozen=True, slots=True)
 class ProviderMessageCapacityEstimate:
     estimated_input_tokens: int
-    reserved_output_tokens: int
+    estimated_output_tokens: int
     estimated_total_tokens: int
 
     def __post_init__(self) -> None:
@@ -20,25 +20,29 @@ class ProviderMessageCapacityEstimate:
             field_name="estimated_input_tokens",
         )
         _require_non_negative_int(
-            self.reserved_output_tokens,
-            field_name="reserved_output_tokens",
+            self.estimated_output_tokens,
+            field_name="estimated_output_tokens",
         )
         _require_positive_int(
             self.estimated_total_tokens,
             field_name="estimated_total_tokens",
         )
         if self.estimated_total_tokens != (
-            self.estimated_input_tokens + self.reserved_output_tokens
+            self.estimated_input_tokens + self.estimated_output_tokens
         ):
             raise ValueError(
-                "estimated_total_tokens must equal input plus reserved output",
+                "estimated_total_tokens must equal input plus estimated output",
             )
+
+    @property
+    def reserved_output_tokens(self) -> int:
+        return self.estimated_output_tokens
 
     def to_payload(self) -> dict[str, object]:
         return {
             "estimator": "rough_char_div_4_actual_provider_messages",
             "estimated_input_tokens": self.estimated_input_tokens,
-            "reserved_output_tokens": self.reserved_output_tokens,
+            "estimated_output_tokens": self.estimated_output_tokens,
             "estimated_total_tokens": self.estimated_total_tokens,
         }
 
@@ -61,11 +65,11 @@ def estimate_provider_message_capacity(
             content
         )
 
-    reserved_output_tokens = max(1024, min(4096, estimated_input_tokens))
+    estimated_output_tokens = max(1024, min(4096, estimated_input_tokens))
     return ProviderMessageCapacityEstimate(
         estimated_input_tokens=estimated_input_tokens,
-        reserved_output_tokens=reserved_output_tokens,
-        estimated_total_tokens=estimated_input_tokens + reserved_output_tokens,
+        estimated_output_tokens=estimated_output_tokens,
+        estimated_total_tokens=estimated_input_tokens + estimated_output_tokens,
     )
 
 

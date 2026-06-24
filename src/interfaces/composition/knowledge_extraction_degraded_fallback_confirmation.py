@@ -159,7 +159,7 @@ class _PostgresDegradedFallbackScheduler:
                                 "estimated_input_tokens": (
                                     decision.estimated_prompt_tokens
                                 ),
-                                "reserved_output_tokens": (
+                                "estimated_output_tokens": (
                                     decision.estimated_completion_tokens
                                 ),
                                 "estimated_total_tokens": (
