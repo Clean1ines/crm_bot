@@ -8,6 +8,14 @@ from typing import cast
 
 import pytest
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+    CapacityAdmissionWorkItemProjectionCandidate,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+    PersistCapacityAdmissionProjectionResult,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -83,6 +91,22 @@ class FakeWorkItemSchedulingRepository:
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
 
 
+@dataclass(slots=True)
+class FakeCapacityAdmissionProjectionWriter:
+    persisted_batches: list[
+        tuple[CapacityAdmissionWorkItemProjectionCandidate, ...]
+    ] = field(default_factory=list)
+
+    async def persist_projection_candidates(
+        self,
+        candidates: tuple[CapacityAdmissionWorkItemProjectionCandidate, ...],
+    ) -> PersistCapacityAdmissionProjectionResult:
+        self.persisted_batches.append(candidates)
+        return PersistCapacityAdmissionProjectionResult(
+            persisted_count=len(candidates),
+        )
+
+
 def _now() -> datetime:
     return datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc)
 
@@ -125,9 +149,16 @@ def _command(
 
 def _service(
     unit_of_work: WorkItemSchedulingRepositoryPort,
+    *,
+    capacity_admission_projection_writer: (
+        CapacityAdmissionProjectionWriterPort | None
+    ) = None,
+    capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
 ) -> ScheduleClaimBuilderSectionWork:
     return ScheduleClaimBuilderSectionWork(
         scheduling_repository=unit_of_work,
+        capacity_admission_projection_writer=capacity_admission_projection_writer,
+        capacity_admission_lane_target=capacity_admission_lane_target,
     )
 
 
@@ -259,13 +290,118 @@ async def test_schedules_created_work_items_for_source_units() -> None:
     assert all(
         "claim_builder_provenance" in saved.payload for saved in unit_of_work.saved
     )
-    assert (
-        "# Unit 0\\n\\nBody"
-        in unit_of_work.saved[0].payload["provider_messages"][1]["content"]
+    provider_messages = cast(
+        tuple[Mapping[str, object], ...],
+        unit_of_work.saved[0].payload["provider_messages"],
     )
-    assert unit_of_work.saved[0].payload["claim_builder_provenance"]["prompt_id"] == (
-        "faq_claim_observations"
+    provider_user_content = provider_messages[1]["content"]
+    assert isinstance(provider_user_content, str)
+    assert "# Unit 0\\n\\nBody" in provider_user_content
+
+    saved_provenance = cast(
+        Mapping[str, object],
+        unit_of_work.saved[0].payload["claim_builder_provenance"],
     )
+    assert saved_provenance["prompt_id"] == "faq_claim_observations"
+
+
+@pytest.mark.asyncio
+async def test_persists_capacity_admission_projection_when_lane_target_is_configured() -> (
+    None
+):
+    unit_of_work = FakeWorkItemSchedulingRepository()
+    projection_writer = FakeCapacityAdmissionProjectionWriter()
+
+    result = await _service(
+        unit_of_work,
+        capacity_admission_projection_writer=projection_writer,
+        capacity_admission_lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            account_ref="groq-account-1",
+            model_ref="llama-3.3-70b-versatile",
+        ),
+    ).execute(_command())
+
+    assert result.created_count == 2
+    assert result.conflict_count == 0
+    assert result.capacity_admission_projection_persisted_count == 2
+    assert len(projection_writer.persisted_batches) == 1
+
+    candidates = projection_writer.persisted_batches[0]
+    assert tuple(candidate.work_item_id for candidate in candidates) == tuple(
+        saved.item.work_item_id for saved in unit_of_work.saved
+    )
+    assert all(candidate.provider == "groq" for candidate in candidates)
+    assert all(candidate.account_ref == "groq-account-1" for candidate in candidates)
+    assert all(
+        candidate.model_ref == "llama-3.3-70b-versatile" for candidate in candidates
+    )
+    assert all(
+        candidate.reserved_total_tokens
+        >= candidate.estimated_input_tokens + candidate.estimated_output_tokens
+        for candidate in candidates
+    )
+    assert candidates[0].source_ref["source_unit_ref"] == (
+        "source-document:project-1:abc.unit.0"
+    )
+
+
+@pytest.mark.asyncio
+async def test_capacity_admission_projection_is_not_persisted_on_schedule_conflict() -> (
+    None
+):
+    workflow_run_id = "knowledge-extraction:source-document:project-1:abc"
+    unit_ref = "source-document:project-1:abc.unit.0"
+    work_item_id = _work_item_id(
+        workflow_run_id=workflow_run_id,
+        unit_ref=unit_ref,
+    )
+    unit_of_work = FakeWorkItemSchedulingRepository(
+        existing_items={
+            work_item_id: WorkItem(
+                work_item_id=work_item_id,
+                work_kind=_work_kind(),
+            ),
+        },
+        schedule_payload_hashes={work_item_id: "different-payload-hash"},
+    )
+    projection_writer = FakeCapacityAdmissionProjectionWriter()
+
+    result = await _service(
+        unit_of_work,
+        capacity_admission_projection_writer=projection_writer,
+        capacity_admission_lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            model_ref="llama-3.3-70b-versatile",
+        ),
+    ).execute(_command(source_units=(_source_unit(unit_ref=unit_ref, ordinal=0),)))
+
+    assert result.created_count == 0
+    assert result.conflict_count == 1
+    assert result.capacity_admission_projection_persisted_count == 0
+    assert projection_writer.persisted_batches == []
+
+
+def test_capacity_admission_projection_dependencies_must_be_configured_together() -> (
+    None
+):
+    unit_of_work = FakeWorkItemSchedulingRepository()
+    projection_writer = FakeCapacityAdmissionProjectionWriter()
+
+    with pytest.raises(ValueError, match="writer and lane target"):
+        ScheduleClaimBuilderSectionWork(
+            scheduling_repository=unit_of_work,
+            capacity_admission_projection_writer=projection_writer,
+        )
+
+    with pytest.raises(ValueError, match="writer and lane target"):
+        ScheduleClaimBuilderSectionWork(
+            scheduling_repository=unit_of_work,
+            capacity_admission_lane_target=CapacityAdmissionLaneTarget(
+                provider="groq",
+                model_ref="llama-3.3-70b-versatile",
+            ),
+        )
 
 
 @pytest.mark.asyncio
@@ -388,6 +524,10 @@ async def test_schedule_claim_builder_section_work_source_guard() -> None:
         "created_count",
         "already_exists_count",
         "conflict_count",
+        "capacity_admission_projection_persisted_count",
+        "CapacityAdmissionProjectionWriterPort",
+        "CapacityAdmissionLaneTarget",
+        "BuildCapacityAdmissionProjectionCandidates",
         "ClaimBuilderScheduledWorkItemSummary",
         "scheduled_items",
         "payload_hash",
@@ -401,7 +541,7 @@ async def test_schedule_claim_builder_section_work_source_guard() -> None:
         "execution_runtime.infrastructure",
         "Postgres",
         "asyncpg",
-        "queue",
+        "queue_worker",
         "worker",
         "lease",
         "Groq",

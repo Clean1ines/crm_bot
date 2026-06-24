@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    BuildCapacityAdmissionProjectionCandidates,
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -86,6 +93,7 @@ class ScheduleClaimBuilderSectionWorkResult:
     already_exists_count: int
     conflict_count: int
     scheduled_items: tuple[ClaimBuilderScheduledWorkItemSummary, ...]
+    capacity_admission_projection_persisted_count: int = 0
 
     def __post_init__(self) -> None:
         for field_name, value in (
@@ -93,6 +101,10 @@ class ScheduleClaimBuilderSectionWorkResult:
             ("created_count", self.created_count),
             ("already_exists_count", self.already_exists_count),
             ("conflict_count", self.conflict_count),
+            (
+                "capacity_admission_projection_persisted_count",
+                self.capacity_admission_projection_persisted_count,
+            ),
         ):
             if not isinstance(value, int):
                 raise TypeError(f"{field_name} must be int")
@@ -118,6 +130,18 @@ class ScheduleClaimBuilderSectionWorkResult:
 @dataclass(frozen=True, slots=True)
 class ScheduleClaimBuilderSectionWork:
     scheduling_repository: WorkItemSchedulingRepositoryPort
+    capacity_admission_projection_writer: (
+        CapacityAdmissionProjectionWriterPort | None
+    ) = None
+    capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None
+
+    def __post_init__(self) -> None:
+        if (self.capacity_admission_projection_writer is None) != (
+            self.capacity_admission_lane_target is None
+        ):
+            raise ValueError(
+                "capacity admission projection writer and lane target must be provided together"
+            )
 
     async def execute(
         self,
@@ -143,6 +167,22 @@ class ScheduleClaimBuilderSectionWork:
             ),
         )
 
+        capacity_admission_projection_persisted_count = 0
+        if (
+            scheduling_result.conflict_count == 0
+            and self.capacity_admission_projection_writer is not None
+            and self.capacity_admission_lane_target is not None
+        ):
+            projection_candidates = BuildCapacityAdmissionProjectionCandidates(
+                lane_target=self.capacity_admission_lane_target,
+            ).execute(execution_schedule.schedule_plans)
+            projection_result = await self.capacity_admission_projection_writer.persist_projection_candidates(
+                projection_candidates,
+            )
+            capacity_admission_projection_persisted_count = (
+                projection_result.persisted_count
+            )
+
         return ScheduleClaimBuilderSectionWorkResult(
             planned_count=len(execution_schedule.schedule_plans),
             created_count=scheduling_result.created_count,
@@ -151,6 +191,9 @@ class ScheduleClaimBuilderSectionWork:
             scheduled_items=_build_scheduled_item_summaries(
                 workbench_plans=workbench_plans.plans,
                 scheduling_outcomes=scheduling_result.outcomes,
+            ),
+            capacity_admission_projection_persisted_count=(
+                capacity_admission_projection_persisted_count
             ),
         )
 
