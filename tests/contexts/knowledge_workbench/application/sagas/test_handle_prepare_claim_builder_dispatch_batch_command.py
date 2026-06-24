@@ -584,6 +584,41 @@ async def test_calls_existing_prepare_llm_dispatch_batch_for_claim_builder_work_
 
 
 @pytest.mark.asyncio
+async def test_reads_target_profile_keys_from_llm_dispatch_preparation() -> None:
+    workflow_command = _workflow_command()
+    payload = dict(workflow_command.payload)
+    dispatch_preparation = payload["llm_dispatch_preparation"]
+    assert isinstance(dispatch_preparation, dict)
+    dispatch_preparation = dict(dispatch_preparation)
+    profile = dispatch_preparation["profile"]
+    assert isinstance(profile, dict)
+    profile = dict(profile)
+    profile.pop("estimated_prompt_tokens")
+    profile.pop("estimated_completion_tokens")
+    profile["estimated_input_tokens"] = 3456
+    profile["estimated_output_tokens"] = 789
+    dispatch_preparation["profile"] = profile
+    payload["llm_dispatch_preparation"] = dispatch_preparation
+    workflow_command = WorkflowCommand(
+        command_id=workflow_command.command_id,
+        command_type=workflow_command.command_type,
+        workflow_run_id=workflow_command.workflow_run_id,
+        idempotency_key=workflow_command.idempotency_key,
+        payload=payload,
+        status=workflow_command.status,
+        run_after=workflow_command.run_after,
+        created_at=workflow_command.created_at,
+        updated_at=workflow_command.updated_at,
+    )
+
+    _, prepare, _ = await _execute(workflow_command)
+
+    assert prepare.calls[0].profile is not None
+    assert prepare.calls[0].profile.estimated_input_tokens == 3456
+    assert prepare.calls[0].profile.estimated_output_tokens == 789
+
+
+@pytest.mark.asyncio
 async def test_appends_claim_builder_dispatch_batch_prepared_event() -> None:
     result, _, workflow_unit_of_work = await _execute()
 
@@ -887,6 +922,7 @@ async def test_source_split_required_emits_split_required_event_and_command() ->
     assert command.payload["source_unit_ref"] == "unit-1"
     assert command.payload["source_unit_refs"] == ("unit-1",)
     assert command.payload["affected_work_item_refs"] == ("work-1",)
+    assert command.payload["estimated_input_tokens"] == 3000
     assert command.payload["estimated_prompt_tokens"] == 3000
     assert command.payload["active_model_ref"] == "qwen/qwen3-32b"
     assert command.payload["input_size_preflight_decision"] == ("SOURCE_SPLIT_REQUIRED")

@@ -45,6 +45,8 @@ class ClaimBuilderDispatchPreparation:
         return {
             "profile": {
                 "profile_id": self.profile.profile_id,
+                "estimated_input_tokens": self.profile.estimated_input_tokens,
+                "estimated_output_tokens": self.profile.estimated_output_tokens,
                 "estimated_prompt_tokens": self.profile.estimated_prompt_tokens,
                 "estimated_completion_tokens": self.profile.estimated_completion_tokens,
                 "estimated_requests": self.profile.estimated_requests,

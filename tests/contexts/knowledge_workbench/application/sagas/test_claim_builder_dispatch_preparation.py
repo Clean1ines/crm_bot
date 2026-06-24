@@ -10,7 +10,14 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_status import
     WorkItemStatus,
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
+    LlmProviderAccountCapacity,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
+    LlmTaskCapacityProfile,
+)
 from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
+    ClaimBuilderDispatchPreparation,
     ClaimBuilderDispatchPreparationBuilder,
 )
 
@@ -61,6 +68,40 @@ def test_profile_completion_estimate_comes_from_estimated_output_tokens() -> Non
     assert profile.estimated_prompt_tokens == 5000
     assert profile.estimated_completion_tokens == 1600
     assert profile.estimated_requests == 1
+
+
+def test_dispatch_preparation_payload_dual_writes_target_and_legacy_profile_keys() -> (
+    None
+):
+    preparation = ClaimBuilderDispatchPreparation(
+        profile=LlmTaskCapacityProfile(
+            profile_id="prompt-a",
+            estimated_prompt_tokens=5000,
+            estimated_completion_tokens=1600,
+        ),
+        account_capacities=(
+            LlmProviderAccountCapacity(
+                provider="groq",
+                account_ref="groq_org_primary",
+                model_ref="qwen/qwen3-32b",
+                remaining_minute_requests=2,
+                remaining_minute_tokens=7000,
+                remaining_daily_requests=100,
+                remaining_daily_tokens=50000,
+            ),
+        ),
+        active_model_ref="qwen/qwen3-32b",
+        requested_items=1,
+    )
+
+    payload = preparation.to_payload()
+    profile = payload["profile"]
+
+    assert isinstance(profile, dict)
+    assert profile["estimated_input_tokens"] == 5000
+    assert profile["estimated_output_tokens"] == 1600
+    assert profile["estimated_prompt_tokens"] == 5000
+    assert profile["estimated_completion_tokens"] == 1600
 
 
 def test_profile_rejects_legacy_reserved_output_tokens_as_expected_output() -> None:

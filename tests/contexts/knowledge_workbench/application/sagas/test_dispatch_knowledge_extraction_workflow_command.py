@@ -448,7 +448,37 @@ class FakeAttemptResult:
 
 
 @dataclass(slots=True)
+class FakeAllocation:
+    provider: str = "groq"
+    account_ref: str = "groq_org_primary"
+    model_ref: str = "qwen/qwen3-32b"
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "provider": self.provider,
+            "account_ref": self.account_ref,
+            "model_ref": self.model_ref,
+        }
+
+
+@dataclass(slots=True)
+class FakeLeasedItem:
+    schedule_payload: dict[str, object]
+    allocation: FakeAllocation
+    selection_kind: str = "fresh"
+
+    def admitted_schedule_payload(self) -> dict[str, object]:
+        return dict(self.schedule_payload)
+
+
+@dataclass(slots=True)
+class FakeLeaseResult:
+    leased: tuple[FakeLeasedItem, ...]
+
+
+@dataclass(slots=True)
 class FakePrepareResult:
+    lease_result: FakeLeaseResult
     attempt_result: FakeAttemptResult
     capacity_retry_at: datetime | None = None
     input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
@@ -468,7 +498,29 @@ class FakePrepareLlmDispatchBatch:
 
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
         self.calls.append(command)
+        model_ref = command.active_model_ref or "qwen/qwen3-32b"
+        allocation = FakeAllocation(model_ref=model_ref)
+        schedule_payload: dict[str, object] = {
+            "workflow_run_id": _workflow_run_id(),
+            "source_document_ref": _document_ref().value,
+            "source_unit_ref": f"{_document_ref().value}.unit.0",
+            "group_ref": "group-1",
+            "batch_ref": "batch-1",
+            "round_index": 0,
+            "expected_output_kind": "compacted_claims",
+            "source_claim_refs": ["claim-a", "claim-b"],
+            "left_node_ref": "raw:workflow-1:group-1:claim-a",
+            "right_node_ref": "raw:workflow-1:group-1:claim-b",
+        }
         return FakePrepareResult(
+            lease_result=FakeLeaseResult(
+                leased=(
+                    FakeLeasedItem(
+                        schedule_payload=schedule_payload,
+                        allocation=allocation,
+                    ),
+                ),
+            ),
             capacity_retry_at=self.capacity_retry_at,
             attempt_result=FakeAttemptResult(
                 started_attempts=(
@@ -478,16 +530,8 @@ class FakePrepareLlmDispatchBatch:
                         attempt_number=1,
                         dispatch_payload={
                             "work_item_id": "work-1",
-                            "schedule_payload": {
-                                "workflow_run_id": _workflow_run_id(),
-                                "group_ref": "group-1",
-                                "batch_ref": "batch-1",
-                                "round_index": 0,
-                                "expected_output_kind": "compacted_claims",
-                                "source_claim_refs": ["claim-a", "claim-b"],
-                                "left_node_ref": "raw:workflow-1:group-1:claim-a",
-                                "right_node_ref": "raw:workflow-1:group-1:claim-b",
-                            },
+                            "schedule_payload": schedule_payload,
+                            "llm_allocation": allocation.to_payload(),
                         },
                     ),
                 ),
@@ -766,6 +810,9 @@ async def test_apply_draft_claim_compaction_result_dispatches_when_dependencies_
         workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
         draft_claim_compaction_reduction_state_repository=repository,
         draft_claim_observation_read_repository=read_repository,
+        execute_prepared_llm_dispatch_attempt=(
+            FakeDraftClaimCompactionWorkItemCompletion()
+        ),
     )
 
     assert result.dispatched is True
@@ -782,6 +829,7 @@ def _apply_result_payload() -> dict[str, object]:
         "batch_ref": "batch-1",
         "work_item_id": "work-item-1",
         "round_index": 0,
+        "lease_token": "lease-token-1",
         "output_kind": "compacted_claims",
         "left_node_ref": "raw:workflow-1:group-1:claim-a",
         "right_node_ref": "raw:workflow-1:group-1:claim-b",
@@ -973,6 +1021,21 @@ class FakeCapacityObservationRepository:
 
     async def record_observation(self, observation) -> None:
         self.observations.append(observation)
+
+
+@dataclass(slots=True)
+class FakeDraftClaimCompactionWorkItemCompletion:
+    completed_work_item_ids: list[str] = field(default_factory=list)
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: object,
+    ) -> object:
+        del lease_token
+        self.completed_work_item_ids.append(work_item_id)
+        return object()
 
 
 async def _dispatch_execute_draft_claim_compaction(

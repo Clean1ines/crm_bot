@@ -454,6 +454,31 @@ def test_b1d3a_task_capacity_profile_exposes_target_accessors() -> None:
     assert "_first_fallback_that_fits_prompt" not in preflight_source
 
 
+def test_b1d3b_claim_builder_profile_payload_dual_writes_and_dual_reads() -> None:
+    producer = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "claim_builder_dispatch_preparation.py",
+    )
+    reader = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "handle_prepare_claim_builder_dispatch_batch_command.py",
+    )
+
+    assert '"estimated_input_tokens": self.profile.estimated_input_tokens' in producer
+    assert '"estimated_output_tokens": self.profile.estimated_output_tokens' in producer
+    assert '"estimated_prompt_tokens": self.profile.estimated_prompt_tokens' in producer
+    assert (
+        '"estimated_completion_tokens": self.profile.estimated_completion_tokens'
+        in producer
+    )
+    assert "_claim_builder_profile_positive_int_with_legacy_fallback" in reader
+    assert "_claim_builder_profile_non_negative_int_with_legacy_fallback" in reader
+    assert 'key="estimated_input_tokens"' in reader
+    assert 'legacy_key="estimated_prompt_tokens"' in reader
+    assert 'key="estimated_output_tokens"' in reader
+    assert 'legacy_key="estimated_completion_tokens"' in reader
+
+
 def test_b1a_does_not_pretend_runtime_token_vocabulary_is_migrated() -> None:
     source = _read(ARCH_DOC_PATH)
     normalized_source = source.replace("`", "")

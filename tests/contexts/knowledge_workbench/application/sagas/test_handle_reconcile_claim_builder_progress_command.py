@@ -533,25 +533,27 @@ async def test_distinct_reconcile_commands_create_distinct_prepare_keys_for_next
 
 
 @pytest.mark.asyncio
-async def test_future_retryable_work_appends_prepare_dispatch_batch_later() -> None:
-    next_due_at = _now() + timedelta(minutes=2)
+async def test_retryable_work_appends_prepare_dispatch_batch_now_even_with_legacy_next_due_at() -> (
+    None
+):
+    legacy_next_due_at = _now() + timedelta(minutes=2)
     result, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(
             retryable_failed_count=1,
-            due_retryable_failed_count=0,
+            due_retryable_failed_count=1,
             completed_count=2,
-            next_due_at=next_due_at,
+            next_due_at=legacy_next_due_at,
         ),
     )
 
     assert result.decision == (
-        ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER.value
+        ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW.value
     )
     next_command = workflow_unit_of_work.command_log.pending_commands[0]
     assert next_command.command_type == (
         KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
     )
-    assert next_command.run_after == next_due_at
+    assert next_command.run_after == _now()
 
 
 @pytest.mark.asyncio
