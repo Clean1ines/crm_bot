@@ -178,6 +178,25 @@ class CapacityAdmissionProjectionLeaseSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class CapacityAdmissionCapacityReservationSummary:
+    reservation_ref: str
+    work_item_id: str
+    lane: CapacityAdmissionLaneSummary
+    reserved_requests: int
+    reserved_tokens: int
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.reservation_ref, "reservation_ref")
+        _require_non_empty_text(self.work_item_id, "work_item_id")
+        if not isinstance(self.lane, CapacityAdmissionLaneSummary):
+            raise TypeError("lane must be CapacityAdmissionLaneSummary")
+        _require_positive_int(self.reserved_requests, "reserved_requests")
+        _require_positive_int(self.reserved_tokens, "reserved_tokens")
+        _require_timezone_aware(self.expires_at, "expires_at")
+
+
+@dataclass(frozen=True, slots=True)
 class CapacityAdmissionStartedAttemptSummary:
     attempt_id: str
     work_item_id: str
@@ -258,6 +277,7 @@ class CapacityWindowAdmissionPassResult:
     lane: CapacityAdmissionLaneSummary
     admitted_items: tuple[CapacityAdmissionAdmittedItemSummary, ...] = ()
     projection_leases: tuple[CapacityAdmissionProjectionLeaseSummary, ...] = ()
+    capacity_reservations: tuple[CapacityAdmissionCapacityReservationSummary, ...] = ()
     started_attempts: tuple[CapacityAdmissionStartedAttemptSummary, ...] = ()
     appended_execute_command_refs: tuple[str, ...] = ()
     skipped_reason: CapacityWindowAdmissionSkippedReason | None = None
@@ -293,6 +313,18 @@ class CapacityWindowAdmissionPassResult:
                 )
             if lease.lane != self.lane:
                 raise ValueError("projection lease lane must match result lane")
+
+        for reservation in self.capacity_reservations:
+            if not isinstance(
+                reservation,
+                CapacityAdmissionCapacityReservationSummary,
+            ):
+                raise TypeError(
+                    "capacity_reservations must contain "
+                    "CapacityAdmissionCapacityReservationSummary"
+                )
+            if reservation.lane != self.lane:
+                raise ValueError("capacity reservation lane must match result lane")
 
         for attempt in self.started_attempts:
             if not isinstance(attempt, CapacityAdmissionStartedAttemptSummary):
@@ -360,6 +392,12 @@ class CapacityWindowAdmissionPassResult:
                 "admitted result projection_leases length must equal "
                 "admitted_items length"
             )
+        if self.capacity_reservations and len(self.capacity_reservations) != len(
+            self.admitted_items
+        ):
+            raise ValueError(
+                "capacity_reservations length must equal admitted_items when present"
+            )
 
         execution_refs = len(self.started_attempts) + len(
             self.appended_execute_command_refs
@@ -396,6 +434,8 @@ class CapacityWindowAdmissionPassResult:
             raise ValueError("skipped result must not include admitted_items")
         if self.projection_leases:
             raise ValueError("skipped result must not include projection_leases")
+        if self.capacity_reservations:
+            raise ValueError("skipped result must not include capacity_reservations")
         if self.started_attempts:
             raise ValueError("skipped result must not include started_attempts")
         if self.appended_execute_command_refs:

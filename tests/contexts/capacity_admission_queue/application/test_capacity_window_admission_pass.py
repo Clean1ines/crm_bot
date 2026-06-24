@@ -17,6 +17,8 @@ from src.contexts.capacity_admission_queue.application.capacity_window_admission
     CapacityWindowAdmissionReservationResult,
 )
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_result import (
+    CapacityAdmissionCapacityReservationSummary,
+    CapacityAdmissionLaneSummary,
     CapacityWindowAdmissionSkippedReason,
 )
 from src.contexts.capacity_admission_queue.application.select_capacity_admission_work_item import (
@@ -158,6 +160,7 @@ class FakeCapacityReservation:
     async def reserve_capacity_for_selected_work_item(
         self,
         *,
+        reservation_ref: str,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
         budget: CapacityAdmissionWindowBudget,
         now: datetime,
@@ -172,6 +175,19 @@ class FakeCapacityReservation:
             )
         return CapacityWindowAdmissionReservationResult(
             reserved=True,
+            reservation_summary=CapacityAdmissionCapacityReservationSummary(
+                reservation_ref=reservation_ref,
+                work_item_id=selected_work_item.work_item_id,
+                lane=CapacityAdmissionLaneSummary(
+                    work_kind=selected_work_item.lane_key.work_kind,
+                    provider=selected_work_item.lane_key.provider,
+                    account_ref=selected_work_item.lane_key.account_ref,
+                    model_ref=selected_work_item.lane_key.model_ref,
+                ),
+                reserved_requests=1,
+                reserved_tokens=selected_work_item.reserved_total_tokens,
+                expires_at=expires_at,
+            ),
             budget_after=CapacityAdmissionWindowBudget(
                 remaining_requests=budget.remaining_requests - 1,
                 remaining_tokens=budget.remaining_tokens
@@ -194,6 +210,7 @@ class FakeExecutionBoundary:
         selected_work_item: CapacityAdmissionSelectableWorkItem,
         leased_work_item: LeasedWorkItemRecord,
         projection_lease: CapacityAdmissionProjectionLeaseResult,
+        capacity_reservation: CapacityAdmissionCapacityReservationSummary,
         now: datetime,
     ) -> CapacityWindowAdmissionExecutionReference:
         self.started_work_item_ids.append(selected_work_item.work_item_id)
@@ -204,7 +221,7 @@ class FakeExecutionBoundary:
             )
         return CapacityWindowAdmissionExecutionReference(
             work_item_id=selected_work_item.work_item_id,
-            attempt_id=f"{selected_work_item.work_item_id}:attempt:1",
+            attempt_id=capacity_reservation.reservation_ref,
             attempt_number=1,
         )
 
@@ -331,6 +348,7 @@ async def test_pass_admits_retryable_before_ready_and_returns_started_attempts()
     ]
     assert result.frontend_event_summary is not None
     assert result.frontend_event_summary.admitted_count == 2
+    assert result.capacity_reservations[0].reservation_ref.endswith("work-item-retry")
 
 
 @pytest.mark.asyncio

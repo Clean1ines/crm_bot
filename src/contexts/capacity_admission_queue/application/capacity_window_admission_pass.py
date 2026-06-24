@@ -10,6 +10,7 @@ from src.contexts.capacity_admission_queue.application.admit_capacity_admission_
 )
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_result import (
     CapacityAdmissionAdmittedItemSummary,
+    CapacityAdmissionCapacityReservationSummary,
     CapacityAdmissionFrontendEventSummary,
     CapacityAdmissionLaneSummary,
     CapacityAdmissionProjectionLeaseSummary,
@@ -42,6 +43,7 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 class CapacityWindowAdmissionReservationResult:
     reserved: bool
     budget_after: CapacityAdmissionWindowBudget
+    reservation_summary: CapacityAdmissionCapacityReservationSummary | None = None
     skipped_reason: CapacityWindowAdmissionSkippedReason | None = None
 
     def __post_init__(self) -> None:
@@ -49,6 +51,13 @@ class CapacityWindowAdmissionReservationResult:
             raise TypeError("reserved must be bool")
         if not isinstance(self.budget_after, CapacityAdmissionWindowBudget):
             raise TypeError("budget_after must be CapacityAdmissionWindowBudget")
+        if self.reservation_summary is not None and not isinstance(
+            self.reservation_summary,
+            CapacityAdmissionCapacityReservationSummary,
+        ):
+            raise TypeError(
+                "reservation_summary must be CapacityAdmissionCapacityReservationSummary"
+            )
         if self.skipped_reason is not None and not isinstance(
             self.skipped_reason,
             CapacityWindowAdmissionSkippedReason,
@@ -56,16 +65,21 @@ class CapacityWindowAdmissionReservationResult:
             raise TypeError(
                 "skipped_reason must be CapacityWindowAdmissionSkippedReason"
             )
+        if self.reserved and self.reservation_summary is None:
+            raise ValueError("reserved result must include reservation_summary")
         if self.reserved and self.skipped_reason is not None:
             raise ValueError("reserved result must not include skipped_reason")
         if not self.reserved and self.skipped_reason is None:
             raise ValueError("not reserved result must include skipped_reason")
+        if not self.reserved and self.reservation_summary is not None:
+            raise ValueError("not reserved result must not include reservation_summary")
 
 
 class CapacityWindowAdmissionReservationPort(Protocol):
     async def reserve_capacity_for_selected_work_item(
         self,
         *,
+        reservation_ref: str,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
         budget: CapacityAdmissionWindowBudget,
         now: datetime,
@@ -121,6 +135,7 @@ class CapacityWindowAdmissionExecutionBoundaryPort(Protocol):
         selected_work_item: CapacityAdmissionSelectableWorkItem,
         leased_work_item: LeasedWorkItemRecord,
         projection_lease: CapacityAdmissionProjectionLeaseResult,
+        capacity_reservation: CapacityAdmissionCapacityReservationSummary,
         now: datetime,
     ) -> CapacityWindowAdmissionExecutionReference:
         """Start attempt or return an explicit execute command reference."""
@@ -183,6 +198,7 @@ class CapacityWindowAdmissionPass:
         budget = command.budget
         admitted_items: list[CapacityAdmissionAdmittedItemSummary] = []
         projection_leases: list[CapacityAdmissionProjectionLeaseSummary] = []
+        capacity_reservations: list[CapacityAdmissionCapacityReservationSummary] = []
         started_attempts: list[CapacityAdmissionStartedAttemptSummary] = []
         execute_command_refs: list[str] = []
 
@@ -204,13 +220,20 @@ class CapacityWindowAdmissionPass:
                         command=command,
                         admitted_items=tuple(admitted_items),
                         projection_leases=tuple(projection_leases),
+                        capacity_reservations=tuple(capacity_reservations),
                         started_attempts=tuple(started_attempts),
                         execute_command_refs=tuple(execute_command_refs),
                     )
                 return self._skipped_result(command, skipped_reason)
 
+            reservation_ref = _reservation_ref(
+                prefix=command.lease_token_prefix,
+                admission_index=admission_index,
+                work_item_id=selected_work_item.work_item_id,
+            )
             reservation = (
                 await self.capacity_reservation.reserve_capacity_for_selected_work_item(
+                    reservation_ref=reservation_ref,
                     selected_work_item=selected_work_item,
                     budget=budget,
                     now=command.now,
@@ -227,6 +250,7 @@ class CapacityWindowAdmissionPass:
                         command=command,
                         admitted_items=tuple(admitted_items),
                         projection_leases=tuple(projection_leases),
+                        capacity_reservations=tuple(capacity_reservations),
                         started_attempts=tuple(started_attempts),
                         execute_command_refs=tuple(execute_command_refs),
                     )
@@ -255,6 +279,7 @@ class CapacityWindowAdmissionPass:
                         command=command,
                         admitted_items=tuple(admitted_items),
                         projection_leases=tuple(projection_leases),
+                        capacity_reservations=tuple(capacity_reservations),
                         started_attempts=tuple(started_attempts),
                         execute_command_refs=tuple(execute_command_refs),
                     )
@@ -264,12 +289,16 @@ class CapacityWindowAdmissionPass:
                 raise RuntimeError("leased result must include execution_lease")
             if lease_result.projection_lease is None:
                 raise RuntimeError("leased result must include projection_lease")
+            if reservation.reservation_summary is None:
+                raise RuntimeError("reserved result must include reservation_summary")
+            reservation_summary = reservation.reservation_summary
 
             execution_reference = (
                 await self.execution_boundary.start_or_append_execution(
                     selected_work_item=selected_work_item,
                     leased_work_item=lease_result.execution_lease,
                     projection_lease=lease_result.projection_lease,
+                    capacity_reservation=reservation_summary,
                     now=command.now,
                 )
             )
@@ -278,6 +307,7 @@ class CapacityWindowAdmissionPass:
             projection_leases.append(
                 _projection_lease_summary(lease_result.projection_lease)
             )
+            capacity_reservations.append(reservation_summary)
 
             started_attempt = execution_reference.to_started_attempt_summary()
             if started_attempt is not None:
@@ -294,6 +324,7 @@ class CapacityWindowAdmissionPass:
                 command=command,
                 admitted_items=tuple(admitted_items),
                 projection_leases=tuple(projection_leases),
+                capacity_reservations=tuple(capacity_reservations),
                 started_attempts=tuple(started_attempts),
                 execute_command_refs=tuple(execute_command_refs),
             )
@@ -329,6 +360,7 @@ class CapacityWindowAdmissionPass:
         command: CapacityWindowAdmissionPassCommand,
         admitted_items: tuple[CapacityAdmissionAdmittedItemSummary, ...],
         projection_leases: tuple[CapacityAdmissionProjectionLeaseSummary, ...],
+        capacity_reservations: tuple[CapacityAdmissionCapacityReservationSummary, ...],
         started_attempts: tuple[CapacityAdmissionStartedAttemptSummary, ...],
         execute_command_refs: tuple[str, ...],
     ) -> CapacityWindowAdmissionPassResult:
@@ -340,6 +372,7 @@ class CapacityWindowAdmissionPass:
             lane=_lane_summary(command.lane_key),
             admitted_items=admitted_items,
             projection_leases=projection_leases,
+            capacity_reservations=capacity_reservations,
             started_attempts=started_attempts,
             appended_execute_command_refs=execute_command_refs,
             frontend_event_summary=CapacityAdmissionFrontendEventSummary(
@@ -454,6 +487,15 @@ def _lease_skipped_reason(
     if skipped_reason == "capacity_projection_not_admitted":
         return CapacityWindowAdmissionSkippedReason.PROJECTION_CONFLICT
     return CapacityWindowAdmissionSkippedReason.PROJECTION_CONFLICT
+
+
+def _reservation_ref(
+    *,
+    prefix: str,
+    admission_index: int,
+    work_item_id: str,
+) -> str:
+    return f"{prefix}:{admission_index + 1}:{work_item_id}"
 
 
 def _lease_token(
