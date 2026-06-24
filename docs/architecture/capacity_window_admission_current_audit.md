@@ -30,7 +30,7 @@
 
 | Symbol/file | Current behavior | Owner | Risk | Patch recommendation |
 |---|---|---|---|---|
-| `execution_work_item_schedules.payload.llm_capacity_estimate` | Required by input-token admission helpers; includes `estimated_input_tokens` and `reserved_output_tokens`. | Work scheduling / composition contract | Missing payload estimate raises at admission time. | Next patch should make estimate contract explicit and guarded at scheduling boundary. |
+| `execution_work_item_schedules.payload.llm_capacity_estimate` | Required by admission helpers; includes target vocabulary such as `estimated_input_tokens`, `estimated_output_tokens`, `effective_output_cap_tokens`, `request_output_cap_tokens`, and `reserved_total_tokens` after admission. | Work scheduling / composition contract | Missing payload estimate raises at admission time. | Keep estimate contract explicit and guarded at scheduling boundary. |
 | `LlmTaskCapacityProfile` | Carries `estimated_prompt_tokens`, `estimated_completion_tokens`, and derived `estimated_total_tokens`. | LLM Runtime capacity domain | Batch-level max estimate can obscure per-item fit requirements. | Keep profile for preflight, but durable admission should select by per-item estimate. |
 | `capacity_window_leased_work_item_event` | Supports optional `token_estimate` and `reserved_tokens`; current claim-builder wrapper does not pass them. | Knowledge Workbench capacity events | Frontend projection may lack token-fit audit details. | Add optional token/reservation fields only in event/contract slice, not UI. |
 
@@ -59,7 +59,31 @@
 | `capacity_retry_at` scalar | Still present as workflow wakeup shortcut. | Composition / workflow command log | Shortcut can become implicit CapacityWindow state. | Replace or wrap it with explicit CapacityWindow wakeup decision. |
 | `TERMINAL_FAILED` | Checkpoint requires read-only audit; this patch does not change it. | Execution Runtime / Workbench producers | It may still be overused for retriable/provider/capacity outcomes. | Keep separate `TERMINAL_FAILED` audit patch. |
 
-## 8. Next patch recommendation
+## 8. CW-1a admission pass decision vocabulary
+
+Current CW-1a scope is an admission-pass decision vocabulary, not a durable
+CapacityWindow table/status implementation.
+
+Required decision/outcome names:
+
+| Decision/outcome | Meaning | Current implementation status |
+|---|---|---|
+| `capacity_exhausted` | Due/admission-eligible work exists, no item was leased, and a capacity-owned exhaustion snapshot/reset is known. Only this state may emit `CapacityWindowExhausted`. | Partially implemented through `capacity_window_exhaustion`. |
+| `no_due_work_items_no_active_leases` | No due WorkItems are visible to this admission pass and no active leased WorkItems are known at this boundary. | Not a capacity exhaustion state. |
+| `no_due_work_items_with_active_leases` | No due WorkItems are visible because work is already leased/running elsewhere. | Documented target; active leased count is not exposed at the current prepare boundary. |
+| `leased_work_item` | Capacity/admission selected and leased a WorkItem. | Implemented through `CapacityWindowLeasedWorkItem`. |
+| `scheduled_capacity_wakeup` | Capacity-owned reset/wakeup command was scheduled for provider/account/model window. | Event factory exists; prepare-handler parity still needs audit/patch. |
+
+CW-1a guardrail:
+
+* do not introduce `TERMINAL_IDLE` as a durable runtime status before active leased
+  visibility is available;
+* do not model provider reset as WorkItem retry timing;
+* do not treat zero dispatch as capacity exhaustion unless `capacity_window_exhaustion`
+  is present;
+* prefer `CapacityWindow` events for frontend capacity semantics.
+
+## 9. Next patch recommendation
 
 | Symbol/file | Current behavior | Owner | Risk | Patch recommendation |
 |---|---|---|---|---|
