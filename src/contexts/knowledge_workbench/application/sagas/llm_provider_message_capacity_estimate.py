@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    estimate_tokens_roughly,
+    CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR,
 )
 
 
@@ -57,7 +57,9 @@ def estimate_provider_message_capacity(
         content = message.get("content")
         if not isinstance(content, str) or not content.strip():
             raise ValueError("provider message content must be non-empty")
-        estimated_input_tokens += max(1, estimate_tokens_roughly(content))
+        estimated_input_tokens += CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(
+            content
+        )
 
     reserved_output_tokens = max(1024, min(4096, estimated_input_tokens))
     return ProviderMessageCapacityEstimate(

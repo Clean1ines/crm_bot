@@ -3,6 +3,9 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, replace
 
+from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
+    COMPACTION_ROUGH_TOKEN_ESTIMATOR,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionBatchCandidate,
     DraftClaimCompactionGroupCandidate,
@@ -85,7 +88,9 @@ def _prompt_variant_for_batch(
 
 
 def _estimate(claim: DraftClaimForCompaction) -> int:
-    return max(1, (len(claim.claim) + len(claim.embedding_text)) // 4 + 40)
+    return COMPACTION_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(
+        claim.claim + claim.embedding_text,
+    )
 
 
 def _chunks(

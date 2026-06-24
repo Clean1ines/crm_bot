@@ -9,18 +9,19 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
 )
 
 
-def _claim(ref: str) -> DraftClaimForCompaction:
+def _claim(ref: str, *, text: str | None = None) -> DraftClaimForCompaction:
+    claim_text = text or f"Claim {ref}"
     return DraftClaimForCompaction(
         observation_ref=ref,
         embedding_ref=f"embedding:{ref}",
         workflow_run_id="workflow-1",
         source_document_ref="document-1",
         source_unit_ref=f"unit:{ref}",
-        claim=f"Claim {ref}",
+        claim=claim_text,
         possible_questions=(f"Question {ref}?",),
         exclusion_scope=(),
         granularity="atomic",
-        embedding_text=f"Claim {ref}",
+        embedding_text=claim_text,
         embedding_model_id="sentence-transformers/all-MiniLM-L6-v2",
         dimensions=2,
         vector=(1.0, 0.0),
@@ -83,7 +84,7 @@ def test_capacity_split_inside_multi_member_group_does_not_schedule_singleton_ch
 
 
 def test_singleton_chunk_inside_larger_group_waits_for_compacted_frontier() -> None:
-    claims = tuple(_claim(f"claim-{index}") for index in range(3))
+    claims = tuple(_claim(f"claim-{index}", text="x" * 120) for index in range(3))
     groups = (_group("group-a", tuple(claim.observation_ref for claim in claims)),)
 
     plan = DraftClaimCompactionBatchBudgetPolicy(max_input_tokens=2145).build_batches(

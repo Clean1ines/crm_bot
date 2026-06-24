@@ -14,6 +14,9 @@ from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_
     estimate_tokens_roughly,
     required_segment_count,
     text_fits_segmentation_budget,
+    CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR,
+    COMPACTION_ROUGH_TOKEN_ESTIMATOR,
+    RoughTokenEstimator,
 )
 
 __all__ = [
@@ -28,4 +31,7 @@ __all__ = [
     "estimate_tokens_roughly",
     "required_segment_count",
     "text_fits_segmentation_budget",
+    "CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR",
+    "COMPACTION_ROUGH_TOKEN_ESTIMATOR",
+    "RoughTokenEstimator",
 ]

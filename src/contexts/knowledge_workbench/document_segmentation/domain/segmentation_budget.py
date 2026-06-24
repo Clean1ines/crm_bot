@@ -1,13 +1,41 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from fractions import Fraction
 
 TokenEstimator = Callable[[str], int]
 
 
+@dataclass(frozen=True, slots=True)
+class RoughTokenEstimator:
+    multiplier: Fraction
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.multiplier, Fraction):
+            raise TypeError("multiplier must be Fraction")
+        if self.multiplier <= 0:
+            raise ValueError("multiplier must be > 0")
+
+    def estimate_tokens(self, text: str) -> int:
+        if not isinstance(text, str):
+            raise TypeError("text must be str")
+        if not text.strip():
+            return 0
+
+        numerator = self.multiplier.numerator
+        denominator = self.multiplier.denominator
+        return max(1, (len(text) * denominator + numerator - 1) // numerator)
+
+
+CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR = RoughTokenEstimator(
+    multiplier=Fraction(33, 10),
+)
+COMPACTION_ROUGH_TOKEN_ESTIMATOR = RoughTokenEstimator(
+    multiplier=Fraction(37, 10),
+)
+
+
 def estimate_tokens_roughly(text: str) -> int:
-    if not text.strip():
-        return 0
-    return max(1, (len(text) * 10 + 32) // 33)
+    return CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(text)
 
 
 @dataclass(frozen=True, slots=True)

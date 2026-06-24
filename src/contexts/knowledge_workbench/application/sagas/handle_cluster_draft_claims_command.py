@@ -12,6 +12,9 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
     EnsureWorkItemsScheduledCommand,
     WorkItemSchedulePlan,
 )
+from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
+    COMPACTION_ROUGH_TOKEN_ESTIMATOR,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -397,7 +400,7 @@ def _build_initial_raw_node(
 
 
 def _estimated_raw_claim_tokens(claim: DraftClaimForCompaction) -> int:
-    return max(1, len(claim.embedding_text) // 4)
+    return COMPACTION_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(claim.embedding_text)
 
 
 def _plan(

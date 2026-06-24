@@ -7,7 +7,7 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
     WorkItemSchedulePlan,
 )
 from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    estimate_tokens_roughly,
+    CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR,
 )
 
 
@@ -128,7 +128,9 @@ def _claim_builder_token_estimate(
 ) -> dict[str, object]:
     del prompt_contract
     prompt_token_count = _claim_builder_prompt_tokens_from_env()
-    source_unit_token_count = max(1, estimate_tokens_roughly(plan.source_unit_text))
+    source_unit_token_count = CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(
+        plan.source_unit_text
+    )
     estimated_input_tokens = prompt_token_count + source_unit_token_count
     estimated_output_tokens = source_unit_token_count
 

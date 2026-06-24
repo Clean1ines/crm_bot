@@ -55,7 +55,7 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 )
 from src.domain.project_plane.json_types import JsonObject, JsonValue
 from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    estimate_tokens_roughly,
+    COMPACTION_ROUGH_TOKEN_ESTIMATOR,
 )
 
 
@@ -1541,7 +1541,7 @@ def _estimated_compacted_claim_tokens(payload: JsonObject) -> int:
         separators=(",", ":"),
         sort_keys=True,
     )
-    return max(1, estimate_tokens_roughly(serialized))
+    return COMPACTION_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(serialized)
 
 
 def _origin_separation_edge(

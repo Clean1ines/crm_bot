@@ -352,8 +352,8 @@ def test_b1a_compatibility_map_and_followup_split_are_documented() -> None:
         "do not treat legacy reserved_output_tokens as the claim-builder expected output estimate",
         "B1d:",
         "introduce single RoughTokenEstimator(multiplier)",
-        "claim_builder multiplier target 3.7",
-        "compaction multiplier target 3.3",
+        "claim_builder multiplier target 3.3",
+        "compaction multiplier target 3.7",
         "remove chars/3.3, chars/4, chars/4+40 drift",
     )
 
@@ -397,6 +397,41 @@ def test_b1d1_segmentation_vocabulary_uses_input_safety_gap_name() -> None:
         source = _read(target_path)
         assert "segmentation_input_safety_gap_tokens" in source
         assert "reserved_output_tokens" not in source
+
+
+def test_b1d2_rough_token_estimator_targets_are_not_reversed() -> None:
+    source = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/document_segmentation/domain/"
+        "segmentation_budget.py",
+    )
+    claim_builder_schedule = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "map_claim_builder_section_plans_to_execution_schedule.py",
+    )
+    compaction_batch = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/extraction/application/policies/"
+        "draft_claim_compaction_batch_budget_policy.py",
+    )
+    compaction_cluster = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "handle_cluster_draft_claims_command.py",
+    )
+    compaction_repository = _read(
+        REPO_ROOT
+        / "src/contexts/knowledge_workbench/extraction/infrastructure/postgres/"
+        "postgres_draft_claim_compaction_reduction_state_repository.py",
+    )
+
+    assert "CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR" in source
+    assert "multiplier=Fraction(33, 10)" in source
+    assert "COMPACTION_ROUGH_TOKEN_ESTIMATOR" in source
+    assert "multiplier=Fraction(37, 10)" in source
+    assert "CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR" in claim_builder_schedule
+    assert "COMPACTION_ROUGH_TOKEN_ESTIMATOR" in compaction_batch
+    assert "COMPACTION_ROUGH_TOKEN_ESTIMATOR" in compaction_cluster
+    assert "COMPACTION_ROUGH_TOKEN_ESTIMATOR" in compaction_repository
+    assert "// 4 + 40" not in compaction_batch
+    assert "len(claim.embedding_text) // 4" not in compaction_cluster
 
 
 def test_b1a_does_not_pretend_runtime_token_vocabulary_is_migrated() -> None:

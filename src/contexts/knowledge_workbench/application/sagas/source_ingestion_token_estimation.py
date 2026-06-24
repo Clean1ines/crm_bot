@@ -5,7 +5,7 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segment
     SourceIngestionSegmentationProfile,
 )
 from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    estimate_tokens_roughly,
+    CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR,
 )
 
 
@@ -21,7 +21,7 @@ class WorkbenchTokenEstimatorPort(Protocol):
 @dataclass(frozen=True, slots=True)
 class RoughWorkbenchTokenEstimator:
     def estimate_tokens(self, text: str) -> int:
-        return estimate_tokens_roughly(text)
+        return CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(text)
 
 
 @dataclass(frozen=True, slots=True)

@@ -319,8 +319,8 @@ B1d:
 
 * B1d-1: segmentation budget/source-ingestion vocabulary uses `segmentation_input_safety_gap_tokens` for the input-side safety gap.
 * introduce single `RoughTokenEstimator(multiplier)`
-* claim_builder multiplier target 3.7
-* compaction multiplier target 3.3
+* claim_builder multiplier target 3.3
+* compaction multiplier target 3.7
 * remove chars/3.3, chars/4, chars/4+40 drift
 
 B1a success criteria:
