@@ -72,6 +72,10 @@ from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capac
     SelectActiveLlmModelCapacity,
     SelectActiveLlmModelCapacityResult,
 )
+from src.contexts.llm_runtime.application.policies.request_output_cap_policy import (
+    RequestOutputCapDecision,
+    RequestOutputCapPolicy,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelRouteCatalog,
 )
@@ -89,6 +93,7 @@ from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacit
 from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
     build_groq_free_plan_model_profiles,
+    groq_free_combined_tpm_output_cap_profile,
 )
 from src.interfaces.composition.lease_llm_admitted_work_items import (
     LeaseLlmAdmittedWorkItemsResult,
@@ -104,6 +109,12 @@ from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
 
 
 LOGGER = structlog.get_logger(__name__)
+
+
+def _default_request_output_cap_policy() -> RequestOutputCapPolicy:
+    return RequestOutputCapPolicy(
+        provider_profile=groq_free_combined_tpm_output_cap_profile(),
+    )
 
 
 class AsyncTransaction(Protocol):
@@ -287,6 +298,9 @@ class PrepareLlmDispatchBatch:
     dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder = field(
         default_factory=ClaimBuilderDispatchPreparationBuilder,
     )
+    request_output_cap_policy: RequestOutputCapPolicy = field(
+        default_factory=_default_request_output_cap_policy,
+    )
 
     def __post_init__(self) -> None:
         if not isinstance(self.route_catalog, LlmModelRouteCatalog):
@@ -298,6 +312,10 @@ class PrepareLlmDispatchBatch:
             raise TypeError(
                 "dispatch_preparation_builder must be "
                 "ClaimBuilderDispatchPreparationBuilder",
+            )
+        if not isinstance(self.request_output_cap_policy, RequestOutputCapPolicy):
+            raise TypeError(
+                "request_output_cap_policy must be RequestOutputCapPolicy",
             )
 
     async def execute(
@@ -494,6 +512,7 @@ class PrepareLlmDispatchBatch:
                     lease_expires_at=command.lease_expires_at,
                     now=command.now,
                     route_catalog=self.route_catalog,
+                    request_output_cap_policy=self.request_output_cap_policy,
                 )
 
                 LOGGER.info(
@@ -601,7 +620,14 @@ class _InputAdmittedCandidate:
     account_ref: str
     model_ref: str
     estimated_input_tokens: int
-    reserved_output_tokens: int
+    minimum_output_tokens: int
+    effective_output_cap_tokens: int
+    request_output_cap_tokens: int | None
+    reserved_total_tokens: int
+
+    @property
+    def reserved_output_tokens(self) -> int:
+        return self.effective_output_cap_tokens
 
 
 @dataclass(slots=True)
@@ -648,42 +674,45 @@ class _MutableInputCapacity:
             remaining_daily_tokens=capacity.remaining_daily_tokens,
         )
 
-    def admitted_output_tokens(self, *, estimated_input_tokens: int) -> int:
-        return max(0, self.remaining_minute_tokens - estimated_input_tokens)
-
-    def can_admit(
+    def request_output_cap_decision(
         self,
         *,
         estimated_input_tokens: int,
         minimum_output_tokens: int,
-    ) -> bool:
-        admitted_output_tokens = self.admitted_output_tokens(
+        hard_output_limit_tokens: int,
+        request_output_cap_policy: RequestOutputCapPolicy,
+    ) -> RequestOutputCapDecision:
+        return request_output_cap_policy.decide(
             estimated_input_tokens=estimated_input_tokens,
+            estimated_output_tokens=minimum_output_tokens,
+            tokens_remaining=min(
+                self.remaining_minute_tokens,
+                self.remaining_daily_tokens,
+            ),
+            hard_output_limit_tokens=hard_output_limit_tokens,
         )
-        reserved_total_tokens = estimated_input_tokens + admitted_output_tokens
-        minimum_total_tokens = estimated_input_tokens + minimum_output_tokens
+
+    def can_admit(
+        self,
+        *,
+        decision: RequestOutputCapDecision,
+        minimum_output_tokens: int,
+    ) -> bool:
         return (
             self.remaining_minute_requests > 0
             and self.remaining_daily_requests > 0
-            and admitted_output_tokens >= minimum_output_tokens
-            and self.remaining_minute_tokens >= minimum_total_tokens
-            and self.remaining_daily_tokens >= minimum_total_tokens
-            and self.remaining_daily_tokens >= reserved_total_tokens
+            and decision.effective_output_cap_tokens >= minimum_output_tokens
+            and self.remaining_minute_tokens >= decision.reserved_total_tokens
+            and self.remaining_daily_tokens >= decision.reserved_total_tokens
         )
 
-    def consume(
-        self,
-        *,
-        estimated_input_tokens: int,
-        reserved_output_tokens: int,
-    ) -> None:
-        minimum_output_tokens = reserved_output_tokens
-        if not self.can_admit(
-            estimated_input_tokens=estimated_input_tokens,
-            minimum_output_tokens=minimum_output_tokens,
-        ):
+    def consume(self, *, reserved_total_tokens: int) -> None:
+        if self.remaining_minute_requests <= 0 or self.remaining_daily_requests <= 0:
             raise ValueError("input capacity cannot admit work item")
-        reserved_total_tokens = estimated_input_tokens + reserved_output_tokens
+        if self.remaining_minute_tokens < reserved_total_tokens:
+            raise ValueError("input capacity cannot admit work item")
+        if self.remaining_daily_tokens < reserved_total_tokens:
+            raise ValueError("input capacity cannot admit work item")
         self.remaining_minute_requests -= 1
         self.remaining_daily_requests -= 1
         self.remaining_minute_tokens -= reserved_total_tokens
@@ -766,6 +795,7 @@ async def _lease_input_admitted_work_items(
     lease_expires_at: datetime,
     now: datetime,
     route_catalog: LlmModelRouteCatalog,
+    request_output_cap_policy: RequestOutputCapPolicy,
 ) -> LeaseLlmAdmittedWorkItemsResult:
     active_accounts = tuple(
         account
@@ -775,10 +805,13 @@ async def _lease_input_admitted_work_items(
     mutable_accounts = [
         _MutableInputCapacity.from_capacity(account) for account in active_accounts
     ]
+    capacity_limits = route_catalog.capacity_limits_for_model_ref(active_model_ref)
     candidates = _input_admitted_candidates(
         due_records=due_records,
         mutable_accounts=mutable_accounts,
         requested_items=requested_items,
+        hard_output_limit_tokens=capacity_limits.output_token_limit,
+        request_output_cap_policy=request_output_cap_policy,
     )
 
     execution_settings = route_catalog.execution_settings_for_model_ref(
@@ -814,7 +847,9 @@ async def _lease_input_admitted_work_items(
                 pre_lease_status=candidate.record.work_item.status,
                 schedule_payload_override=_admitted_schedule_payload(
                     schedule_payload=leased_record.schedule_payload,
-                    reserved_output_tokens=candidate.reserved_output_tokens,
+                    effective_output_cap_tokens=(candidate.effective_output_cap_tokens),
+                    request_output_cap_tokens=candidate.request_output_cap_tokens,
+                    reserved_total_tokens=candidate.reserved_total_tokens,
                 ),
             ),
         )
@@ -844,6 +879,8 @@ def _input_admitted_candidates(
     due_records: tuple[DueWorkItemRecord, ...],
     mutable_accounts: list[_MutableInputCapacity],
     requested_items: int,
+    hard_output_limit_tokens: int,
+    request_output_cap_policy: RequestOutputCapPolicy,
 ) -> tuple[_InputAdmittedCandidate, ...]:
     candidates: list[_InputAdmittedCandidate] = []
     pending_retry_records = [
@@ -864,11 +901,15 @@ def _input_admitted_candidates(
         selected_record = _pop_first_record_that_fits(
             records=pending_retry_records,
             account=account,
+            hard_output_limit_tokens=hard_output_limit_tokens,
+            request_output_cap_policy=request_output_cap_policy,
         )
         if selected_record is None:
             selected_record = _pop_first_record_that_fits(
                 records=pending_fresh_records,
                 account=account,
+                hard_output_limit_tokens=hard_output_limit_tokens,
+                request_output_cap_policy=request_output_cap_policy,
             )
         if selected_record is None:
             continue
@@ -882,23 +923,25 @@ def _pop_first_record_that_fits(
     *,
     records: list[DueWorkItemRecord],
     account: _MutableInputCapacity,
+    hard_output_limit_tokens: int,
+    request_output_cap_policy: RequestOutputCapPolicy,
 ) -> _InputAdmittedCandidate | None:
     for index, record in enumerate(records):
         estimated_input_tokens = _estimated_input_tokens_from_due_record(record)
         minimum_output_tokens = _reserved_output_tokens_from_due_record(record)
-        if not account.can_admit(
+        decision = account.request_output_cap_decision(
             estimated_input_tokens=estimated_input_tokens,
+            minimum_output_tokens=minimum_output_tokens,
+            hard_output_limit_tokens=hard_output_limit_tokens,
+            request_output_cap_policy=request_output_cap_policy,
+        )
+        if not account.can_admit(
+            decision=decision,
             minimum_output_tokens=minimum_output_tokens,
         ):
             continue
 
-        admitted_output_tokens = account.admitted_output_tokens(
-            estimated_input_tokens=estimated_input_tokens,
-        )
-        account.consume(
-            estimated_input_tokens=estimated_input_tokens,
-            reserved_output_tokens=admitted_output_tokens,
-        )
+        account.consume(reserved_total_tokens=decision.reserved_total_tokens)
         records.pop(index)
         return _InputAdmittedCandidate(
             record=record,
@@ -906,7 +949,10 @@ def _pop_first_record_that_fits(
             account_ref=account.account_ref,
             model_ref=account.model_ref,
             estimated_input_tokens=estimated_input_tokens,
-            reserved_output_tokens=admitted_output_tokens,
+            minimum_output_tokens=minimum_output_tokens,
+            effective_output_cap_tokens=decision.effective_output_cap_tokens,
+            request_output_cap_tokens=decision.request_output_cap_tokens,
+            reserved_total_tokens=decision.reserved_total_tokens,
         )
     return None
 
@@ -940,20 +986,22 @@ def _reserved_output_tokens_from_due_record(record: DueWorkItemRecord) -> int:
 def _admitted_schedule_payload(
     *,
     schedule_payload: Mapping[str, object],
-    reserved_output_tokens: int,
+    effective_output_cap_tokens: int,
+    request_output_cap_tokens: int | None,
+    reserved_total_tokens: int,
 ) -> dict[str, object]:
     estimate_payload = schedule_payload.get("llm_capacity_estimate")
     if not isinstance(estimate_payload, Mapping):
         raise ValueError("schedule_payload.llm_capacity_estimate is required")
     updated_estimate = dict(estimate_payload)
-    updated_estimate["reserved_output_tokens"] = reserved_output_tokens
-    updated_estimate["estimated_total_tokens"] = (
-        _require_int_value(
-            updated_estimate.get("estimated_input_tokens"),
-            field_name="llm_capacity_estimate.estimated_input_tokens",
-        )
-        + reserved_output_tokens
-    )
+    updated_estimate["reserved_output_tokens"] = effective_output_cap_tokens
+    updated_estimate["effective_output_cap_tokens"] = effective_output_cap_tokens
+    if request_output_cap_tokens is not None:
+        updated_estimate["request_output_cap_tokens"] = request_output_cap_tokens
+    else:
+        updated_estimate.pop("request_output_cap_tokens", None)
+    updated_estimate["estimated_total_tokens"] = reserved_total_tokens
+    updated_estimate["reserved_total_tokens"] = reserved_total_tokens
 
     updated_payload = dict(schedule_payload)
     updated_payload["llm_capacity_estimate"] = updated_estimate

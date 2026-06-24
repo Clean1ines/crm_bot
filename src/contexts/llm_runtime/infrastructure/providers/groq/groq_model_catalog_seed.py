@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
+from src.contexts.llm_runtime.application.policies.request_output_cap_policy import (
+    ProviderOutputCapProfile,
+)
 from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.llm_runtime.domain.entities.provider_account import ProviderAccount
 from src.contexts.llm_runtime.domain.value_objects.model_id import ModelId
@@ -24,6 +27,17 @@ from src.contexts.llm_runtime.domain.value_objects.token_price import TokenPrice
 
 
 GROQ_PROVIDER_ID = ProviderId("groq")
+GROQ_FREE_PROVIDER_DEFAULT_OUTPUT_CAP_TOKENS = 2048
+GROQ_FREE_REQUEST_SAFETY_GAP_TOKENS = 300
+
+
+def groq_free_combined_tpm_output_cap_profile() -> ProviderOutputCapProfile:
+    return ProviderOutputCapProfile(
+        provider_default_output_cap_tokens=(
+            GROQ_FREE_PROVIDER_DEFAULT_OUTPUT_CAP_TOKENS
+        ),
+        request_safety_gap_tokens=GROQ_FREE_REQUEST_SAFETY_GAP_TOKENS,
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -147,6 +147,65 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
 
 
 @pytest.mark.asyncio
+async def test_prepared_request_output_cap_becomes_max_completion_tokens() -> None:
+    schedule_payload = {
+        "provider_messages": [
+            {
+                "role": "user",
+                "content": "Extract claims",
+            },
+        ],
+        "llm_capacity_estimate": {
+            "estimated_input_tokens": 1000,
+            "reserved_output_tokens": 2048,
+            "request_output_cap_tokens": 1234,
+            "effective_output_cap_tokens": 1234,
+            "estimated_total_tokens": 2234,
+            "reserved_total_tokens": 2234,
+        },
+    }
+    transport = FakeGroqTransport(response=_success_response())
+
+    result = await _executor(transport).execute_dispatch(
+        _execution_input(
+            dispatch_payload=_dispatch_payload(schedule_payload=schedule_payload),
+        ),
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
+    assert transport.payloads[0]["max_completion_tokens"] == 1234
+
+
+@pytest.mark.asyncio
+async def test_missing_prepared_request_output_cap_is_not_rejected_by_executor() -> (
+    None
+):
+    schedule_payload = {
+        "provider_messages": [
+            {
+                "role": "user",
+                "content": "Extract claims",
+            },
+        ],
+        "llm_capacity_estimate": {
+            "estimated_input_tokens": 1000,
+            "reserved_output_tokens": 100,
+            "estimated_total_tokens": 1100,
+        },
+    }
+    transport = FakeGroqTransport(response=_success_response())
+
+    result = await _executor(transport).execute_dispatch(
+        _execution_input(
+            dispatch_payload=_dispatch_payload(schedule_payload=schedule_payload),
+        ),
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
+    assert "max_completion_tokens" not in transport.payloads[0]
+
+
+@pytest.mark.asyncio
 async def test_invalid_dispatch_missing_provider_messages_returns_terminal_failed() -> (
     None
 ):

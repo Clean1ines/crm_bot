@@ -236,7 +236,7 @@ def test_architecture_document_contains_b0_boundary_contract() -> None:
         "DeepSeek cheap",
         "Local GPU",
         "B1a: vocabulary contract + compatibility mapping, no behavior change",
-        "B1b: request output cap policy, no admitted uncapped Groq requests",
+        "B1b: Groq Free effective output cap / request budget policy boundary",
         "B1c: claim-builder estimate rename/split",
         "B1d: estimator unification",
     )
@@ -285,11 +285,15 @@ def test_reserved_output_tokens_remains_legacy_only() -> None:
         assert target_term in source
 
 
-def test_groq_admitted_request_requires_explicit_max_completion_tokens_marker() -> None:
+def test_groq_free_effective_output_cap_boundary_marker() -> None:
     source = _read(ARCH_DOC_PATH)
 
     required_markers = (
-        "No admitted Groq request without explicit `max_completion_tokens`.",
+        "provider_default_output_cap_tokens = 2048",
+        "effective_output_cap_tokens = request_output_cap_tokens or provider_default_output_cap_tokens",
+        "tokens_remaining >= estimated_input_tokens + effective_output_cap_tokens",
+        "missing explicit `max_completion_tokens` means provider default output cap, not unlimited output",
+        "executor consumes prepared request budget; executor does not own admission math",
         "groq_dispatch_executor._resolve_max_completion_tokens",
         "groq_chat_request_builder",
     )
@@ -339,10 +343,11 @@ def test_b1a_compatibility_map_and_followup_split_are_documented() -> None:
         "RoughTokenEstimator(multiplier)",
         "B1b:",
         "introduce RequestOutputCapPolicy",
-        "forbid admitted Groq request without explicit max_completion_tokens",
-        "no runtime uncapped Groq request",
-        "request_output_cap_tokens < estimated_output_tokens",
-        "request_output_cap_tokens <= 0",
+        "introduce Groq Free provider_default_output_cap_tokens = 2048",
+        "effective_output_cap_tokens = request_output_cap_tokens or provider_default_output_cap_tokens",
+        "admission fits by estimated_input_tokens + effective_output_cap_tokens",
+        "missing explicit max_completion_tokens is not unlimited output",
+        "executor consumes prepared request budget",
         "B1c:",
         "migrate claim-builder schedule payload from reserved_output_tokens to estimated_output_tokens",
         "keep compatibility read for old payloads if needed",

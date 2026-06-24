@@ -1,7 +1,7 @@
 
 # Provider-agnostic capacity and budget policy model
 
-Status: B0 boundary contract + B1a compatibility map.
+Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary.
 
 This document freezes the boundary model before behavioral refactors. It does not migrate runtime code, token names, segmentation, compaction, capacity storage, or provider execution.
 
@@ -112,7 +112,7 @@ These are target contracts. B0 documents them; it does not require immediate cod
 | `SourceUnitSplitPolicy`            | Workbench source management / document segmentation                                                     | failed SourceUnit, failure reason, hard/soft input limits, prior split lineage                   | child SourceUnit plan or terminal split refusal                           | Groq model names, free-plan key count, HTTP payload fields                                      | provider profile may report limits; split policy stays Workbench-owned                    | OpenAI/DeepSeek/Local provide limits/quality ceilings through policy inputs      |
 | `PhaseTokenBudgetPolicy`           | LLM Runtime application policy, with phase-specific Workbench adapters                                  | phase, work item kind, prompt profile, source/input estimates, business quality ceilings         | estimated input/output/total budget and quality ceilings                  | provider headers, API keys, concrete free-plan windows                                          | Groq Free profile supplies provider limits/accounting facts behind generic budget inputs  | paid/cost/local profiles supply cost/quality/concurrency limits                  |
 | `ProviderCapacityAccountingPolicy` | Capacity Runtime / LLM Runtime capacity boundary                                                        | provider profile, account/window observations, reservations, actual usage                        | available capacity view and reset/wakeup hints                            | Workbench claim semantics, compaction graph semantics                                           | `src/contexts/llm_runtime/infrastructure/providers/groq/` or explicit Groq profile wiring | OpenAI project/org windows, DeepSeek windows, local GPU lanes                    |
-| `RequestOutputCapPolicy`           | LLM Runtime application policy                                                                          | route candidate, estimated input, estimated output, remaining capacity, hard limits, safety gaps | `request_output_cap_tokens` or no-cap decision where provider allows it   | Workbench domain decisions, prompt-specific semantic validation                                 | Groq Free combined TPM profile requires explicit cap calculation                          | OpenAI/DeepSeek may cap by cost/quality; local may cap by memory/context         |
+| `RequestOutputCapPolicy`           | LLM Runtime application policy                                                                          | route candidate, estimated input, estimated output, remaining capacity, hard limits, safety gaps | `request_output_cap_tokens`, `effective_output_cap_tokens`, and `reserved_total_tokens` | Workbench domain decisions, prompt-specific semantic validation                                 | Groq Free combined TPM profile applies provider default output cap before admission       | OpenAI/DeepSeek may cap by cost/quality; local may cap by memory/context         |
 | `RouteSelectionPolicy`             | LLM Runtime application policy / provider profile boundary                                              | phase, model capabilities, hard limits, quality ceilings, fallback exclusions, user-choice state | ordered route candidates, possibly empty fallback/special arrays          | Workbench persistence details, SourceUnit storage, API key count unless inside provider profile | Groq profile seeds Groq model route facts and exclusions                                  | OpenAI/DeepSeek/Local route catalogs can be swapped without domain changes       |
 | `AdmissionPolicy`                  | Capacity Runtime / LLM Runtime application boundary                                                     | route candidate, estimated budget, capacity view, reservations, schedule state                   | admitted/deferred/paused/rejected decision with reason and wakeup         | claim text semantics, compaction graph details, provider HTTP payload fields                    | Groq Free profile enforces combined TPM and partial-window behavior                       | paid providers add cost/project budgets; local adds GPU lane backpressure        |
 | `RetryEstimatePolicy`              | LLM Runtime application policy, with Workbench phase adapters                                           | failed attempt, validation outcome, prior usage, next candidate, source/input estimates          | next estimated budget and safety gaps                                     | provider-specific headers except normalized capacity facts                                      | Groq profile may adjust output gap for free TPM retries                                   | provider-specific retry cost/latency/quality estimates                           |
@@ -168,8 +168,11 @@ depending on the meaning.
 * Configured account/org refs.
 * Model route catalog seed.
 * Combined TPM accounting.
-* Explicit `max_completion_tokens` requirement.
-* Request output cap policy: `remaining_tpm - estimated_input_tokens - request_safety_gap_tokens`.
+* Provider default output cap: `provider_default_output_cap_tokens = 2048`.
+* Effective output cap policy: `effective_output_cap_tokens = request_output_cap_tokens or provider_default_output_cap_tokens`.
+* Request output cap policy: `remaining_tpm - estimated_input_tokens - request_safety_gap_tokens`, only when the resulting explicit cap is policy-admissible for the WorkItem.
+* Admission fit rule: `tokens_remaining >= estimated_input_tokens + effective_output_cap_tokens`.
+* Omitted explicit `max_completion_tokens` means provider default output cap, not unlimited output, and is allowed only when admission reserved against that effective cap.
 * Default `max_parallel_attempts_per_window = 1`.
 * Partial-window no-fit behavior.
 * Wake/sleep strategy for free limits.
@@ -187,7 +190,7 @@ For Groq Free, partial-window no-fit means that a currently insufficient TPM win
 * Execution Runtime WorkItem entity.
 * Workflow Runtime command model.
 
-Required B0 marker: no admitted Groq request without explicit `max_completion_tokens`.
+Required B1b marker: no admitted Groq Free request unless admission reserved `estimated_input_tokens + effective_output_cap_tokens`; missing explicit `max_completion_tokens` means provider default output cap, not unlimited output.
 
 Known current implementation paths to audit in B1b, not fix in B0:
 
@@ -233,7 +236,7 @@ Expected differences:
 1. No Groq model refs in Workbench domain or compaction domain.
 2. No `provider="groq"` literal in generic composition/admission code.
 3. No new `reserved_output_tokens` contract.
-4. No admitted Groq request without explicit `max_completion_tokens`.
+4. No admitted Groq Free request unless `RequestOutputCapPolicy` has computed `effective_output_cap_tokens` from `request_output_cap_tokens` or `provider_default_output_cap_tokens` and admission has reserved `estimated_input_tokens + effective_output_cap_tokens`.
 5. No compaction fit-by-Groq-TPM in domain policy.
 6. No default_groq route catalog as generic default.
 7. Markdown heading segmentation is a DocumentFormat-specific policy, not universal source ingestion.
@@ -296,11 +299,13 @@ runtime behavior unless a later slice explicitly changes code and tests:
 B1b:
 
 * introduce `RequestOutputCapPolicy`
-* forbid admitted Groq request without explicit `max_completion_tokens`
-* no runtime uncapped Groq request
-* calculate Groq Free `request_output_cap_tokens` from remaining TPM, estimated input, and request safety gap
-* if `request_output_cap_tokens < estimated_output_tokens`, the WorkItem does not fit this window
-* if `request_output_cap_tokens <= 0`, do not send request
+* introduce Groq Free `provider_default_output_cap_tokens = 2048`
+* calculate `effective_output_cap_tokens = request_output_cap_tokens or provider_default_output_cap_tokens`
+* admission fits by `estimated_input_tokens + effective_output_cap_tokens`
+* missing explicit `max_completion_tokens` is not unlimited output; it is provider default output cap
+* calculate Groq Free `request_output_cap_tokens` from remaining TPM, estimated input, and request safety gap when that explicit cap is policy-admissible
+* if the effective output cap cannot cover the WorkItem estimated output, the WorkItem does not fit this window
+* executor consumes prepared request budget; executor does not own admission math
 
 B1c:
 
@@ -328,7 +333,7 @@ B1a success criteria:
 ## 9. B1 roadmap, explicitly split
 
 B1a: vocabulary contract + compatibility mapping, no behavior change
-B1b: request output cap policy, no admitted uncapped Groq requests
+B1b: Groq Free effective output cap / request budget policy boundary
 B1c: claim-builder estimate rename/split
 B1d: estimator unification
 
