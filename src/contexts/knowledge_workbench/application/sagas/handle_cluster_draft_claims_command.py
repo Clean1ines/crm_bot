@@ -8,6 +8,9 @@ from src.contexts.capacity_admission_queue.application.build_capacity_admission_
     BuildCapacityAdmissionProjectionCandidates,
     CapacityAdmissionLaneTarget,
 )
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetResolverPort,
+)
 from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
     CapacityAdmissionProjectionWriterPort,
 )
@@ -128,12 +131,16 @@ class HandleClusterDraftClaimsCommandHandler:
         capacity_admission_projection_writer: CapacityAdmissionProjectionWriterPort
         | None = None,
         capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
+        capacity_admission_lane_target_resolver: (
+            CapacityAdmissionLaneTargetResolverPort | None
+        ) = None,
     ) -> None:
-        if (capacity_admission_projection_writer is None) != (
-            capacity_admission_lane_target is None
+        if capacity_admission_projection_writer is None and (
+            capacity_admission_lane_target is not None
+            or capacity_admission_lane_target_resolver is not None
         ):
             raise ValueError(
-                "capacity admission projection writer and lane target must be provided together"
+                "capacity admission lane target requires projection writer"
             )
         self._similarity_policy = (
             similarity_policy or DraftClaimHybridSimilarityPolicy()
@@ -146,6 +153,9 @@ class HandleClusterDraftClaimsCommandHandler:
             capacity_admission_projection_writer
         )
         self._capacity_admission_lane_target = capacity_admission_lane_target
+        self._capacity_admission_lane_target_resolver = (
+            capacity_admission_lane_target_resolver
+        )
 
     async def execute(
         self,
@@ -220,12 +230,20 @@ class HandleClusterDraftClaimsCommandHandler:
             raise ValueError("draft claim compaction work item schedule conflict")
 
         capacity_admission_projection_persisted_count = 0
-        if (
-            self._capacity_admission_projection_writer is not None
-            and self._capacity_admission_lane_target is not None
-        ):
+        if self._capacity_admission_projection_writer is not None:
+            resolved_capacity_admission_lane_target = (
+                _resolve_capacity_admission_lane_target(
+                    explicit_lane_target=self._capacity_admission_lane_target,
+                    lane_target_resolver=self._capacity_admission_lane_target_resolver,
+                    work_kind=WORK_KIND.value,
+                )
+            )
+            if resolved_capacity_admission_lane_target is None:
+                raise ValueError(
+                    "capacity admission projection writer requires lane target"
+                )
             projection_candidates = BuildCapacityAdmissionProjectionCandidates(
-                lane_target=self._capacity_admission_lane_target,
+                lane_target=resolved_capacity_admission_lane_target,
             ).execute(schedule_plans)
             projection_result = await self._capacity_admission_projection_writer.persist_projection_candidates(
                 projection_candidates,
@@ -317,6 +335,19 @@ class HandleClusterDraftClaimsCommandHandler:
                 capacity_admission_projection_persisted_count
             ),
         )
+
+
+def _resolve_capacity_admission_lane_target(
+    *,
+    explicit_lane_target: CapacityAdmissionLaneTarget | None,
+    lane_target_resolver: CapacityAdmissionLaneTargetResolverPort | None,
+    work_kind: str,
+) -> CapacityAdmissionLaneTarget | None:
+    if explicit_lane_target is not None:
+        return explicit_lane_target
+    if lane_target_resolver is None:
+        return None
+    return lane_target_resolver.resolve_lane_target_for_work_kind(work_kind)
 
 
 def _payload_text(

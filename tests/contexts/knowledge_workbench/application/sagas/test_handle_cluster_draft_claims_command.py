@@ -9,7 +9,11 @@ from typing import cast
 import pytest
 
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
     CapacityAdmissionWorkItemProjectionCandidate,
+)
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetRegistry,
 )
 from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
     PersistCapacityAdmissionProjectionResult,
@@ -716,6 +720,56 @@ async def test_handler_projects_clusters_built_event() -> None:
     projected = next(iter(repository.events.values()))
     assert projected.projection_type == "workflow_draft_claim_clusters_built"
     assert projected.source_event_id == workflow_uow.outbox.events[0].event_id.value
+
+
+@pytest.mark.asyncio
+async def test_compaction_projection_uses_compaction_lane_target_resolver() -> None:
+    capacity_writer = FakeCapacityAdmissionProjectionWriter()
+    scheduling = FakeWorkItemSchedulingRepository()
+
+    await HandleClusterDraftClaimsCommandHandler(
+        capacity_admission_projection_writer=capacity_writer,
+        capacity_admission_lane_target_resolver=CapacityAdmissionLaneTargetRegistry(
+            targets_by_work_kind={
+                "knowledge_workbench.claim_builder.section_extraction": CapacityAdmissionLaneTarget(
+                    provider="groq",
+                    account_ref="claim-builder-account",
+                    model_ref="qwen/qwen3-32b",
+                ),
+                "knowledge_workbench.draft_claim_compaction": CapacityAdmissionLaneTarget(
+                    provider="groq",
+                    account_ref="compaction-account",
+                    model_ref="openai/gpt-oss-120b",
+                ),
+            }
+        ),
+    ).execute(
+        HandleClusterDraftClaimsCommand(
+            workflow_command=_command(
+                KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
+            )
+        ),
+        compaction_plan_repository=_plan_repository(
+            FakeCompactionRepository((_claim("claim-a"), _claim("claim-b")))
+        ),
+        work_item_scheduling_repository=scheduling,
+        workflow_unit_of_work=_workflow_unit_of_work(FakeWorkflowUnitOfWork()),
+        compaction_reduction_state_repository=_reduction_state_repository(
+            FakeReductionStateRepository()
+        ),
+    )
+
+    assert len(capacity_writer.persisted_batches) == 1
+    candidates = capacity_writer.persisted_batches[0]
+    assert len(candidates) == len(scheduling.saved_payloads)
+    assert all(
+        candidate.work_kind == "knowledge_workbench.draft_claim_compaction"
+        for candidate in candidates
+    )
+    assert all(
+        candidate.account_ref == "compaction-account" for candidate in candidates
+    )
+    assert all(candidate.model_ref == "openai/gpt-oss-120b" for candidate in candidates)
 
 
 @pytest.mark.asyncio

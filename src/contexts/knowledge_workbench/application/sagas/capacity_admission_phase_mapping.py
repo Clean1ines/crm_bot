@@ -103,7 +103,7 @@ def _require_timezone_aware(value: datetime, field_name: str) -> None:
 CLAIM_BUILDER_ADMISSION_PHASE_PROFILE = CapacityAdmissionPhaseMappingProfile(
     phase="CLAIM_BUILDER_SECTION_EXTRACTION",
     operation_key="prepare_claim_builder_dispatch",
-    work_kind="knowledge_workbench.claim_builder_section",
+    work_kind="knowledge_workbench.claim_builder.section_extraction",
     dispatch_prepared_event_type="ClaimBuilderDispatchBatchPrepared",
     execute_command_type="ExecuteClaimBuilderSection",
     supports_source_split_required=True,

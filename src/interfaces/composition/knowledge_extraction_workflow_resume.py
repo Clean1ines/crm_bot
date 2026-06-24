@@ -11,6 +11,10 @@ import asyncpg
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
     CapacityAdmissionLaneTarget,
 )
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetRegistry,
+    CapacityAdmissionLaneTargetResolverPort,
+)
 from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
     CapacityAdmissionProjectionWriterPort,
 )
@@ -289,6 +293,9 @@ class RunKnowledgeExtractionWorkflowResume:
             CapacityAdmissionProjectionWriterPort | None
         ) = None,
         capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
+        capacity_admission_lane_target_resolver: (
+            CapacityAdmissionLaneTargetResolverPort | None
+        ) = None,
     ) -> None:
         self._pool = cast(_AsyncResumePoolLike, pool)
         self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
@@ -315,9 +322,9 @@ class RunKnowledgeExtractionWorkflowResume:
         self._draft_claim_compaction_reduction_state_repository = (
             draft_claim_compaction_reduction_state_repository
         )
-        if (
-            capacity_admission_projection_writer is not None
-            and capacity_admission_lane_target is None
+        if capacity_admission_projection_writer is not None and (
+            capacity_admission_lane_target is None
+            and capacity_admission_lane_target_resolver is None
         ):
             raise ValueError(
                 "capacity admission projection writer requires lane target"
@@ -330,6 +337,9 @@ class RunKnowledgeExtractionWorkflowResume:
             capacity_admission_projection_writer
         )
         self._capacity_admission_lane_target = capacity_admission_lane_target
+        self._capacity_admission_lane_target_resolver = (
+            capacity_admission_lane_target_resolver
+        )
 
     async def execute(
         self,
@@ -726,10 +736,19 @@ def make_knowledge_extraction_workflow_resume(
 
     return RunKnowledgeExtractionWorkflowResume(
         pool=pool,
-        capacity_admission_lane_target=CapacityAdmissionLaneTarget(
-            provider="groq",
-            account_ref=None,
-            model_ref=route_catalog.primary_model_ref(),
+        capacity_admission_lane_target_resolver=CapacityAdmissionLaneTargetRegistry(
+            targets_by_work_kind={
+                "knowledge_workbench.claim_builder.section_extraction": CapacityAdmissionLaneTarget(
+                    provider="groq",
+                    account_ref=groq_env_config.accounts[0].account_seed.account_ref,
+                    model_ref=route_catalog.primary_model_ref(),
+                ),
+                "knowledge_workbench.draft_claim_compaction": CapacityAdmissionLaneTarget(
+                    provider="groq",
+                    account_ref=groq_env_config.accounts[0].account_seed.account_ref,
+                    model_ref="openai/gpt-oss-120b",
+                ),
+            }
         ),
         prepare_llm_dispatch_batch=PrepareLlmDispatchBatch(
             pool=pool,

@@ -12,6 +12,9 @@ from src.contexts.capacity_admission_queue.application.build_capacity_admission_
     CapacityAdmissionLaneTarget,
     CapacityAdmissionWorkItemProjectionCandidate,
 )
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetRegistry,
+)
 from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
     PersistCapacityAdmissionProjectionResult,
 )
@@ -407,6 +410,8 @@ async def _execute(
         FakeCapacityAdmissionProjectionWriter | None
     ) = None,
     capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
+    capacity_admission_lane_target_resolver: CapacityAdmissionLaneTargetRegistry
+    | None = None,
 ) -> tuple[
     object,
     FakeSourceManagementRepository,
@@ -428,6 +433,7 @@ async def _execute(
         frontend_event_projection_writer=frontend_event_projection_writer,
         capacity_admission_projection_writer=capacity_admission_projection_writer,
         capacity_admission_lane_target=capacity_admission_lane_target,
+        capacity_admission_lane_target_resolver=capacity_admission_lane_target_resolver,
     )
     return result, source_repository, scheduling_repository, workflow_unit_of_work
 
@@ -495,6 +501,37 @@ async def test_persists_capacity_admission_projection_when_configured() -> None:
     assert first.account_ref == "groq_org_primary"
     assert first.model_ref == "qwen/qwen3-32b"
     assert first.status.value == "ready"
+
+
+@pytest.mark.asyncio
+async def test_persists_capacity_admission_projection_from_lane_target_resolver() -> (
+    None
+):
+    capacity_writer = FakeCapacityAdmissionProjectionWriter()
+    await _execute(
+        capacity_admission_projection_writer=capacity_writer,
+        capacity_admission_lane_target_resolver=CapacityAdmissionLaneTargetRegistry(
+            targets_by_work_kind={
+                "knowledge_workbench.claim_builder.section_extraction": CapacityAdmissionLaneTarget(
+                    provider="groq",
+                    account_ref="claim-builder-account",
+                    model_ref="qwen/qwen3-32b",
+                ),
+                "knowledge_workbench.draft_claim_compaction": CapacityAdmissionLaneTarget(
+                    provider="groq",
+                    account_ref="compaction-account",
+                    model_ref="openai/gpt-oss-120b",
+                ),
+            }
+        ),
+    )
+
+    assert len(capacity_writer.candidates) == 2
+    assert capacity_writer.candidates[0].work_kind == (
+        "knowledge_workbench.claim_builder.section_extraction"
+    )
+    assert capacity_writer.candidates[0].account_ref == "claim-builder-account"
+    assert capacity_writer.candidates[0].model_ref == "qwen/qwen3-32b"
 
 
 @pytest.mark.asyncio

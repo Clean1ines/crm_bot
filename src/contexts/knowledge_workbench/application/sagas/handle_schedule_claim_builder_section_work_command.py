@@ -7,6 +7,9 @@ from datetime import datetime
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
     CapacityAdmissionLaneTarget,
 )
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetResolverPort,
+)
 from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
     CapacityAdmissionProjectionWriterPort,
 )
@@ -100,6 +103,9 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
             CapacityAdmissionProjectionWriterPort | None
         ) = None,
         capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
+        capacity_admission_lane_target_resolver: (
+            CapacityAdmissionLaneTargetResolverPort | None
+        ) = None,
     ) -> HandleScheduleClaimBuilderSectionWorkResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -122,10 +128,18 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
             source_document_ref,
         )
 
+        resolved_capacity_admission_lane_target = (
+            _resolve_capacity_admission_lane_target(
+                explicit_lane_target=capacity_admission_lane_target,
+                lane_target_resolver=capacity_admission_lane_target_resolver,
+                work_kind="knowledge_workbench.claim_builder.section_extraction",
+            )
+        )
+
         scheduling_result = await ScheduleClaimBuilderSectionWork(
             scheduling_repository=knowledge_unit_of_work,
             capacity_admission_projection_writer=capacity_admission_projection_writer,
-            capacity_admission_lane_target=capacity_admission_lane_target,
+            capacity_admission_lane_target=resolved_capacity_admission_lane_target,
         ).execute(
             ScheduleClaimBuilderSectionWorkCommand(
                 workflow_run_id=workflow_run_id,
@@ -451,3 +465,16 @@ def _require_non_negative_int(value: int, field_name: str) -> None:
         raise TypeError(f"{field_name} must be int")
     if value < 0:
         raise ValueError(f"{field_name} must be >= 0")
+
+
+def _resolve_capacity_admission_lane_target(
+    *,
+    explicit_lane_target: CapacityAdmissionLaneTarget | None,
+    lane_target_resolver: CapacityAdmissionLaneTargetResolverPort | None,
+    work_kind: str,
+) -> CapacityAdmissionLaneTarget | None:
+    if explicit_lane_target is not None:
+        return explicit_lane_target
+    if lane_target_resolver is None:
+        return None
+    return lane_target_resolver.resolve_lane_target_for_work_kind(work_kind)

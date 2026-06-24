@@ -241,7 +241,7 @@ class FakeActiveLeaseInspector:
 
 def _lane() -> CapacityAdmissionLaneKey:
     return CapacityAdmissionLaneKey(
-        work_kind="knowledge_workbench.claim_builder_section",
+        work_kind="knowledge_workbench.claim_builder.section_extraction",
         provider="groq",
         account_ref="groq-account-1",
         model_ref="qwen/qwen3-32b",

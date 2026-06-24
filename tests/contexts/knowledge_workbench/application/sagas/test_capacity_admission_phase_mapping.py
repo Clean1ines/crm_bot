@@ -29,7 +29,7 @@ from src.contexts.knowledge_workbench.application.sagas.capacity_admission_phase
 
 
 def _lane(
-    *, work_kind: str = "knowledge_workbench.claim_builder_section"
+    *, work_kind: str = "knowledge_workbench.claim_builder.section_extraction"
 ) -> CapacityAdmissionLaneSummary:
     return CapacityAdmissionLaneSummary(
         work_kind=work_kind,

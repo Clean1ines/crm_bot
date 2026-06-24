@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
     CapacityAdmissionLaneTarget,
 )
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetResolverPort,
+)
 from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
     CapacityAdmissionProjectionWriterPort,
 )
@@ -181,6 +184,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
             CapacityAdmissionProjectionWriterPort | None
         ) = None,
         capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
+        capacity_admission_lane_target_resolver: (
+            CapacityAdmissionLaneTargetResolverPort | None
+        ) = None,
         draft_claim_embedding_read_repository: (
             DraftClaimEmbeddingReadRepositoryPort | None
         ) = None,
@@ -279,6 +285,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                     capacity_admission_projection_writer
                 ),
                 capacity_admission_lane_target=capacity_admission_lane_target,
+                capacity_admission_lane_target_resolver=(
+                    capacity_admission_lane_target_resolver
+                ),
                 draft_claim_embedding_read_repository=(
                     draft_claim_embedding_read_repository
                 ),

@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
     CapacityAdmissionLaneTarget,
 )
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetResolverPort,
+)
 from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
     CapacityAdmissionProjectionWriterPort,
 )
@@ -217,6 +220,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             CapacityAdmissionProjectionWriterPort | None
         ) = None,
         capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
+        capacity_admission_lane_target_resolver: (
+            CapacityAdmissionLaneTargetResolverPort | None
+        ) = None,
         draft_claim_embedding_read_repository: (
             DraftClaimEmbeddingReadRepositoryPort | None
         ) = None,
@@ -510,6 +516,13 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 knowledge_unit_of_work=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
                 frontend_event_projection_writer=frontend_event_projection_writer,
+                capacity_admission_projection_writer=(
+                    capacity_admission_projection_writer
+                ),
+                capacity_admission_lane_target=capacity_admission_lane_target,
+                capacity_admission_lane_target_resolver=(
+                    capacity_admission_lane_target_resolver
+                ),
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,
@@ -736,7 +749,13 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     dispatched=False,
                     blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
                 )
-            await HandleClusterDraftClaimsCommandHandler().execute(
+            await HandleClusterDraftClaimsCommandHandler(
+                capacity_admission_projection_writer=capacity_admission_projection_writer,
+                capacity_admission_lane_target=capacity_admission_lane_target,
+                capacity_admission_lane_target_resolver=(
+                    capacity_admission_lane_target_resolver
+                ),
+            ).execute(
                 HandleClusterDraftClaimsCommand(workflow_command=workflow_command),
                 compaction_plan_repository=draft_claim_compaction_plan_repository,
                 work_item_scheduling_repository=knowledge_unit_of_work,
