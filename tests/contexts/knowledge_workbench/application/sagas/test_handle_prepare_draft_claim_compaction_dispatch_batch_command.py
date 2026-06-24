@@ -86,6 +86,8 @@ def _payload() -> dict[str, object]:
         "llm_dispatch_preparation": {
             "profile": {
                 "profile_id": "draft_claim_compaction",
+                "estimated_input_tokens": 12345,
+                "estimated_output_tokens": 4000,
                 "estimated_prompt_tokens": 12345,
                 "estimated_completion_tokens": 4000,
                 "estimated_requests": 1,
@@ -115,11 +117,44 @@ class FakeAttemptResult:
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class FakeAllocation:
+    provider: str = "groq"
+    account_ref: str = "groq_org_primary"
+    model_ref: str = "openai/gpt-oss-120b"
+
+
+@dataclass(frozen=True, slots=True)
+class FakeLeasedItem:
+    schedule_payload: dict[str, object]
+    allocation: FakeAllocation = field(default_factory=FakeAllocation)
+    selection_kind: str = "fresh"
+
+    def admitted_schedule_payload(self) -> dict[str, object]:
+        return self.schedule_payload
+
+
+@dataclass(frozen=True, slots=True)
+class FakeLeaseResult:
+    leased: tuple[FakeLeasedItem, ...]
+
+
 def _fake_prepare_result(
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...],
 ) -> PrepareLlmDispatchBatchResult:
     result = object.__new__(PrepareLlmDispatchBatchResult)
-    object.__setattr__(result, "lease_result", None)
+    object.__setattr__(
+        result,
+        "lease_result",
+        FakeLeaseResult(
+            leased=tuple(
+                FakeLeasedItem(
+                    schedule_payload=dict(attempt.dispatch_payload["schedule_payload"])
+                )
+                for attempt in started_attempts
+            )
+        ),
+    )
     object.__setattr__(
         result,
         "attempt_result",
@@ -323,13 +358,15 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     )
 
     assert result.prepared_dispatch_count == 1
-    assert result.appended_event_count == 1
+    assert result.appended_event_count == 2
     assert result.appended_next_command_count == 1
     assert prepare.calls[0].work_kind == DRAFT_CLAIM_COMPACTION_WORK_KIND
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
     assert prepare.calls[0].allow_automatic_fallbacks is False
     assert prepare.calls[0].use_local_active_model_tpm_budget is True
     assert prepare.calls[0].profile is not None
+    assert prepare.calls[0].profile.estimated_input_tokens == 12345
+    assert prepare.calls[0].profile.estimated_output_tokens == 4000
     assert prepare.calls[0].profile.estimated_prompt_tokens == 12345
     assert prepare.calls[0].profile.estimated_completion_tokens == 4000
     assert prepare.calls[0].profile.estimated_requests == 1
@@ -354,6 +391,34 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     assert execute_command.payload["batch_ref"] == "batch-1"
     assert execute_command.payload["expected_output_kind"] == "compacted_claims"
     assert execute_command.payload["source_claim_refs"] == ["claim-a", "claim-b"]
+
+
+@pytest.mark.asyncio
+async def test_reads_target_profile_keys_from_llm_dispatch_preparation() -> None:
+    payload = _payload()
+    llm_dispatch_preparation = dict(payload["llm_dispatch_preparation"])
+    profile = dict(llm_dispatch_preparation["profile"])
+    profile.pop("estimated_prompt_tokens")
+    profile.pop("estimated_completion_tokens")
+    profile["estimated_input_tokens"] = 22222
+    profile["estimated_output_tokens"] = 3333
+    llm_dispatch_preparation["profile"] = profile
+    payload["llm_dispatch_preparation"] = llm_dispatch_preparation
+
+    prepare = FakePrepareLlmDispatchBatch(started_attempts=())
+    workflow_uow = FakeWorkflowUnitOfWork()
+
+    await HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler().execute(
+        HandlePrepareDraftClaimCompactionDispatchBatchCommand(
+            workflow_command=_command(payload=payload)
+        ),
+        prepare_llm_dispatch_batch=prepare,
+        workflow_unit_of_work=workflow_uow,
+    )
+
+    assert prepare.calls[0].profile is not None
+    assert prepare.calls[0].profile.estimated_input_tokens == 22222
+    assert prepare.calls[0].profile.estimated_output_tokens == 3333
     assert workflow_uow.command_log.completed == [_command().command_id]
 
 

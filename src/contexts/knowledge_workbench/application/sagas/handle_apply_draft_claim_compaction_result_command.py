@@ -661,6 +661,8 @@ def _next_work_profile_payload(
     estimated_prompt_tokens = max(next_work_item.estimated_prompt_tokens, 1)
     return {
         "profile_id": f"draft_claim_compaction:{batch_ref}",
+        "estimated_input_tokens": estimated_prompt_tokens,
+        "estimated_output_tokens": next_work_item.estimated_completion_tokens,
         "estimated_prompt_tokens": estimated_prompt_tokens,
         "estimated_completion_tokens": next_work_item.estimated_completion_tokens,
         "estimated_requests": next_work_item.estimated_requests,

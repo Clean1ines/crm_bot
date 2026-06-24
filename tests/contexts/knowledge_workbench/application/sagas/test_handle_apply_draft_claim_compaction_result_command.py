@@ -797,6 +797,8 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         == "knowledge-workbench-draft-claim-compaction-dispatch"
     )
     assert dispatch_payload["account_capacities"] == ()
+    assert dispatch_payload["profile"]["estimated_input_tokens"] == 1
+    assert dispatch_payload["profile"]["estimated_output_tokens"] == 4000
     assert dispatch_payload["profile"]["estimated_prompt_tokens"] == 1
     assert dispatch_payload["profile"]["estimated_completion_tokens"] == 4000
     assert dispatch_payload["profile"]["estimated_requests"] == 1

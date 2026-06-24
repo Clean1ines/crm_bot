@@ -435,13 +435,19 @@ def _profile_from_payload(
 
     return LlmTaskCapacityProfile(
         profile_id=_payload_text(profile_payload, "profile_id"),
-        estimated_prompt_tokens=_payload_positive_int(
-            profile_payload,
-            "estimated_prompt_tokens",
+        estimated_prompt_tokens=(
+            _compaction_profile_positive_int_with_legacy_fallback(
+                profile_payload,
+                key="estimated_input_tokens",
+                legacy_key="estimated_prompt_tokens",
+            )
         ),
-        estimated_completion_tokens=_payload_non_negative_int(
-            profile_payload,
-            "estimated_completion_tokens",
+        estimated_completion_tokens=(
+            _compaction_profile_non_negative_int_with_legacy_fallback(
+                profile_payload,
+                key="estimated_output_tokens",
+                legacy_key="estimated_completion_tokens",
+            )
         ),
         estimated_requests=_payload_positive_int(
             profile_payload,
@@ -449,6 +455,28 @@ def _profile_from_payload(
             fallback=1,
         ),
     )
+
+
+def _compaction_profile_positive_int_with_legacy_fallback(
+    payload: Mapping[str, object],
+    *,
+    key: str,
+    legacy_key: str,
+) -> int:
+    if key in payload:
+        return _payload_positive_int(payload, key)
+    return _payload_positive_int(payload, legacy_key)
+
+
+def _compaction_profile_non_negative_int_with_legacy_fallback(
+    payload: Mapping[str, object],
+    *,
+    key: str,
+    legacy_key: str,
+) -> int:
+    if key in payload:
+        return _payload_non_negative_int(payload, key)
+    return _payload_non_negative_int(payload, legacy_key)
 
 
 def _dispatch_preparation_strategy(

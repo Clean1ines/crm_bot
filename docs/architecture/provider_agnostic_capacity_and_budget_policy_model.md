@@ -1,7 +1,7 @@
 
 # Provider-agnostic capacity and budget policy model
 
-Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary + B1c claim-builder estimate vocabulary boundary + B1d-1 segmentation vocabulary cleanup + B1d-2 rough estimator targets + B1d-3a profile input/output accessors + B1d-3b claim-builder profile payload compatibility.
+Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary + B1c claim-builder estimate vocabulary boundary + B1d-1 segmentation vocabulary cleanup + B1d-2 rough estimator targets + B1d-3a profile input/output accessors + B1d-3b claim-builder profile payload compatibility + B1d-3c compaction profile payload compatibility.
 
 This document freezes the boundary model before behavioral refactors. It does not migrate runtime code, token names, segmentation, compaction, capacity storage, or provider execution.
 
@@ -324,6 +324,7 @@ B1d:
 * remove chars/3.3, chars/4, chars/4+40 drift
 * B1d-3a: `LlmTaskCapacityProfile` exposes `estimated_input_tokens` and `estimated_output_tokens` accessors while legacy constructor fields remain compatible.
 * B1d-3b: claim-builder dispatch preparation profile payload dual-writes `estimated_input_tokens`/`estimated_output_tokens` while claim-builder prepare reads target keys with legacy fallback.
+* B1d-3c: draft-claim compaction dispatch preparation profile payload dual-writes `estimated_input_tokens`/`estimated_output_tokens` while compaction prepare reads target keys with legacy fallback.
 
 B1a success criteria:
 
