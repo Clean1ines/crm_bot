@@ -34,10 +34,6 @@ class ProviderMessageCapacityEstimate:
                 "estimated_total_tokens must equal input plus estimated output",
             )
 
-    @property
-    def reserved_output_tokens(self) -> int:
-        return self.estimated_output_tokens
-
     def to_payload(self) -> dict[str, object]:
         return {
             "estimator": "rough_char_div_4_actual_provider_messages",

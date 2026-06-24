@@ -207,7 +207,7 @@ def test_admitted_schedule_payload_carries_request_budget_fields() -> None:
     estimate = updated["llm_capacity_estimate"]
     assert isinstance(estimate, dict)
     assert estimate["estimated_output_tokens"] == 1000
-    assert estimate["reserved_output_tokens"] == 2048
+    assert "reserved_output_tokens" not in estimate
     assert estimate["effective_output_cap_tokens"] == 2048
     assert estimate["request_output_cap_tokens"] == 2048
     assert estimate["estimated_total_tokens"] == 7048

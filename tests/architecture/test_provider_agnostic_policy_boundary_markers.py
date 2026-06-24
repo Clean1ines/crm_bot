@@ -111,15 +111,7 @@ RESERVED_OUTPUT_TOKEN_TARGET_TERMS = (
 )
 
 KNOWN_RESERVED_OUTPUT_TOKENS_PATHS = {
-    "src/contexts/knowledge_workbench/application/sagas/claim_builder_dispatch_preparation.py",
-    "src/contexts/knowledge_workbench/application/sagas/handle_apply_draft_claim_compaction_result_command.py",
-    "src/contexts/knowledge_workbench/application/sagas/handle_cluster_draft_claims_command.py",
-    "src/contexts/knowledge_workbench/application/sagas/llm_provider_message_capacity_estimate.py",
-    "src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py",
     "src/contexts/llm_runtime/application/policies/llm_quota_availability_policy.py",
-    "src/contexts/llm_runtime/infrastructure/providers/groq/groq_dispatch_executor.py",
-    "src/interfaces/composition/knowledge_extraction_degraded_fallback_confirmation.py",
-    "src/interfaces/composition/prepare_llm_dispatch_batch.py",
 }
 
 COMPACTION_FIT_BY_GROQ_TPM_MARKERS = (
@@ -535,7 +527,7 @@ def test_b1f1_groq_executor_uses_effective_output_cap_as_fallback_source() -> No
     assert "effective_output_cap_tokens: int" in groq_executor
     assert "_parse_effective_output_cap_tokens" in groq_executor
     assert 'estimate_payload.get("effective_output_cap_tokens")' in groq_executor
-    assert 'estimate_payload.get("reserved_output_tokens")' in groq_executor
+    assert 'estimate_payload.get("reserved_output_tokens")' not in groq_executor
     assert "parsed.effective_output_cap_tokens" in groq_executor
     assert "parsed.reserved_output_tokens" not in groq_executor
     assert "def _parse_reserved_output_tokens" not in groq_executor
@@ -571,8 +563,32 @@ def test_b1f2_compaction_schedule_payload_uses_estimated_output_tokens() -> None
         not in apply_result
     )
     assert "estimated_output_tokens: int" in estimate
-    assert "def reserved_output_tokens(self) -> int:" in estimate
+    assert "def reserved_output_tokens(self) -> int:" not in estimate
     assert '"estimated_output_tokens": self.estimated_output_tokens' in estimate
     assert '"reserved_output_tokens": self.reserved_output_tokens' not in estimate
     assert '"estimated_output_tokens": (' in degraded_confirmation
     assert '"reserved_output_tokens": (' not in degraded_confirmation
+
+
+def test_b1f3a_no_schedule_or_executor_reserved_output_legacy() -> None:
+    doc = _read(ARCH_DOC_PATH)
+    prepare_batch = _read(
+        REPO_ROOT / "src/interfaces/composition/prepare_llm_dispatch_batch.py"
+    )
+    groq_executor = _read(
+        REPO_ROOT / "src/contexts/llm_runtime/infrastructure/providers/groq/"
+        "groq_dispatch_executor.py"
+    )
+    estimate = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "llm_provider_message_capacity_estimate.py"
+    )
+
+    assert (
+        "B1f-3a: schedule admission and Groq executor no longer write or read "
+        "`reserved_output_tokens`" in doc
+    )
+    assert "def reserved_output_tokens(self) -> int:" not in prepare_batch
+    assert 'updated_estimate["reserved_output_tokens"]' not in prepare_batch
+    assert 'estimate_payload.get("reserved_output_tokens")' not in groq_executor
+    assert "reserved_output_tokens" not in estimate

@@ -625,10 +625,6 @@ class _InputAdmittedCandidate:
     request_output_cap_tokens: int | None
     reserved_total_tokens: int
 
-    @property
-    def reserved_output_tokens(self) -> int:
-        return self.effective_output_cap_tokens
-
 
 @dataclass(slots=True)
 class _LocalAccountUsage:
@@ -994,7 +990,6 @@ def _admitted_schedule_payload(
     if not isinstance(estimate_payload, Mapping):
         raise ValueError("schedule_payload.llm_capacity_estimate is required")
     updated_estimate = dict(estimate_payload)
-    updated_estimate["reserved_output_tokens"] = effective_output_cap_tokens
     updated_estimate["effective_output_cap_tokens"] = effective_output_cap_tokens
     if request_output_cap_tokens is not None:
         updated_estimate["request_output_cap_tokens"] = request_output_cap_tokens

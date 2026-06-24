@@ -395,14 +395,14 @@ def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int
 def _parse_effective_output_cap_tokens(schedule_payload: Mapping[str, object]) -> int:
     estimate_payload = _require_mapping(schedule_payload, "llm_capacity_estimate")
     value = estimate_payload.get("effective_output_cap_tokens")
-    field_name = "effective_output_cap_tokens"
-    if value is None:
-        value = estimate_payload.get("reserved_output_tokens")
-        field_name = "reserved_output_tokens"
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(f"llm_capacity_estimate.{field_name} must be int")
+        raise ValueError(
+            "llm_capacity_estimate.effective_output_cap_tokens must be int"
+        )
     if value < 0:
-        raise ValueError(f"llm_capacity_estimate.{field_name} must be >= 0")
+        raise ValueError(
+            "llm_capacity_estimate.effective_output_cap_tokens must be >= 0"
+        )
     return value
 
 

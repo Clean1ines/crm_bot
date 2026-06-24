@@ -78,7 +78,7 @@ def _dispatch_payload(
             ],
             "llm_capacity_estimate": {
                 "estimated_input_tokens": 1000,
-                "reserved_output_tokens": 1000,
+                "effective_output_cap_tokens": 1000,
                 "estimated_total_tokens": 2000,
             },
         },
@@ -147,63 +147,6 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
 
 
 @pytest.mark.asyncio
-async def test_legacy_reserved_output_tokens_is_only_effective_output_cap_fallback() -> (
-    None
-):
-    legacy_transport = FakeGroqTransport(response=_success_response())
-    target_transport = FakeGroqTransport(response=_success_response())
-
-    legacy_schedule_payload = {
-        "provider_messages": [
-            {
-                "role": "user",
-                "content": "Extract claims",
-            },
-        ],
-        "llm_capacity_estimate": {
-            "estimated_input_tokens": 100,
-            "reserved_output_tokens": 1000,
-            "estimated_total_tokens": 1100,
-        },
-    }
-    target_schedule_payload = {
-        "provider_messages": [
-            {
-                "role": "user",
-                "content": "Extract claims",
-            },
-        ],
-        "llm_capacity_estimate": {
-            "estimated_input_tokens": 100,
-            "effective_output_cap_tokens": 1000,
-            "estimated_total_tokens": 1100,
-        },
-    }
-
-    legacy_result = await _executor(legacy_transport).execute_dispatch(
-        _execution_input(
-            dispatch_payload=_dispatch_payload(
-                schedule_payload=legacy_schedule_payload,
-            ),
-        ),
-    )
-    target_result = await _executor(target_transport).execute_dispatch(
-        _execution_input(
-            dispatch_payload=_dispatch_payload(
-                schedule_payload=target_schedule_payload,
-            ),
-        ),
-    )
-
-    assert legacy_result.status is LlmDispatchExecutionStatus.SUCCEEDED
-    assert target_result.status is LlmDispatchExecutionStatus.SUCCEEDED
-    assert (
-        legacy_transport.payloads[0]["max_completion_tokens"]
-        == (target_transport.payloads[0]["max_completion_tokens"])
-    )
-
-
-@pytest.mark.asyncio
 async def test_prepared_request_output_cap_becomes_max_completion_tokens() -> None:
     schedule_payload = {
         "provider_messages": [
@@ -245,7 +188,7 @@ async def test_missing_prepared_request_output_cap_is_not_rejected_by_executor()
         ],
         "llm_capacity_estimate": {
             "estimated_input_tokens": 1000,
-            "reserved_output_tokens": 100,
+            "effective_output_cap_tokens": 100,
             "estimated_total_tokens": 1100,
         },
     }
