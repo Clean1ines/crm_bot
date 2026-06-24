@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 
+from src.contexts.capacity_admission_queue.application.sync_capacity_admission_projection_lifecycle import (
+    CapacityAdmissionProjectionLifecycleSynchronizerPort,
+    CapacityAdmissionProjectionLifecycleUpdate,
+    SyncCapacityAdmissionProjectionLifecycle,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -114,6 +119,9 @@ class HandleSplitClaimBuilderSourceUnitCommandHandler:
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
         work_item_split_supersede_repository: WorkItemSplitSupersedeRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        capacity_admission_projection_lifecycle_synchronizer: (
+            CapacityAdmissionProjectionLifecycleSynchronizerPort | None
+        ) = None,
     ) -> HandleSplitClaimBuilderSourceUnitResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -175,6 +183,13 @@ class HandleSplitClaimBuilderSourceUnitCommandHandler:
             SupersedeWaitingWorkItemsForSplitCommand(
                 work_item_ids=affected_work_item_refs,
             )
+        )
+        await _sync_superseded_capacity_admission_projection(
+            lifecycle_synchronizer=(
+                capacity_admission_projection_lifecycle_synchronizer
+            ),
+            superseded_work_item_ids=supersede_result.superseded_work_item_ids,
+            occurred_at=occurred_at,
         )
 
         scheduling_result = await ScheduleClaimBuilderSectionWork(
@@ -250,6 +265,28 @@ class HandleSplitClaimBuilderSourceUnitCommandHandler:
             appended_event_count=1,
             appended_next_command_count=1,
             completed_command_id=workflow_command.command_id,
+        )
+
+
+async def _sync_superseded_capacity_admission_projection(
+    *,
+    lifecycle_synchronizer: CapacityAdmissionProjectionLifecycleSynchronizerPort | None,
+    superseded_work_item_ids: tuple[str, ...],
+    occurred_at: datetime,
+) -> None:
+    if lifecycle_synchronizer is None:
+        return
+
+    sync_projection_lifecycle = SyncCapacityAdmissionProjectionLifecycle(
+        projection_lifecycle_synchronizer=lifecycle_synchronizer,
+    )
+    for work_item_id in superseded_work_item_ids:
+        await sync_projection_lifecycle.execute(
+            CapacityAdmissionProjectionLifecycleUpdate(
+                work_item_id=work_item_id,
+                status="split_superseded",
+                changed_at=occurred_at,
+            )
         )
 
 

@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 import pytest
 from pathlib import Path
 
+from src.contexts.capacity_admission_queue.application.sync_capacity_admission_projection_lifecycle import (
+    CapacityAdmissionProjectionLifecycleSyncResult,
+    CapacityAdmissionProjectionLifecycleUpdate,
+)
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.handle_split_claim_builder_source_unit_command import (
@@ -255,6 +259,20 @@ class FakeSplitSupersedeRepository:
 
 
 @dataclass(slots=True)
+class FakeCapacityAdmissionProjectionLifecycleSynchronizer:
+    updates: list[CapacityAdmissionProjectionLifecycleUpdate] = field(
+        default_factory=list,
+    )
+
+    async def sync_projection_lifecycle(
+        self,
+        update: CapacityAdmissionProjectionLifecycleUpdate,
+    ) -> CapacityAdmissionProjectionLifecycleSyncResult | None:
+        self.updates.append(update)
+        return None
+
+
+@dataclass(slots=True)
 class FakeCommandLogRepository:
     pending_commands: list[WorkflowCommand] = field(default_factory=list)
     completed_command_ids: list[WorkflowCommandId] = field(default_factory=list)
@@ -500,6 +518,33 @@ async def test_supersedes_affected_parent_work_items() -> None:
     assert tuple(item.work_item_id for item in split_repository.saved_items) == (
         "work-parent",
     )
+
+
+@pytest.mark.asyncio
+async def test_syncs_capacity_projection_for_superseded_parent_work_items() -> None:
+    source_repository = FakeSourceManagementRepository()
+    scheduling_repository = FakeSchedulingRepository()
+    split_repository = FakeSplitSupersedeRepository()
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+    capacity_synchronizer = FakeCapacityAdmissionProjectionLifecycleSynchronizer()
+
+    await HandleSplitClaimBuilderSourceUnitCommandHandler().execute(
+        HandleSplitClaimBuilderSourceUnitCommand(
+            workflow_command=_command(),
+        ),
+        source_management_repository=source_repository,
+        work_item_scheduling_repository=scheduling_repository,
+        work_item_split_supersede_repository=split_repository,
+        workflow_unit_of_work=workflow_unit_of_work,
+        capacity_admission_projection_lifecycle_synchronizer=capacity_synchronizer,
+    )
+
+    assert len(capacity_synchronizer.updates) == 1
+    update = capacity_synchronizer.updates[0]
+    assert update.work_item_id == "work-parent"
+    assert update.status == "split_superseded"
+    assert update.retry_plan is None
+    assert update.changed_at == _now()
 
 
 @pytest.mark.asyncio

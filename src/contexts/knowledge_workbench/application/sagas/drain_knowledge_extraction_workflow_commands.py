@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from src.contexts.capacity_admission_queue.application.sync_capacity_admission_projection_lifecycle import (
+    CapacityAdmissionProjectionLifecycleSynchronizerPort,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
     DraftClaimCompactionPlanRepositoryPort,
 )
@@ -164,6 +168,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         work_item_split_supersede_repository: (
             WorkItemSplitSupersedeRepositoryPort | None
         ) = None,
+        capacity_admission_projection_lifecycle_synchronizer: (
+            CapacityAdmissionProjectionLifecycleSynchronizerPort | None
+        ) = None,
         draft_claim_embedding_read_repository: (
             DraftClaimEmbeddingReadRepositoryPort | None
         ) = None,
@@ -254,6 +261,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 ),
                 work_item_split_supersede_repository=(
                     work_item_split_supersede_repository
+                ),
+                capacity_admission_projection_lifecycle_synchronizer=(
+                    capacity_admission_projection_lifecycle_synchronizer
                 ),
                 draft_claim_embedding_read_repository=(
                     draft_claim_embedding_read_repository

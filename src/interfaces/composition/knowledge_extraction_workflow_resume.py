@@ -459,6 +459,11 @@ class RunKnowledgeExtractionWorkflowResume:
                         cast(asyncpg.Connection, connection),
                     )
                 ),
+                capacity_admission_projection_lifecycle_synchronizer=(
+                    PostgresCapacityAdmissionProjectionLifecycleSynchronizer(
+                        cast(asyncpg.Connection, connection),
+                    )
+                ),
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
                 execute_prepared_llm_dispatch_attempt=(

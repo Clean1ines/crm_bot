@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from src.contexts.capacity_admission_queue.application.sync_capacity_admission_projection_lifecycle import (
+    CapacityAdmissionProjectionLifecycleSynchronizerPort,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_apply_draft_claim_compaction_result_command import (
     HandleApplyDraftClaimCompactionResultCommand,
     HandleApplyDraftClaimCompactionResultCommandHandler,
@@ -199,6 +203,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         ) = None,
         work_item_split_supersede_repository: (
             WorkItemSplitSupersedeRepositoryPort | None
+        ) = None,
+        capacity_admission_projection_lifecycle_synchronizer: (
+            CapacityAdmissionProjectionLifecycleSynchronizerPort | None
         ) = None,
         draft_claim_embedding_read_repository: (
             DraftClaimEmbeddingReadRepositoryPort | None
@@ -463,6 +470,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     work_item_split_supersede_repository
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
+                capacity_admission_projection_lifecycle_synchronizer=(
+                    capacity_admission_projection_lifecycle_synchronizer
+                ),
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,
