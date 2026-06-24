@@ -434,6 +434,26 @@ def test_b1d2_rough_token_estimator_targets_are_not_reversed() -> None:
     assert "len(claim.embedding_text) // 4" not in compaction_cluster
 
 
+def test_b1d3a_task_capacity_profile_exposes_target_accessors() -> None:
+    profile_source = _read(
+        REPO_ROOT / "src/contexts/llm_runtime/domain/capacity/"
+        "llm_task_capacity_profile.py",
+    )
+    preflight_source = _read(
+        REPO_ROOT / "src/contexts/llm_runtime/application/capacity/"
+        "resolve_llm_dispatch_input_size_preflight.py",
+    )
+
+    assert "def estimated_input_tokens" in profile_source
+    assert "def estimated_output_tokens" in profile_source
+    assert "return self.estimated_input_tokens + self.estimated_output_tokens" in (
+        profile_source
+    )
+    assert "command.profile.estimated_input_tokens" in preflight_source
+    assert "estimated prompt tokens" not in preflight_source
+    assert "_first_fallback_that_fits_prompt" not in preflight_source
+
+
 def test_b1a_does_not_pretend_runtime_token_vocabulary_is_migrated() -> None:
     source = _read(ARCH_DOC_PATH)
     normalized_source = source.replace("`", "")

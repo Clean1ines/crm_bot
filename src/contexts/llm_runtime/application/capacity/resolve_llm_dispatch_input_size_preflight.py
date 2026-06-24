@@ -52,22 +52,22 @@ class ResolveLlmDispatchInputSizePreflight:
         self,
         command: ResolveLlmDispatchInputSizePreflightCommand,
     ) -> ResolveLlmDispatchInputSizePreflightResult:
-        estimated_prompt_tokens = command.profile.estimated_prompt_tokens
+        estimated_input_tokens = command.profile.estimated_input_tokens
         active_limits = command.route_catalog.capacity_limits_for_model_ref(
             command.active_model_ref,
         )
 
-        if estimated_prompt_tokens <= active_limits.input_token_limit:
+        if estimated_input_tokens <= active_limits.input_token_limit:
             return ResolveLlmDispatchInputSizePreflightResult(
                 decision=LlmDispatchInputSizePreflightDecision.USE_ACTIVE_MODEL,
                 active_model_ref=command.active_model_ref,
-                reason="estimated prompt tokens fit active model input limit",
+                reason="estimated input tokens fit active model input limit",
             )
 
         fallback_model_ref = None
         if command.allow_automatic_fallbacks:
-            fallback_model_ref = _first_fallback_that_fits_prompt(
-                estimated_prompt_tokens=estimated_prompt_tokens,
+            fallback_model_ref = _first_fallback_that_fits_input(
+                estimated_input_tokens=estimated_input_tokens,
                 current_model_ref=command.active_model_ref,
                 route_catalog=command.route_catalog,
             )
@@ -76,7 +76,7 @@ class ResolveLlmDispatchInputSizePreflight:
                 decision=LlmDispatchInputSizePreflightDecision.USE_LARGER_INPUT_MODEL,
                 active_model_ref=fallback_model_ref,
                 reason=(
-                    "estimated prompt tokens exceed active model input limit; "
+                    "estimated input tokens exceed active model input limit; "
                     "selected larger input model"
                 ),
             )
@@ -84,13 +84,13 @@ class ResolveLlmDispatchInputSizePreflight:
         return ResolveLlmDispatchInputSizePreflightResult(
             decision=LlmDispatchInputSizePreflightDecision.SOURCE_SPLIT_REQUIRED,
             active_model_ref=command.active_model_ref,
-            reason="estimated prompt tokens exceed all automatic fallback input limits",
+            reason="estimated input tokens exceed all automatic fallback input limits",
         )
 
 
-def _first_fallback_that_fits_prompt(
+def _first_fallback_that_fits_input(
     *,
-    estimated_prompt_tokens: int,
+    estimated_input_tokens: int,
     current_model_ref: str,
     route_catalog: LlmModelRouteCatalog,
 ) -> str | None:
@@ -100,7 +100,7 @@ def _first_fallback_that_fits_prompt(
         current_model_ref,
     ):
         limits = route_catalog.capacity_limits_for_model_ref(model_ref)
-        if estimated_prompt_tokens <= limits.input_token_limit:
+        if estimated_input_tokens <= limits.input_token_limit:
             return model_ref
     return None
 

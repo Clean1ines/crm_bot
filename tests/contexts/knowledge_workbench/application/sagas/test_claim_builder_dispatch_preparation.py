@@ -56,6 +56,8 @@ def test_profile_completion_estimate_comes_from_estimated_output_tokens() -> Non
         )
     )
 
+    assert profile.estimated_input_tokens == 5000
+    assert profile.estimated_output_tokens == 1600
     assert profile.estimated_prompt_tokens == 5000
     assert profile.estimated_completion_tokens == 1600
     assert profile.estimated_requests == 1

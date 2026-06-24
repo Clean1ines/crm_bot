@@ -5,15 +5,28 @@ from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
 )
 
 
-def test_total_tokens_is_prompt_plus_completion() -> None:
+def test_total_tokens_is_input_plus_output() -> None:
     profile = LlmTaskCapacityProfile(
         profile_id="prompt-a",
         estimated_prompt_tokens=3000,
         estimated_completion_tokens=500,
     )
 
+    assert profile.estimated_input_tokens == 3000
+    assert profile.estimated_output_tokens == 500
     assert profile.estimated_total_tokens == 3500
     assert profile.estimated_requests == 1
+
+
+def test_legacy_constructor_fields_remain_compatible() -> None:
+    profile = LlmTaskCapacityProfile(
+        profile_id="prompt-a",
+        estimated_prompt_tokens=3000,
+        estimated_completion_tokens=500,
+    )
+
+    assert profile.estimated_prompt_tokens == profile.estimated_input_tokens
+    assert profile.estimated_completion_tokens == profile.estimated_output_tokens
 
 
 def test_rejects_empty_profile_id() -> None:
