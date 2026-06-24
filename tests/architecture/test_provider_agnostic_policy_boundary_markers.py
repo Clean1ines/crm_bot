@@ -492,3 +492,33 @@ def test_b1a_does_not_pretend_runtime_token_vocabulary_is_migrated() -> None:
 
     missing = [marker for marker in required_markers if marker not in normalized_source]
     assert not missing, "\n".join(missing)
+
+
+def test_b1e_actual_token_usage_payload_compatibility() -> None:
+    doc = _read(ARCH_DOC_PATH)
+    observation = _read(
+        REPO_ROOT / "src/contexts/capacity_runtime/application/ports/"
+        "llm_attempt_capacity_observation_repository_port.py"
+    )
+    groq_executor = _read(
+        REPO_ROOT / "src/contexts/llm_runtime/infrastructure/providers/groq/"
+        "groq_dispatch_executor.py"
+    )
+
+    assert "B1e: capacity observation payloads dual-write" in doc
+    assert "def actual_input_tokens" in observation
+    assert "def actual_output_tokens" in observation
+    assert "_payload_optional_int_with_legacy_fallback" in observation
+    assert 'key="actual_input_tokens"' in observation
+    assert 'legacy_key="actual_prompt_tokens"' in observation
+    assert 'key="actual_output_tokens"' in observation
+    assert 'legacy_key="actual_completion_tokens"' in observation
+    assert '"actual_input_tokens": self.actual_input_tokens' in observation
+    assert '"actual_output_tokens": self.actual_output_tokens' in observation
+    assert '"actual_prompt_tokens": self.actual_prompt_tokens' in observation
+    assert '"actual_completion_tokens": self.actual_completion_tokens' in observation
+
+    assert '"actual_input_tokens": usage.input_tokens' in groq_executor
+    assert '"actual_output_tokens": usage.output_tokens' in groq_executor
+    assert '"actual_prompt_tokens": usage.input_tokens' in groq_executor
+    assert '"actual_completion_tokens": usage.output_tokens' in groq_executor

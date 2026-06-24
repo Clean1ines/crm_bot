@@ -23,6 +23,14 @@ class LlmAttemptCapacityObservation:
     outcome_class: str
     observed_at: datetime
 
+    @property
+    def actual_input_tokens(self) -> int | None:
+        return self.actual_prompt_tokens
+
+    @property
+    def actual_output_tokens(self) -> int | None:
+        return self.actual_completion_tokens
+
     def __post_init__(self) -> None:
         _require_non_empty_text(self.provider, "provider")
         _require_non_empty_text(self.account_ref, "account_ref")
@@ -76,13 +84,15 @@ class LlmAttemptCapacityObservation:
             ),
             minute_reset_at=_payload_optional_datetime(payload, "minute_reset_at"),
             daily_reset_at=_payload_optional_datetime(payload, "daily_reset_at"),
-            actual_prompt_tokens=_payload_optional_int(
+            actual_prompt_tokens=_payload_optional_int_with_legacy_fallback(
                 payload,
-                "actual_prompt_tokens",
+                key="actual_input_tokens",
+                legacy_key="actual_prompt_tokens",
             ),
-            actual_completion_tokens=_payload_optional_int(
+            actual_completion_tokens=_payload_optional_int_with_legacy_fallback(
                 payload,
-                "actual_completion_tokens",
+                key="actual_output_tokens",
+                legacy_key="actual_completion_tokens",
             ),
             actual_total_tokens=_payload_optional_int(
                 payload,
@@ -103,6 +113,8 @@ class LlmAttemptCapacityObservation:
             "remaining_daily_tokens": self.remaining_daily_tokens,
             "minute_reset_at": _datetime_payload(self.minute_reset_at),
             "daily_reset_at": _datetime_payload(self.daily_reset_at),
+            "actual_input_tokens": self.actual_input_tokens,
+            "actual_output_tokens": self.actual_output_tokens,
             "actual_prompt_tokens": self.actual_prompt_tokens,
             "actual_completion_tokens": self.actual_completion_tokens,
             "actual_total_tokens": self.actual_total_tokens,
@@ -141,6 +153,17 @@ def _payload_optional_int(payload: Mapping[str, object], key: str) -> int | None
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{key} must be non-negative int or None")
     return value
+
+
+def _payload_optional_int_with_legacy_fallback(
+    payload: Mapping[str, object],
+    *,
+    key: str,
+    legacy_key: str,
+) -> int | None:
+    if key in payload:
+        return _payload_optional_int(payload, key)
+    return _payload_optional_int(payload, legacy_key)
 
 
 def _payload_datetime(payload: Mapping[str, object], key: str) -> datetime:

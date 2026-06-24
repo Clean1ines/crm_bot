@@ -492,6 +492,8 @@ def _capacity_observation_payload(
         "remaining_daily_tokens": quota.remaining_tokens_day,
         "minute_reset_at": quota.minute_reset_at,
         "daily_reset_at": quota.daily_reset_at,
+        "actual_input_tokens": usage.input_tokens if usage is not None else None,
+        "actual_output_tokens": usage.output_tokens if usage is not None else None,
         "actual_prompt_tokens": usage.input_tokens if usage is not None else None,
         "actual_completion_tokens": usage.output_tokens if usage is not None else None,
         "actual_total_tokens": usage.total_tokens if usage is not None else None,
