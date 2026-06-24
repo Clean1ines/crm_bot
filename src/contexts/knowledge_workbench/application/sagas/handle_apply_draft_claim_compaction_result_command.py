@@ -5,6 +5,13 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    BuildCapacityAdmissionProjectionCandidates,
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -122,11 +129,24 @@ class HandleApplyDraftClaimCompactionResult:
     already_scheduled_work_item_count: int
     appended_next_command_count: int
     next_command_type: str | None
+    capacity_admission_projection_persisted_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class HandleApplyDraftClaimCompactionResultCommandHandler:
     apply_result_use_case: DraftClaimCompactionApplyResultUseCasePort | None = None
+    capacity_admission_projection_writer: (
+        CapacityAdmissionProjectionWriterPort | None
+    ) = None
+    capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None
+
+    def __post_init__(self) -> None:
+        if (self.capacity_admission_projection_writer is None) != (
+            self.capacity_admission_lane_target is None
+        ):
+            raise ValueError(
+                "capacity admission projection writer and lane target must be provided together"
+            )
 
     async def execute(
         self,
@@ -164,7 +184,10 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
             )
         outcome = await apply_result_use_case.execute(apply_command)
 
-        schedule = await _schedule_next_work(
+        (
+            schedule,
+            capacity_admission_projection_persisted_count,
+        ) = await _schedule_next_work(
             workflow_run_id=apply_command.workflow_run_id,
             group_ref=apply_command.group_ref,
             next_work_item=outcome.next_decision.next_work_item,
@@ -175,6 +198,10 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
                 draft_claim_observation_read_repository
             ),
             work_item_scheduling_repository=work_item_scheduling_repository,
+            capacity_admission_projection_writer=(
+                self.capacity_admission_projection_writer
+            ),
+            capacity_admission_lane_target=self.capacity_admission_lane_target,
         )
         if schedule.conflict_count:
             raise ValueError("draft claim compaction next work item schedule conflict")
@@ -281,6 +308,9 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
             already_scheduled_work_item_count=schedule.already_exists_count,
             appended_next_command_count=appended_next_command_count,
             next_command_type=next_command_type,
+            capacity_admission_projection_persisted_count=(
+                capacity_admission_projection_persisted_count
+            ),
         )
 
 
@@ -341,16 +371,19 @@ async def _schedule_next_work(
     ),
     draft_claim_observation_read_repository: DraftClaimObservationReadRepositoryPort,
     work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
-) -> EnsureWorkItemsScheduledResult:
+    capacity_admission_projection_writer: CapacityAdmissionProjectionWriterPort | None,
+    capacity_admission_lane_target: CapacityAdmissionLaneTarget | None,
+) -> tuple[EnsureWorkItemsScheduledResult, int]:
     if next_work_item.work_type not in {
         DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT,
         DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
         DraftClaimCompactionNextWorkItemType.MIXED,
         DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
     }:
-        return await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
-            EnsureWorkItemsScheduledCommand(plans=())
-        )
+        schedule = await EnsureWorkItemsScheduled(
+            work_item_scheduling_repository
+        ).execute(EnsureWorkItemsScheduledCommand(plans=()))
+        return schedule, 0
 
     batch_ref = _next_batch_ref(
         group_ref=group_ref,
@@ -389,9 +422,25 @@ async def _schedule_next_work(
             },
         },
     )
-    return await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
+    schedule = await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,))
     )
+    if (
+        schedule.conflict_count == 0
+        and capacity_admission_projection_writer is not None
+        and capacity_admission_lane_target is not None
+    ):
+        projection_candidates = BuildCapacityAdmissionProjectionCandidates(
+            lane_target=capacity_admission_lane_target,
+        ).execute((plan,))
+        projection_result = (
+            await capacity_admission_projection_writer.persist_projection_candidates(
+                projection_candidates,
+            )
+        )
+        return schedule, projection_result.persisted_count
+
+    return schedule, 0
 
 
 async def _provider_messages_for_next_work_item(

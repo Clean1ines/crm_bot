@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import cast
 
 import pytest
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+    CapacityAdmissionWorkItemProjectionCandidate,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    PersistCapacityAdmissionProjectionResult,
+)
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     work_item_schedule_payload_hash,
 )
@@ -42,12 +51,17 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionApplyPersistenceResult,
     DraftClaimCompactionReductionStatePersistenceResult,
+    DraftClaimCompactionReductionStateRepositoryPort,
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
     DraftClaimObservationReadModel,
+    DraftClaimObservationReadRepositoryPort,
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_provider_messages import (
     build_draft_claim_compaction_provider_messages,
+)
+from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
+    WorkflowRuntimeUnitOfWorkPort,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
@@ -285,8 +299,25 @@ def _raw_claim(observation_ref: str) -> DraftClaimObservationReadModel:
 
 
 @dataclass(slots=True)
+class FakeCapacityAdmissionProjectionWriter:
+    persisted_batches: list[
+        tuple[CapacityAdmissionWorkItemProjectionCandidate, ...]
+    ] = field(default_factory=list)
+
+    async def persist_projection_candidates(
+        self,
+        candidates: tuple[CapacityAdmissionWorkItemProjectionCandidate, ...],
+    ) -> PersistCapacityAdmissionProjectionResult:
+        self.persisted_batches.append(candidates)
+        return PersistCapacityAdmissionProjectionResult(
+            persisted_count=len(candidates),
+        )
+
+
+@dataclass(slots=True)
 class FakeWorkItemSchedulingRepository:
-    saved_payloads: list[object] = field(default_factory=list)
+    saved_payloads: list[Mapping[str, object]] = field(default_factory=list)
+    saved_items: list[WorkItem] = field(default_factory=list)
     existing_payload_hashes: dict[str, str] = field(default_factory=dict)
     existing_work_kinds: dict[str, WorkKind] = field(default_factory=dict)
 
@@ -311,7 +342,10 @@ class FakeWorkItemSchedulingRepository:
         payload: object,
     ) -> None:
         del idempotency_key
+        if not isinstance(payload, Mapping):
+            raise AssertionError("expected mapping schedule payload")
         self.saved_payloads.append(payload)
+        self.saved_items.append(item)
         self.existing_payload_hashes[item.work_item_id] = payload_hash
         self.existing_work_kinds[item.work_item_id] = item.work_kind
 
@@ -480,6 +514,30 @@ class FakeWorkflowUnitOfWork:
         raise AssertionError("handler must not rollback")
 
 
+def _workflow_unit_of_work(
+    unit_of_work: FakeWorkflowUnitOfWork,
+) -> WorkflowRuntimeUnitOfWorkPort:
+    return cast(WorkflowRuntimeUnitOfWorkPort, unit_of_work)
+
+
+def _reduction_state_repository(
+    repository: FakeReductionStateRepository,
+) -> DraftClaimCompactionReductionStateRepositoryPort:
+    return cast(DraftClaimCompactionReductionStateRepositoryPort, repository)
+
+
+def _draft_claim_observation_read_repository(
+    repository: FakeDraftClaimObservationReadRepository,
+) -> DraftClaimObservationReadRepositoryPort:
+    return cast(DraftClaimObservationReadRepositoryPort, repository)
+
+
+def _mapping_value(value: object) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise AssertionError("expected mapping value")
+    return cast(Mapping[str, object], value)
+
+
 @pytest.mark.asyncio
 async def test_applies_result_events_progress_timeline_and_completes_command() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
@@ -496,9 +554,11 @@ async def test_applies_result_events_progress_timeline_and_completes_command() -
         apply_result_use_case=apply_use_case,
     ).execute(
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=repository,
-        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(repository),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
         work_item_scheduling_repository=scheduling,
         work_item_completion=FakeWorkItemCompletion(),
     )
@@ -542,9 +602,11 @@ async def test_constructed_apply_use_case_receives_raw_claim_read_repository() -
 
     await HandleApplyDraftClaimCompactionResultCommandHandler().execute(
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=repository,
-        draft_claim_observation_read_repository=read_repository,
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(repository),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            read_repository
+        ),
         work_item_scheduling_repository=scheduling,
         work_item_completion=FakeWorkItemCompletion(),
     )
@@ -576,9 +638,11 @@ async def test_schedules_next_work_item_for_reduced_rewrite_decision() -> None:
         apply_result_use_case=apply_use_case,
     ).execute(
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=repository,
-        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(repository),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
         work_item_scheduling_repository=scheduling,
         work_item_completion=FakeWorkItemCompletion(),
     )
@@ -600,13 +664,11 @@ async def test_schedules_next_work_item_for_reduced_rewrite_decision() -> None:
     ]
     prepare_payload = workflow_uow.command_log.pending_commands[0].payload
     assert prepare_payload["scheduled_work_item_count"] == 1
-    assert prepare_payload["llm_dispatch_preparation"]["requested_items"] == 1
+    dispatch_preparation = _mapping_value(prepare_payload["llm_dispatch_preparation"])
+    assert dispatch_preparation["requested_items"] == 1
+    assert dispatch_preparation["active_model_ref"] == "openai/gpt-oss-120b"
     assert (
-        prepare_payload["llm_dispatch_preparation"]["active_model_ref"]
-        == "openai/gpt-oss-120b"
-    )
-    assert (
-        prepare_payload["llm_dispatch_preparation"]["worker_ref"]
+        dispatch_preparation["worker_ref"]
         == "knowledge-workbench-draft-claim-compaction-dispatch"
     )
 
@@ -633,9 +695,11 @@ async def test_waiting_user_model_choice_appends_event_without_scheduling() -> N
         apply_result_use_case=apply_use_case,
     ).execute(
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=repository,
-        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(repository),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
         work_item_scheduling_repository=scheduling,
         work_item_completion=FakeWorkItemCompletion(),
     )
@@ -661,11 +725,15 @@ async def test_rejects_wrong_command_type() -> None:
                     command_type=KnowledgeExtractionCanonicalCommandType.CLUSTER_DRAFT_CLAIMS
                 )
             ),
-            workflow_unit_of_work=FakeWorkflowUnitOfWork(),
-            compaction_reduction_state_repository=FakeReductionStateRepository(
-                _decision(DraftClaimCompactionNextWorkItemType.DONE)
+            workflow_unit_of_work=_workflow_unit_of_work(FakeWorkflowUnitOfWork()),
+            compaction_reduction_state_repository=_reduction_state_repository(
+                FakeReductionStateRepository(
+                    _decision(DraftClaimCompactionNextWorkItemType.DONE)
+                )
             ),
-            draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+            draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+                FakeDraftClaimObservationReadRepository()
+            ),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
             work_item_completion=FakeWorkItemCompletion(),
         )
@@ -678,11 +746,15 @@ async def test_rejects_non_pending_command() -> None:
             HandleApplyDraftClaimCompactionResultCommand(
                 workflow_command=_command(status=WorkflowCommandStatus.COMPLETED)
             ),
-            workflow_unit_of_work=FakeWorkflowUnitOfWork(),
-            compaction_reduction_state_repository=FakeReductionStateRepository(
-                _decision(DraftClaimCompactionNextWorkItemType.DONE)
+            workflow_unit_of_work=_workflow_unit_of_work(FakeWorkflowUnitOfWork()),
+            compaction_reduction_state_repository=_reduction_state_repository(
+                FakeReductionStateRepository(
+                    _decision(DraftClaimCompactionNextWorkItemType.DONE)
+                )
             ),
-            draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+            draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+                FakeDraftClaimObservationReadRepository()
+            ),
             work_item_scheduling_repository=FakeWorkItemSchedulingRepository(),
             work_item_completion=FakeWorkItemCompletion(),
         )
@@ -739,6 +811,115 @@ def _apply_persistence() -> DraftClaimCompactionApplyPersistenceResult:
 
 
 @pytest.mark.asyncio
+async def test_persists_capacity_projection_after_next_compacted_work_item() -> None:
+    command = HandleApplyDraftClaimCompactionResultCommand(
+        workflow_command=_command(),
+    )
+    decision = _decision(
+        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+        node_refs=("compacted-a", "compacted-b"),
+    )
+    scheduling = FakeWorkItemSchedulingRepository()
+    projection_writer = FakeCapacityAdmissionProjectionWriter()
+    handler = HandleApplyDraftClaimCompactionResultCommandHandler(
+        apply_result_use_case=FakeApplyResultUseCase(decision),
+        capacity_admission_projection_writer=projection_writer,
+        capacity_admission_lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            account_ref="groq-account-1",
+            model_ref="llama-3.3-70b-versatile",
+        ),
+    )
+
+    result = await handler.execute(
+        command,
+        compaction_reduction_state_repository=_reduction_state_repository(
+            FakeReductionStateRepository(decision)
+        ),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
+        work_item_scheduling_repository=scheduling,
+        workflow_unit_of_work=_workflow_unit_of_work(FakeWorkflowUnitOfWork()),
+        work_item_completion=FakeWorkItemCompletion(),
+    )
+
+    assert result.scheduled_work_item_count == 1
+    assert result.capacity_admission_projection_persisted_count == 1
+    assert len(projection_writer.persisted_batches) == 1
+    candidates = projection_writer.persisted_batches[0]
+    assert len(candidates) == 1
+    assert candidates[0].work_item_id == scheduling.saved_items[0].work_item_id
+    assert candidates[0].provider == "groq"
+    assert candidates[0].account_ref == "groq-account-1"
+    assert candidates[0].model_ref == "llama-3.3-70b-versatile"
+    assert candidates[0].reserved_total_tokens > 0
+
+    payload = scheduling.saved_payloads[0]
+    assert "llm_capacity_estimate" in payload
+    assert "provider" not in payload
+    assert "account_ref" not in payload
+    assert "model_ref" not in payload
+
+
+@pytest.mark.asyncio
+async def test_capacity_projection_not_persisted_when_apply_has_no_next_work() -> None:
+    command = HandleApplyDraftClaimCompactionResultCommand(
+        workflow_command=_command(),
+    )
+    decision = _decision(DraftClaimCompactionNextWorkItemType.DONE)
+    scheduling = FakeWorkItemSchedulingRepository()
+    projection_writer = FakeCapacityAdmissionProjectionWriter()
+    handler = HandleApplyDraftClaimCompactionResultCommandHandler(
+        apply_result_use_case=FakeApplyResultUseCase(decision),
+        capacity_admission_projection_writer=projection_writer,
+        capacity_admission_lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            model_ref="llama-3.3-70b-versatile",
+        ),
+    )
+
+    result = await handler.execute(
+        command,
+        compaction_reduction_state_repository=_reduction_state_repository(
+            FakeReductionStateRepository(decision)
+        ),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
+        work_item_scheduling_repository=scheduling,
+        workflow_unit_of_work=_workflow_unit_of_work(FakeWorkflowUnitOfWork()),
+        work_item_completion=FakeWorkItemCompletion(),
+    )
+
+    assert result.scheduled_work_item_count == 0
+    assert result.capacity_admission_projection_persisted_count == 0
+    assert projection_writer.persisted_batches == []
+
+
+def test_capacity_projection_dependencies_must_be_configured_together() -> None:
+    projection_writer = FakeCapacityAdmissionProjectionWriter()
+
+    with pytest.raises(ValueError, match="writer and lane target"):
+        HandleApplyDraftClaimCompactionResultCommandHandler(
+            apply_result_use_case=FakeApplyResultUseCase(
+                _decision(DraftClaimCompactionNextWorkItemType.DONE)
+            ),
+            capacity_admission_projection_writer=projection_writer,
+        )
+
+    with pytest.raises(ValueError, match="writer and lane target"):
+        HandleApplyDraftClaimCompactionResultCommandHandler(
+            apply_result_use_case=FakeApplyResultUseCase(
+                _decision(DraftClaimCompactionNextWorkItemType.DONE)
+            ),
+            capacity_admission_lane_target=CapacityAdmissionLaneTarget(
+                provider="groq",
+                model_ref="llama-3.3-70b-versatile",
+            ),
+        )
+
+
 async def test_schedules_prepare_command_after_next_compacted_work_item() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     scheduling = FakeWorkItemSchedulingRepository()
@@ -759,9 +940,11 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         apply_result_use_case=apply_use_case,
     ).execute(
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=repository,
-        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(repository),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
         work_item_scheduling_repository=scheduling,
         work_item_completion=FakeWorkItemCompletion(),
     )
@@ -789,7 +972,7 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     assert payload["workflow_run_id"] == _workflow_run_id()
     assert payload["work_kind"] == "knowledge_workbench.draft_claim_compaction"
     assert payload["scheduled_work_item_count"] == 1
-    dispatch_payload = payload["llm_dispatch_preparation"]
+    dispatch_payload = _mapping_value(payload["llm_dispatch_preparation"])
     assert dispatch_payload["requested_items"] == 1
     assert dispatch_payload["active_model_ref"] == "openai/gpt-oss-120b"
     assert (
@@ -797,11 +980,12 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         == "knowledge-workbench-draft-claim-compaction-dispatch"
     )
     assert dispatch_payload["account_capacities"] == ()
-    assert dispatch_payload["profile"]["estimated_input_tokens"] == 1
-    assert dispatch_payload["profile"]["estimated_output_tokens"] == 4000
-    assert dispatch_payload["profile"]["estimated_prompt_tokens"] == 1
-    assert dispatch_payload["profile"]["estimated_completion_tokens"] == 4000
-    assert dispatch_payload["profile"]["estimated_requests"] == 1
+    dispatch_profile = _mapping_value(dispatch_payload["profile"])
+    assert dispatch_profile["estimated_input_tokens"] == 1
+    assert dispatch_profile["estimated_output_tokens"] == 4000
+    assert dispatch_profile["estimated_prompt_tokens"] == 1
+    assert dispatch_profile["estimated_completion_tokens"] == 4000
+    assert dispatch_profile["estimated_requests"] == 1
     scheduled_payload = scheduling.saved_payloads[0]
     assert isinstance(scheduled_payload, dict)
     assert scheduled_payload["compacted_node_refs"] == [
@@ -850,9 +1034,11 @@ async def test_appends_prepare_command_when_next_work_item_already_exists() -> N
         apply_result_use_case=apply_use_case,
     ).execute(
         HandleApplyDraftClaimCompactionResultCommand(workflow_command=_command()),
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=repository,
-        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(repository),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
         work_item_scheduling_repository=scheduling,
         work_item_completion=FakeWorkItemCompletion(),
     )
@@ -942,17 +1128,21 @@ async def test_repeated_apply_dispatch_does_not_duplicate_next_prepare_command()
 
     first = await handler.execute(
         command,
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=repository,
-        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(repository),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
         work_item_scheduling_repository=scheduling,
         work_item_completion=FakeWorkItemCompletion(),
     )
     second = await handler.execute(
         command,
-        workflow_unit_of_work=workflow_uow,
-        compaction_reduction_state_repository=repository,
-        draft_claim_observation_read_repository=FakeDraftClaimObservationReadRepository(),
+        workflow_unit_of_work=_workflow_unit_of_work(workflow_uow),
+        compaction_reduction_state_repository=_reduction_state_repository(repository),
+        draft_claim_observation_read_repository=_draft_claim_observation_read_repository(
+            FakeDraftClaimObservationReadRepository()
+        ),
         work_item_scheduling_repository=scheduling,
         work_item_completion=FakeWorkItemCompletion(),
     )
