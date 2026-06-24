@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import os
 from typing import Protocol, cast
 
 import asyncpg
 
+from src.contexts.capacity_admission_queue.application.sync_capacity_admission_projection_lifecycle import (
+    CapacityAdmissionProjectionLifecycleUpdate,
+    SyncCapacityAdmissionProjectionLifecycle,
+)
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_projection_lifecycle_synchronizer import (
+    PostgresCapacityAdmissionProjectionLifecycleSynchronizer,
+)
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
@@ -20,7 +28,11 @@ from src.contexts.execution_runtime.application.ports.work_item_progress_read_re
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
     RecordWorkItemAttemptOutcome,
 )
+from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_dispatch_read_repository import (
     PostgresReadWorkItemAttemptDispatchRepository,
 )
@@ -564,6 +576,11 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
                     actual_tokens=actual_tokens,
                     finalized_at=result.llm_result.finished_at,
                 )
+                await _sync_capacity_admission_projection_lifecycle(
+                    asyncpg_connection,
+                    work_item=result.outcome_result.work_item,
+                    changed_at=result.llm_result.finished_at,
+                )
                 return result
         finally:
             await self.pool.release(connection)
@@ -577,14 +594,46 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
         connection = await self.pool.acquire()
         try:
             async with connection.transaction():
-                return await PostgresWorkItemAttemptOutcomeRepository(
-                    cast(asyncpg.Connection, connection),
+                asyncpg_connection = cast(asyncpg.Connection, connection)
+                work_item = await PostgresWorkItemAttemptOutcomeRepository(
+                    asyncpg_connection,
                 ).complete_work_item_after_domain_apply(
                     work_item_id=work_item_id,
                     lease_token=lease_token,
                 )
+                await _sync_capacity_admission_projection_lifecycle(
+                    asyncpg_connection,
+                    work_item=work_item,
+                    changed_at=datetime.now(UTC),
+                )
+                return work_item
         finally:
             await self.pool.release(connection)
+
+
+async def _sync_capacity_admission_projection_lifecycle(
+    connection: asyncpg.Connection,
+    *,
+    work_item: WorkItem,
+    changed_at: datetime,
+) -> None:
+    if work_item.status is WorkItemStatus.LEASED:
+        return
+
+    await SyncCapacityAdmissionProjectionLifecycle(
+        projection_lifecycle_synchronizer=(
+            PostgresCapacityAdmissionProjectionLifecycleSynchronizer(connection)
+        )
+    ).execute(
+        CapacityAdmissionProjectionLifecycleUpdate(
+            work_item_id=work_item.work_item_id,
+            status=work_item.status.value,
+            retry_plan=(
+                work_item.retry_plan.value if work_item.retry_plan is not None else None
+            ),
+            changed_at=changed_at,
+        )
+    )
 
 
 def make_knowledge_extraction_workflow_resume(
