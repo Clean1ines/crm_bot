@@ -14,6 +14,7 @@ from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow
     CLAIM_BUILDER_PREPARE_OPERATION_KEY,
     capacity_window_exhausted_event,
     capacity_window_leased_work_item_event,
+    capacity_window_scheduled_wakeup_event,
     source_unit_ref_from_schedule_payload,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
@@ -287,6 +288,32 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
                     if frontend_event_projection_writer is not None:
                         await frontend_event_projection_writer.execute(
                             persisted_exhausted_event,
+                        )
+                    appended_event_count += 1
+
+                    scheduled_wakeup_event = capacity_window_scheduled_wakeup_event(
+                        workflow_run_id=workflow_run_id,
+                        provider=capacity_window_exhaustion.provider,
+                        account_ref=capacity_window_exhaustion.account_ref,
+                        model_ref=capacity_window_exhaustion.model_ref,
+                        run_after=capacity_retry_at,
+                        reset_at=capacity_window_exhaustion.reset_at,
+                        wakeup_command_id=workflow_command.command_id,
+                        prepare_command_type=workflow_command.command_type,
+                        wakeup_reason="prepare_capacity_retry_at",
+                        operation_key=CLAIM_BUILDER_PREPARE_OPERATION_KEY,
+                        canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
+                        occurred_at=occurred_at,
+                        causation_command_id=workflow_command.command_id,
+                    )
+                    persisted_wakeup_event = (
+                        await workflow_unit_of_work.outbox.append_event(
+                            scheduled_wakeup_event,
+                        )
+                    )
+                    if frontend_event_projection_writer is not None:
+                        await frontend_event_projection_writer.execute(
+                            persisted_wakeup_event,
                         )
                     appended_event_count += 1
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
+    CapacityWindowExhaustionSnapshot,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_draft_claim_compaction_dispatch_batch_command import (
     DRAFT_CLAIM_COMPACTION_WORK_KIND,
     HandlePrepareDraftClaimCompactionDispatchBatchCommand,
@@ -141,6 +144,9 @@ class FakeLeaseResult:
 
 def _fake_prepare_result(
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...],
+    *,
+    capacity_retry_at: datetime | None = None,
+    capacity_window_exhaustion: CapacityWindowExhaustionSnapshot | None = None,
 ) -> PrepareLlmDispatchBatchResult:
     result = object.__new__(PrepareLlmDispatchBatchResult)
     object.__setattr__(
@@ -174,28 +180,53 @@ def _fake_prepare_result(
     object.__setattr__(result, "source_split_required", False)
     object.__setattr__(result, "affected_work_item_refs", ())
     object.__setattr__(result, "source_unit_refs", ())
-    object.__setattr__(result, "capacity_retry_at", None)
+    object.__setattr__(result, "capacity_retry_at", capacity_retry_at)
+    object.__setattr__(
+        result,
+        "capacity_window_exhaustion",
+        capacity_window_exhaustion,
+    )
     return result
 
 
 @dataclass(slots=True)
 class FakePrepareLlmDispatchBatch:
     started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
+    capacity_retry_at: datetime | None = None
+    capacity_window_exhaustion: CapacityWindowExhaustionSnapshot | None = None
     calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
 
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
         self.calls.append(command)
-        return _fake_prepare_result(self.started_attempts)
+        return _fake_prepare_result(
+            self.started_attempts,
+            capacity_retry_at=self.capacity_retry_at,
+            capacity_window_exhaustion=self.capacity_window_exhaustion,
+        )
 
 
 @dataclass(slots=True)
 class FakeCommandLog:
     completed: list[WorkflowCommandId] = field(default_factory=list)
     pending_commands: list[WorkflowCommand] = field(default_factory=list)
+    rescheduled_commands: list[tuple[WorkflowCommandId, datetime]] = field(
+        default_factory=list
+    )
 
     async def append_pending_command(self, command: WorkflowCommand) -> WorkflowCommand:
         self.pending_commands.append(command)
         return command
+
+    async def reschedule_pending_command(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        run_after: datetime,
+        rescheduled_at: datetime,
+    ) -> WorkflowCommand:
+        del rescheduled_at
+        self.rescheduled_commands.append((command_id, run_after))
+        return _command()
 
     async def mark_command_completed(
         self,
@@ -443,6 +474,67 @@ async def test_zero_attempts_completes_without_prepared_event_or_timeline() -> N
     assert workflow_uow.timeline.entries == []
     assert workflow_uow.progress_snapshots.snapshot is not None
     assert workflow_uow.command_log.completed == [_command().command_id]
+
+
+@pytest.mark.asyncio
+async def test_capacity_throttled_zero_dispatch_emits_window_events_and_reschedules() -> (
+    None
+):
+    retry_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    exhaustion = CapacityWindowExhaustionSnapshot(
+        provider="groq",
+        account_ref="groq_org_primary",
+        model_ref="openai/gpt-oss-120b",
+        exhausted_reason="prepare_capacity_window_unavailable",
+        exhausted_dimensions=("minute_tokens",),
+        reset_at=retry_at,
+    )
+    prepare = FakePrepareLlmDispatchBatch(
+        started_attempts=(),
+        capacity_retry_at=retry_at,
+        capacity_window_exhaustion=exhaustion,
+    )
+    workflow_uow = FakeWorkflowUnitOfWork()
+
+    result = (
+        await HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler().execute(
+            HandlePrepareDraftClaimCompactionDispatchBatchCommand(
+                workflow_command=_command()
+            ),
+            prepare_llm_dispatch_batch=prepare,
+            workflow_unit_of_work=workflow_uow,
+        )
+    )
+
+    assert result.prepared_dispatch_count == 0
+    assert result.appended_event_count == 2
+    assert result.appended_next_command_count == 0
+    assert workflow_uow.command_log.completed == []
+    assert workflow_uow.command_log.rescheduled_commands == [
+        (_command().command_id, retry_at),
+    ]
+    assert [event.event_type for event in workflow_uow.outbox.events] == [
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED.value,
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_SCHEDULED_WAKEUP.value,
+    ]
+    exhausted_payload = workflow_uow.outbox.events[0].payload
+    assert (
+        exhausted_payload["window_key"] == "groq:groq_org_primary:openai/gpt-oss-120b"
+    )
+    assert exhausted_payload["reset_at"] == retry_at.isoformat()
+    assert exhausted_payload["exhausted_dimensions"] == ["minute_tokens"]
+
+    wakeup_payload = workflow_uow.outbox.events[1].payload
+    assert wakeup_payload["window_key"] == exhausted_payload["window_key"]
+    assert wakeup_payload["run_after"] == retry_at.isoformat()
+    assert wakeup_payload["reset_at"] == retry_at.isoformat()
+    assert wakeup_payload["wakeup_command_id"] == _command().command_id.value
+    assert wakeup_payload["prepare_command_type"] == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert wakeup_payload["wakeup_reason"] == "prepare_capacity_retry_at"
+    assert "next_attempt_at" not in wakeup_payload
+    assert "retry_owner" not in wakeup_payload
 
 
 @pytest.mark.asyncio

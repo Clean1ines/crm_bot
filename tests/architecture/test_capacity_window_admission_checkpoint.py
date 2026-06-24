@@ -54,3 +54,21 @@ def test_cw1a_capacity_window_admission_decision_vocabulary_is_documented() -> N
 
     missing = [marker for marker in required_markers if marker not in text]
     assert not missing, "\n".join(missing)
+
+
+def test_cw2a_prepare_capacity_retry_emits_scheduled_wakeup_events() -> None:
+    claim_builder = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "handle_prepare_claim_builder_dispatch_batch_command.py"
+    ).read_text(encoding="utf-8")
+    compaction = Path(
+        "src/contexts/knowledge_workbench/application/sagas/"
+        "handle_prepare_draft_claim_compaction_dispatch_batch_command.py"
+    ).read_text(encoding="utf-8")
+
+    for source in (claim_builder, compaction):
+        assert "capacity_window_scheduled_wakeup_event" in source
+        assert 'wakeup_reason="prepare_capacity_retry_at"' in source
+        assert "prepare_command_type=workflow_command.command_type" in source
+        assert "wakeup_command_id=workflow_command.command_id" in source
+        assert "reschedule_pending_command" in source

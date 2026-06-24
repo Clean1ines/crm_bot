@@ -10,7 +10,9 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
     DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
     DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
+    capacity_window_exhausted_event,
     capacity_window_leased_work_item_event,
+    capacity_window_scheduled_wakeup_event,
     compaction_context_from_schedule_payload,
 )
 from src.interfaces.composition.lease_llm_admitted_work_items import (
@@ -152,6 +154,43 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
                 typed_prepare_result.capacity_retry_at,
                 occurred_at=occurred_at,
             )
+            capacity_window_exhaustion = typed_prepare_result.capacity_window_exhaustion
+            if capacity_window_exhaustion is not None:
+                exhausted_event = capacity_window_exhausted_event(
+                    workflow_run_id=workflow_run_id,
+                    exhaustion=capacity_window_exhaustion,
+                    operation_key=DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
+                    canonical_phase=DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
+                    occurred_at=occurred_at,
+                    causation_command_id=workflow_command.command_id,
+                    correlation_id=(
+                        f"{capacity_window_exhaustion.provider}:"
+                        f"{capacity_window_exhaustion.account_ref}:"
+                        f"{capacity_window_exhaustion.model_ref}:"
+                        f"{capacity_retry_at.isoformat()}"
+                    ),
+                )
+                await workflow_unit_of_work.outbox.append_event(exhausted_event)
+                appended_event_count += 1
+
+                scheduled_wakeup_event = capacity_window_scheduled_wakeup_event(
+                    workflow_run_id=workflow_run_id,
+                    provider=capacity_window_exhaustion.provider,
+                    account_ref=capacity_window_exhaustion.account_ref,
+                    model_ref=capacity_window_exhaustion.model_ref,
+                    run_after=capacity_retry_at,
+                    reset_at=capacity_window_exhaustion.reset_at,
+                    wakeup_command_id=workflow_command.command_id,
+                    prepare_command_type=workflow_command.command_type,
+                    wakeup_reason="prepare_capacity_retry_at",
+                    operation_key=DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
+                    canonical_phase=DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
+                    occurred_at=occurred_at,
+                    causation_command_id=workflow_command.command_id,
+                )
+                await workflow_unit_of_work.outbox.append_event(scheduled_wakeup_event)
+                appended_event_count += 1
+
             await workflow_unit_of_work.timeline.append_entry(
                 _capacity_throttled_timeline_entry(
                     workflow_command=workflow_command,

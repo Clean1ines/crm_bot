@@ -729,7 +729,7 @@ async def test_reschedules_prepare_when_zero_attempts_are_capacity_throttled() -
     )
 
     assert result.prepared_dispatch_count == 0
-    assert result.appended_event_count == 1
+    assert result.appended_event_count == 2
     assert result.appended_next_command_count == 0
     assert workflow_unit_of_work.command_log.failed_command_ids == []
     assert workflow_unit_of_work.command_log.completed_command_ids == []
@@ -739,6 +739,22 @@ async def test_reschedules_prepare_when_zero_attempts_are_capacity_throttled() -
     assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
         "Claim builder dispatch capacity temporarily unavailable",
     )
+    event_types = [event.event_type for event in workflow_unit_of_work.outbox.events]
+    assert event_types == [
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED.value,
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_SCHEDULED_WAKEUP.value,
+    ]
+    wakeup_payload = workflow_unit_of_work.outbox.events[1].payload
+    assert wakeup_payload["window_key"] == "groq:groq_org_primary:qwen/qwen3-32b"
+    assert wakeup_payload["run_after"] == retry_at.isoformat()
+    assert wakeup_payload["reset_at"] == retry_at.isoformat()
+    assert wakeup_payload["wakeup_command_id"] == _workflow_command().command_id.value
+    assert wakeup_payload["prepare_command_type"] == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+    )
+    assert wakeup_payload["wakeup_reason"] == "prepare_capacity_retry_at"
+    assert "next_attempt_at" not in wakeup_payload
+    assert "retry_owner" not in wakeup_payload
 
 
 @pytest.mark.asyncio
@@ -1217,7 +1233,14 @@ async def test_capacity_throttled_zero_dispatch_emits_capacity_window_exhausted(
         if event.event_type
         == KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED.value
     ]
+    wakeup_events = [
+        event
+        for event in workflow_unit_of_work.outbox.events
+        if event.event_type
+        == KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_SCHEDULED_WAKEUP.value
+    ]
     assert len(exhausted_events) == 1
+    assert len(wakeup_events) == 1
     payload = exhausted_events[0].payload
     assert payload["reset_at"] == retry_at.isoformat()
     assert payload["exhausted_dimensions"] == ["minute_tokens"]
