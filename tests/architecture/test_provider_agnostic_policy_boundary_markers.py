@@ -67,10 +67,10 @@ KNOWN_GROQ_FREE_FACT_VIOLATION_PATHS = {
     "src/application/ai_playground/contracts.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_apply_draft_claim_compaction_result_command.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_cluster_draft_claims_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_prepare_claim_builder_dispatch_batch_command.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_prepare_draft_claim_compaction_dispatch_batch_command.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_reconcile_draft_claim_compaction_progress_command.py",
-    "src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py",
     "src/contexts/knowledge_workbench/application/sagas/repair_knowledge_extraction_command_payload.py",
     "src/contexts/knowledge_workbench/extraction/application/models/draft_claim_compaction_reduction_models.py",
     "src/contexts/knowledge_workbench/extraction/application/policies/draft_claim_compaction_batch_budget_policy.py",
@@ -350,7 +350,10 @@ def test_b1a_compatibility_map_and_followup_split_are_documented() -> None:
         "executor consumes prepared request budget",
         "B1c:",
         "migrate claim-builder schedule payload from reserved_output_tokens to estimated_output_tokens",
-        "keep compatibility read for old payloads if needed",
+        "claim-builder schedule payload writes estimated_output_tokens as the expected answer estimate",
+        "prepare/admission reads claim-builder estimated_output_tokens as minimum_output_tokens",
+        "fail clearly when claim-builder schedule payload misses estimated_output_tokens",
+        "do not treat legacy reserved_output_tokens as the claim-builder expected output estimate",
         "B1d:",
         "introduce single RoughTokenEstimator(multiplier)",
         "claim_builder multiplier target 3.7",
@@ -360,6 +363,27 @@ def test_b1a_compatibility_map_and_followup_split_are_documented() -> None:
 
     missing = [marker for marker in required_markers if marker not in normalized_source]
     assert not missing, "\n".join(missing)
+
+
+def test_b1c_claim_builder_schedule_payload_uses_estimated_output_tokens() -> None:
+    producer = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "map_claim_builder_section_plans_to_execution_schedule.py",
+    )
+    preparation = _read(
+        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "claim_builder_dispatch_preparation.py",
+    )
+    prepare_batch = _read(
+        REPO_ROOT / "src/interfaces/composition/prepare_llm_dispatch_batch.py",
+    )
+
+    assert '"estimated_output_tokens": estimated_output_tokens' in producer
+    assert '"reserved_output_tokens": reserved_output_tokens' not in producer
+    assert "estimate.estimated_output_tokens" in preparation
+    assert "estimate.reserved_output_tokens" not in preparation
+    assert "_estimated_output_tokens_from_due_record" in prepare_batch
+    assert 'estimate_payload.get("estimated_output_tokens")' in prepare_batch
 
 
 def test_b1a_does_not_pretend_runtime_token_vocabulary_is_migrated() -> None:

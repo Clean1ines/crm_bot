@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
     DueWorkItemRecord,
 )
@@ -42,14 +44,14 @@ def _account(*, remaining_tokens: int) -> _MutableInputCapacity:
 def _schedule_payload(
     *,
     estimated_input_tokens: int,
-    reserved_output_tokens: int,
+    estimated_output_tokens: int,
 ) -> dict[str, object]:
     return {
         "provider_messages": [{"role": "user", "content": "Extract claims"}],
         "llm_capacity_estimate": {
             "estimated_input_tokens": estimated_input_tokens,
-            "reserved_output_tokens": reserved_output_tokens,
-            "estimated_total_tokens": estimated_input_tokens + reserved_output_tokens,
+            "estimated_output_tokens": estimated_output_tokens,
+            "estimated_total_tokens": estimated_input_tokens + estimated_output_tokens,
         },
     }
 
@@ -59,7 +61,7 @@ def _record(
     *,
     status: WorkItemStatus = WorkItemStatus.READY,
     estimated_input_tokens: int,
-    reserved_output_tokens: int = 1000,
+    estimated_output_tokens: int = 1000,
 ) -> DueWorkItemRecord:
     return DueWorkItemRecord(
         work_item=WorkItem(
@@ -69,7 +71,7 @@ def _record(
         ),
         schedule_payload=_schedule_payload(
             estimated_input_tokens=estimated_input_tokens,
-            reserved_output_tokens=reserved_output_tokens,
+            estimated_output_tokens=estimated_output_tokens,
         ),
     )
 
@@ -80,7 +82,7 @@ def test_admission_rejects_window_below_provider_default_output_cap() -> None:
             _record(
                 "work-1",
                 estimated_input_tokens=5000,
-                reserved_output_tokens=1000,
+                estimated_output_tokens=1000,
             ),
         ),
         mutable_accounts=[_account(remaining_tokens=7047)],
@@ -98,7 +100,7 @@ def test_admission_accepts_window_covering_provider_default_output_cap() -> None
             _record(
                 "work-1",
                 estimated_input_tokens=5000,
-                reserved_output_tokens=1000,
+                estimated_output_tokens=1000,
             ),
         ),
         mutable_accounts=[_account(remaining_tokens=7048)],
@@ -119,7 +121,7 @@ def test_admission_records_explicit_cap_when_safety_gap_fits() -> None:
             _record(
                 "work-1",
                 estimated_input_tokens=5000,
-                reserved_output_tokens=1000,
+                estimated_output_tokens=1000,
             ),
         ),
         mutable_accounts=[_account(remaining_tokens=7348)],
@@ -141,13 +143,13 @@ def test_retryable_no_fit_falls_through_to_ready_fit() -> None:
                 "retryable-high-input",
                 status=WorkItemStatus.RETRYABLE_FAILED,
                 estimated_input_tokens=6000,
-                reserved_output_tokens=1000,
+                estimated_output_tokens=1000,
             ),
             _record(
                 "ready-fitting-input",
                 status=WorkItemStatus.READY,
                 estimated_input_tokens=5000,
-                reserved_output_tokens=1000,
+                estimated_output_tokens=1000,
             ),
         ),
         mutable_accounts=[_account(remaining_tokens=7048)],
@@ -160,11 +162,42 @@ def test_retryable_no_fit_falls_through_to_ready_fit() -> None:
     assert candidates[0].record.work_item.work_item_id == "ready-fitting-input"
 
 
+def test_admission_requires_estimated_output_tokens_not_legacy_reserved_output_tokens() -> (
+    None
+):
+    legacy_schedule_payload = {
+        "provider_messages": [{"role": "user", "content": "Extract claims"}],
+        "llm_capacity_estimate": {
+            "estimated_input_tokens": 5000,
+            "reserved_output_tokens": 1000,
+            "estimated_total_tokens": 6000,
+        },
+    }
+
+    with pytest.raises(TypeError, match="estimated_output_tokens"):
+        _input_admitted_candidates(
+            due_records=(
+                DueWorkItemRecord(
+                    work_item=WorkItem(
+                        work_item_id="legacy-work",
+                        work_kind=WorkKind("knowledge.claim_builder"),
+                        status=WorkItemStatus.READY,
+                    ),
+                    schedule_payload=legacy_schedule_payload,
+                ),
+            ),
+            mutable_accounts=[_account(remaining_tokens=7048)],
+            requested_items=1,
+            hard_output_limit_tokens=8192,
+            request_output_cap_policy=_policy(),
+        )
+
+
 def test_admitted_schedule_payload_carries_request_budget_fields() -> None:
     updated = _admitted_schedule_payload(
         schedule_payload=_schedule_payload(
             estimated_input_tokens=5000,
-            reserved_output_tokens=1000,
+            estimated_output_tokens=1000,
         ),
         effective_output_cap_tokens=2048,
         request_output_cap_tokens=2048,
@@ -173,6 +206,7 @@ def test_admitted_schedule_payload_carries_request_budget_fields() -> None:
 
     estimate = updated["llm_capacity_estimate"]
     assert isinstance(estimate, dict)
+    assert estimate["estimated_output_tokens"] == 1000
     assert estimate["reserved_output_tokens"] == 2048
     assert estimate["effective_output_cap_tokens"] == 2048
     assert estimate["request_output_cap_tokens"] == 2048

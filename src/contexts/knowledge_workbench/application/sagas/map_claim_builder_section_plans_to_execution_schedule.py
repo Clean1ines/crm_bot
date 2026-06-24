@@ -130,7 +130,7 @@ def _claim_builder_token_estimate(
     prompt_token_count = _claim_builder_prompt_tokens_from_env()
     source_unit_token_count = max(1, estimate_tokens_roughly(plan.source_unit_text))
     estimated_input_tokens = prompt_token_count + source_unit_token_count
-    reserved_output_tokens = source_unit_token_count
+    estimated_output_tokens = source_unit_token_count
 
     return {
         "estimator": (
@@ -140,8 +140,8 @@ def _claim_builder_token_estimate(
         "prompt_message_tokens": (prompt_token_count,),
         "source_unit_token_count": source_unit_token_count,
         "estimated_input_tokens": estimated_input_tokens,
-        "reserved_output_tokens": reserved_output_tokens,
-        "estimated_total_tokens": estimated_input_tokens + reserved_output_tokens,
+        "estimated_output_tokens": estimated_output_tokens,
+        "estimated_total_tokens": estimated_input_tokens + estimated_output_tokens,
     }
 
 

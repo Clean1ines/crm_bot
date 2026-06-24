@@ -928,7 +928,7 @@ def _pop_first_record_that_fits(
 ) -> _InputAdmittedCandidate | None:
     for index, record in enumerate(records):
         estimated_input_tokens = _estimated_input_tokens_from_due_record(record)
-        minimum_output_tokens = _reserved_output_tokens_from_due_record(record)
+        minimum_output_tokens = _estimated_output_tokens_from_due_record(record)
         decision = account.request_output_cap_decision(
             estimated_input_tokens=estimated_input_tokens,
             minimum_output_tokens=minimum_output_tokens,
@@ -970,16 +970,16 @@ def _estimated_input_tokens_from_due_record(record: DueWorkItemRecord) -> int:
     return value
 
 
-def _reserved_output_tokens_from_due_record(record: DueWorkItemRecord) -> int:
+def _estimated_output_tokens_from_due_record(record: DueWorkItemRecord) -> int:
     estimate_payload = record.schedule_payload.get("llm_capacity_estimate")
     if not isinstance(estimate_payload, Mapping):
         raise ValueError("schedule_payload.llm_capacity_estimate is required")
 
-    value = estimate_payload.get("reserved_output_tokens")
+    value = estimate_payload.get("estimated_output_tokens")
     if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError("llm_capacity_estimate.reserved_output_tokens must be int")
+        raise TypeError("llm_capacity_estimate.estimated_output_tokens must be int")
     if value < 0:
-        raise ValueError("llm_capacity_estimate.reserved_output_tokens must be >= 0")
+        raise ValueError("llm_capacity_estimate.estimated_output_tokens must be >= 0")
     return value
 
 

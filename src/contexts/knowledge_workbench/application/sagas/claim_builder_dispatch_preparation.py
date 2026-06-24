@@ -113,7 +113,7 @@ class ClaimBuilderDispatchPreparationBuilder:
                 estimate.estimated_input_tokens for estimate in estimates
             ),
             estimated_completion_tokens=max(
-                estimate.reserved_output_tokens for estimate in estimates
+                estimate.estimated_output_tokens for estimate in estimates
             ),
             estimated_requests=1,
         )
@@ -187,7 +187,7 @@ class ClaimBuilderDispatchPreparationBuilder:
 @dataclass(frozen=True, slots=True)
 class _CapacityEstimate:
     estimated_input_tokens: int
-    reserved_output_tokens: int
+    estimated_output_tokens: int
 
 
 def _capacity_estimate_from_schedule_payload(
@@ -202,9 +202,9 @@ def _capacity_estimate_from_schedule_payload(
             estimate_payload,
             "estimated_input_tokens",
         ),
-        reserved_output_tokens=_mapping_non_negative_int(
+        estimated_output_tokens=_mapping_non_negative_int(
             estimate_payload,
-            "reserved_output_tokens",
+            "estimated_output_tokens",
         ),
     )
 

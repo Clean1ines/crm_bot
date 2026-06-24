@@ -1,7 +1,7 @@
 
 # Provider-agnostic capacity and budget policy model
 
-Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary.
+Status: B0 boundary contract + B1a compatibility map + B1b effective output cap boundary + B1c claim-builder estimate vocabulary boundary.
 
 This document freezes the boundary model before behavioral refactors. It does not migrate runtime code, token names, segmentation, compaction, capacity storage, or provider execution.
 
@@ -310,8 +310,10 @@ B1b:
 B1c:
 
 * migrate claim-builder schedule payload from `reserved_output_tokens` to `estimated_output_tokens`
-* keep compatibility read for old payloads if needed
-* stop using `reserved_output_tokens` as the claim-builder expected output estimate
+* claim-builder schedule payload writes `estimated_output_tokens` as the expected answer estimate
+* prepare/admission reads claim-builder `estimated_output_tokens` as `minimum_output_tokens`
+* fail clearly when claim-builder schedule payload misses `estimated_output_tokens`
+* do not treat legacy `reserved_output_tokens` as the claim-builder expected output estimate
 
 B1d:
 

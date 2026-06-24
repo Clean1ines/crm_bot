@@ -184,8 +184,9 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
     assert capacity_estimate["estimated_input_tokens"] == (
         1953 + capacity_estimate["source_unit_token_count"]
     )
+    assert "reserved_output_tokens" not in capacity_estimate
     assert (
-        capacity_estimate["reserved_output_tokens"]
+        capacity_estimate["estimated_output_tokens"]
         == capacity_estimate["source_unit_token_count"]
     )
     assert capacity_estimate["estimated_total_tokens"] == (
@@ -211,6 +212,10 @@ def test_prompt_token_count_can_be_overridden_from_env(
     assert capacity_estimate["prompt_message_tokens"] == (4200,)
     assert capacity_estimate["estimated_input_tokens"] == (
         4200 + capacity_estimate["source_unit_token_count"]
+    )
+    assert (
+        capacity_estimate["estimated_output_tokens"]
+        == capacity_estimate["source_unit_token_count"]
     )
     assert capacity_estimate["estimated_total_tokens"] == (
         4200 + capacity_estimate["source_unit_token_count"] * 2
