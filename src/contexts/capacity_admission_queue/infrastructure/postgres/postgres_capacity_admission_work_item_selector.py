@@ -73,6 +73,9 @@ class PostgresCapacityAdmissionWorkItemSelector:
                 account_ref,
                 model_ref,
                 status,
+                estimated_input_tokens,
+                estimated_output_tokens,
+                effective_output_cap_tokens,
                 reserved_total_tokens
             FROM capacity_admission_work_items
             WHERE work_kind = $1
@@ -121,6 +124,18 @@ def _row_to_selectable_work_item(
                 row,
                 "reserved_total_tokens",
             ),
+            estimated_input_tokens=_optional_positive_int(
+                row,
+                "estimated_input_tokens",
+            ),
+            estimated_output_tokens=_optional_non_negative_int(
+                row,
+                "estimated_output_tokens",
+            ),
+            effective_output_cap_tokens=_optional_non_negative_int(
+                row,
+                "effective_output_cap_tokens",
+            ),
         )
 
     return CapacityAdmissionSelectableWorkItem(
@@ -130,6 +145,18 @@ def _row_to_selectable_work_item(
         reserved_total_tokens=_required_positive_int(
             row,
             "reserved_total_tokens",
+        ),
+        estimated_input_tokens=_optional_positive_int(
+            row,
+            "estimated_input_tokens",
+        ),
+        estimated_output_tokens=_optional_non_negative_int(
+            row,
+            "estimated_output_tokens",
+        ),
+        effective_output_cap_tokens=_optional_non_negative_int(
+            row,
+            "effective_output_cap_tokens",
         ),
     )
 
@@ -154,4 +181,22 @@ def _required_positive_int(row: Mapping[str, object], key: str) -> int:
     value = row.get(key)
     if not isinstance(value, int) or value <= 0:
         raise ValueError(f"{key} must be a positive integer")
+    return value
+
+
+def _optional_positive_int(row: Mapping[str, object], key: str) -> int | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{key} must be null or a positive integer")
+    return value
+
+
+def _optional_non_negative_int(row: Mapping[str, object], key: str) -> int | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int) or value < 0:
+        raise ValueError(f"{key} must be null or a non-negative integer")
     return value

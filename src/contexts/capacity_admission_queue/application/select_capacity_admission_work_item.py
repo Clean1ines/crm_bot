@@ -58,10 +58,25 @@ class CapacityAdmissionSelectableWorkItem:
     lane_key: CapacityAdmissionLaneKey
     status: CapacityAdmissionProjectionStatus
     reserved_total_tokens: int
+    estimated_input_tokens: int | None = None
+    estimated_output_tokens: int | None = None
+    effective_output_cap_tokens: int | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.work_item_id, "work_item_id")
         _require_positive(self.reserved_total_tokens, "reserved_total_tokens")
+        if self.estimated_input_tokens is not None:
+            _require_positive(self.estimated_input_tokens, "estimated_input_tokens")
+        if self.estimated_output_tokens is not None:
+            _require_non_negative(
+                self.estimated_output_tokens,
+                "estimated_output_tokens",
+            )
+        if self.effective_output_cap_tokens is not None:
+            _require_non_negative(
+                self.effective_output_cap_tokens,
+                "effective_output_cap_tokens",
+            )
 
 
 @dataclass(frozen=True, slots=True)
