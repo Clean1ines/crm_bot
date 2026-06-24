@@ -8,12 +8,21 @@ from typing import Protocol, cast
 
 import asyncpg
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+)
 from src.contexts.capacity_admission_queue.application.sync_capacity_admission_projection_lifecycle import (
     CapacityAdmissionProjectionLifecycleUpdate,
     SyncCapacityAdmissionProjectionLifecycle,
 )
 from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_projection_lifecycle_synchronizer import (
     PostgresCapacityAdmissionProjectionLifecycleSynchronizer,
+)
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_projection_writer import (
+    PostgresCapacityAdmissionProjectionWriter,
 )
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
@@ -276,6 +285,10 @@ class RunKnowledgeExtractionWorkflowResume:
         draft_claim_compaction_output_validator: (
             DraftClaimCompactionOutputValidator | None
         ) = None,
+        capacity_admission_projection_writer: (
+            CapacityAdmissionProjectionWriterPort | None
+        ) = None,
+        capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
     ) -> None:
         self._pool = cast(_AsyncResumePoolLike, pool)
         self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
@@ -302,10 +315,21 @@ class RunKnowledgeExtractionWorkflowResume:
         self._draft_claim_compaction_reduction_state_repository = (
             draft_claim_compaction_reduction_state_repository
         )
+        if (
+            capacity_admission_projection_writer is not None
+            and capacity_admission_lane_target is None
+        ):
+            raise ValueError(
+                "capacity admission projection writer requires lane target"
+            )
         self._draft_claim_compaction_output_validator = (
             draft_claim_compaction_output_validator
             or DraftClaimCompactionOutputValidator()
         )
+        self._capacity_admission_projection_writer = (
+            capacity_admission_projection_writer
+        )
+        self._capacity_admission_lane_target = capacity_admission_lane_target
 
     async def execute(
         self,
@@ -441,6 +465,13 @@ class RunKnowledgeExtractionWorkflowResume:
                 cast(asyncpg.Connection, connection),
             ),
         )
+        capacity_admission_projection_writer = (
+            _capacity_admission_projection_writer_for_transaction(
+                connection=cast(asyncpg.Connection, connection),
+                configured_writer=self._capacity_admission_projection_writer,
+                lane_target=self._capacity_admission_lane_target,
+            )
+        )
 
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
@@ -464,6 +495,10 @@ class RunKnowledgeExtractionWorkflowResume:
                         cast(asyncpg.Connection, connection),
                     )
                 ),
+                capacity_admission_projection_writer=(
+                    capacity_admission_projection_writer
+                ),
+                capacity_admission_lane_target=self._capacity_admission_lane_target,
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
                 execute_prepared_llm_dispatch_attempt=(
@@ -641,6 +676,19 @@ async def _sync_capacity_admission_projection_lifecycle(
     )
 
 
+def _capacity_admission_projection_writer_for_transaction(
+    *,
+    connection: asyncpg.Connection,
+    configured_writer: CapacityAdmissionProjectionWriterPort | None,
+    lane_target: CapacityAdmissionLaneTarget | None,
+) -> CapacityAdmissionProjectionWriterPort | None:
+    if lane_target is None:
+        return None
+    if configured_writer is not None:
+        return configured_writer
+    return PostgresCapacityAdmissionProjectionWriter(connection)
+
+
 def make_knowledge_extraction_workflow_resume(
     *,
     pool: AsyncPool,
@@ -678,6 +726,11 @@ def make_knowledge_extraction_workflow_resume(
 
     return RunKnowledgeExtractionWorkflowResume(
         pool=pool,
+        capacity_admission_lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            account_ref=None,
+            model_ref=route_catalog.primary_model_ref(),
+        ),
         prepare_llm_dispatch_batch=PrepareLlmDispatchBatch(
             pool=pool,
             capacity_policy=CapacityAdmissionPolicy(),

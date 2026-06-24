@@ -5,6 +5,12 @@ from typing import cast
 import pytest
 from pathlib import Path
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_projection_writer import (
+    PostgresCapacityAdmissionProjectionWriter,
+)
 from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extraction_workflow_commands import (
     DrainKnowledgeExtractionWorkflowCommandsResult,
 )
@@ -101,6 +107,65 @@ async def test_resume_passes_postgres_draft_claim_observation_read_repository_in
     assert repository._connection is connection
     assert result.workflow_run_id == "workflow-1"
     assert pool.released_connections == [connection]
+
+
+@pytest.mark.asyncio
+async def test_resume_passes_capacity_projection_writer_and_lane_target_into_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = _FakeConnection()
+    pool = _FakePool(connection)
+    captured_dependencies: dict[str, object] = {}
+
+    async def fake_drain_execute(
+        self: object,
+        command: object,
+        **dependencies: object,
+    ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
+        del self, command
+        captured_dependencies.update(dependencies)
+        return DrainKnowledgeExtractionWorkflowCommandsResult(
+            workflow_run_id="workflow-1",
+            inspected_count=0,
+            dispatched_count=0,
+            blocked_count=0,
+            last_blocked_command_type=None,
+            last_blocked_reason=None,
+        )
+
+    monkeypatch.setattr(
+        composition,
+        "PostgresWorkflowRuntimeUnitOfWork",
+        _FakeWorkflowRuntimeUnitOfWork,
+    )
+    monkeypatch.setattr(
+        composition.DrainKnowledgeExtractionWorkflowCommands,
+        "execute",
+        fake_drain_execute,
+    )
+
+    lane_target = CapacityAdmissionLaneTarget(
+        provider="groq",
+        account_ref=None,
+        model_ref="qwen/qwen3-32b",
+    )
+    runner = RunKnowledgeExtractionWorkflowResume(
+        pool=pool,
+        capacity_admission_lane_target=lane_target,
+    )
+
+    await runner._run_one_drain_transaction(
+        workflow_run_id="workflow-1",
+        max_commands=1,
+    )
+
+    writer = cast(
+        PostgresCapacityAdmissionProjectionWriter,
+        captured_dependencies["capacity_admission_projection_writer"],
+    )
+    assert isinstance(writer, PostgresCapacityAdmissionProjectionWriter)
+    assert writer._connection is connection
+    assert captured_dependencies["capacity_admission_lane_target"] == lane_target
 
 
 def test_resume_uses_workflow_wide_frontend_projection_composite() -> None:
