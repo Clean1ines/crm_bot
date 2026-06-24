@@ -4,6 +4,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -90,6 +96,10 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
+        capacity_admission_projection_writer: (
+            CapacityAdmissionProjectionWriterPort | None
+        ) = None,
+        capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
     ) -> HandleScheduleClaimBuilderSectionWorkResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -105,6 +115,7 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
         source_document_ref = SourceDocumentRef(
             _payload_text(payload, "source_document_ref")
         )
+        project_id = _payload_optional_text(payload, "project_id")
         occurred_at = workflow_command.updated_at
 
         source_units = await source_unit_repository.list_source_units_for_document(
@@ -113,12 +124,15 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
 
         scheduling_result = await ScheduleClaimBuilderSectionWork(
             scheduling_repository=knowledge_unit_of_work,
+            capacity_admission_projection_writer=capacity_admission_projection_writer,
+            capacity_admission_lane_target=capacity_admission_lane_target,
         ).execute(
             ScheduleClaimBuilderSectionWorkCommand(
                 workflow_run_id=workflow_run_id,
                 source_document_ref=source_document_ref,
                 source_units=source_units,
-            )
+                project_id=project_id,
+            ),
         )
         if scheduling_result.conflict_count > 0:
             raise ValueError("claim builder section work scheduling conflict")
@@ -401,6 +415,18 @@ def _timeline_entries(
             source_ref=source_document_ref.value,
         ),
     )
+
+
+def _payload_optional_text(
+    payload: Mapping[str, object],
+    key: str,
+) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"workflow command payload must include text {key}")
+    return value
 
 
 def _payload_text(

@@ -29,9 +29,12 @@ class ClaimBuilderSectionWorkPlan:
     work_item_id: str
     work_kind: WorkKind
     idempotency_key: str
+    project_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.workflow_run_id, field_name="workflow_run_id")
+        if self.project_id is not None:
+            _require_non_empty_text(self.project_id, field_name="project_id")
         if not isinstance(self.source_document_ref, SourceDocumentRef):
             raise TypeError("source_document_ref must be SourceDocumentRef")
         if not isinstance(self.source_unit_ref, SourceUnitRef):
@@ -56,9 +59,12 @@ class PlanClaimBuilderSectionWorkCommand:
     workflow_run_id: str
     source_document_ref: SourceDocumentRef
     source_units: tuple[SourceUnit, ...]
+    project_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.workflow_run_id, field_name="workflow_run_id")
+        if self.project_id is not None:
+            _require_non_empty_text(self.project_id, field_name="project_id")
         if not isinstance(self.source_document_ref, SourceDocumentRef):
             raise TypeError("source_document_ref must be SourceDocumentRef")
         if not isinstance(self.source_units, tuple):
@@ -100,6 +106,7 @@ class PlanClaimBuilderSectionWork:
         plans = tuple(
             _build_plan(
                 workflow_run_id=command.workflow_run_id,
+                project_id=command.project_id,
                 source_document_ref=command.source_document_ref,
                 source_unit=source_unit,
             )
@@ -111,6 +118,7 @@ class PlanClaimBuilderSectionWork:
 def _build_plan(
     *,
     workflow_run_id: str,
+    project_id: str | None,
     source_document_ref: SourceDocumentRef,
     source_unit: SourceUnit,
 ) -> ClaimBuilderSectionWorkPlan:
@@ -120,6 +128,7 @@ def _build_plan(
     )
     return ClaimBuilderSectionWorkPlan(
         workflow_run_id=workflow_run_id,
+        project_id=project_id,
         source_document_ref=source_document_ref,
         source_unit_ref=source_unit.unit_ref,
         source_unit_ordinal=source_unit.ordinal,

@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+)
 from src.contexts.capacity_admission_queue.application.sync_capacity_admission_projection_lifecycle import (
     CapacityAdmissionProjectionLifecycleSynchronizerPort,
 )
@@ -207,6 +213,10 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         capacity_admission_projection_lifecycle_synchronizer: (
             CapacityAdmissionProjectionLifecycleSynchronizerPort | None
         ) = None,
+        capacity_admission_projection_writer: (
+            CapacityAdmissionProjectionWriterPort | None
+        ) = None,
+        capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
         draft_claim_embedding_read_repository: (
             DraftClaimEmbeddingReadRepositoryPort | None
         ) = None,
@@ -473,6 +483,10 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 capacity_admission_projection_lifecycle_synchronizer=(
                     capacity_admission_projection_lifecycle_synchronizer
                 ),
+                capacity_admission_projection_writer=(
+                    capacity_admission_projection_writer
+                ),
+                capacity_admission_lane_target=capacity_admission_lane_target,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

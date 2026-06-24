@@ -8,6 +8,13 @@ import inspect
 
 import pytest
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+    CapacityAdmissionWorkItemProjectionCandidate,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    PersistCapacityAdmissionProjectionResult,
+)
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
 from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_builder_section_work_command import (
     HandleScheduleClaimBuilderSectionWorkCommand,
@@ -82,9 +89,6 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 )
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
-)
-from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
-    StartedLlmAdmittedAttempt,
 )
 
 
@@ -218,6 +222,22 @@ class FakeWorkItemSchedulingRepository:
         )
         self.existing_items[item.work_item_id] = item
         self.schedule_payload_hashes[item.work_item_id] = payload_hash
+
+
+@dataclass(slots=True)
+class FakeCapacityAdmissionProjectionWriter:
+    candidates: list[CapacityAdmissionWorkItemProjectionCandidate] = field(
+        default_factory=list,
+    )
+
+    async def persist_projection_candidates(
+        self,
+        candidates: tuple[CapacityAdmissionWorkItemProjectionCandidate, ...],
+    ) -> PersistCapacityAdmissionProjectionResult:
+        self.candidates.extend(candidates)
+        return PersistCapacityAdmissionProjectionResult(
+            persisted_count=len(candidates),
+        )
 
 
 @dataclass(slots=True)
@@ -383,6 +403,10 @@ async def _execute(
     workflow_command: WorkflowCommand | None = None,
     *,
     frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
+    capacity_admission_projection_writer: (
+        FakeCapacityAdmissionProjectionWriter | None
+    ) = None,
+    capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
 ) -> tuple[
     object,
     FakeSourceManagementRepository,
@@ -402,6 +426,8 @@ async def _execute(
         knowledge_unit_of_work=scheduling_repository,
         workflow_unit_of_work=workflow_unit_of_work,
         frontend_event_projection_writer=frontend_event_projection_writer,
+        capacity_admission_projection_writer=capacity_admission_projection_writer,
+        capacity_admission_lane_target=capacity_admission_lane_target,
     )
     return result, source_repository, scheduling_repository, workflow_unit_of_work
 
@@ -446,6 +472,29 @@ async def test_schedules_one_work_item_per_source_unit() -> None:
         f"{_document_ref().value}.unit.0",
         f"{_document_ref().value}.unit.1",
     )
+
+
+@pytest.mark.asyncio
+async def test_persists_capacity_admission_projection_when_configured() -> None:
+    capacity_writer = FakeCapacityAdmissionProjectionWriter()
+
+    await _execute(
+        capacity_admission_projection_writer=capacity_writer,
+        capacity_admission_lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            account_ref="groq_org_primary",
+            model_ref="qwen/qwen3-32b",
+        ),
+    )
+
+    assert len(capacity_writer.candidates) == 2
+    first = capacity_writer.candidates[0]
+    assert first.workflow_run_id == _workflow_run_id()
+    assert first.project_id == "project-1"
+    assert first.provider == "groq"
+    assert first.account_ref == "groq_org_primary"
+    assert first.model_ref == "qwen/qwen3-32b"
+    assert first.status.value == "ready"
 
 
 @pytest.mark.asyncio
@@ -518,12 +567,14 @@ async def test_appends_timeline_entries() -> None:
 
 @dataclass(slots=True)
 class FakeAttemptResult:
-    started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
+    started_attempts: tuple[object, ...]
 
 
 @dataclass(slots=True)
 class FakePrepareResult:
     attempt_result: FakeAttemptResult
+    capacity_retry_at: datetime | None = None
+    capacity_window_exhaustion: object | None = None
     affected_work_item_refs: tuple[str, ...] = ()
     source_unit_refs: tuple[str, ...] = ()
     input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
@@ -541,27 +592,7 @@ class FakePrepareLlmDispatchBatch:
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
         self.calls.append(command)
         return FakePrepareResult(
-            attempt_result=FakeAttemptResult(
-                started_attempts=(
-                    StartedLlmAdmittedAttempt(
-                        attempt_id="work-1:attempt:1",
-                        work_item_id="work-1",
-                        attempt_number=1,
-                        dispatch_payload={
-                            "work_item_id": "work-1",
-                            "schedule_payload": {
-                                "source_document_ref": _document_ref().value,
-                                "source_unit_ref": f"{_document_ref().value}.unit.0",
-                            },
-                            "llm_allocation": {
-                                "provider": "groq",
-                                "account_ref": "groq_org_primary",
-                                "model_ref": "qwen/qwen3-32b",
-                            },
-                        },
-                    ),
-                ),
-            ),
+            attempt_result=FakeAttemptResult(started_attempts=()),
         )
 
 
@@ -738,6 +769,9 @@ def test_schedule_handler_does_not_touch_live_state_or_execution_paths() -> None
         "drain",
         "workflow_runner",
         "execution_runtime",
-        "capacity",
+        "capacity_runtime",
+        "capacity_window",
+        "llm_attempt_capacity",
+        "route_capacity",
     ):
         assert forbidden_marker not in source

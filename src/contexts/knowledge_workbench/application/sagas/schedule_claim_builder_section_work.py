@@ -40,9 +40,12 @@ class ScheduleClaimBuilderSectionWorkCommand:
     workflow_run_id: str
     source_document_ref: SourceDocumentRef
     source_units: tuple[SourceUnit, ...]
+    project_id: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.workflow_run_id, field_name="workflow_run_id")
+        if self.project_id is not None:
+            _require_non_empty_text(self.project_id, field_name="project_id")
         if not isinstance(self.source_document_ref, SourceDocumentRef):
             raise TypeError("source_document_ref must be SourceDocumentRef")
         if not isinstance(self.source_units, tuple):
@@ -152,6 +155,7 @@ class ScheduleClaimBuilderSectionWork:
                 workflow_run_id=command.workflow_run_id,
                 source_document_ref=command.source_document_ref,
                 source_units=command.source_units,
+                project_id=command.project_id,
             ),
         )
         execution_schedule = MapClaimBuilderSectionPlansToExecutionSchedule().execute(

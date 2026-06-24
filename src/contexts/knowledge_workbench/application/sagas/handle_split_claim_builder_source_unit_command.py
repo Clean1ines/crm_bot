@@ -5,6 +5,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+)
 from src.contexts.capacity_admission_queue.application.sync_capacity_admission_projection_lifecycle import (
     CapacityAdmissionProjectionLifecycleSynchronizerPort,
     CapacityAdmissionProjectionLifecycleUpdate,
@@ -122,6 +128,10 @@ class HandleSplitClaimBuilderSourceUnitCommandHandler:
         capacity_admission_projection_lifecycle_synchronizer: (
             CapacityAdmissionProjectionLifecycleSynchronizerPort | None
         ) = None,
+        capacity_admission_projection_writer: (
+            CapacityAdmissionProjectionWriterPort | None
+        ) = None,
+        capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
     ) -> HandleSplitClaimBuilderSourceUnitResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -194,12 +204,15 @@ class HandleSplitClaimBuilderSourceUnitCommandHandler:
 
         scheduling_result = await ScheduleClaimBuilderSectionWork(
             scheduling_repository=work_item_scheduling_repository,
+            capacity_admission_projection_writer=capacity_admission_projection_writer,
+            capacity_admission_lane_target=capacity_admission_lane_target,
         ).execute(
             ScheduleClaimBuilderSectionWorkCommand(
                 workflow_run_id=workflow_run_id,
                 source_document_ref=source_document_ref,
                 source_units=child_source_units,
-            )
+                project_id=source_document.project_id,
+            ),
         )
         if scheduling_result.conflict_count > 0:
             raise ValueError("claim builder child work scheduling conflict")

@@ -105,20 +105,36 @@ def _map_plan_to_schedule_plan(
         work_item_id=plan.work_item_id,
         work_kind=plan.work_kind,
         idempotency_key=plan.idempotency_key,
-        payload={
-            "workflow_run_id": plan.workflow_run_id,
-            "source_document_ref": plan.source_document_ref.value,
-            "source_unit_ref": plan.source_unit_ref.value,
-            "source_unit_ordinal": plan.source_unit_ordinal,
-            "phase": "claim_builder_section_extraction",
-            "provider_messages": prompt_contract.provider_messages,
-            "llm_capacity_estimate": token_estimate,
-            "claim_builder_provenance": _claim_builder_provenance(
-                plan=plan,
-                prompt_contract=prompt_contract,
-            ),
-        },
+        payload=_schedule_payload(
+            plan=plan,
+            prompt_contract=prompt_contract,
+            token_estimate=token_estimate,
+        ),
     )
+
+
+def _schedule_payload(
+    *,
+    plan: ClaimBuilderSectionWorkPlan,
+    prompt_contract: ClaimBuilderSectionExtractionPromptContract,
+    token_estimate: dict[str, object],
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "workflow_run_id": plan.workflow_run_id,
+        "source_document_ref": plan.source_document_ref.value,
+        "source_unit_ref": plan.source_unit_ref.value,
+        "source_unit_ordinal": plan.source_unit_ordinal,
+        "phase": "claim_builder_section_extraction",
+        "provider_messages": prompt_contract.provider_messages,
+        "llm_capacity_estimate": token_estimate,
+        "claim_builder_provenance": _claim_builder_provenance(
+            plan=plan,
+            prompt_contract=prompt_contract,
+        ),
+    }
+    if plan.project_id is not None:
+        payload["project_id"] = plan.project_id
+    return payload
 
 
 def _claim_builder_token_estimate(
