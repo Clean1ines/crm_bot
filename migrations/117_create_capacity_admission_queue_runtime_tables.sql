@@ -9,8 +9,8 @@ CREATE TABLE IF NOT EXISTS capacity_admission_work_items (
         REFERENCES execution_work_items(work_item_id)
         ON DELETE CASCADE,
     work_kind TEXT NOT NULL,
-    workflow_run_id UUID NULL,
-    project_id UUID NULL,
+    workflow_run_id TEXT NULL,
+    project_id TEXT NULL,
     provider TEXT NOT NULL,
     account_ref TEXT NULL,
     model_ref TEXT NOT NULL,

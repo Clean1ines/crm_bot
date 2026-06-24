@@ -94,7 +94,7 @@ class PostgresCapacityAdmissionProjectionWriter(CapacityAdmissionProjectionWrite
                 updated_at
             )
             VALUES (
-                $1, $2, $3::uuid, $4::uuid, $5, $6, $7, $8, $9,
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
                 $10, $11, $12, $13, $14::jsonb, $15, $16
             )
             ON CONFLICT (work_item_id) DO UPDATE SET

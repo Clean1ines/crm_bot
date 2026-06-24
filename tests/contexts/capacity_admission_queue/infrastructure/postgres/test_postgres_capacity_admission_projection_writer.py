@@ -41,8 +41,8 @@ def _candidate(
     return CapacityAdmissionWorkItemProjectionCandidate(
         work_item_id=work_item_id,
         work_kind=work_kind,
-        workflow_run_id="11111111-1111-1111-1111-111111111111",
-        project_id="22222222-2222-2222-2222-222222222222",
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        project_id="project-1",
         provider=provider,
         account_ref=account_ref,
         model_ref=model_ref,
@@ -53,7 +53,7 @@ def _candidate(
         effective_output_cap_tokens=30,
         reserved_total_tokens=reserved_total_tokens,
         source_ref={
-            "workflow_run_id": "11111111-1111-1111-1111-111111111111",
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
             "source_document_ref": "source-document-1",
             "source_unit_ref": "source-unit-1",
         },
@@ -89,6 +89,8 @@ async def test_persists_projection_dirty_lane_and_due_work_event() -> None:
 
     assert "INSERT INTO capacity_admission_work_items" in projection_call.query
     assert "ON CONFLICT (work_item_id) DO UPDATE SET" in projection_call.query
+    assert "$3::uuid" not in projection_call.query
+    assert "$4::uuid" not in projection_call.query
     assert projection_call.args[0] == "work-item-1"
     assert projection_call.args[1] == "knowledge.claim_builder"
     assert projection_call.args[4] == "groq"
