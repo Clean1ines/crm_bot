@@ -1,4 +1,5 @@
 import pytest
+from typing import cast
 
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
     BuildCapacityAdmissionProjectionCandidates,
@@ -123,7 +124,7 @@ def test_rejects_invalid_token_contract_values(
     field_name: str,
     bad_value: object,
 ) -> None:
-    estimate = {
+    estimate: dict[str, object] = {
         "estimated_input_tokens": 100,
         "estimated_output_tokens": 30,
         "effective_output_cap_tokens": 30,
@@ -198,10 +199,16 @@ def test_rejects_empty_lane_target_fields() -> None:
 
 
 def test_rejects_non_schedule_plan_items() -> None:
+    invalid_plans = _invalid_schedule_plan_sequence()
+
     with pytest.raises(TypeError, match="WorkItemSchedulePlan"):
         BuildCapacityAdmissionProjectionCandidates(
             lane_target=CapacityAdmissionLaneTarget(
                 provider="groq",
                 model_ref="llama-3.3-70b-versatile",
             )
-        ).execute(("not-a-plan",))
+        ).execute(invalid_plans)
+
+
+def _invalid_schedule_plan_sequence() -> tuple[WorkItemSchedulePlan, ...]:
+    return cast(tuple[WorkItemSchedulePlan, ...], ("not-a-plan",))
