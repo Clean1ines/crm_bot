@@ -170,7 +170,7 @@ class PostgresKnowledgeExtractionSagaStateRepository(
                     THEN 'failed'
                     WHEN $5 = 'COMPLETED'
                     THEN CASE
-                        WHEN $6 IS NOT NULL
+                        WHEN $6::text IS NOT NULL
                         THEN 'published'
                         ELSE 'processed'
                     END
