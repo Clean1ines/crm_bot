@@ -165,6 +165,79 @@ def test_ignores_forbidden_overlay_fields_when_present_in_canonical_payload() ->
     assert "retry_owner" not in projected.payload
 
 
+def test_projects_capacity_window_waiting_due_work_with_route_context() -> None:
+    projected = CapacityWindowFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_WAITING_DUE_WORK.value
+            ),
+            payload={
+                "workflow_run_id": _workflow_run_id(),
+                "window_key": "groq:groq_org_primary:qwen/qwen3-32b",
+                "provider": "groq",
+                "account_ref": "groq_org_primary",
+                "model_ref": "qwen/qwen3-32b",
+                "waiting_reason": "active_leased_wait",
+                "active_leased_count": 1,
+                "operation_key": "prepare_claim_builder_dispatch_batch",
+                "canonical_phase": (
+                    KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+                ),
+                "route_activation_ref": "claim_builder:primary:qwen",
+                "route_kind": "primary",
+                "route_reason": "normal",
+                "capacity_scope_ref": "groq:groq_org_primary:qwen/qwen3-32b",
+                "slot_ref": "groq:groq_org_primary:qwen/qwen3-32b:slot-1",
+            },
+            event_suffix="waiting-due-work",
+        )
+    )
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_capacity_window_waiting_due_work"
+    assert projected.payload["waiting_reason"] == "active_leased_wait"
+    assert projected.payload["active_leased_count"] == 1
+    assert projected.payload["route_context"] == {
+        "route_activation_ref": "claim_builder:primary:qwen",
+        "route_kind": "primary",
+        "route_reason": "normal",
+        "capacity_scope_ref": "groq:groq_org_primary:qwen/qwen3-32b",
+        "slot_ref": "groq:groq_org_primary:qwen/qwen3-32b:slot-1",
+    }
+    assert "next_attempt_at" not in projected.payload
+
+
+def test_projects_capacity_window_admission_skipped() -> None:
+    projected = CapacityWindowFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=(
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_ADMISSION_SKIPPED.value
+            ),
+            payload={
+                "workflow_run_id": _workflow_run_id(),
+                "window_key": "groq:groq_org_primary:qwen/qwen3-32b",
+                "provider": "groq",
+                "account_ref": "groq_org_primary",
+                "model_ref": "qwen/qwen3-32b",
+                "skipped_reason": "execution_lease_lost",
+                "work_item_id": "work-1",
+                "operation_key": "prepare_claim_builder_dispatch_batch",
+                "canonical_phase": (
+                    KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION.value
+                ),
+            },
+            event_suffix="admission-skipped",
+        )
+    )
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_capacity_window_admission_skipped"
+    assert projected.payload["skipped_reason"] == "execution_lease_lost"
+    assert projected.payload["work_item_id"] == "work-1"
+    assert projected.payload["admission_driver"] == "capacity_window_admission"
+    assert "work_item_retry_timer" not in projected.payload
+
+
 def test_compaction_capacity_event_projects_attachable_work_context() -> None:
     projected = CapacityWindowFrontendWorkflowEventProjector().project(
         _event(

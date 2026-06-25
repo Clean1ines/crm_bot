@@ -303,6 +303,8 @@ def test_capacity_window_projection_boundary_is_passive_and_window_owned() -> No
     assert "workflow_capacity_window_exhausted" in capacity_window
     assert "workflow_capacity_window_scheduled_wakeup" in capacity_window
     assert "workflow_capacity_window_leased_work_item" in capacity_window
+    assert "workflow_capacity_window_waiting_due_work" in capacity_window
+    assert "workflow_capacity_window_admission_skipped" in capacity_window
     assert "CapacityWindowFrontendWorkflowEventProjector" in claim_builder_router
 
     for forbidden_marker in (
@@ -324,9 +326,23 @@ def test_zero_dispatch_is_not_always_capacity_exhausted_in_prepare_handler() -> 
         / "sagas"
         / "handle_prepare_claim_builder_dispatch_batch_command.py"
     ).read_text(encoding="utf-8")
+    phase_mapper = (
+        ROOT
+        / "src"
+        / "contexts"
+        / "knowledge_workbench"
+        / "application"
+        / "sagas"
+        / "claim_builder_capacity_admission_phase_mapper.py"
+    ).read_text(encoding="utf-8")
 
-    assert "capacity_window_exhaustion is not None" in prepare_handler
-    assert "capacity_window_exhausted_event" in prepare_handler
+    assert "ClaimBuilderCapacityAdmissionPhaseMapper" in prepare_handler
+    assert "CapacityAdmissionPhaseMappingDecision.CAPACITY_WAITING" in phase_mapper
+    assert "CapacityAdmissionPhaseMappingDecision.NO_FITTING_WORK_ITEM" in phase_mapper
+    assert "CapacityAdmissionPhaseMappingDecision.ACTIVE_LEASED_WAIT" in phase_mapper
+    assert "ClaimBuilderCapacityWaiting" in phase_mapper
+    assert "ClaimBuilderNoFittingWorkItem" in phase_mapper
+    assert "ClaimBuilderActiveLeasedWait" in phase_mapper
 
 
 def test_attempt_outcome_visibility_uses_existing_projection_single_event_contract() -> (

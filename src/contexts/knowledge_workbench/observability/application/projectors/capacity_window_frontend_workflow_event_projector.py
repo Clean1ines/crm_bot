@@ -81,6 +81,12 @@ def _projection_type_for_event_type(event_type: str) -> str | None:
         KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_LEASED_WORK_ITEM.value: (
             "workflow_capacity_window_leased_work_item"
         ),
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_WAITING_DUE_WORK.value: (
+            "workflow_capacity_window_waiting_due_work"
+        ),
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_ADMISSION_SKIPPED.value: (
+            "workflow_capacity_window_admission_skipped"
+        ),
     }
     return mapping.get(event_type)
 
@@ -96,6 +102,10 @@ def _capacity_window_projection_payload(
         return _scheduled_wakeup_projection_payload(source_payload)
     if projection_type == "workflow_capacity_window_leased_work_item":
         return _leased_work_item_projection_payload(source_payload)
+    if projection_type == "workflow_capacity_window_waiting_due_work":
+        return _waiting_due_work_projection_payload(source_payload)
+    if projection_type == "workflow_capacity_window_admission_skipped":
+        return _admission_skipped_projection_payload(source_payload)
     raise ValueError(f"unsupported capacity window projection type: {projection_type}")
 
 
@@ -182,6 +192,75 @@ def _leased_work_item_projection_payload(
             patch[optional_key] = value
     _copy_optional_compaction_context(payload, patch)
     return _without_forbidden_fields(patch)
+
+
+def _waiting_due_work_projection_payload(
+    payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    patch: dict[str, object] = {
+        "workflow_run_id": _payload_text(payload, "workflow_run_id"),
+        "window_key": _payload_text(payload, "window_key"),
+        "provider": _payload_text(payload, "provider"),
+        "account_ref": _payload_text(payload, "account_ref"),
+        "model_ref": _payload_text(payload, "model_ref"),
+        "waiting_reason": _payload_text(payload, "waiting_reason"),
+        "operation_key": _payload_text(payload, "operation_key"),
+        "canonical_phase": _payload_text(payload, "canonical_phase"),
+        "admission_driver": "capacity_window_admission",
+    }
+    active_leased_count = payload.get("active_leased_count")
+    if isinstance(active_leased_count, int) and not isinstance(
+        active_leased_count, bool
+    ):
+        patch["active_leased_count"] = active_leased_count
+    _copy_optional_route_context(payload, patch)
+    return _without_forbidden_fields(patch)
+
+
+def _admission_skipped_projection_payload(
+    payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    patch: dict[str, object] = {
+        "workflow_run_id": _payload_text(payload, "workflow_run_id"),
+        "window_key": _payload_text(payload, "window_key"),
+        "provider": _payload_text(payload, "provider"),
+        "account_ref": _payload_text(payload, "account_ref"),
+        "model_ref": _payload_text(payload, "model_ref"),
+        "skipped_reason": _payload_text(payload, "skipped_reason"),
+        "operation_key": _payload_text(payload, "operation_key"),
+        "canonical_phase": _payload_text(payload, "canonical_phase"),
+        "admission_driver": "capacity_window_admission",
+    }
+    for optional_key in (
+        "work_item_id",
+        "dispatch_attempt_id",
+        "causation_command_id",
+    ):
+        value = payload.get(optional_key)
+        if isinstance(value, str) and value.strip():
+            patch[optional_key] = value
+    _copy_optional_route_context(payload, patch)
+    return _without_forbidden_fields(patch)
+
+
+def _copy_optional_route_context(
+    source_payload: Mapping[str, object],
+    projected_payload: dict[str, object],
+) -> None:
+    route_context: dict[str, object] = {}
+    for key in (
+        "route_activation_ref",
+        "route_kind",
+        "route_reason",
+        "capacity_scope_ref",
+        "slot_ref",
+    ):
+        value = source_payload.get(key)
+        if isinstance(value, str) and value.strip():
+            route_context[key] = value
+            projected_payload[key] = value
+    if route_context:
+        projected_payload["route_context"] = route_context
 
 
 def _copy_optional_compaction_context(

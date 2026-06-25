@@ -24,6 +24,13 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import
 )
 
 CapacityWindowSelectionKind = Literal["fresh", "retryable"]
+CapacityWindowAdmissionSkippedReason = Literal[
+    "capacity_exhausted",
+    "no_fitting_work_item",
+    "active_leased_wait",
+    "projection_conflict",
+    "execution_lease_lost",
+]
 
 CLAIM_BUILDER_PREPARE_OPERATION_KEY = "prepare_claim_builder_dispatch_batch"
 CLAIM_BUILDER_EXECUTE_OPERATION_KEY = "execute_claim_builder_section"
@@ -294,6 +301,161 @@ def capacity_window_leased_work_item_event(
         causation_command_id=causation_command_id,
         correlation_id=dispatch_attempt_id,
     )
+
+
+def capacity_window_waiting_due_work_event(
+    *,
+    workflow_run_id: str,
+    provider: str,
+    account_ref: str,
+    model_ref: str,
+    waiting_reason: str,
+    operation_key: str,
+    canonical_phase: str,
+    occurred_at: datetime,
+    active_leased_count: int = 0,
+    route_activation_ref: str | None = None,
+    route_kind: str | None = None,
+    route_reason: str | None = None,
+    capacity_scope_ref: str | None = None,
+    slot_ref: str | None = None,
+    causation_command_id: WorkflowCommandId | None = None,
+    correlation_id: str | None = None,
+) -> WorkflowEvent:
+    window_key = capacity_window_key(
+        provider=provider,
+        account_ref=account_ref,
+        model_ref=model_ref,
+    )
+    payload: dict[str, object] = {
+        "workflow_run_id": workflow_run_id,
+        "window_key": window_key,
+        "provider": provider,
+        "account_ref": account_ref,
+        "model_ref": model_ref,
+        "waiting_reason": waiting_reason,
+        "active_leased_count": active_leased_count,
+        "operation_key": operation_key,
+        "canonical_phase": canonical_phase,
+    }
+    _attach_route_fields(
+        payload,
+        route_activation_ref=route_activation_ref,
+        route_kind=route_kind,
+        route_reason=route_reason,
+        capacity_scope_ref=capacity_scope_ref,
+        slot_ref=slot_ref,
+    )
+    if causation_command_id is not None:
+        payload["causation_command_id"] = causation_command_id.value
+
+    id_suffix = correlation_id if correlation_id is not None else window_key
+    return WorkflowEvent(
+        event_id=WorkflowEventId(
+            "workflow-event:"
+            f"{workflow_run_id}:"
+            f"{KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_WAITING_DUE_WORK.value}:"
+            f"{id_suffix}"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_WAITING_DUE_WORK.value
+        ),
+        workflow_run_id=workflow_run_id,
+        payload=payload,
+        occurred_at=occurred_at,
+        causation_command_id=causation_command_id,
+        correlation_id=correlation_id,
+    )
+
+
+def capacity_window_admission_skipped_event(
+    *,
+    workflow_run_id: str,
+    provider: str,
+    account_ref: str,
+    model_ref: str,
+    skipped_reason: CapacityWindowAdmissionSkippedReason,
+    operation_key: str,
+    canonical_phase: str,
+    occurred_at: datetime,
+    work_item_id: str | None = None,
+    dispatch_attempt_id: str | None = None,
+    route_activation_ref: str | None = None,
+    route_kind: str | None = None,
+    route_reason: str | None = None,
+    capacity_scope_ref: str | None = None,
+    slot_ref: str | None = None,
+    causation_command_id: WorkflowCommandId | None = None,
+    correlation_id: str | None = None,
+) -> WorkflowEvent:
+    window_key = capacity_window_key(
+        provider=provider,
+        account_ref=account_ref,
+        model_ref=model_ref,
+    )
+    payload: dict[str, object] = {
+        "workflow_run_id": workflow_run_id,
+        "window_key": window_key,
+        "provider": provider,
+        "account_ref": account_ref,
+        "model_ref": model_ref,
+        "skipped_reason": skipped_reason,
+        "operation_key": operation_key,
+        "canonical_phase": canonical_phase,
+    }
+    if work_item_id is not None:
+        payload["work_item_id"] = work_item_id
+    if dispatch_attempt_id is not None:
+        payload["dispatch_attempt_id"] = dispatch_attempt_id
+    _attach_route_fields(
+        payload,
+        route_activation_ref=route_activation_ref,
+        route_kind=route_kind,
+        route_reason=route_reason,
+        capacity_scope_ref=capacity_scope_ref,
+        slot_ref=slot_ref,
+    )
+    if causation_command_id is not None:
+        payload["causation_command_id"] = causation_command_id.value
+
+    id_suffix = correlation_id if correlation_id is not None else window_key
+    return WorkflowEvent(
+        event_id=WorkflowEventId(
+            "workflow-event:"
+            f"{workflow_run_id}:"
+            f"{KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_ADMISSION_SKIPPED.value}:"
+            f"{id_suffix}"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_ADMISSION_SKIPPED.value
+        ),
+        workflow_run_id=workflow_run_id,
+        payload=payload,
+        occurred_at=occurred_at,
+        causation_command_id=causation_command_id,
+        correlation_id=correlation_id,
+    )
+
+
+def _attach_route_fields(
+    payload: dict[str, object],
+    *,
+    route_activation_ref: str | None,
+    route_kind: str | None,
+    route_reason: str | None,
+    capacity_scope_ref: str | None,
+    slot_ref: str | None,
+) -> None:
+    if route_activation_ref is not None:
+        payload["route_activation_ref"] = route_activation_ref
+    if route_kind is not None:
+        payload["route_kind"] = route_kind
+    if route_reason is not None:
+        payload["route_reason"] = route_reason
+    if capacity_scope_ref is not None:
+        payload["capacity_scope_ref"] = capacity_scope_ref
+    if slot_ref is not None:
+        payload["slot_ref"] = slot_ref
 
 
 def source_unit_ref_from_schedule_payload(

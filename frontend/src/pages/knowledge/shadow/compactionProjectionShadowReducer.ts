@@ -163,6 +163,8 @@ export function reduceCompactionProjectionEvent(
     case 'workflow_capacity_window_exhausted':
     case 'workflow_capacity_window_scheduled_wakeup':
     case 'workflow_capacity_window_leased_work_item':
+    case 'workflow_capacity_window_waiting_due_work':
+    case 'workflow_capacity_window_admission_skipped':
       applyCapacityWindowEvent(next, event, payload);
       break;
     default:

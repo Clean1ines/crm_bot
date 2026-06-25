@@ -65,6 +65,12 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     CAPACITY_WINDOW_EXHAUSTED = "CapacityWindowExhausted"
     CAPACITY_WINDOW_SCHEDULED_WAKEUP = "CapacityWindowScheduledWakeup"
     CAPACITY_WINDOW_LEASED_WORK_ITEM = "CapacityWindowLeasedWorkItem"
+    CAPACITY_WINDOW_WAITING_DUE_WORK = "CapacityWindowWaitingDueWork"
+    CAPACITY_WINDOW_ADMISSION_SKIPPED = "CapacityWindowAdmissionSkipped"
+    ROUTE_ACTIVATION_CREATED = "RouteActivationCreated"
+    ROUTE_ACTIVATION_CLOSED = "RouteActivationClosed"
+    WORK_ITEM_REROUTE_REQUESTED = "WorkItemRerouteRequested"
+    WORK_ITEM_REROUTED = "WorkItemRerouted"
     CLAIM_BUILDER_PROGRESS_RECONCILED = "ClaimBuilderProgressReconciled"
     CLAIM_BUILDER_ALL_SECTIONS_EXTRACTED = "ClaimBuilderAllSectionsExtracted"
     DRAFT_CLAIM_EMBEDDING_BATCH_COMPLETED = "DraftClaimEmbeddingBatchCompleted"
@@ -296,6 +302,9 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
                 KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SOURCE_UNIT_SPLIT_REQUIRED,
                 KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED,
                 KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_LEASED_WORK_ITEM,
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_WAITING_DUE_WORK,
+                KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_ADMISSION_SKIPPED,
+                KnowledgeExtractionCanonicalEventType.ROUTE_ACTIVATION_CREATED,
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION,
@@ -374,6 +383,10 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
                 KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED,
                 KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED,
                 KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_SCHEDULED_WAKEUP,
+                KnowledgeExtractionCanonicalEventType.ROUTE_ACTIVATION_CREATED,
+                KnowledgeExtractionCanonicalEventType.ROUTE_ACTIVATION_CLOSED,
+                KnowledgeExtractionCanonicalEventType.WORK_ITEM_REROUTE_REQUESTED,
+                KnowledgeExtractionCanonicalEventType.WORK_ITEM_REROUTED,
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.RECONCILE_CLAIM_BUILDER_PROGRESS,
