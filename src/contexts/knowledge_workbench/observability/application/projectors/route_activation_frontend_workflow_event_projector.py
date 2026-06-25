@@ -71,6 +71,12 @@ def _projection_type_for_event_type(event_type: str) -> str | None:
         KnowledgeExtractionCanonicalEventType.WORK_ITEM_REROUTED.value: (
             "workflow_work_item_rerouted"
         ),
+        KnowledgeExtractionCanonicalEventType.WORKFLOW_MANUALLY_PAUSED.value: (
+            "workflow_manually_paused"
+        ),
+        KnowledgeExtractionCanonicalEventType.WORKFLOW_MANUALLY_RESUMED.value: (
+            "workflow_manually_resumed"
+        ),
     }
     return mapping.get(event_type)
 
@@ -89,6 +95,11 @@ def _projection_payload(
         "workflow_work_item_rerouted",
     }:
         return _work_item_reroute_payload(payload)
+    if projection_type in {
+        "workflow_manually_paused",
+        "workflow_manually_resumed",
+    }:
+        return _manual_transition_payload(projection_type, payload)
     raise ValueError(f"unsupported route projection type: {projection_type}")
 
 
@@ -139,6 +150,23 @@ def _work_item_reroute_payload(payload: Mapping[str, object]) -> Mapping[str, ob
         value = payload.get(key)
         if isinstance(value, int) and not isinstance(value, bool):
             patch[key] = value
+    return patch
+
+
+def _manual_transition_payload(
+    projection_type: str,
+    payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    patch: dict[str, object] = {
+        "workflow_run_id": _payload_text(payload, "workflow_run_id"),
+        "project_id": _payload_text(payload, "project_id"),
+        "source_document_ref": _payload_text(payload, "source_document_ref"),
+        "status": "paused"
+        if projection_type == "workflow_manually_paused"
+        else "running",
+    }
+    _copy_optional_text(payload, patch, "actor_user_id")
+    _copy_optional_text(payload, patch, "reason")
     return patch
 
 

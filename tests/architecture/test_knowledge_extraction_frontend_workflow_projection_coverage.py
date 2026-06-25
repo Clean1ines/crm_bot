@@ -670,7 +670,7 @@ def test_patch_19b_compaction_shadow_reducer_exists_and_is_pure_frontend_foundat
         assert forbidden_marker not in reducer
 
 
-def test_patch_19b_visible_knowledge_page_and_document_card_are_not_switched_to_projection_stream() -> (
+def test_visible_knowledge_page_uses_frontend_projection_stream_without_exposing_compaction_shadow_state() -> (
     None
 ):
     page = (
@@ -686,8 +686,9 @@ def test_patch_19b_visible_knowledge_page_and_document_card_are_not_switched_to_
         / "KnowledgeDocumentCard.tsx"
     ).read_text(encoding="utf-8")
 
-    assert "streamWorkflowLiveState" in page
-    assert "streamFrontendWorkflowEvents" not in page
+    assert "streamFrontendWorkflowEvents" in page
+    assert "streamWorkflowLiveState" not in page
+    assert "reduceWorkflowFrontendProjectionEvent" in page
     assert "reduceCompactionProjectionEvent" not in page
     assert "WorkbenchWorkflowLiveStateResponse" in card
     assert "CompactionShadowState" not in card

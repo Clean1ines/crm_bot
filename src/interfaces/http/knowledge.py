@@ -451,12 +451,16 @@ def _document_card_lifecycle_state(status: object) -> str:
     normalized = str(status or "").strip().lower()
     if normalized in {"processing", "pending"}:
         return "processing"
+    if normalized in {"paused", "manual_pause", "manually_paused"}:
+        return "paused"
     if normalized in {"cancelled", "canceled", "cancelled_by_user"}:
         return "cancelled"
     if normalized in {"error", "failed"}:
         return "failed"
     if normalized in {"processed", "completed", "done"}:
         return "ready"
+    if normalized == "published":
+        return "published"
     return "processing"
 
 
@@ -476,6 +480,7 @@ def _workbench_document_card_view_fallback(
         else 0
     )
     running = lifecycle_state == "processing"
+    paused = lifecycle_state == "paused"
 
     return {
         "document_id": document_id,
@@ -485,7 +490,7 @@ def _workbench_document_card_view_fallback(
         "lifecycle_state": lifecycle_state,
         "retention_state": "retained",
         "transient_purged": False,
-        "resume_available": False,
+        "resume_available": paused,
         "status_i18n_key": f"knowledge.workbench.status.{lifecycle_state}",
         "default_status_label": (
             "Обрабатывается"
@@ -509,7 +514,7 @@ def _workbench_document_card_view_fallback(
             else "Документ обработан."
         ),
         "timer": {
-            "mode": "running" if running else "stopped",
+            "mode": "running" if running else "paused" if paused else "stopped",
             "active_elapsed_seconds": 0,
             "wall_elapsed_seconds": 0,
             "current_active_started_at": (
@@ -567,6 +572,17 @@ def _workbench_document_card_view_fallback(
                 "reason_code": None if running else "not_running",
                 "confirmation_i18n_key": None,
                 "default_confirmation": "Остановить обработку документа?",
+            },
+            {
+                "action_id": "resume_processing",
+                "visible": paused,
+                "enabled": paused,
+                "tone": "primary",
+                "i18n_key": "knowledge.actions.resume",
+                "default_label": "Продолжить",
+                "reason_code": None if paused else "not_paused",
+                "confirmation_i18n_key": None,
+                "default_confirmation": "Продолжить обработку документа?",
             },
             {
                 "action_id": "delete_document",
@@ -3214,36 +3230,17 @@ async def cancel_knowledge_processing(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Cancels active Workbench processing and disables automatic recovery."""
+    """Compatibility alias for pausing current source-ingestion workflow processing."""
 
-    await _require_project_access(
+    return await stop_knowledge_source_document_processing(
         project_id=project_id,
+        source_document_ref=document_id,
         authorization=authorization,
+        reason="manual_stop",
+        pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_cancel import (
-        WorkbenchCancelProcessingNotFoundError,
-        WorkbenchCancelProcessingRejectedError,
-        cancel_workbench_processing,
-    )
-
-    try:
-        return await cancel_workbench_processing(
-            pool=pool,
-            project_id=project_id,
-            document_id=document_id,
-        )
-    except WorkbenchCancelProcessingNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail="Knowledge document not found",
-        ) from exc
-    except WorkbenchCancelProcessingRejectedError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=str(exc),
-        ) from exc
 
 
 async def _delete_knowledge_document_by_source_ref(

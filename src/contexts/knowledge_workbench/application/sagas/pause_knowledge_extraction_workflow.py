@@ -25,6 +25,9 @@ from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry impor
 from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
     WorkflowEventId,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 
 
 class KnowledgeExtractionWorkflowPauseNotFoundError(LookupError):
@@ -78,6 +81,8 @@ class PauseKnowledgeExtractionWorkflow:
     async def execute(
         self,
         command: PauseKnowledgeExtractionWorkflowCommand,
+        *,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> PauseKnowledgeExtractionWorkflowResult:
         state = await self.state_repository.load_workflow_state(command.workflow_run_id)
         if state is None:
@@ -107,7 +112,7 @@ class PauseKnowledgeExtractionWorkflow:
             updated_at=command.occurred_at,
         )
         await self.state_repository.save_workflow_state(paused_state)
-        await self.workflow_unit_of_work.outbox.append_event(
+        paused_event = await self.workflow_unit_of_work.outbox.append_event(
             _workflow_event(
                 state=paused_state,
                 actor_user_id=command.actor_user_id,
@@ -118,6 +123,8 @@ class PauseKnowledgeExtractionWorkflow:
                 occurred_at=command.occurred_at,
             )
         )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(paused_event)
         await self.workflow_unit_of_work.timeline.append_entry(
             _timeline_entry(
                 state=paused_state,

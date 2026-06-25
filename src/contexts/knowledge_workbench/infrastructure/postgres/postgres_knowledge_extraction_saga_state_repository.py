@@ -162,8 +162,20 @@ class PostgresKnowledgeExtractionSagaStateRepository(
             UPDATE knowledge_workbench_documents
             SET current_processing_run_id = $1,
                 status = CASE
-                    WHEN status IN ('processed', 'published')
-                    THEN status
+                    WHEN $5 = 'PAUSED'
+                    THEN 'paused'
+                    WHEN $5 = 'CANCELLED'
+                    THEN 'cancelled'
+                    WHEN $5 = 'FAILED'
+                    THEN 'failed'
+                    WHEN $5 = 'COMPLETED'
+                    THEN CASE
+                        WHEN $6 IS NOT NULL
+                        THEN 'published'
+                        ELSE 'processed'
+                    END
+                    WHEN $5 = 'WAITING_FOR_REVIEW'
+                    THEN 'processed'
                     ELSE 'processing'
                 END,
                 updated_at = $2
@@ -175,6 +187,8 @@ class PostgresKnowledgeExtractionSagaStateRepository(
             state.updated_at,
             state.source_document_ref,
             state.project_id,
+            state.status.value,
+            state.publication_ref,
         )
 
     async def save_phase_checkpoint(
