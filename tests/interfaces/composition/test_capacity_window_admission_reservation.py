@@ -70,7 +70,7 @@ def _item(
     return CapacityAdmissionSelectableWorkItem(
         work_item_id="work-item-1",
         lane_key=CapacityAdmissionLaneKey(
-            work_kind="knowledge_workbench.claim_builder_section",
+            work_kind="knowledge_workbench.claim_builder.section_extraction",
             provider="groq",
             account_ref=account_ref,
             model_ref="qwen/qwen3-32b",
