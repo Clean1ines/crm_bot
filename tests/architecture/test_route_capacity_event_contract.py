@@ -106,3 +106,15 @@ def test_provider_capacity_window_vocabulary_separates_scope_from_slot() -> None
     assert "capacity_scope_key" in source
     assert "execution_slot_key" in source
     assert "slots_per_account_model_route" in source
+
+
+def test_execution_window_expander_uses_route_activation_not_bare_policy_rule() -> None:
+    source = (
+        ROOT / "src/contexts/llm_runtime/domain/routing/provider_capacity_windows.py"
+    ).read_text(encoding="utf-8")
+
+    assert "class RouteActivation" in source
+    assert "def expand_activation(" in source
+    assert "activation: RouteActivation" in source
+    assert "route_activation_ref=activation.activation_ref" in source
+    assert "RouteActivation.from_phase_route_rule" in source

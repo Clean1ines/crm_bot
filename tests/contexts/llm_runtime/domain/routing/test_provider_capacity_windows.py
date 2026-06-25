@@ -17,6 +17,8 @@ from src.contexts.llm_runtime.domain.routing.provider_capacity_windows import (
     ProviderCapacityExecutionWindowExpander,
     ProviderCapacityProfile,
     ProviderParallelismPolicy,
+    RouteActivation,
+    RouteActivationStatus,
 )
 from src.contexts.llm_runtime.domain.value_objects.model_id import ModelId
 from src.contexts.llm_runtime.domain.value_objects.model_lifecycle import ModelLifecycle
@@ -73,6 +75,14 @@ def _route(model_ref: str) -> PhaseRouteRule:
     )
 
 
+def _activation(model_ref: str) -> RouteActivation:
+    return RouteActivation.from_phase_route_rule(
+        phase="CLAIM_BUILDER_SECTION_EXTRACTION",
+        work_kind="knowledge_workbench.claim_builder.section_extraction",
+        route=_route(model_ref),
+    )
+
+
 def test_groq_free_four_accounts_one_slot_expands_to_four_windows_and_four_scopes() -> (
     None
 ):
@@ -88,9 +98,9 @@ def test_groq_free_four_accounts_one_slot_expands_to_four_windows_and_four_scope
         parallelism_policy=ProviderParallelismPolicy.one_slot_per_account_model_route(),
     )
 
-    windows = ProviderCapacityExecutionWindowExpander().expand_route(
+    windows = ProviderCapacityExecutionWindowExpander().expand_activation(
         provider_profile=profile,
-        route=_route(model_ref),
+        activation=_activation(model_ref),
     )
 
     assert len(windows) == 4
@@ -114,9 +124,9 @@ def test_groq_free_eight_accounts_one_slot_expands_to_eight_windows_and_eight_sc
         parallelism_policy=ProviderParallelismPolicy.one_slot_per_account_model_route(),
     )
 
-    windows = ProviderCapacityExecutionWindowExpander().expand_route(
+    windows = ProviderCapacityExecutionWindowExpander().expand_activation(
         provider_profile=profile,
-        route=_route(model_ref),
+        activation=_activation(model_ref),
     )
 
     assert len(windows) == 8
@@ -139,9 +149,9 @@ def test_deepseek_paid_one_account_sixteen_slots_expands_to_sixteen_windows_one_
         ),
     )
 
-    windows = ProviderCapacityExecutionWindowExpander().expand_route(
+    windows = ProviderCapacityExecutionWindowExpander().expand_activation(
         provider_profile=profile,
-        route=_route(model_ref),
+        activation=_activation(model_ref),
     )
 
     assert len(windows) == 16
@@ -169,18 +179,23 @@ def test_special_route_opens_additional_windows_without_replacing_primary_route(
         parallelism_policy=ProviderParallelismPolicy.one_slot_per_account_model_route(),
     )
 
-    primary_windows = ProviderCapacityExecutionWindowExpander().expand_route(
+    primary_windows = ProviderCapacityExecutionWindowExpander().expand_activation(
         provider_profile=profile,
-        route=_route(primary_model_ref),
+        activation=_activation(primary_model_ref),
     )
-    special_windows = ProviderCapacityExecutionWindowExpander().expand_route(
+    special_windows = ProviderCapacityExecutionWindowExpander().expand_activation(
         provider_profile=profile,
-        route=PhaseRouteRule(
-            route_ref="claim_builder:special:input_too_large:gpt_oss",
-            route_kind=PhaseRouteKind.SPECIAL,
-            route_reason=PhaseRouteReason.INPUT_TOO_LARGE,
-            model_ref=special_model_ref,
-            activation_scope=PhaseRouteActivationScope.WORK_ITEM,
+        activation=RouteActivation.from_phase_route_rule(
+            phase="CLAIM_BUILDER_SECTION_EXTRACTION",
+            work_kind="knowledge_workbench.claim_builder.section_extraction",
+            route=PhaseRouteRule(
+                route_ref="claim_builder:special:input_too_large:gpt_oss",
+                route_kind=PhaseRouteKind.SPECIAL,
+                route_reason=PhaseRouteReason.INPUT_TOO_LARGE,
+                model_ref=special_model_ref,
+                activation_scope=PhaseRouteActivationScope.WORK_ITEM,
+            ),
+            target_work_item_id="work-item-oversized",
         ),
     )
 
@@ -204,8 +219,35 @@ def test_provider_profile_rejects_route_model_that_is_not_in_profile() -> None:
         parallelism_policy=ProviderParallelismPolicy.one_slot_per_account_model_route(),
     )
 
-    with pytest.raises(ValueError, match="route model_ref is not in provider profile"):
+    with pytest.raises(
+        ValueError, match="route activation model_ref is not in provider profile"
+    ):
         ProviderCapacityExecutionWindowExpander().expand_route(
             provider_profile=profile,
             route=_route("openai/gpt-oss-120b"),
+        )
+
+
+def test_route_activation_requires_target_work_item_for_work_item_scope() -> None:
+    with pytest.raises(ValueError, match="requires target_work_item_id"):
+        RouteActivation.from_phase_route_rule(
+            phase="CLAIM_BUILDER_SECTION_EXTRACTION",
+            work_kind="knowledge_workbench.claim_builder.section_extraction",
+            route=PhaseRouteRule(
+                route_ref="claim_builder:special:input_too_large:gpt_oss",
+                route_kind=PhaseRouteKind.SPECIAL,
+                route_reason=PhaseRouteReason.INPUT_TOO_LARGE,
+                model_ref="openai/gpt-oss-120b",
+                activation_scope=PhaseRouteActivationScope.WORK_ITEM,
+            ),
+        )
+
+
+def test_non_active_route_activation_does_not_expand_into_windows() -> None:
+    with pytest.raises(ValueError, match="only active route activations"):
+        RouteActivation.from_phase_route_rule(
+            phase="CLAIM_BUILDER_SECTION_EXTRACTION",
+            work_kind="knowledge_workbench.claim_builder.section_extraction",
+            route=_route("qwen/qwen3-32b"),
+            status=RouteActivationStatus.WAITING_CAPACITY,
         )

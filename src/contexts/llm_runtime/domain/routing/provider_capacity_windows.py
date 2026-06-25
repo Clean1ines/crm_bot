@@ -28,6 +28,88 @@ class ProviderParallelismPolicyKind(StrEnum):
     FIXED_SLOTS_PER_ACCOUNT_MODEL_ROUTE = "fixed_slots_per_account_model_route"
 
 
+class RouteActivationStatus(StrEnum):
+    ACTIVE = "active"
+    WAITING_CAPACITY = "waiting_capacity"
+    WAITING_USER_CHOICE = "waiting_user_choice"
+    EXHAUSTED = "exhausted"
+    PAUSED = "paused"
+    CLOSED = "closed"
+
+
+@dataclass(frozen=True, slots=True)
+class RouteActivation:
+    activation_ref: str
+    phase: str
+    work_kind: str
+    route_kind: PhaseRouteKind
+    route_reason: PhaseRouteReason
+    model_ref: str
+    activation_scope: PhaseRouteActivationScope
+    status: RouteActivationStatus = RouteActivationStatus.ACTIVE
+    target_work_item_id: str | None = None
+    retry_group_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_non_empty_text(self.activation_ref, "activation_ref")
+        _require_non_empty_text(self.phase, "phase")
+        _require_non_empty_text(self.work_kind, "work_kind")
+        _require_non_empty_text(self.model_ref, "model_ref")
+        if not isinstance(self.route_kind, PhaseRouteKind):
+            raise TypeError("route_kind must be PhaseRouteKind")
+        if not isinstance(self.route_reason, PhaseRouteReason):
+            raise TypeError("route_reason must be PhaseRouteReason")
+        if not isinstance(self.activation_scope, PhaseRouteActivationScope):
+            raise TypeError("activation_scope must be PhaseRouteActivationScope")
+        if not isinstance(self.status, RouteActivationStatus):
+            raise TypeError("status must be RouteActivationStatus")
+        if self.target_work_item_id is not None:
+            _require_non_empty_text(self.target_work_item_id, "target_work_item_id")
+        if self.retry_group_ref is not None:
+            _require_non_empty_text(self.retry_group_ref, "retry_group_ref")
+        if (
+            self.activation_scope is PhaseRouteActivationScope.WORK_ITEM
+            and self.target_work_item_id is None
+        ):
+            raise ValueError("work_item route activation requires target_work_item_id")
+        if (
+            self.activation_scope is PhaseRouteActivationScope.RETRY_GROUP
+            and self.retry_group_ref is None
+        ):
+            raise ValueError("retry_group route activation requires retry_group_ref")
+        if self.status is not RouteActivationStatus.ACTIVE:
+            raise ValueError("only active route activations can expand into windows")
+
+    @classmethod
+    def from_phase_route_rule(
+        cls,
+        *,
+        phase: str,
+        work_kind: str,
+        route: PhaseRouteRule,
+        activation_ref: str | None = None,
+        status: RouteActivationStatus = RouteActivationStatus.ACTIVE,
+        target_work_item_id: str | None = None,
+        retry_group_ref: str | None = None,
+    ) -> RouteActivation:
+        if not isinstance(route, PhaseRouteRule):
+            raise TypeError("route must be PhaseRouteRule")
+        return cls(
+            activation_ref=activation_ref
+            if activation_ref is not None
+            else route.route_ref,
+            phase=phase,
+            work_kind=work_kind,
+            route_kind=route.route_kind,
+            route_reason=route.route_reason,
+            model_ref=route.model_ref,
+            activation_scope=route.activation_scope,
+            status=status,
+            target_work_item_id=target_work_item_id,
+            retry_group_ref=retry_group_ref,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class CapacityScopeKey:
     provider_id: ProviderId
@@ -203,33 +285,54 @@ class ProviderCapacityProfile:
         if len(set(model_ids)) != len(model_ids):
             raise ValueError("model ids must be unique")
 
+    def model_profile_for_model_ref(self, model_ref: str) -> ModelProfile:
+        _require_non_empty_text(model_ref, "model_ref")
+        for model_profile in self.model_profiles:
+            if model_profile.model_id.value == model_ref:
+                return model_profile
+        raise ValueError(f"model_ref is not in provider profile: {model_ref}")
+
     def model_profile_for_route(self, route: PhaseRouteRule) -> ModelProfile:
         if not isinstance(route, PhaseRouteRule):
             raise TypeError("route must be PhaseRouteRule")
-        for model_profile in self.model_profiles:
-            if model_profile.model_id.value == route.model_ref:
-                return model_profile
-        raise ValueError(
-            f"route model_ref is not in provider profile: {route.model_ref}"
-        )
+        try:
+            return self.model_profile_for_model_ref(route.model_ref)
+        except ValueError as exc:
+            raise ValueError(
+                f"route model_ref is not in provider profile: {route.model_ref}"
+            ) from exc
+
+    def model_profile_for_activation(
+        self,
+        activation: RouteActivation,
+    ) -> ModelProfile:
+        if not isinstance(activation, RouteActivation):
+            raise TypeError("activation must be RouteActivation")
+        try:
+            return self.model_profile_for_model_ref(activation.model_ref)
+        except ValueError as exc:
+            raise ValueError(
+                "route activation model_ref is not in provider profile: "
+                f"{activation.model_ref}"
+            ) from exc
 
     def enabled_accounts(self) -> tuple[ProviderAccount, ...]:
         return tuple(account for account in self.accounts if account.enabled)
 
 
 class ProviderCapacityExecutionWindowExpander:
-    def expand_route(
+    def expand_activation(
         self,
         *,
         provider_profile: ProviderCapacityProfile,
-        route: PhaseRouteRule,
+        activation: RouteActivation,
     ) -> tuple[CapacityExecutionWindow, ...]:
         if not isinstance(provider_profile, ProviderCapacityProfile):
             raise TypeError("provider_profile must be ProviderCapacityProfile")
-        if not isinstance(route, PhaseRouteRule):
-            raise TypeError("route must be PhaseRouteRule")
+        if not isinstance(activation, RouteActivation):
+            raise TypeError("activation must be RouteActivation")
 
-        model_profile = provider_profile.model_profile_for_route(route)
+        model_profile = provider_profile.model_profile_for_activation(activation)
         windows: list[CapacityExecutionWindow] = []
         for account in provider_profile.enabled_accounts():
             capacity_scope_key = _capacity_scope_key(
@@ -249,10 +352,10 @@ class ProviderCapacityExecutionWindowExpander:
                 )
                 windows.append(
                     CapacityExecutionWindow(
-                        route_activation_ref=route.route_ref,
-                        route_kind=route.route_kind,
-                        route_reason=route.route_reason,
-                        activation_scope=route.activation_scope,
+                        route_activation_ref=activation.activation_ref,
+                        route_kind=activation.route_kind,
+                        route_reason=activation.route_reason,
+                        activation_scope=activation.activation_scope,
                         provider_id=provider_profile.provider_id,
                         account_ref=account.account_ref,
                         model_id=model_profile.model_id,
@@ -261,6 +364,26 @@ class ProviderCapacityExecutionWindowExpander:
                     )
                 )
         return tuple(windows)
+
+    def expand_route(
+        self,
+        *,
+        provider_profile: ProviderCapacityProfile,
+        route: PhaseRouteRule,
+        phase: str = "compatibility_phase",
+        work_kind: str = "compatibility_work_kind",
+    ) -> tuple[CapacityExecutionWindow, ...]:
+        if not isinstance(route, PhaseRouteRule):
+            raise TypeError("route must be PhaseRouteRule")
+        activation = RouteActivation.from_phase_route_rule(
+            phase=phase,
+            work_kind=work_kind,
+            route=route,
+        )
+        return self.expand_activation(
+            provider_profile=provider_profile,
+            activation=activation,
+        )
 
 
 def _capacity_scope_key(
