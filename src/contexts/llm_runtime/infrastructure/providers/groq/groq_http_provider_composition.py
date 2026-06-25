@@ -15,6 +15,7 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_provider_adapte
 )
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_provider_composition import (
     GroqProviderRuntimeComponents,
+    build_groq_free_provider_capacity_profile,
 )
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
     build_groq_free_plan_model_profiles,
@@ -55,4 +56,8 @@ class GroqHttpProviderRuntimeFactory:
             ),
             model_profiles=model_profiles,
             provider_accounts=provider_accounts,
+            capacity_profile=build_groq_free_provider_capacity_profile(
+                provider_accounts=provider_accounts,
+                model_profiles=model_profiles,
+            ),
         )

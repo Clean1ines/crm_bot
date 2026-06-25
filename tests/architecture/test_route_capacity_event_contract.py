@@ -118,3 +118,19 @@ def test_execution_window_expander_uses_route_activation_not_bare_policy_rule() 
     assert "activation: RouteActivation" in source
     assert "route_activation_ref=activation.activation_ref" in source
     assert "RouteActivation.from_phase_route_rule" in source
+
+
+def test_groq_composition_exposes_provider_capacity_profile_without_admission_execution() -> (
+    None
+):
+    source = (
+        ROOT
+        / "src/contexts/llm_runtime/infrastructure/providers/groq/groq_provider_composition.py"
+    ).read_text(encoding="utf-8")
+
+    assert "capacity_profile: ProviderCapacityProfile" in source
+    assert "build_groq_free_provider_capacity_profile" in source
+    assert "CapacityScopePolicy.ACCOUNT_MODEL" in source
+    assert "one_slot_per_account_model_route" in source
+    assert "capacity_window_admission" not in source
+    assert "WorkflowCommand" not in source
