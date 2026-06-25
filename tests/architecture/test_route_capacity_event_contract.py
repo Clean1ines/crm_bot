@@ -55,3 +55,34 @@ def test_phase_route_policy_vocabulary_separates_phase_routes_from_provider_cata
         "INPUT_TOO_LARGE",
     ):
         assert marker in source
+
+
+def test_knowledge_extraction_phase_route_policies_are_workbench_specific() -> None:
+    policy_source = (
+        ROOT
+        / "src/contexts/knowledge_workbench/application/routing/knowledge_extraction_phase_route_policies.py"
+    ).read_text(encoding="utf-8")
+    generic_source = (
+        ROOT / "src/contexts/llm_runtime/domain/routing/phase_route_policy.py"
+    ).read_text(encoding="utf-8")
+
+    assert "claim_builder_groq_free_phase_route_policy" in policy_source
+    assert "draft_claim_compaction_groq_free_phase_route_policy" in policy_source
+    assert "knowledge_workbench.claim_builder.section_extraction" not in generic_source
+    assert "knowledge_workbench.draft_claim_compaction" not in generic_source
+
+
+def test_phase_route_policies_keep_gpt_oss_out_of_claim_builder_daily_fallbacks() -> (
+    None
+):
+    policy_source = (
+        ROOT
+        / "src/contexts/knowledge_workbench/application/routing/knowledge_extraction_phase_route_policies.py"
+    ).read_text(encoding="utf-8")
+
+    assert "CLAIM_BUILDER_SPECIAL_EMPTY_CLAIMS_GPT_OSS_ROUTE_REF" in policy_source
+    assert "CLAIM_BUILDER_SPECIAL_INPUT_TOO_LARGE_GPT_OSS_ROUTE_REF" in policy_source
+    assert "CLAIM_BUILDER_SPECIAL_OUTPUT_TOO_LARGE_GPT_OSS_ROUTE_REF" in policy_source
+    assert "CLAIM_BUILDER_SPECIAL_TRUNCATED_JSON_GPT_OSS_ROUTE_REF" in policy_source
+    assert "CLAIM_BUILDER_AUTO_LLAMA_VERSATILE_ROUTE_REF" in policy_source
+    assert "CLAIM_BUILDER_AUTO_LLAMA_SCOUT_ROUTE_REF" in policy_source
