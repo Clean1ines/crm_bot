@@ -53,13 +53,14 @@ def _row(
     status: str = "retryable_failed",
     retry_plan: str | None = "RETRY_SAME_ROUTE",
     account_ref: str | None = "groq-account-1",
+    model_ref: str = "llama-3.3-70b-versatile",
 ) -> Mapping[str, object]:
     return {
         "work_item_id": "work-item-1",
         "work_kind": "knowledge.claim_builder",
         "provider": "groq",
         "account_ref": account_ref,
-        "model_ref": "llama-3.3-70b-versatile",
+        "model_ref": model_ref,
         "previous_status": previous_status,
         "status": status,
         "retry_plan": retry_plan,
@@ -94,12 +95,14 @@ async def test_syncs_leased_to_retryable_failed_and_emits_due_wakeup() -> None:
     assert "UPDATE capacity_admission_work_items" in update_call.query
     assert "status = $2" in update_call.query
     assert "retry_plan = $3" in update_call.query
+    assert "model_ref = COALESCE($5, work_items.model_ref)" in update_call.query
     assert "FOR UPDATE" in update_call.query
     assert update_call.args == (
         "work-item-1",
         "retryable_failed",
         "RETRY_SAME_ROUTE",
         _changed_at(),
+        None,
     )
 
     dirty_call = connection.execute_calls[0]
@@ -115,11 +118,40 @@ async def test_syncs_leased_to_retryable_failed_and_emits_due_wakeup() -> None:
     assert event_call.args[8] == "work_item_returned_retryable"
     payload = json.loads(str(event_call.args[9]))
     assert payload == {
+        "model_ref": "llama-3.3-70b-versatile",
         "previous_status": "leased",
         "retry_plan": "RETRY_SAME_ROUTE",
         "status": "retryable_failed",
         "work_item_id": "work-item-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_retryable_failed_can_move_projection_to_retry_model_lane() -> None:
+    connection = FakeConnection(_row(model_ref="llama-3.3-70b-versatile"))
+
+    result = await PostgresCapacityAdmissionProjectionLifecycleSynchronizer(
+        connection
+    ).sync_projection_lifecycle(
+        CapacityAdmissionProjectionLifecycleUpdate(
+            work_item_id="work-item-1",
+            status="retryable_failed",
+            retry_plan="retry_larger_output_limit_route",
+            model_ref="llama-3.3-70b-versatile",
+            changed_at=_changed_at(),
+        )
+    )
+
+    assert result is not None
+    assert result.lane_key.model_ref == "llama-3.3-70b-versatile"
+    update_call = connection.fetchrow_calls[0]
+    assert update_call.args == (
+        "work-item-1",
+        "retryable_failed",
+        "retry_larger_output_limit_route",
+        _changed_at(),
+        "llama-3.3-70b-versatile",
+    )
 
 
 @pytest.mark.asyncio
@@ -209,5 +241,15 @@ def test_rejects_retry_plan_for_terminal_status() -> None:
             work_item_id="work-item-1",
             status="completed",
             retry_plan="RETRY_SAME_ROUTE",
+            changed_at=_changed_at(),
+        )
+
+
+def test_rejects_model_ref_for_terminal_status() -> None:
+    with pytest.raises(ValueError, match="model_ref"):
+        CapacityAdmissionProjectionLifecycleUpdate(
+            work_item_id="work-item-1",
+            status="completed",
+            model_ref="llama-3.3-70b-versatile",
             changed_at=_changed_at(),
         )

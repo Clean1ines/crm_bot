@@ -65,12 +65,17 @@ class PostgresCapacityAdmissionProjectionLifecycleSynchronizer(
                 SET
                     status = $2,
                     retry_plan = $3,
-                    updated_at = $4
+                    updated_at = $4,
+                    model_ref = COALESCE($5, work_items.model_ref)
                 FROM selected
                 WHERE work_items.work_item_id = selected.work_item_id
                   AND (
                     work_items.status IS DISTINCT FROM $2
                     OR work_items.retry_plan IS DISTINCT FROM $3
+                    OR (
+                        $5::text IS NOT NULL
+                        AND work_items.model_ref IS DISTINCT FROM $5
+                    )
                   )
                 RETURNING
                     work_items.work_item_id,
@@ -97,6 +102,7 @@ class PostgresCapacityAdmissionProjectionLifecycleSynchronizer(
             update.status,
             update.retry_plan,
             update.changed_at,
+            update.model_ref,
         )
         if row is None:
             return None
@@ -130,6 +136,7 @@ class PostgresCapacityAdmissionProjectionLifecycleSynchronizer(
                 "previous_status": _required_status(row, "previous_status"),
                 "status": _required_status(row, "status"),
                 "retry_plan": _optional_str(row, "retry_plan"),
+                "model_ref": _required_str(row, "model_ref"),
             },
             occurred_at=update.changed_at,
         )

@@ -30,6 +30,7 @@ class CapacityAdmissionProjectionLifecycleUpdate:
     status: str
     changed_at: datetime
     retry_plan: str | None = None
+    model_ref: str | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.work_item_id, "work_item_id")
@@ -40,10 +41,14 @@ class CapacityAdmissionProjectionLifecycleUpdate:
             if self.retry_plan is None:
                 raise ValueError("retry_plan is required for retryable_failed")
             _require_non_empty(self.retry_plan, "retry_plan")
+            if self.model_ref is not None:
+                _require_non_empty(self.model_ref, "model_ref")
             return
 
         if self.retry_plan is not None:
             raise ValueError("retry_plan is only allowed for retryable_failed")
+        if self.model_ref is not None:
+            raise ValueError("model_ref is only allowed for retryable_failed")
 
 
 @dataclass(frozen=True, slots=True)

@@ -152,6 +152,10 @@ from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelRouteCatalog,
     default_groq_llm_model_route_catalog,
 )
+from src.interfaces.composition.resolve_retryable_work_item_admission_route import (
+    ResolveRetryableWorkItemAdmissionRoute,
+    ResolveRetryableWorkItemAdmissionRouteCommand,
+)
 from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
     LlmRuntimeSettings,
 )
@@ -690,6 +694,10 @@ async def _sync_capacity_admission_projection_lifecycle(
     if work_item.status is WorkItemStatus.LEASED:
         return
 
+    retry_admission_model_ref = await _retry_admission_model_ref(
+        connection,
+        work_item=work_item,
+    )
     await SyncCapacityAdmissionProjectionLifecycle(
         projection_lifecycle_synchronizer=(
             PostgresCapacityAdmissionProjectionLifecycleSynchronizer(connection)
@@ -701,9 +709,64 @@ async def _sync_capacity_admission_projection_lifecycle(
             retry_plan=(
                 work_item.retry_plan.value if work_item.retry_plan is not None else None
             ),
+            model_ref=retry_admission_model_ref,
             changed_at=changed_at,
         )
     )
+
+
+async def _retry_admission_model_ref(
+    connection: asyncpg.Connection,
+    *,
+    work_item: WorkItem,
+) -> str | None:
+    if (
+        work_item.status is not WorkItemStatus.RETRYABLE_FAILED
+        or work_item.retry_plan is None
+    ):
+        return None
+
+    current_model_ref = await _current_capacity_admission_projection_model_ref(
+        connection,
+        work_item_id=work_item.work_item_id,
+    )
+    if current_model_ref is None:
+        return None
+
+    return (
+        ResolveRetryableWorkItemAdmissionRoute()
+        .execute(
+            ResolveRetryableWorkItemAdmissionRouteCommand(
+                current_model_ref=current_model_ref,
+                retry_plan=work_item.retry_plan,
+                route_catalog=default_groq_llm_model_route_catalog(),
+            )
+        )
+        .model_ref
+    )
+
+
+async def _current_capacity_admission_projection_model_ref(
+    connection: asyncpg.Connection,
+    *,
+    work_item_id: str,
+) -> str | None:
+    row = await connection.fetchrow(
+        """
+        SELECT model_ref
+        FROM capacity_admission_work_items
+        WHERE work_item_id = $1
+        LIMIT 1
+        """,
+        work_item_id,
+    )
+    if row is None:
+        return None
+
+    value = row.get("model_ref")
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("capacity admission projection model_ref must be non-empty")
+    return value
 
 
 def _capacity_admission_projection_writer_for_transaction(
