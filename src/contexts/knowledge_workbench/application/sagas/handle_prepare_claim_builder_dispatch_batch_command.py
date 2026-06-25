@@ -179,17 +179,12 @@ async def _execute_capacity_window_admission_branch(
     workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
     frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None,
 ) -> HandlePrepareClaimBuilderDispatchBatchResult:
-    admission_command = _capacity_window_admission_pass_command(
+    admission_result = await _execute_first_admitted_capacity_window(
         workflow_command=workflow_command,
         workflow_run_id=workflow_run_id,
         occurred_at=occurred_at,
+        capacity_window_admission_pass=capacity_window_admission_pass,
     )
-    admission_result = await capacity_window_admission_pass.execute(admission_command)
-    if not isinstance(admission_result, CapacityWindowAdmissionPassResult):
-        raise TypeError(
-            "capacity_window_admission_pass must return "
-            "CapacityWindowAdmissionPassResult"
-        )
 
     mapping_plan = (
         await ClaimBuilderCapacityAdmissionPhaseMapper().map_admission_result(
@@ -211,6 +206,90 @@ async def _execute_capacity_window_admission_branch(
         appended_event_count=apply_result.appended_event_count,
         appended_next_command_count=apply_result.appended_next_command_count,
         completed_command_id=apply_result.completed_command_id,
+    )
+
+
+async def _execute_first_admitted_capacity_window(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    occurred_at: datetime,
+    capacity_window_admission_pass: CapacityWindowAdmissionPassPort,
+) -> CapacityWindowAdmissionPassResult:
+    skipped_results: list[CapacityWindowAdmissionPassResult] = []
+    for admission_command in _capacity_window_admission_pass_commands(
+        workflow_command=workflow_command,
+        workflow_run_id=workflow_run_id,
+        occurred_at=occurred_at,
+    ):
+        admission_result = await capacity_window_admission_pass.execute(
+            admission_command
+        )
+        if not isinstance(admission_result, CapacityWindowAdmissionPassResult):
+            raise TypeError(
+                "capacity_window_admission_pass must return "
+                "CapacityWindowAdmissionPassResult"
+            )
+        if not admission_result.skipped:
+            return admission_result
+        skipped_results.append(admission_result)
+
+    if skipped_results:
+        return skipped_results[-1]
+    raise ValueError("capacity_window_admission_pass has no capacity windows to try")
+
+
+def _capacity_window_admission_pass_commands(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    occurred_at: datetime,
+) -> tuple[CapacityWindowAdmissionPassCommand, ...]:
+    account_capacities = _capacities_for_capacity_admission(
+        workflow_command.payload,
+    )
+    return tuple(
+        _capacity_window_admission_pass_command_for_capacity(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            occurred_at=occurred_at,
+            account_capacity=account_capacity,
+        )
+        for account_capacity in account_capacities
+    )
+
+
+def _capacity_window_admission_pass_command_for_capacity(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    occurred_at: datetime,
+    account_capacity: LlmProviderAccountCapacity,
+) -> CapacityWindowAdmissionPassCommand:
+    return CapacityWindowAdmissionPassCommand(
+        workflow_run_id=workflow_run_id,
+        phase=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.phase,
+        operation_key=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.operation_key,
+        lane_key=CapacityAdmissionLaneKey(
+            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
+            provider=account_capacity.provider,
+            account_ref=account_capacity.account_ref,
+            model_ref=account_capacity.model_ref,
+        ),
+        budget=CapacityAdmissionWindowBudget(
+            remaining_requests=account_capacity.remaining_minute_requests,
+            remaining_tokens=account_capacity.remaining_minute_tokens,
+            remaining_daily_requests=account_capacity.remaining_daily_requests,
+            remaining_daily_tokens=account_capacity.remaining_daily_tokens,
+        ),
+        worker=WorkerRef("knowledge-workbench-claim-builder-dispatch"),
+        lease_token_prefix=f"claim-builder-dispatch:{workflow_run_id}",
+        lease_expires_at=occurred_at + timedelta(seconds=90),
+        now=occurred_at,
+        max_admitted_items=_payload_positive_int(
+            workflow_command.payload,
+            "scheduled_work_item_count",
+        ),
     )
 
 
@@ -248,6 +327,27 @@ def _capacity_window_admission_pass_command(
             "scheduled_work_item_count",
         ),
     )
+
+
+def _capacities_for_capacity_admission(
+    payload: Mapping[str, object],
+) -> tuple[LlmProviderAccountCapacity, ...]:
+    account_capacities = _account_capacities_from_dispatch_preparation(payload)
+    if not account_capacities:
+        raise ValueError(
+            "capacity_window_admission_pass requires llm_dispatch_preparation "
+            "account_capacities"
+        )
+
+    active_model_ref = _active_model_ref_from_payload(payload)
+    active_model_capacities = tuple(
+        account_capacity
+        for account_capacity in account_capacities
+        if account_capacity.model_ref == active_model_ref
+    )
+    if active_model_capacities:
+        return active_model_capacities
+    return (account_capacities[0],)
 
 
 def _first_capacity_for_capacity_admission(
