@@ -107,3 +107,21 @@ def test_draft_compaction_admission_commands_are_built_for_each_active_model_win
         "openai/gpt-oss-120b"
     }
     assert all(item.max_admitted_items == 2 for item in commands)
+
+
+def test_draft_compaction_retry_plan_opens_fallback_model_window() -> None:
+    payload = _payload_with_account_capacities()
+    payload["retry_plan"] = "retry_daily_fallback_route"
+    command = _workflow_command(payload)
+
+    commands = _capacity_window_admission_pass_commands(
+        workflow_command=command,
+        workflow_run_id="workflow-run-1",
+        occurred_at=command.updated_at,
+    )
+
+    assert len(commands) == 1
+    assert commands[0].lane_key.account_ref is None
+    assert commands[0].lane_key.model_ref == "llama-3.3-70b-versatile"
+    assert commands[0].execution_lane_key.account_ref == "groq_org_2"
+    assert commands[0].execution_lane_key.model_ref == "llama-3.3-70b-versatile"

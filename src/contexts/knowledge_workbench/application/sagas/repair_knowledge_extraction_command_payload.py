@@ -3,24 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from src.contexts.knowledge_workbench.application.sagas.handle_prepare_draft_claim_compaction_dispatch_batch_command import (
-    DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-    DRAFT_CLAIM_COMPACTION_WORKER_REF,
-)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
 )
-
-
-DRAFT_CLAIM_COMPACTION_DISPATCH_PROFILE_ID = "draft_claim_compaction"
-DRAFT_CLAIM_COMPACTION_ESTIMATED_PROMPT_TOKENS = 90_000
-DRAFT_CLAIM_COMPACTION_ESTIMATED_COMPLETION_TOKENS = 4_000
-DRAFT_CLAIM_COMPACTION_PROVIDER = "groq"
-DRAFT_CLAIM_COMPACTION_ACCOUNT_REF = "groq_org_primary"
-DRAFT_CLAIM_COMPACTION_LEASE_TTL_SECONDS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,18 +43,7 @@ class KnowledgeExtractionCommandPayloadRepairPolicy:
             command_type
             is KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH
         ):
-            scheduled_work_item_count = _payload_positive_int(
-                workflow_command.payload,
-                "scheduled_work_item_count",
-            )
-            return _copy_command_with_payload_value(
-                workflow_command=workflow_command,
-                key="llm_dispatch_preparation",
-                value=_draft_claim_compaction_dispatch_preparation_payload(
-                    workflow_run_id=workflow_command.workflow_run_id,
-                    scheduled_work_item_count=scheduled_work_item_count,
-                ),
-            )
+            return workflow_command
 
         return workflow_command
 
@@ -84,50 +61,6 @@ def repair_knowledge_extraction_command_payload(
 
 def _has_dispatch_preparation(payload: Mapping[str, object]) -> bool:
     return payload.get("llm_dispatch_preparation") is not None
-
-
-def _draft_claim_compaction_dispatch_preparation_payload(
-    *,
-    workflow_run_id: str,
-    scheduled_work_item_count: int,
-) -> dict[str, object]:
-    _require_non_empty_text(workflow_run_id, "workflow_run_id")
-    _require_positive_int(scheduled_work_item_count, "scheduled_work_item_count")
-
-    estimated_total_tokens = (
-        DRAFT_CLAIM_COMPACTION_ESTIMATED_PROMPT_TOKENS
-        + DRAFT_CLAIM_COMPACTION_ESTIMATED_COMPLETION_TOKENS
-    )
-    return {
-        "profile": {
-            "profile_id": DRAFT_CLAIM_COMPACTION_DISPATCH_PROFILE_ID,
-            "estimated_prompt_tokens": (DRAFT_CLAIM_COMPACTION_ESTIMATED_PROMPT_TOKENS),
-            "estimated_completion_tokens": (
-                DRAFT_CLAIM_COMPACTION_ESTIMATED_COMPLETION_TOKENS
-            ),
-            "estimated_requests": 1,
-        },
-        "account_capacities": [
-            {
-                "provider": DRAFT_CLAIM_COMPACTION_PROVIDER,
-                "account_ref": DRAFT_CLAIM_COMPACTION_ACCOUNT_REF,
-                "model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-                "remaining_minute_requests": scheduled_work_item_count,
-                "remaining_minute_tokens": (
-                    estimated_total_tokens * scheduled_work_item_count
-                ),
-                "remaining_daily_requests": scheduled_work_item_count,
-                "remaining_daily_tokens": (
-                    estimated_total_tokens * scheduled_work_item_count
-                ),
-            }
-        ],
-        "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-        "requested_items": scheduled_work_item_count,
-        "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-        "lease_token_prefix": f"draft-claim-compaction-dispatch:{workflow_run_id}",
-        "lease_ttl_seconds": DRAFT_CLAIM_COMPACTION_LEASE_TTL_SECONDS,
-    }
 
 
 def _copy_command_with_payload_value(

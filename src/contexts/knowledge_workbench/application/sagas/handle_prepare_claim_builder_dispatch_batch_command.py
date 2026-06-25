@@ -45,6 +45,13 @@ from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_secti
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
 )
+from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparation_strategy import (
+    ResolveLlmDispatchPreparationStrategy,
+    ResolveLlmDispatchPreparationStrategyCommand,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    default_groq_llm_model_route_catalog,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
 )
@@ -407,15 +414,34 @@ def _active_model_ref_from_payload(payload: Mapping[str, object]) -> str:
         "llm_dispatch_preparation",
     )
     if dispatch_preparation is not None:
-        return _payload_text(
+        base_active_model_ref = _payload_text(
             dispatch_preparation,
             "active_model_ref",
             fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
         )
-    return _payload_text(
-        payload,
-        "active_model_ref",
-        fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
+    else:
+        base_active_model_ref = _payload_text(
+            payload,
+            "active_model_ref",
+            fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
+        )
+
+    retry_plan = _retry_plan_from_payload(payload)
+    legacy_strategy = _legacy_dispatch_preparation_strategy_from_payload(payload)
+    if retry_plan is None and legacy_strategy is None:
+        return base_active_model_ref
+
+    return (
+        ResolveLlmDispatchPreparationStrategy()
+        .execute(
+            ResolveLlmDispatchPreparationStrategyCommand(
+                current_active_model_ref=base_active_model_ref,
+                route_catalog=default_groq_llm_model_route_catalog(),
+                retry_plan=retry_plan,
+                strategy=legacy_strategy,
+            )
+        )
+        .active_model_ref
     )
 
 

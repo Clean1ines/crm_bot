@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Protocol
 
+from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
+    WorkItemRetryPlan,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
@@ -35,6 +38,13 @@ from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow
 )
 from src.interfaces.composition.lease_llm_admitted_work_items import (
     LlmAdmittedLeasedWorkItem,
+)
+from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparation_strategy import (
+    ResolveLlmDispatchPreparationStrategy,
+    ResolveLlmDispatchPreparationStrategyCommand,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    default_groq_llm_model_route_catalog,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
@@ -416,12 +426,31 @@ def _first_capacity_for_capacity_admission(
 def _active_model_ref_for_capacity_admission(payload: Mapping[str, object]) -> str:
     llm_dispatch_preparation = payload.get("llm_dispatch_preparation")
     if isinstance(llm_dispatch_preparation, Mapping):
-        return _payload_text(
+        base_active_model_ref = _payload_text(
             llm_dispatch_preparation,
             "active_model_ref",
             fallback=DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
         )
-    return _active_model_ref_from_payload(payload)
+    else:
+        base_active_model_ref = _active_model_ref_from_payload(payload)
+
+    retry_plan = _retry_plan_from_payload(payload)
+    legacy_strategy = _dispatch_preparation_strategy(payload)
+    if retry_plan is None and legacy_strategy is None:
+        return base_active_model_ref
+
+    return (
+        ResolveLlmDispatchPreparationStrategy()
+        .execute(
+            ResolveLlmDispatchPreparationStrategyCommand(
+                current_active_model_ref=base_active_model_ref,
+                route_catalog=default_groq_llm_model_route_catalog(),
+                retry_plan=retry_plan,
+                strategy=legacy_strategy,
+            )
+        )
+        .active_model_ref
+    )
 
 
 def _provider_account_refs_from_payload(
@@ -509,6 +538,24 @@ def _compaction_profile_non_negative_int_with_legacy_fallback(
     if key in payload:
         return _payload_non_negative_int(payload, key)
     return _payload_non_negative_int(payload, legacy_key)
+
+
+def _retry_plan_from_payload(payload: Mapping[str, object]) -> WorkItemRetryPlan | None:
+    for key in (
+        "retry_plan",
+        "selected_retry_plan",
+        "draft_claim_compaction_retry_plan",
+    ):
+        value = payload.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"workflow command payload {key} must be non-empty text")
+        try:
+            return WorkItemRetryPlan(value)
+        except ValueError as exc:
+            raise ValueError(f"workflow command payload {key} is unknown") from exc
+    return None
 
 
 def _dispatch_preparation_strategy(
