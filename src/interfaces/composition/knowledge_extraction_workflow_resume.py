@@ -15,6 +15,9 @@ from src.contexts.capacity_admission_queue.application.capacity_admission_lane_t
     CapacityAdmissionLaneTargetRegistry,
     CapacityAdmissionLaneTargetResolverPort,
 )
+from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
+    CapacityWindowAdmissionPass,
+)
 from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
     CapacityAdmissionProjectionWriterPort,
 )
@@ -22,11 +25,17 @@ from src.contexts.capacity_admission_queue.application.sync_capacity_admission_p
     CapacityAdmissionProjectionLifecycleUpdate,
     SyncCapacityAdmissionProjectionLifecycle,
 )
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_projection_admitter import (
+    PostgresCapacityAdmissionProjectionAdmitter,
+)
 from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_projection_lifecycle_synchronizer import (
     PostgresCapacityAdmissionProjectionLifecycleSynchronizer,
 )
 from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_projection_writer import (
     PostgresCapacityAdmissionProjectionWriter,
+)
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_work_item_selector import (
+    PostgresCapacityAdmissionWorkItemSelector,
 )
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
@@ -49,11 +58,17 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_status import
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_dispatch_read_repository import (
     PostgresReadWorkItemAttemptDispatchRepository,
 )
+from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_dispatch_repository import (
+    PostgresWorkItemAttemptDispatchRepository,
+)
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_outcome_repository import (
     PostgresWorkItemAttemptOutcomeRepository,
 )
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_progress_read_repository import (
     PostgresWorkItemProgressReadRepository,
+)
+from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
+    PostgresWorkItemLeaseRepository,
 )
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
     PostgresWorkItemSchedulingRepository,
@@ -144,6 +159,7 @@ from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port impor
     LlmDispatchExecutorPort,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelRouteCatalog,
     default_groq_llm_model_route_catalog,
 )
 from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
@@ -168,6 +184,9 @@ from src.contexts.knowledge_workbench.observability.application.projectors.proje
 from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
     PostgresFrontendWorkflowEventRepository,
 )
+from src.interfaces.composition.capacity_window_admission_execution_boundary import (
+    StartAttemptCapacityWindowAdmissionExecutionBoundary,
+)
 from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttempt,
     ExecutePreparedLlmDispatchAttemptCommand,
@@ -176,6 +195,9 @@ from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     AsyncPool,
     PrepareLlmDispatchBatch,
+)
+from src.interfaces.composition.capacity_window_admission_reservation import (
+    ReserveLlmRouteCapacityForAdmission,
 )
 
 
@@ -296,6 +318,7 @@ class RunKnowledgeExtractionWorkflowResume:
         capacity_admission_lane_target_resolver: (
             CapacityAdmissionLaneTargetResolverPort | None
         ) = None,
+        capacity_window_admission_route_catalog: LlmModelRouteCatalog | None = None,
     ) -> None:
         self._pool = cast(_AsyncResumePoolLike, pool)
         self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
@@ -339,6 +362,9 @@ class RunKnowledgeExtractionWorkflowResume:
         self._capacity_admission_lane_target = capacity_admission_lane_target
         self._capacity_admission_lane_target_resolver = (
             capacity_admission_lane_target_resolver
+        )
+        self._capacity_window_admission_route_catalog = (
+            capacity_window_admission_route_catalog
         )
 
     async def execute(
@@ -475,11 +501,18 @@ class RunKnowledgeExtractionWorkflowResume:
                 cast(asyncpg.Connection, connection),
             ),
         )
+        asyncpg_connection = cast(asyncpg.Connection, connection)
         capacity_admission_projection_writer = (
             _capacity_admission_projection_writer_for_transaction(
-                connection=cast(asyncpg.Connection, connection),
+                connection=asyncpg_connection,
                 configured_writer=self._capacity_admission_projection_writer,
                 lane_target=self._capacity_admission_lane_target,
+            )
+        )
+        capacity_window_admission_pass = (
+            _capacity_window_admission_pass_for_transaction(
+                connection=asyncpg_connection,
+                route_catalog=self._capacity_window_admission_route_catalog,
             )
         )
 
@@ -511,6 +544,7 @@ class RunKnowledgeExtractionWorkflowResume:
                 capacity_admission_lane_target=self._capacity_admission_lane_target,
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
+                capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt
                 ),
@@ -699,6 +733,69 @@ def _capacity_admission_projection_writer_for_transaction(
     return PostgresCapacityAdmissionProjectionWriter(connection)
 
 
+def _capacity_window_admission_pass_for_transaction(
+    *,
+    connection: asyncpg.Connection,
+    route_catalog: LlmModelRouteCatalog | None,
+) -> CapacityWindowAdmissionPass | None:
+    if route_catalog is None:
+        return None
+
+    return CapacityWindowAdmissionPass(
+        selector=PostgresCapacityAdmissionWorkItemSelector(connection),
+        execution_lease_repository=PostgresWorkItemLeaseRepository(connection),
+        projection_admitter=PostgresCapacityAdmissionProjectionAdmitter(connection),
+        capacity_reservation=ReserveLlmRouteCapacityForAdmission(
+            reservation_repository=PostgresLlmRouteCapacityReservationRepository(
+                connection,
+            ),
+        ),
+        execution_boundary=StartAttemptCapacityWindowAdmissionExecutionBoundary(
+            attempt_dispatch_repository=PostgresWorkItemAttemptDispatchRepository(
+                connection,
+            ),
+            route_catalog=route_catalog,
+        ),
+        active_lease_inspector=_PostgresCapacityWindowAdmissionActiveLeaseInspector(
+            connection,
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _PostgresCapacityWindowAdmissionActiveLeaseInspector:
+    connection: asyncpg.Connection
+
+    async def has_active_leased_work(
+        self,
+        *,
+        lane_key,
+        now: datetime,
+    ) -> bool:
+        row = await self.connection.fetchrow(
+            """
+            SELECT 1
+            FROM capacity_admission_work_items cai
+            JOIN execution_work_items wi
+              ON wi.work_item_id = cai.work_item_id
+            WHERE cai.work_kind = $1
+              AND cai.provider = $2
+              AND cai.account_ref IS NOT DISTINCT FROM $3
+              AND cai.model_ref = $4
+              AND cai.status = 'leased'
+              AND wi.status = 'leased'
+              AND wi.lease_expires_at > $5
+            LIMIT 1
+            """,
+            lane_key.work_kind,
+            lane_key.provider,
+            lane_key.account_ref,
+            lane_key.model_ref,
+            now,
+        )
+        return row is not None
+
+
 def make_knowledge_extraction_workflow_resume(
     *,
     pool: AsyncPool,
@@ -768,6 +865,7 @@ def make_knowledge_extraction_workflow_resume(
                 llm_executor=llm_executor,
             )
         ),
+        capacity_window_admission_route_catalog=route_catalog,
         claim_builder_output_validation_policy=ClaimBuilderOutputValidationPolicy(),
         draft_claim_compaction_output_validator=(
             draft_claim_compaction_output_validator
