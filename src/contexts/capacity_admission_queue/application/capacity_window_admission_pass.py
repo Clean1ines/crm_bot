@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -10,6 +11,7 @@ from src.contexts.capacity_admission_queue.application.admit_capacity_admission_
 )
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_result import (
     CapacityAdmissionAdmittedItemSummary,
+    CapacityAdmissionDispatchContextSummary,
     CapacityAdmissionCapacityReservationSummary,
     CapacityAdmissionFrontendEventSummary,
     CapacityAdmissionLaneSummary,
@@ -303,7 +305,12 @@ class CapacityWindowAdmissionPass:
                 )
             )
 
-            admitted_items.append(_admitted_item_summary(selected_work_item))
+            admitted_items.append(
+                _admitted_item_summary(
+                    selected_work_item,
+                    schedule_payload=lease_result.execution_lease.schedule_payload,
+                )
+            )
             projection_leases.append(
                 _projection_lease_summary(lease_result.projection_lease)
             )
@@ -424,6 +431,8 @@ class CapacityWindowAdmissionPass:
 
 def _admitted_item_summary(
     selected_work_item: CapacityAdmissionSelectableWorkItem,
+    *,
+    schedule_payload: Mapping[str, object],
 ) -> CapacityAdmissionAdmittedItemSummary:
     estimated_input_tokens = (
         selected_work_item.estimated_input_tokens
@@ -449,6 +458,7 @@ def _admitted_item_summary(
         estimated_output_tokens=estimated_output_tokens,
         effective_output_cap_tokens=effective_output_cap_tokens,
         reserved_total_tokens=selected_work_item.reserved_total_tokens,
+        dispatch_context=_dispatch_context_from_schedule_payload(schedule_payload),
     )
 
 
@@ -462,6 +472,98 @@ def _projection_lease_summary(
         status=projection_lease.status,
         event_id=projection_lease.event_id,
     )
+
+
+def _dispatch_context_from_schedule_payload(
+    schedule_payload: Mapping[str, object],
+) -> CapacityAdmissionDispatchContextSummary | None:
+    source_ref = _optional_text(schedule_payload, "source_document_ref")
+    source_unit_ref = _optional_text(schedule_payload, "source_unit_ref")
+    group_ref = _optional_text(schedule_payload, "group_ref")
+    batch_ref = _optional_text(schedule_payload, "batch_ref")
+    expected_output_kind = _optional_text(schedule_payload, "expected_output_kind")
+    round_index = _optional_non_negative_int(schedule_payload, "round_index")
+
+    input_claim_refs = _text_tuple_from_payload(
+        schedule_payload,
+        "source_claim_refs",
+    )
+    input_node_refs = _text_tuple_from_payload(
+        schedule_payload,
+        "source_node_refs",
+    )
+    if not input_node_refs:
+        input_node_refs = tuple(
+            value
+            for value in (
+                _optional_text(schedule_payload, "left_node_ref"),
+                _optional_text(schedule_payload, "right_node_ref"),
+            )
+            if value is not None
+        )
+
+    if (
+        source_ref is None
+        and source_unit_ref is None
+        and group_ref is None
+        and batch_ref is None
+        and expected_output_kind is None
+        and round_index is None
+        and not input_claim_refs
+        and not input_node_refs
+    ):
+        return None
+
+    return CapacityAdmissionDispatchContextSummary(
+        source_ref=source_ref,
+        source_unit_ref=source_unit_ref,
+        group_ref=group_ref,
+        batch_ref=batch_ref,
+        round_index=round_index,
+        expected_output_kind=expected_output_kind,
+        input_claim_refs=input_claim_refs,
+        input_node_refs=input_node_refs,
+    )
+
+
+def _optional_text(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"schedule_payload {key} must be non-empty text")
+    return value
+
+
+def _optional_non_negative_int(
+    payload: Mapping[str, object],
+    key: str,
+) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int):
+        raise TypeError(f"schedule_payload {key} must be int")
+    if value < 0:
+        raise ValueError(f"schedule_payload {key} must be non-negative")
+    return value
+
+
+def _text_tuple_from_payload(
+    payload: Mapping[str, object],
+    key: str,
+) -> tuple[str, ...]:
+    value = payload.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, tuple | list):
+        raise TypeError(f"schedule_payload {key} must be sequence")
+    items: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"schedule_payload {key} must contain non-empty text")
+        items.append(item)
+    return tuple(items)
 
 
 def _lane_summary(lane_key: CapacityAdmissionLaneKey) -> CapacityAdmissionLaneSummary:
