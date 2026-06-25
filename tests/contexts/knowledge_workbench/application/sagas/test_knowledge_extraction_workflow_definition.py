@@ -118,6 +118,7 @@ def test_ingest_source_document_has_source_document_persisted_intermediate_event
 
     assert operation.intermediate_event_types == (
         KnowledgeExtractionCanonicalEventType.SOURCE_DOCUMENT_PERSISTED,
+        KnowledgeExtractionCanonicalEventType.SOURCE_UNIT_CREATED,
     )
     assert (
         operation.success_event_type
@@ -160,6 +161,8 @@ def test_execute_claim_builder_section_has_started_and_capacity_intermediate_eve
     assert operation.intermediate_event_types == (
         KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_STARTED,
         KnowledgeExtractionCanonicalEventType.LLM_PROVIDER_CAPACITY_OBSERVED,
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_EXHAUSTED,
+        KnowledgeExtractionCanonicalEventType.CAPACITY_WINDOW_SCHEDULED_WAKEUP,
     )
 
 
