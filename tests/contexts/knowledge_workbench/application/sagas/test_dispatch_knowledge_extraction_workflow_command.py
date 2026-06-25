@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from uuid import UUID
 
 import pytest
 
@@ -11,6 +12,23 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
 )
 from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
     StartedLlmAdmittedAttempt,
+)
+from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
+    CapacityWindowAdmissionPassCommand,
+)
+from src.contexts.capacity_admission_queue.application.capacity_window_admission_result import (
+    CapacityAdmissionAdmittedItemSummary,
+    CapacityAdmissionDispatchContextSummary,
+    CapacityAdmissionFrontendEventSummary,
+    CapacityAdmissionLaneSummary,
+    CapacityAdmissionProjectionLeaseSummary,
+    CapacityAdmissionStartedAttemptSummary,
+    CapacityWindowAdmissionLogEvent,
+    CapacityWindowAdmissionPassResult,
+)
+from src.contexts.knowledge_workbench.application.sagas.capacity_admission_phase_mapping import (
+    CLAIM_BUILDER_ADMISSION_PHASE_PROFILE,
+    DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE,
 )
 from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extraction_workflow_command import (
     COMMAND_HANDLER_NOT_IMPLEMENTED,
@@ -1360,3 +1378,206 @@ async def test_cluster_draft_claims_passes_frontend_projection_writer(
     assert captured["frontend_event_projection_writer"] is projection_writer
     assert result.dispatched is True
     assert result.blocked_reason is None
+
+
+@dataclass(slots=True)
+class FakeCapacityWindowAdmissionPass:
+    result: CapacityWindowAdmissionPassResult
+    calls: list[CapacityWindowAdmissionPassCommand] = field(default_factory=list)
+
+    async def execute(self, command: CapacityWindowAdmissionPassCommand) -> object:
+        self.calls.append(command)
+        return self.result
+
+
+def _claim_builder_admission_result() -> CapacityWindowAdmissionPassResult:
+    lane = CapacityAdmissionLaneSummary(
+        work_kind=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.work_kind,
+        provider="groq",
+        account_ref="groq-account-1",
+        model_ref="qwen/qwen3-32b",
+    )
+    projection_event_id = UUID("00000000-0000-0000-0000-000000000501")
+    return CapacityWindowAdmissionPassResult(
+        workflow_run_id=_workflow_run_id(),
+        phase=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.phase,
+        operation_key=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.operation_key,
+        work_kind=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.work_kind,
+        lane=lane,
+        admitted_items=(
+            CapacityAdmissionAdmittedItemSummary(
+                work_item_id="work-1",
+                lane=lane,
+                selection_kind="fresh",
+                estimated_input_tokens=100,
+                estimated_output_tokens=10,
+                effective_output_cap_tokens=50,
+                reserved_total_tokens=150,
+                dispatch_context=CapacityAdmissionDispatchContextSummary(
+                    source_ref=_document_ref().value,
+                    source_unit_ref="source-unit:project-1:abc:1",
+                ),
+            ),
+        ),
+        projection_leases=(
+            CapacityAdmissionProjectionLeaseSummary(
+                work_item_id="work-1",
+                lane=lane,
+                previous_status="ready",
+                status="leased",
+                event_id=projection_event_id,
+            ),
+        ),
+        started_attempts=(
+            CapacityAdmissionStartedAttemptSummary(
+                work_item_id="work-1",
+                attempt_id="attempt-1",
+                attempt_number=1,
+            ),
+        ),
+        frontend_event_summary=CapacityAdmissionFrontendEventSummary(
+            event_kind="capacity_admission_pass_completed",
+            workflow_run_id=_workflow_run_id(),
+            phase=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.phase,
+            operation_key=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.operation_key,
+            work_kind=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.work_kind,
+            lane=lane,
+            admitted_count=1,
+            started_attempt_count=1,
+            work_item_ids=("work-1",),
+            attempt_ids=("attempt-1",),
+            projection_event_ids=(projection_event_id,),
+            occurred_at=_now(),
+        ),
+        log_event=CapacityWindowAdmissionLogEvent.PASS_COMPLETED,
+    )
+
+
+def _draft_claim_compaction_admission_result() -> CapacityWindowAdmissionPassResult:
+    lane = CapacityAdmissionLaneSummary(
+        work_kind=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.work_kind,
+        provider="groq",
+        account_ref="groq-account-1",
+        model_ref="openai/gpt-oss-120b",
+    )
+    projection_event_id = UUID("00000000-0000-0000-0000-000000000502")
+    dispatch_context = CapacityAdmissionDispatchContextSummary(
+        group_ref="group-1",
+        batch_ref="batch-1",
+        round_index=0,
+        expected_output_kind="compacted_claims",
+        input_claim_refs=("claim-a", "claim-b"),
+        input_node_refs=("raw:workflow-1:group-1:claim-a",),
+    )
+    return CapacityWindowAdmissionPassResult(
+        workflow_run_id=_workflow_run_id(),
+        phase=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.phase,
+        operation_key=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.operation_key,
+        work_kind=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.work_kind,
+        lane=lane,
+        admitted_items=(
+            CapacityAdmissionAdmittedItemSummary(
+                work_item_id="work-1",
+                lane=lane,
+                selection_kind="fresh",
+                estimated_input_tokens=100,
+                estimated_output_tokens=10,
+                effective_output_cap_tokens=50,
+                reserved_total_tokens=150,
+                dispatch_context=dispatch_context,
+            ),
+        ),
+        projection_leases=(
+            CapacityAdmissionProjectionLeaseSummary(
+                work_item_id="work-1",
+                lane=lane,
+                previous_status="ready",
+                status="leased",
+                event_id=projection_event_id,
+            ),
+        ),
+        started_attempts=(
+            CapacityAdmissionStartedAttemptSummary(
+                work_item_id="work-1",
+                attempt_id="attempt-1",
+                attempt_number=1,
+            ),
+        ),
+        frontend_event_summary=CapacityAdmissionFrontendEventSummary(
+            event_kind="capacity_admission_pass_completed",
+            workflow_run_id=_workflow_run_id(),
+            phase=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.phase,
+            operation_key=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.operation_key,
+            work_kind=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.work_kind,
+            lane=lane,
+            admitted_count=1,
+            started_attempt_count=1,
+            work_item_ids=("work-1",),
+            attempt_ids=("attempt-1",),
+            projection_event_ids=(projection_event_id,),
+            dispatch_contexts=(dispatch_context,),
+            occurred_at=_now(),
+        ),
+        log_event=CapacityWindowAdmissionLogEvent.PASS_COMPLETED,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_prepare_claim_builder_uses_capacity_admission_when_provided() -> (
+    None
+):
+    admission_pass = FakeCapacityWindowAdmissionPass(
+        result=_claim_builder_admission_result()
+    )
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH,
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=workflow_unit_of_work,
+        capacity_window_admission_pass=admission_pass,
+    )
+
+    assert result.dispatched is True
+    assert result.blocked_reason is None
+    assert len(admission_pass.calls) == 1
+    assert (
+        workflow_unit_of_work.command_log.pending_commands[0].command_type
+        == KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_prepare_draft_claim_compaction_uses_capacity_admission_when_provided() -> (
+    None
+):
+    admission_pass = FakeCapacityWindowAdmissionPass(
+        result=_draft_claim_compaction_admission_result()
+    )
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+                payload=_draft_claim_compaction_dispatch_payload(),
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=workflow_unit_of_work,
+        capacity_window_admission_pass=admission_pass,
+    )
+
+    assert result.dispatched is True
+    assert result.blocked_reason is None
+    assert len(admission_pass.calls) == 1
+    assert (
+        workflow_unit_of_work.command_log.pending_commands[0].command_type
+        == KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value
+    )

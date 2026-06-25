@@ -81,6 +81,7 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_o
     DraftClaimObservationReadRepositoryPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    CapacityWindowAdmissionPassPort,
     PrepareLlmDispatchBatchPort,
 )
 from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
@@ -153,6 +154,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
+        capacity_window_admission_pass: CapacityWindowAdmissionPassPort | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
         ) = None,
@@ -258,6 +260,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 knowledge_unit_of_work=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
+                capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
                     execute_prepared_llm_dispatch_attempt
                 ),
