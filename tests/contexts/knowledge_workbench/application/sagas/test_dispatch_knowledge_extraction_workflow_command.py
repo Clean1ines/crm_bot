@@ -7,12 +7,6 @@ from uuid import UUID
 import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
-from src.interfaces.composition.prepare_llm_dispatch_batch import (
-    PrepareLlmDispatchBatchCommand,
-)
-from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
-    StartedLlmAdmittedAttempt,
-)
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
     CapacityWindowAdmissionPassCommand,
 )
@@ -432,166 +426,6 @@ class FakeWorkflowRuntimeUnitOfWork:
 
 
 @pytest.mark.asyncio
-async def test_dispatches_schedule_claim_builder_section_work_to_existing_handler() -> (
-    None
-):
-    source_repository = FakeSourceManagementRepository()
-    scheduling_repository = FakeWorkItemSchedulingRepository()
-    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
-
-    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
-        DispatchKnowledgeExtractionWorkflowCommand(
-            workflow_command=_workflow_command(
-                KnowledgeExtractionCanonicalCommandType.SCHEDULE_CLAIM_BUILDER_SECTION_WORK
-            )
-        ),
-        source_unit_repository=source_repository,
-        knowledge_unit_of_work=scheduling_repository,
-        workflow_unit_of_work=workflow_unit_of_work,
-    )
-
-    operation = operation_by_command_type(
-        KnowledgeExtractionCanonicalCommandType.SCHEDULE_CLAIM_BUILDER_SECTION_WORK
-    )
-    assert result.dispatched is True
-    assert result.operation_key == operation.operation_key
-    assert result.phase == operation.phase.value
-    assert result.handler_name == "HandleScheduleClaimBuilderSectionWorkCommandHandler"
-    assert scheduling_repository.saved_count == 1
-
-
-@dataclass(slots=True)
-class FakeAttemptResult:
-    started_attempts: tuple[StartedLlmAdmittedAttempt, ...]
-
-
-@dataclass(slots=True)
-class FakeAllocation:
-    provider: str = "groq"
-    account_ref: str = "groq_org_primary"
-    model_ref: str = "qwen/qwen3-32b"
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "provider": self.provider,
-            "account_ref": self.account_ref,
-            "model_ref": self.model_ref,
-        }
-
-
-@dataclass(slots=True)
-class FakeLeasedItem:
-    schedule_payload: dict[str, object]
-    allocation: FakeAllocation
-    selection_kind: str = "fresh"
-
-    def admitted_schedule_payload(self) -> dict[str, object]:
-        return dict(self.schedule_payload)
-
-
-@dataclass(slots=True)
-class FakeLeaseResult:
-    leased: tuple[FakeLeasedItem, ...]
-
-
-@dataclass(slots=True)
-class FakePrepareResult:
-    lease_result: FakeLeaseResult
-    attempt_result: FakeAttemptResult
-    capacity_retry_at: datetime | None = None
-    input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
-    input_size_preflight_reason: str = (
-        "estimated prompt tokens fit active model input limit"
-    )
-    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
-    source_split_required: bool = False
-    affected_work_item_refs: tuple[str, ...] = ()
-    source_unit_refs: tuple[str, ...] = ()
-
-
-@dataclass(slots=True)
-class FakePrepareLlmDispatchBatch:
-    calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
-    capacity_retry_at: datetime | None = None
-
-    async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
-        self.calls.append(command)
-        model_ref = command.active_model_ref or "qwen/qwen3-32b"
-        allocation = FakeAllocation(model_ref=model_ref)
-        schedule_payload: dict[str, object] = {
-            "workflow_run_id": _workflow_run_id(),
-            "source_document_ref": _document_ref().value,
-            "source_unit_ref": f"{_document_ref().value}.unit.0",
-            "group_ref": "group-1",
-            "batch_ref": "batch-1",
-            "round_index": 0,
-            "expected_output_kind": "compacted_claims",
-            "source_claim_refs": ["claim-a", "claim-b"],
-            "left_node_ref": "raw:workflow-1:group-1:claim-a",
-            "right_node_ref": "raw:workflow-1:group-1:claim-b",
-        }
-        return FakePrepareResult(
-            lease_result=FakeLeaseResult(
-                leased=(
-                    FakeLeasedItem(
-                        schedule_payload=schedule_payload,
-                        allocation=allocation,
-                    ),
-                ),
-            ),
-            capacity_retry_at=self.capacity_retry_at,
-            attempt_result=FakeAttemptResult(
-                started_attempts=(
-                    StartedLlmAdmittedAttempt(
-                        attempt_id="work-1:attempt:1",
-                        work_item_id="work-1",
-                        attempt_number=1,
-                        dispatch_payload={
-                            "work_item_id": "work-1",
-                            "schedule_payload": schedule_payload,
-                            "llm_allocation": allocation.to_payload(),
-                        },
-                    ),
-                ),
-            ),
-        )
-
-
-@pytest.mark.asyncio
-async def test_dispatches_prepare_claim_builder_dispatch_batch_to_existing_handler() -> (
-    None
-):
-    prepare = FakePrepareLlmDispatchBatch()
-    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
-
-    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
-        DispatchKnowledgeExtractionWorkflowCommand(
-            workflow_command=_workflow_command(
-                KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
-            )
-        ),
-        source_unit_repository=FakeSourceManagementRepository(),
-        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
-        workflow_unit_of_work=workflow_unit_of_work,
-        prepare_llm_dispatch_batch=prepare,
-    )
-
-    operation = operation_by_command_type(
-        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
-    )
-    assert result.dispatched is True
-    assert result.blocked_reason is None
-    assert result.operation_key == operation.operation_key
-    assert result.phase == operation.phase.value
-    assert result.handler_name == "HandlePrepareClaimBuilderDispatchBatchCommandHandler"
-    assert len(prepare.calls) == 1
-    assert tuple(
-        command.command_type
-        for command in workflow_unit_of_work.command_log.pending_commands
-    ) == (KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value,)
-
-
-@pytest.mark.asyncio
 async def test_known_unimplemented_execute_claim_builder_section_returns_blocked() -> (
     None
 ):
@@ -809,6 +643,21 @@ async def test_apply_draft_claim_compaction_result_requires_raw_claim_read_repos
     assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
 
 
+@dataclass(slots=True)
+class FakeDraftClaimCompactionWorkItemCompletion:
+    completed_work_item_ids: list[str] = field(default_factory=list)
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: object,
+    ) -> object:
+        del lease_token
+        self.completed_work_item_ids.append(work_item_id)
+        return object()
+
+
 @pytest.mark.asyncio
 async def test_apply_draft_claim_compaction_result_dispatches_when_dependencies_exist() -> (
     None
@@ -978,36 +827,6 @@ async def test_prepare_draft_claim_compaction_dispatch_batch_requires_prepare_de
     assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
 
 
-@pytest.mark.asyncio
-async def test_prepare_draft_claim_compaction_dispatch_batch_dispatches_when_dependency_exists() -> (
-    None
-):
-    prepare = FakePrepareLlmDispatchBatch()
-    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
-        DispatchKnowledgeExtractionWorkflowCommand(
-            workflow_command=_workflow_command(
-                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
-                payload=_draft_claim_compaction_dispatch_payload(),
-            )
-        ),
-        source_unit_repository=FakeSourceManagementRepository(),
-        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
-        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
-        prepare_llm_dispatch_batch=prepare,
-    )
-
-    assert result.dispatched is True
-    assert (
-        result.handler_name
-        == "HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler"
-    )
-    assert len(prepare.calls) == 1
-    assert (
-        prepare.calls[0].work_kind.value == "knowledge_workbench.draft_claim_compaction"
-    )
-    assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
-
-
 def _execute_draft_claim_compaction_payload() -> dict[str, object]:
     return {
         "workflow_run_id": _workflow_run_id(),
@@ -1027,7 +846,7 @@ def _execute_draft_claim_compaction_payload() -> dict[str, object]:
 class FakeExecutePreparedLlmDispatchAttempt:
     calls: int = 0
 
-    async def execute(self, command) -> object:
+    async def execute(self, command: object) -> object:
         del command
         self.calls += 1
         raise RuntimeError("fake execute should not be reached in wiring block tests")
@@ -1037,23 +856,8 @@ class FakeExecutePreparedLlmDispatchAttempt:
 class FakeCapacityObservationRepository:
     observations: list[object] = field(default_factory=list)
 
-    async def record_observation(self, observation) -> None:
+    async def record_observation(self, observation: object) -> None:
         self.observations.append(observation)
-
-
-@dataclass(slots=True)
-class FakeDraftClaimCompactionWorkItemCompletion:
-    completed_work_item_ids: list[str] = field(default_factory=list)
-
-    async def complete_work_item_after_domain_apply(
-        self,
-        *,
-        work_item_id: str,
-        lease_token: object,
-    ) -> object:
-        del lease_token
-        self.completed_work_item_ids.append(work_item_id)
-        return object()
 
 
 async def _dispatch_execute_draft_claim_compaction(
@@ -1061,7 +865,7 @@ async def _dispatch_execute_draft_claim_compaction(
     execute_dependency: FakeExecutePreparedLlmDispatchAttempt | None,
     capacity_repository: FakeCapacityObservationRepository | None,
     validator: DraftClaimCompactionOutputValidator | None,
-):
+) -> object:
     return await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
         DispatchKnowledgeExtractionWorkflowCommand(
             workflow_command=_workflow_command(
@@ -1154,72 +958,6 @@ async def test_curation_commands_block_without_required_dependencies(
 
     assert result.dispatched is False
     assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
-
-
-@pytest.mark.asyncio
-async def test_dispatch_repairs_claim_builder_prepare_command_without_dispatch_preparation() -> (
-    None
-):
-    prepare = FakePrepareLlmDispatchBatch()
-    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
-
-    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
-        DispatchKnowledgeExtractionWorkflowCommand(
-            workflow_command=_workflow_command(
-                KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH,
-                payload={
-                    "workflow_run_id": _workflow_run_id(),
-                    "source_document_ref": _document_ref().value,
-                    "scheduled_work_item_count": 2,
-                },
-            )
-        ),
-        source_unit_repository=FakeSourceManagementRepository(),
-        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
-        workflow_unit_of_work=workflow_unit_of_work,
-        prepare_llm_dispatch_batch=prepare,
-    )
-
-    assert result.dispatched is True
-    assert result.blocked_reason is None
-    assert len(prepare.calls) == 1
-    assert prepare.calls[0].active_model_ref == "qwen/qwen3-32b"
-    assert prepare.calls[0].requested_items == 2
-    assert prepare.calls[0].worker.value == (
-        "knowledge-workbench-claim-builder-dispatch"
-    )
-
-
-@pytest.mark.asyncio
-async def test_dispatch_repairs_compaction_prepare_command_without_dispatch_preparation() -> (
-    None
-):
-    prepare = FakePrepareLlmDispatchBatch()
-
-    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
-        DispatchKnowledgeExtractionWorkflowCommand(
-            workflow_command=_workflow_command(
-                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
-                payload={
-                    "workflow_run_id": _workflow_run_id(),
-                    "scheduled_work_item_count": 2,
-                },
-            )
-        ),
-        source_unit_repository=FakeSourceManagementRepository(),
-        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
-        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
-        prepare_llm_dispatch_batch=prepare,
-    )
-
-    assert result.dispatched is True
-    assert result.blocked_reason is None
-    assert len(prepare.calls) == 1
-    assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
-    assert prepare.calls[0].requested_items == 2
-    assert prepare.calls[0].worker.value == (
-        "knowledge-workbench-draft-claim-compaction-dispatch"
-    )
 
 
 @pytest.mark.asyncio

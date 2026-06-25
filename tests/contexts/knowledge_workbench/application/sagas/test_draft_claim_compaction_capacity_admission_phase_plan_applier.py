@@ -385,28 +385,3 @@ async def test_applies_compaction_capacity_waiting_without_execute_commands() ->
     assert workflow_unit_of_work.outbox.events[0].payload["skipped_reason"] == (
         "capacity_exhausted"
     )
-
-
-def test_applier_source_does_not_import_old_prepare_or_capacity_selection() -> None:
-    import inspect
-
-    from src.contexts.knowledge_workbench.application.sagas import (
-        draft_claim_compaction_capacity_admission_phase_plan_applier,
-    )
-
-    source = inspect.getsource(
-        draft_claim_compaction_capacity_admission_phase_plan_applier
-    )
-
-    forbidden_markers = (
-        "PrepareLlmDispatchBatch",
-        "prepare_llm_dispatch_batch",
-        "SelectCapacityAdmissionWorkItem",
-        "LeaseSelectedCapacityAdmissionWorkItem",
-        "ReserveLlmRouteCapacityForAdmission",
-        "Postgres",
-        "peek_due_work_items",
-        "DueWorkItemRecord",
-    )
-    for marker in forbidden_markers:
-        assert marker not in source

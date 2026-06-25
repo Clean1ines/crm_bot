@@ -11,9 +11,6 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.knowledge_workbench.application.sagas.append_capacity_window_prepare_wakeup import (
     append_capacity_window_prepare_wakeup,
 )
-from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
-    _prepare_llm_dispatch_batch_command,
-)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
 )
@@ -159,35 +156,3 @@ async def test_capacity_observation_appends_single_account_prepare_wakeup() -> N
     dispatch_preparation = command.payload["llm_dispatch_preparation"]
     assert isinstance(dispatch_preparation, dict)
     assert "account_capacities" not in dispatch_preparation
-
-
-def test_claim_builder_prepare_command_uses_single_capacity_window_account() -> None:
-    workflow_command = _source_command(
-        command_type=KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH,
-        payload={
-            "workflow_run_id": "workflow-1",
-            "source_document_ref": "doc-1",
-            "scheduled_work_item_count": 12,
-            "capacity_window_provider_account_refs": ["groq_org_2"],
-            "active_model_ref": "qwen/qwen3-32b",
-            "llm_dispatch_preparation": {
-                "active_model_ref": "qwen/qwen3-32b",
-                "profile": {
-                    "profile_id": "claim-builder",
-                    "estimated_prompt_tokens": 1000,
-                    "estimated_completion_tokens": 2000,
-                    "estimated_requests": 1,
-                },
-            },
-        },
-    )
-
-    command = _prepare_llm_dispatch_batch_command(
-        workflow_command=workflow_command,
-        workflow_run_id="workflow-1",
-        occurred_at=_now(),
-    )
-
-    assert command.provider_account_refs == ("groq_org_2",)
-    assert command.requested_items == 12
-    assert command.active_model_ref == "qwen/qwen3-32b"

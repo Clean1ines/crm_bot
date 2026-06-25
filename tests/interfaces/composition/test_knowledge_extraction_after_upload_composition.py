@@ -17,10 +17,9 @@ from src.interfaces.composition import (
 from src.interfaces.composition.knowledge_extraction_after_upload_composition import (
     make_knowledge_extraction_workflow_after_upload,
 )
-from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
-    RunKnowledgeExtractionWorkflowAfterUpload,
+from src.interfaces.composition.knowledge_extraction_after_upload_composition import (
+    AsyncPool,
 )
-from src.interfaces.composition.prepare_llm_dispatch_batch import AsyncPool
 
 
 class FakeLlmExecutor(LlmDispatchExecutorPort):
@@ -48,30 +47,6 @@ def _project_repo() -> Mapping[str, object]:
     return {}
 
 
-def test_factory_creates_after_upload_runner_without_llm_executor() -> None:
-    runner = make_knowledge_extraction_workflow_after_upload(
-        pool=_pool(),
-        project_repo=_project_repo(),
-        user_repo=_user_repo(),
-    )
-
-    assert isinstance(runner, RunKnowledgeExtractionWorkflowAfterUpload)
-    assert runner._prepare_llm_dispatch_batch is None
-    assert runner._execute_prepared_llm_dispatch_attempt is None
-    assert runner._capacity_observation_repository is None
-
-
-def test_factory_wires_prepare_llm_dispatch_batch_when_executor_is_provided() -> None:
-    runner = make_knowledge_extraction_workflow_after_upload(
-        pool=_pool(),
-        project_repo=_project_repo(),
-        user_repo=_user_repo(),
-        llm_executor=FakeLlmExecutor(),
-    )
-
-    assert runner._prepare_llm_dispatch_batch is not None
-
-
 def test_factory_wires_execute_prepared_llm_dispatch_attempt_when_executor_is_provided() -> (
     None
 ):
@@ -87,19 +62,6 @@ def test_factory_wires_execute_prepared_llm_dispatch_attempt_when_executor_is_pr
     assert execute_attempt is not None
     assert execute_attempt.llm_executor is llm_executor
     assert runner._capacity_observation_repository is None
-
-
-def test_factory_with_fake_executor_is_ready_to_dispatch_beyond_schedule() -> None:
-    runner = make_knowledge_extraction_workflow_after_upload(
-        pool=_pool(),
-        project_repo=_project_repo(),
-        user_repo=_user_repo(),
-        llm_executor=FakeLlmExecutor(),
-    )
-
-    assert runner._prepare_llm_dispatch_batch is not None
-    assert runner._execute_prepared_llm_dispatch_attempt is not None
-    assert runner._claim_builder_output_validation_policy is not None
 
 
 def test_factory_no_longer_contains_noop_capacity_observation_repository() -> None:

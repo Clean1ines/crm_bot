@@ -379,26 +379,3 @@ async def test_applies_source_split_required_summary_without_execute_commands() 
         ]
         == 1
     )
-
-
-def test_applier_source_does_not_import_old_prepare_or_capacity_selection() -> None:
-    import inspect
-
-    from src.contexts.knowledge_workbench.application.sagas import (
-        claim_builder_capacity_admission_phase_plan_applier,
-    )
-
-    source = inspect.getsource(claim_builder_capacity_admission_phase_plan_applier)
-
-    forbidden_markers = (
-        "PrepareLlmDispatchBatch",
-        "prepare_llm_dispatch_batch",
-        "SelectCapacityAdmissionWorkItem",
-        "LeaseSelectedCapacityAdmissionWorkItem",
-        "ReserveLlmRouteCapacityForAdmission",
-        "Postgres",
-        "peek_due_work_items",
-        "DueWorkItemRecord",
-    )
-    for marker in forbidden_markers:
-        assert marker not in source

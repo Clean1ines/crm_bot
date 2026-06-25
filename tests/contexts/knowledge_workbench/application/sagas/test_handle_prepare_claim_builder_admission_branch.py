@@ -312,16 +312,3 @@ async def test_prepare_claim_builder_can_use_capacity_admission_branch() -> None
     assert workflow_unit_of_work.command_log.completed_command_ids == [
         _workflow_command().command_id
     ]
-
-
-def test_handler_source_keeps_legacy_prepare_only_as_fallback() -> None:
-    import inspect
-
-    from src.contexts.knowledge_workbench.application.sagas import (
-        handle_prepare_claim_builder_dispatch_batch_command,
-    )
-
-    source = inspect.getsource(handle_prepare_claim_builder_dispatch_batch_command)
-
-    assert "capacity_window_admission_pass is not None" in source
-    assert "prepare_llm_dispatch_batch is required when" in source

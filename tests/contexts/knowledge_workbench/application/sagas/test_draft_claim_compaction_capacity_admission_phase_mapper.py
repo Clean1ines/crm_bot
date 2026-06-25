@@ -245,26 +245,3 @@ async def test_rejects_source_split_required_for_compaction() -> None:
             ),
             occurred_at=_now(),
         )
-
-
-def test_mapper_source_does_not_import_old_prepare_or_capacity_selection() -> None:
-    import inspect
-
-    from src.contexts.knowledge_workbench.application.sagas import (
-        draft_claim_compaction_capacity_admission_phase_mapper,
-    )
-
-    source = inspect.getsource(draft_claim_compaction_capacity_admission_phase_mapper)
-
-    forbidden_markers = (
-        "PrepareLlmDispatchBatch",
-        "prepare_llm_dispatch_batch",
-        "SelectCapacityAdmissionWorkItem",
-        "LeaseSelectedCapacityAdmissionWorkItem",
-        "ReserveLlmRouteCapacityForAdmission",
-        "Postgres",
-        "peek_due_work_items",
-        "DueWorkItemRecord",
-    )
-    for marker in forbidden_markers:
-        assert marker not in source

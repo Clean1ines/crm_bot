@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -313,20 +312,3 @@ def test_phase_mapping_decision_requires_matching_skipped_reason(
     )
 
     assert plan.decision is decision
-
-
-def test_phase_mapping_source_does_not_import_old_prepare_or_due_scan_contracts() -> (
-    None
-):
-    source = (
-        Path("src/contexts/knowledge_workbench/application/sagas/")
-        / "capacity_admission_phase_mapping.py"
-    ).read_text(encoding="utf-8")
-
-    assert "PrepareLlmDispatchBatch" not in source
-    assert "DueWorkItemRecord" not in source
-    assert "peek_due_work_items" not in source
-    assert "requested_items" not in source
-    assert "source_unit_text" not in source
-    assert "prompt_text" not in source
-    assert "raw_output" not in source

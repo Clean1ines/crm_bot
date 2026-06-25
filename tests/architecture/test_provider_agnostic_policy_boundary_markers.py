@@ -99,7 +99,6 @@ KNOWN_PROVIDER_GROQ_VIOLATION_PATHS = {
     "src/interfaces/composition/knowledge_extraction_after_upload_composition.py",
     "src/interfaces/composition/knowledge_extraction_workflow_resume.py",
     "src/interfaces/composition/llm_dispatch_executor.py",
-    "src/interfaces/composition/prepare_llm_dispatch_batch.py",
     "src/interfaces/http/limits.py",
 }
 
@@ -133,7 +132,6 @@ KNOWN_DEFAULT_GROQ_CATALOG_PATHS = {
     "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
     "src/interfaces/composition/knowledge_extraction_after_upload_composition.py",
     "src/interfaces/composition/knowledge_extraction_workflow_resume.py",
-    "src/interfaces/composition/prepare_llm_dispatch_batch.py",
     "src/interfaces/http/limits.py",
 }
 
@@ -351,27 +349,6 @@ def test_b1a_compatibility_map_and_followup_split_are_documented() -> None:
     assert not missing, "\n".join(missing)
 
 
-def test_b1c_claim_builder_schedule_payload_uses_estimated_output_tokens() -> None:
-    producer = _read(
-        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
-        "map_claim_builder_section_plans_to_execution_schedule.py",
-    )
-    preparation = _read(
-        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
-        "claim_builder_dispatch_preparation.py",
-    )
-    prepare_batch = _read(
-        REPO_ROOT / "src/interfaces/composition/prepare_llm_dispatch_batch.py",
-    )
-
-    assert '"estimated_output_tokens": estimated_output_tokens' in producer
-    assert '"reserved_output_tokens": reserved_output_tokens' not in producer
-    assert "estimate.estimated_output_tokens" in preparation
-    assert "estimate.reserved_output_tokens" not in preparation
-    assert "_estimated_output_tokens_from_due_record" in prepare_batch
-    assert 'estimate_payload.get("estimated_output_tokens")' in prepare_batch
-
-
 def test_b1d1_segmentation_vocabulary_uses_input_safety_gap_name() -> None:
     target_paths = (
         REPO_ROOT / "src/contexts/knowledge_workbench/document_segmentation/domain/"
@@ -566,30 +543,6 @@ def test_b1f2_compaction_schedule_payload_uses_estimated_output_tokens() -> None
     assert '"reserved_output_tokens": self.reserved_output_tokens' not in estimate
     assert '"estimated_output_tokens": (' in degraded_confirmation
     assert '"reserved_output_tokens": (' not in degraded_confirmation
-
-
-def test_b1f3a_no_schedule_or_executor_reserved_output_legacy() -> None:
-    doc = _read(ARCH_DOC_PATH)
-    prepare_batch = _read(
-        REPO_ROOT / "src/interfaces/composition/prepare_llm_dispatch_batch.py"
-    )
-    groq_executor = _read(
-        REPO_ROOT / "src/contexts/llm_runtime/infrastructure/providers/groq/"
-        "groq_dispatch_executor.py"
-    )
-    estimate = _read(
-        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
-        "llm_provider_message_capacity_estimate.py"
-    )
-
-    assert (
-        "B1f-3a: schedule admission and Groq executor no longer write or read "
-        "`reserved_output_tokens`" in doc
-    )
-    assert "def reserved_output_tokens(self) -> int:" not in prepare_batch
-    assert 'updated_estimate["reserved_output_tokens"]' not in prepare_batch
-    assert 'estimate_payload.get("reserved_output_tokens")' not in groq_executor
-    assert "reserved_output_tokens" not in estimate
 
 
 def test_b1f3b_quota_estimated_token_need_uses_estimated_output_tokens() -> None:

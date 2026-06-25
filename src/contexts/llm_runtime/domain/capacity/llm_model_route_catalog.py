@@ -161,6 +161,17 @@ class LlmModelRouteCatalog:
             LlmModelRouteRole.DEGRADED_USER_CHOICE,
         )[0].model_ref
 
+    def highest_input_limit_automatic_route_model_ref(self) -> str:
+        routes = self._ordered_routes_with_role(
+            LlmModelRouteRole.AUTOMATIC_FALLBACK,
+        )
+        if not routes:
+            return self.primary_model_ref()
+        return max(
+            routes,
+            key=lambda route: route.capacity_limits.input_token_limit,
+        ).model_ref
+
     def route_for_model_ref(self, model_ref: str) -> LlmModelRoute | None:
         _require_non_empty_text(model_ref, field_name="model_ref")
         for route in self.routes:

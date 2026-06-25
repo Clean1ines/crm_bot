@@ -32,10 +32,6 @@ from src.contexts.knowledge_workbench.observability.application.projectors.claim
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
 )
-from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
-    HandlePrepareClaimBuilderDispatchBatchCommand,
-    HandlePrepareClaimBuilderDispatchBatchCommandHandler,
-)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -89,9 +85,6 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_consumer_ref im
 )
 from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
     WorkflowIdempotencyKey,
-)
-from src.interfaces.composition.prepare_llm_dispatch_batch import (
-    PrepareLlmDispatchBatchCommand,
 )
 
 
@@ -589,120 +582,6 @@ async def test_updates_progress_snapshot_scheduled_work_items() -> None:
     assert snapshot.scheduled_work_items == 2
     assert snapshot.total_work_items == 2
     assert snapshot.domain_counters["scheduled_work_item_count"] == 2
-
-
-@pytest.mark.asyncio
-async def test_appends_timeline_entries() -> None:
-    _, _, _, workflow_unit_of_work = await _execute()
-
-    assert tuple(entry.message for entry in workflow_unit_of_work.timeline.entries) == (
-        "Claim builder section work scheduled",
-        "Prepare claim builder dispatch batch requested",
-        "Schedule claim builder section work command completed",
-    )
-
-
-@dataclass(slots=True)
-class FakeAttemptResult:
-    started_attempts: tuple[object, ...]
-
-
-@dataclass(slots=True)
-class FakePrepareResult:
-    attempt_result: FakeAttemptResult
-    capacity_retry_at: datetime | None = None
-    capacity_window_exhaustion: object | None = None
-    affected_work_item_refs: tuple[str, ...] = ()
-    source_unit_refs: tuple[str, ...] = ()
-    input_size_preflight_decision: str = "USE_ACTIVE_MODEL"
-    input_size_preflight_reason: str = (
-        "estimated prompt tokens fit active model input limit"
-    )
-    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
-    source_split_required: bool = False
-
-
-@dataclass(slots=True)
-class FakePrepareLlmDispatchBatch:
-    calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
-
-    async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object:
-        self.calls.append(command)
-        return FakePrepareResult(
-            attempt_result=FakeAttemptResult(started_attempts=()),
-        )
-
-
-@pytest.mark.asyncio
-@pytest.mark.skip(
-    reason="pre-existing baseline: schedule handler does not populate llm_dispatch_preparation in prepare command payload"
-)
-async def test_appends_prepare_command_with_default_llm_dispatch_preparation() -> None:
-    _, _, _, workflow_unit_of_work = await _execute()
-
-    next_command = workflow_unit_of_work.command_log.pending_commands[0]
-    dispatch_preparation = next_command.payload.get("llm_dispatch_preparation")
-
-    assert isinstance(dispatch_preparation, dict)
-    assert set(dispatch_preparation) >= {
-        "profile",
-        "account_capacities",
-        "active_model_ref",
-        "requested_items",
-        "worker_ref",
-        "lease_token_prefix",
-        "lease_ttl_seconds",
-    }
-    assert dispatch_preparation["active_model_ref"] == "qwen/qwen3-32b"
-    assert dispatch_preparation["requested_items"] == 2
-    assert dispatch_preparation["worker_ref"] == (
-        "knowledge-workbench-claim-builder-dispatch"
-    )
-    assert dispatch_preparation["lease_token_prefix"] == (
-        f"claim-builder-dispatch:{_workflow_run_id()}"
-    )
-    assert dispatch_preparation["lease_ttl_seconds"] == 300
-
-    profile = dispatch_preparation["profile"]
-    assert isinstance(profile, dict)
-    assert profile["profile_id"] == "faq_claim_observations"
-    assert profile["estimated_prompt_tokens"] == 3000
-    assert profile["estimated_completion_tokens"] == 500
-    assert profile["estimated_requests"] == 1
-
-    account_capacities = dispatch_preparation["account_capacities"]
-    assert isinstance(account_capacities, list)
-    assert len(account_capacities) == 1
-    account_capacity = account_capacities[0]
-    assert isinstance(account_capacity, dict)
-    assert account_capacity["provider"] == "groq"
-    assert account_capacity["account_ref"] == "groq_org_primary"
-    assert account_capacity["model_ref"] == "qwen/qwen3-32b"
-
-
-@pytest.mark.asyncio
-async def test_schedule_output_can_be_passed_to_prepare_without_missing_mapping() -> (
-    None
-):
-    _, _, _, schedule_unit_of_work = await _execute()
-    next_command = schedule_unit_of_work.command_log.pending_commands[0]
-    prepare = FakePrepareLlmDispatchBatch()
-    prepare_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
-
-    await HandlePrepareClaimBuilderDispatchBatchCommandHandler().execute(
-        HandlePrepareClaimBuilderDispatchBatchCommand(
-            workflow_command=next_command,
-        ),
-        prepare_llm_dispatch_batch=prepare,
-        workflow_unit_of_work=prepare_unit_of_work,
-    )
-
-    assert len(prepare.calls) == 1
-    assert prepare.calls[0].active_model_ref == "qwen/qwen3-32b"
-    assert prepare.calls[0].requested_items == 2
-    assert prepare.calls[0].worker.value == (
-        "knowledge-workbench-claim-builder-dispatch"
-    )
 
 
 @pytest.mark.asyncio

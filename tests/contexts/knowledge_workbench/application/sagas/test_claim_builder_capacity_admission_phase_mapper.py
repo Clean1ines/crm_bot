@@ -185,26 +185,3 @@ async def test_maps_claim_builder_skipped_results(
     assert plan.progress_summary is not None
     assert plan.progress_summary.skipped_reason == skipped_reason.value
     assert len(plan.frontend_events) == 1
-
-
-def test_mapper_source_does_not_import_old_prepare_or_capacity_selection() -> None:
-    import inspect
-
-    from src.contexts.knowledge_workbench.application.sagas import (
-        claim_builder_capacity_admission_phase_mapper,
-    )
-
-    source = inspect.getsource(claim_builder_capacity_admission_phase_mapper)
-
-    forbidden_markers = (
-        "PrepareLlmDispatchBatch",
-        "prepare_llm_dispatch_batch",
-        "SelectCapacityAdmissionWorkItem",
-        "LeaseSelectedCapacityAdmissionWorkItem",
-        "ReserveLlmRouteCapacityForAdmission",
-        "Postgres",
-        "peek_due_work_items",
-        "DueWorkItemRecord",
-    )
-    for marker in forbidden_markers:
-        assert marker not in source

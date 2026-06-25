@@ -829,7 +829,7 @@ def make_knowledge_extraction_workflow_resume(
                 "knowledge_workbench.draft_claim_compaction": CapacityAdmissionLaneTarget(
                     provider="groq",
                     account_ref=groq_env_config.accounts[0].account_seed.account_ref,
-                    model_ref="openai/gpt-oss-120b",
+                    model_ref=route_catalog.highest_input_limit_automatic_route_model_ref(),
                 ),
             }
         ),
