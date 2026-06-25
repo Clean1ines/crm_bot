@@ -636,6 +636,137 @@ const applySectionOutcome = (
   appendTimeline(response, event, message);
 };
 
+const setWorkflowActions = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  mode: "running" | "paused" | "completed",
+): void => {
+  if (mode === "paused") {
+    response.workflow.actions = [
+      {
+        action_id: "resume_processing",
+        visible: true,
+        enabled: true,
+        reason_code: null,
+      },
+      {
+        action_id: "delete_document",
+        visible: true,
+        enabled: true,
+        reason_code: null,
+      },
+    ];
+    return;
+  }
+
+  if (mode === "completed") {
+    response.workflow.actions = [
+      {
+        action_id: "delete_document",
+        visible: true,
+        enabled: true,
+        reason_code: null,
+      },
+    ];
+    return;
+  }
+
+  response.workflow.actions = [
+    {
+      action_id: "cancel_processing",
+      visible: true,
+      enabled: true,
+      reason_code: null,
+    },
+  ];
+};
+
+const applyManualPaused = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+): void => {
+  response.document_status = "paused";
+  response.workflow.workflow_status = "paused";
+  response.workflow.timer.mode = "paused";
+  response.workflow.timer.is_live = false;
+  response.workflow.timer.current_active_started_at = null;
+  setWorkflowActions(response, "paused");
+  appendTimeline(response, event, "Обработка документа приостановлена");
+};
+
+const applyManualResumed = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+): void => {
+  response.document_status = "processing";
+  response.workflow.workflow_status = "running";
+  response.workflow.timer.mode = "running";
+  response.workflow.timer.is_live = true;
+  response.workflow.timer.current_active_started_at = event.occurred_at;
+  setWorkflowActions(response, "running");
+  appendTimeline(response, event, "Обработка документа продолжена");
+};
+
+const applyCurationReviewRequired = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+): void => {
+  const workspaceRef = text(event.payload, "workspace_ref");
+  const itemCount = intValue(event.payload, "item_count") ?? 0;
+  const curationStage = stageById(response, "curation");
+  curationStage.status = "running";
+  curationStage.total = Math.max(curationStage.total, itemCount);
+  curationStage.current = itemCount;
+  curationStage.started_at = curationStage.started_at ?? event.occurred_at;
+
+  response.document_status = "processed";
+  response.workflow.workflow_status = "waiting_for_review";
+  response.workflow.current_phase = "draft_claim_curation";
+  response.workflow.timer.mode = "paused";
+  response.workflow.timer.is_live = false;
+  response.workflow.curation = {
+    ...response.workflow.curation,
+    available: true,
+    reason_code: "ready_for_review",
+    workflow_run_id: event.workflow_run_id,
+    workspace_ref: workspaceRef,
+    workspace_status: "pending",
+    item_count: itemCount,
+  };
+  appendTimeline(response, event, `Рабочее пространство проверки готово: ${itemCount}`);
+};
+
+const applyCurationPublished = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+): void => {
+  const publishedCount = intValue(event.payload, "published_item_count") ?? 0;
+  const curationStage = stageById(response, "curation");
+  curationStage.status = "completed";
+  curationStage.completed_at = event.occurred_at;
+
+  const publicationStage = stageById(response, "publication");
+  publicationStage.status = "completed";
+  publicationStage.total = Math.max(publicationStage.total, publishedCount);
+  publicationStage.current = publishedCount;
+  publicationStage.started_at = publicationStage.started_at ?? event.occurred_at;
+  publicationStage.completed_at = event.occurred_at;
+
+  response.document_status = "published";
+  response.workflow.workflow_status = "completed";
+  response.workflow.current_phase = "completed";
+  response.workflow.timer.mode = "completed";
+  response.workflow.timer.is_live = false;
+  response.workflow.timer.completed_at = event.occurred_at;
+  response.workflow.curation = {
+    ...response.workflow.curation,
+    available: false,
+    reason_code: "published",
+    workspace_status: "published",
+  };
+  setWorkflowActions(response, "completed");
+  appendTimeline(response, event, `Опубликовано записей: ${publishedCount}`);
+};
+
 const applyBatchPrepared = (
   response: WorkbenchWorkflowLiveStateResponse,
   event: FrontendWorkflowEventEnvelope,
@@ -677,9 +808,18 @@ export const reduceWorkflowFrontendProjectionEvent = (
   next.workflow.workflow_run_id = normalizedEvent.workflow_run_id;
   next.workflow.source_document_ref =
     text(payload, "source_document_ref") || next.workflow.source_document_ref || next.document_id;
-  next.workflow.workflow_status = "running";
-  next.workflow.timer.mode = "running";
-  next.workflow.timer.is_live = true;
+  const startsActive = ![
+    "workflow_manually_paused",
+    "workflow_draft_claim_curation_workspace_opened",
+    "workflow_draft_claim_curation_review_required",
+    "workflow_draft_claim_curation_workspace_published",
+  ].includes(normalizedEvent.projection_type);
+
+  if (startsActive) {
+    next.workflow.workflow_status = "running";
+    next.workflow.timer.mode = "running";
+    next.workflow.timer.is_live = true;
+  }
   next.workflow.timer.current_active_started_at =
     next.workflow.timer.current_active_started_at ||
     normalizedEvent.occurred_at;
@@ -737,6 +877,19 @@ export const reduceWorkflowFrontendProjectionEvent = (
       appendTimeline(next, normalizedEvent, "Все разделы обработаны");
       break;
     }
+    case "workflow_manually_paused":
+      applyManualPaused(next, normalizedEvent);
+      break;
+    case "workflow_manually_resumed":
+      applyManualResumed(next, normalizedEvent);
+      break;
+    case "workflow_draft_claim_curation_workspace_opened":
+    case "workflow_draft_claim_curation_review_required":
+      applyCurationReviewRequired(next, normalizedEvent);
+      break;
+    case "workflow_draft_claim_curation_workspace_published":
+      applyCurationPublished(next, normalizedEvent);
+      break;
     default:
       appendTimeline(
         next,

@@ -41,6 +41,9 @@ from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry impor
 from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
     WorkflowEventId,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +70,7 @@ class HandleOpenDraftClaimCurationWorkspaceCommandHandler:
         compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort
         ),
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleOpenDraftClaimCurationWorkspaceResult:
         workflow_command = command.workflow_command
         if (
@@ -97,7 +101,7 @@ class HandleOpenDraftClaimCurationWorkspaceCommandHandler:
             created_at=workflow_command.updated_at,
         )
 
-        await workflow_unit_of_work.outbox.append_event(
+        opened_event = await workflow_unit_of_work.outbox.append_event(
             WorkflowEvent(
                 event_id=WorkflowEventId(
                     f"workflow-event:{workflow_command.workflow_run_id}:"
@@ -109,6 +113,8 @@ class HandleOpenDraftClaimCurationWorkspaceCommandHandler:
                 ),
                 workflow_run_id=workflow_command.workflow_run_id,
                 payload={
+                    "project_id": state.project_id,
+                    "source_document_ref": state.source_document_ref,
                     "workspace_ref": snapshot.workspace.workspace_ref,
                     "item_count": len(snapshot.items),
                 },
@@ -117,7 +123,9 @@ class HandleOpenDraftClaimCurationWorkspaceCommandHandler:
                 correlation_id=workflow_command.command_id.value,
             )
         )
-        await workflow_unit_of_work.outbox.append_event(
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(opened_event)
+        review_required_event = await workflow_unit_of_work.outbox.append_event(
             WorkflowEvent(
                 event_id=WorkflowEventId(
                     f"workflow-event:{workflow_command.workflow_run_id}:"
@@ -129,6 +137,8 @@ class HandleOpenDraftClaimCurationWorkspaceCommandHandler:
                 ),
                 workflow_run_id=workflow_command.workflow_run_id,
                 payload={
+                    "project_id": state.project_id,
+                    "source_document_ref": state.source_document_ref,
                     "workspace_ref": snapshot.workspace.workspace_ref,
                     "item_count": len(snapshot.items),
                 },
@@ -137,6 +147,8 @@ class HandleOpenDraftClaimCurationWorkspaceCommandHandler:
                 correlation_id=workflow_command.command_id.value,
             )
         )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(review_required_event)
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
             workflow_command=workflow_command,

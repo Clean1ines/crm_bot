@@ -44,6 +44,9 @@ from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry impor
 from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
     WorkflowEventId,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +74,7 @@ class HandlePublishDraftClaimCurationWorkspaceCommandHandler:
         embedding_generation_port: EmbeddingGenerationPort,
         embedding_model_id: str,
         embedding_dimensions: int,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandlePublishDraftClaimCurationWorkspaceResult:
         workflow_command = command.workflow_command
         if (
@@ -99,7 +103,7 @@ class HandlePublishDraftClaimCurationWorkspaceCommandHandler:
             workflow_run_id=workflow_command.workflow_run_id,
             published_at=workflow_command.updated_at,
         )
-        await workflow_unit_of_work.outbox.append_event(
+        published_event = await workflow_unit_of_work.outbox.append_event(
             WorkflowEvent(
                 event_id=WorkflowEventId(
                     f"workflow-event:{workflow_command.workflow_run_id}:"
@@ -111,6 +115,8 @@ class HandlePublishDraftClaimCurationWorkspaceCommandHandler:
                 ),
                 workflow_run_id=workflow_command.workflow_run_id,
                 payload={
+                    "project_id": state.project_id,
+                    "source_document_ref": state.source_document_ref,
                     "publication_id": result.publication_id,
                     "published_item_count": result.published_item_count,
                     "runtime_entry_count": result.runtime_entry_count,
@@ -121,6 +127,8 @@ class HandlePublishDraftClaimCurationWorkspaceCommandHandler:
                 correlation_id=workflow_command.command_id.value,
             )
         )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(published_event)
         await workflow_unit_of_work.timeline.append_entry(
             WorkflowTimelineEntry(
                 timeline_entry_id=(

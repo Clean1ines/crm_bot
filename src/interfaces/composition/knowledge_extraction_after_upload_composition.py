@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 import os
 from typing import Protocol, cast
 
@@ -56,6 +57,9 @@ from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
     RunKnowledgeExtractionWorkflowAfterUpload,
 )
+from src.interfaces.composition.knowledge_extraction_workflow_resume import (
+    _sync_capacity_admission_projection_lifecycle,
+)
 from src.interfaces.composition.source_ingestion_first_phase import (
     make_source_ingestion_first_phase,
 )
@@ -106,6 +110,11 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
                     actual_tokens=actual_tokens,
                     finalized_at=result.llm_result.finished_at,
                 )
+                await _sync_capacity_admission_projection_lifecycle(
+                    asyncpg_connection,
+                    work_item=result.outcome_result.work_item,
+                    changed_at=result.llm_result.finished_at,
+                )
                 return result
         finally:
             await self.pool.release(connection)
@@ -119,12 +128,19 @@ class _TransactionalExecutePreparedLlmDispatchAttempt:
         connection = await self.pool.acquire()
         try:
             async with connection.transaction():
-                return await PostgresWorkItemAttemptOutcomeRepository(
-                    cast(asyncpg.Connection, connection),
+                asyncpg_connection = cast(asyncpg.Connection, connection)
+                work_item = await PostgresWorkItemAttemptOutcomeRepository(
+                    asyncpg_connection,
                 ).complete_work_item_after_domain_apply(
                     work_item_id=work_item_id,
                     lease_token=lease_token,
                 )
+                await _sync_capacity_admission_projection_lifecycle(
+                    asyncpg_connection,
+                    work_item=work_item,
+                    changed_at=datetime.now(UTC),
+                )
+                return work_item
         finally:
             await self.pool.release(connection)
 
