@@ -723,3 +723,25 @@ def test_project_clear_deletes_orphan_frontend_workflow_events() -> None:
     assert "DELETE FROM frontend_workflow_events" in source
     assert "source-document:{project_id}:%" in source
     assert '"frontend_workflow_events"' in source
+
+
+def test_project_clear_deletes_frontend_events_before_runtime_tail_early_return() -> (
+    None
+):
+    source = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
+    function_start = source.index(
+        "async def _delete_project_orphan_knowledge_runtime_tails"
+    )
+    function_end = source.index("@router.delete", function_start)
+    function_source = source[function_start:function_end]
+
+    frontend_delete_index = function_source.index(
+        "DELETE FROM frontend_workflow_events"
+    )
+    early_return_index = function_source.index("if not workflow_run_ids:")
+
+    assert frontend_delete_index < early_return_index
+    assert (
+        '"frontend_workflow_events": _deleted_row_count(frontend_event_status)'
+        in function_source
+    )
