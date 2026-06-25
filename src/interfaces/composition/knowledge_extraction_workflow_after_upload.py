@@ -5,6 +5,18 @@ from typing import Protocol, cast
 
 import asyncpg
 
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetResolverPort,
+)
+from src.contexts.capacity_admission_queue.application.ports.capacity_admission_projection_writer_port import (
+    CapacityAdmissionProjectionWriterPort,
+)
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_projection_lifecycle_synchronizer import (
+    PostgresCapacityAdmissionProjectionLifecycleSynchronizer,
+)
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
@@ -100,6 +112,13 @@ from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.
 )
 from src.contexts.workflow_runtime.infrastructure.postgres.postgres_workflow_runtime_unit_of_work import (
     PostgresWorkflowRuntimeUnitOfWork,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelRouteCatalog,
+)
+from src.interfaces.composition.knowledge_extraction_workflow_resume import (
+    _capacity_admission_projection_writer_for_transaction,
+    _capacity_window_admission_pass_for_transaction,
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.knowledge_extraction_frontend_workflow_event_projector import (
     KnowledgeExtractionFrontendWorkflowEventProjector,
@@ -244,6 +263,14 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         draft_claim_compaction_output_validator: (
             DraftClaimCompactionOutputValidator | None
         ) = None,
+        capacity_admission_projection_writer: (
+            CapacityAdmissionProjectionWriterPort | None
+        ) = None,
+        capacity_admission_lane_target: CapacityAdmissionLaneTarget | None = None,
+        capacity_admission_lane_target_resolver: (
+            CapacityAdmissionLaneTargetResolverPort | None
+        ) = None,
+        capacity_window_admission_route_catalog: LlmModelRouteCatalog | None = None,
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
@@ -270,9 +297,26 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         self._draft_claim_compaction_reduction_state_repository = (
             draft_claim_compaction_reduction_state_repository
         )
+        if capacity_admission_projection_writer is not None and (
+            capacity_admission_lane_target is None
+            and capacity_admission_lane_target_resolver is None
+        ):
+            raise ValueError(
+                "capacity admission projection writer requires lane target"
+            )
         self._draft_claim_compaction_output_validator = (
             draft_claim_compaction_output_validator
             or DraftClaimCompactionOutputValidator()
+        )
+        self._capacity_admission_projection_writer = (
+            capacity_admission_projection_writer
+        )
+        self._capacity_admission_lane_target = capacity_admission_lane_target
+        self._capacity_admission_lane_target_resolver = (
+            capacity_admission_lane_target_resolver
+        )
+        self._capacity_window_admission_route_catalog = (
+            capacity_window_admission_route_catalog
         )
 
     async def execute(
@@ -404,6 +448,21 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             projector=KnowledgeExtractionFrontendWorkflowEventProjector(),
             repository=frontend_event_repository,
         )
+        asyncpg_connection = cast(asyncpg.Connection, connection)
+        capacity_admission_projection_writer = (
+            _capacity_admission_projection_writer_for_transaction(
+                connection=asyncpg_connection,
+                configured_writer=self._capacity_admission_projection_writer,
+                lane_target=self._capacity_admission_lane_target,
+                lane_target_resolver=self._capacity_admission_lane_target_resolver,
+            )
+        )
+        capacity_window_admission_pass = (
+            _capacity_window_admission_pass_for_transaction(
+                connection=asyncpg_connection,
+                route_catalog=self._capacity_window_admission_route_catalog,
+            )
+        )
 
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
@@ -422,7 +481,20 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                         cast(asyncpg.Connection, connection),
                     )
                 ),
+                capacity_admission_projection_lifecycle_synchronizer=(
+                    PostgresCapacityAdmissionProjectionLifecycleSynchronizer(
+                        cast(asyncpg.Connection, connection),
+                    )
+                ),
+                capacity_admission_projection_writer=(
+                    capacity_admission_projection_writer
+                ),
+                capacity_admission_lane_target=self._capacity_admission_lane_target,
+                capacity_admission_lane_target_resolver=(
+                    self._capacity_admission_lane_target_resolver
+                ),
                 workflow_unit_of_work=workflow_unit_of_work,
+                capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt
                 ),

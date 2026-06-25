@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Protocol, cast
 
 import asyncpg
+
+from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
+    CapacityAdmissionLaneTarget,
+)
+from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
+    CapacityAdmissionLaneTargetRegistry,
+)
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
     RecordWorkItemAttemptOutcome,
 )
@@ -28,6 +36,12 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
 )
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutorPort,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    default_groq_llm_model_route_catalog,
+)
+from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
+    LlmRuntimeSettings,
 )
 from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
     PostgresLlmRouteCapacityReservationRepository,
@@ -164,15 +178,35 @@ def make_knowledge_extraction_workflow_after_upload(
             embedding_dimensions=embedding_settings.vector_dimensions,
         )
 
+    route_catalog = default_groq_llm_model_route_catalog()
+    _ = LlmRuntimeSettings.from_env_mapping(
+        os.environ,
+    ).to_groq_env_config()
+
     return RunKnowledgeExtractionWorkflowAfterUpload(
         source_ingestion_runner=source_ingestion_runner,
         pool=pool,
+        capacity_admission_lane_target_resolver=CapacityAdmissionLaneTargetRegistry(
+            targets_by_work_kind={
+                "knowledge_workbench.claim_builder.section_extraction": CapacityAdmissionLaneTarget(
+                    provider="groq",
+                    account_ref=None,
+                    model_ref=route_catalog.primary_model_ref(),
+                ),
+                "knowledge_workbench.draft_claim_compaction": CapacityAdmissionLaneTarget(
+                    provider="groq",
+                    account_ref=None,
+                    model_ref=route_catalog.highest_input_limit_automatic_route_model_ref(),
+                ),
+            }
+        ),
         execute_prepared_llm_dispatch_attempt=(
             _TransactionalExecutePreparedLlmDispatchAttempt(
                 pool=pool,
                 llm_executor=llm_executor,
             )
         ),
+        capacity_window_admission_route_catalog=route_catalog,
         claim_builder_output_validation_policy=claim_builder_output_validation_policy,
         draft_claim_compaction_output_validator=(
             draft_claim_compaction_output_validator

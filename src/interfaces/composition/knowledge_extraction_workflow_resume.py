@@ -507,6 +507,7 @@ class RunKnowledgeExtractionWorkflowResume:
                 connection=asyncpg_connection,
                 configured_writer=self._capacity_admission_projection_writer,
                 lane_target=self._capacity_admission_lane_target,
+                lane_target_resolver=self._capacity_admission_lane_target_resolver,
             )
         )
         capacity_window_admission_pass = (
@@ -542,6 +543,9 @@ class RunKnowledgeExtractionWorkflowResume:
                     capacity_admission_projection_writer
                 ),
                 capacity_admission_lane_target=self._capacity_admission_lane_target,
+                capacity_admission_lane_target_resolver=(
+                    self._capacity_admission_lane_target_resolver
+                ),
                 workflow_unit_of_work=workflow_unit_of_work,
                 capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
@@ -786,8 +790,9 @@ def _capacity_admission_projection_writer_for_transaction(
     connection: asyncpg.Connection,
     configured_writer: CapacityAdmissionProjectionWriterPort | None,
     lane_target: CapacityAdmissionLaneTarget | None,
+    lane_target_resolver: CapacityAdmissionLaneTargetResolverPort | None,
 ) -> CapacityAdmissionProjectionWriterPort | None:
-    if lane_target is None:
+    if lane_target is None and lane_target_resolver is None:
         return None
     if configured_writer is not None:
         return configured_writer
