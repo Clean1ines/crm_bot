@@ -86,3 +86,23 @@ def test_phase_route_policies_keep_gpt_oss_out_of_claim_builder_daily_fallbacks(
     assert "CLAIM_BUILDER_SPECIAL_TRUNCATED_JSON_GPT_OSS_ROUTE_REF" in policy_source
     assert "CLAIM_BUILDER_AUTO_LLAMA_VERSATILE_ROUTE_REF" in policy_source
     assert "CLAIM_BUILDER_AUTO_LLAMA_SCOUT_ROUTE_REF" in policy_source
+
+
+def test_provider_capacity_window_vocabulary_separates_scope_from_slot() -> None:
+    source = (
+        ROOT / "src/contexts/llm_runtime/domain/routing/provider_capacity_windows.py"
+    ).read_text(encoding="utf-8")
+
+    for marker in (
+        "CapacityScopeKey",
+        "CapacityExecutionSlotKey",
+        "CapacityExecutionWindow",
+        "ProviderCapacityProfile",
+        "ProviderParallelismPolicy",
+        "ProviderCapacityExecutionWindowExpander",
+    ):
+        assert marker in source
+
+    assert "capacity_scope_key" in source
+    assert "execution_slot_key" in source
+    assert "slots_per_account_model_route" in source
