@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 import asyncpg
+import structlog
 
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
@@ -12,9 +13,12 @@ from src.contexts.knowledge_workbench.observability.application.models.frontend_
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event_cursor import (
     FrontendWorkflowEventCursor,
 )
+
 from src.contexts.knowledge_workbench.observability.application.ports.frontend_workflow_event_repository_port import (
     FrontendWorkflowEventRepositoryPort,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class PostgresFrontendWorkflowEventRepository(FrontendWorkflowEventRepositoryPort):
@@ -83,8 +87,25 @@ class PostgresFrontendWorkflowEventRepository(FrontendWorkflowEventRepositoryPor
             event.projected_at,
         )
         if row is not None:
-            return _hydrate_event(row)
+            appended = _hydrate_event(row)
+            logger.info(
+                "Frontend workflow event appended",
+                workflow_run_id=appended.workflow_run_id,
+                document_id=appended.document_id,
+                projection_event_id=appended.projection_event_id,
+                projection_type=appended.projection_type,
+                source_sequence_number=appended.source_sequence_number,
+            )
+            return appended
 
+        logger.info(
+            "Frontend workflow event append conflict",
+            workflow_run_id=event.workflow_run_id,
+            document_id=event.document_id,
+            projection_event_id=event.projection_event_id,
+            projection_type=event.projection_type,
+            source_sequence_number=event.source_sequence_number,
+        )
         existing = await self._load_by_identity(event)
         if existing is None:
             raise RuntimeError(

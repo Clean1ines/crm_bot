@@ -28,6 +28,7 @@ from fastapi import (
 )
 from starlette.responses import StreamingResponse
 
+
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.json_types import JsonObject
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
@@ -1241,6 +1242,14 @@ async def upload_knowledge(
         llm_executor=llm_executor,
     )
 
+    logger.info(
+        "Knowledge upload accepted",
+        project_id=project_id,
+        file_name=file.filename,
+        source_format=source_format,
+        content_size_bytes=len(file_content),
+        preprocessing_mode=preprocessing_mode,
+    )
     try:
         result = await workflow_runner.execute(
             RunKnowledgeExtractionWorkflowAfterUploadCommand(
@@ -1276,6 +1285,19 @@ async def upload_knowledge(
             status_code=500,
             detail="Source ingestion completed without source_document_ref",
         )
+
+    logger.info(
+        "Knowledge upload workflow result",
+        project_id=project_id,
+        workflow_run_id=result.workflow_run_id,
+        source_document_ref=source_document_ref,
+        source_ingestion_completed=result.source_ingestion_completed,
+        source_unit_count=result.source_unit_count,
+        drained_inspected_count=result.drained_inspected_count,
+        drained_dispatched_count=result.drained_dispatched_count,
+        blocked_command_type=result.blocked_command_type,
+        blocked_reason=result.blocked_reason,
+    )
 
     return {
         "status": "knowledge_extraction_workflow_started",
@@ -3539,6 +3561,17 @@ async def clear_knowledge(
     )
     for key, value in orphan_runtime_tail_counts.items():
         total_counts[key] = total_counts.get(key, 0) + value
+
+    logger.info(
+        "Knowledge project clear completed",
+        project_id=project_id,
+        deleted_document_count=sum(
+            1 for item in deleted_results if item["deleted"] is True
+        ),
+        source_document_refs=list(source_document_refs),
+        deleted_counts=total_counts,
+        orphan_runtime_tail_counts=orphan_runtime_tail_counts,
+    )
 
     return {
         "deleted": True,
