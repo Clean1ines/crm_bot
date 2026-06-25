@@ -7,6 +7,26 @@ from typing import Protocol, cast
 
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
+    CapacityWindowAdmissionPassCommand,
+)
+from src.contexts.capacity_admission_queue.application.capacity_window_admission_result import (
+    CapacityWindowAdmissionPassResult,
+)
+from src.contexts.capacity_admission_queue.application.select_capacity_admission_work_item import (
+    CapacityAdmissionLaneKey,
+    CapacityAdmissionWindowBudget,
+)
+from src.contexts.knowledge_workbench.application.sagas.capacity_admission_phase_mapping import (
+    DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE,
+)
+from src.contexts.knowledge_workbench.application.sagas.draft_claim_compaction_capacity_admission_phase_mapper import (
+    DraftClaimCompactionCapacityAdmissionPhaseMapper,
+)
+from src.contexts.knowledge_workbench.application.sagas.draft_claim_compaction_capacity_admission_phase_plan_applier import (
+    ApplyDraftClaimCompactionCapacityAdmissionPhasePlanCommand,
+    DraftClaimCompactionCapacityAdmissionPhasePlanApplier,
+)
 from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
     DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
     DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
@@ -70,6 +90,10 @@ class PrepareLlmDispatchBatchPort(Protocol):
     async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object: ...
 
 
+class CapacityWindowAdmissionPassPort(Protocol):
+    async def execute(self, command: CapacityWindowAdmissionPassCommand) -> object: ...
+
+
 @dataclass(frozen=True, slots=True)
 class HandlePrepareDraftClaimCompactionDispatchBatchCommand:
     workflow_command: WorkflowCommand
@@ -107,8 +131,9 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
         self,
         command: HandlePrepareDraftClaimCompactionDispatchBatchCommand,
         *,
-        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort,
+        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        capacity_window_admission_pass: CapacityWindowAdmissionPassPort | None = None,
     ) -> HandlePrepareDraftClaimCompactionDispatchBatchResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -122,6 +147,21 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
             raise ValueError("payload workflow_run_id must match workflow command")
 
         occurred_at = _execution_occurred_at(workflow_command)
+        if capacity_window_admission_pass is not None:
+            return await _execute_capacity_window_admission_branch(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                occurred_at=occurred_at,
+                capacity_window_admission_pass=capacity_window_admission_pass,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+
+        if prepare_llm_dispatch_batch is None:
+            raise ValueError(
+                "prepare_llm_dispatch_batch is required when "
+                "capacity_window_admission_pass is not provided"
+            )
+
         prepare_command = _prepare_llm_dispatch_batch_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
@@ -381,6 +421,132 @@ def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
         )
     if workflow_command.status is not WorkflowCommandStatus.PENDING:
         raise ValueError("workflow_command status must be PENDING")
+
+
+async def _execute_capacity_window_admission_branch(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    occurred_at: datetime,
+    capacity_window_admission_pass: CapacityWindowAdmissionPassPort,
+    workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+) -> HandlePrepareDraftClaimCompactionDispatchBatchResult:
+    admission_command = _capacity_window_admission_pass_command(
+        workflow_command=workflow_command,
+        workflow_run_id=workflow_run_id,
+        occurred_at=occurred_at,
+    )
+    admission_result = await capacity_window_admission_pass.execute(admission_command)
+    if not isinstance(admission_result, CapacityWindowAdmissionPassResult):
+        raise TypeError(
+            "capacity_window_admission_pass must return "
+            "CapacityWindowAdmissionPassResult"
+        )
+
+    mapping_plan = (
+        await DraftClaimCompactionCapacityAdmissionPhaseMapper().map_admission_result(
+            admission_result=admission_result,
+            occurred_at=occurred_at,
+        )
+    )
+    apply_result = (
+        await DraftClaimCompactionCapacityAdmissionPhasePlanApplier().execute(
+            ApplyDraftClaimCompactionCapacityAdmissionPhasePlanCommand(
+                workflow_command=workflow_command,
+                mapping_plan=mapping_plan,
+            ),
+            workflow_unit_of_work=workflow_unit_of_work,
+        )
+    )
+    return HandlePrepareDraftClaimCompactionDispatchBatchResult(
+        workflow_run_id=workflow_run_id,
+        prepared_dispatch_count=mapping_plan.prepared_dispatch_count,
+        appended_event_count=apply_result.appended_event_count,
+        appended_next_command_count=apply_result.appended_next_command_count,
+        completed_command_id=apply_result.completed_command_id,
+    )
+
+
+def _capacity_window_admission_pass_command(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    occurred_at: datetime,
+) -> CapacityWindowAdmissionPassCommand:
+    account_capacity = _first_capacity_for_capacity_admission(
+        workflow_command.payload,
+    )
+    return CapacityWindowAdmissionPassCommand(
+        workflow_run_id=workflow_run_id,
+        phase=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.phase,
+        operation_key=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.operation_key,
+        lane_key=CapacityAdmissionLaneKey(
+            work_kind=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.work_kind,
+            provider=_mapping_text(account_capacity, "provider"),
+            account_ref=_mapping_text(account_capacity, "account_ref"),
+            model_ref=_mapping_text(account_capacity, "model_ref"),
+        ),
+        budget=CapacityAdmissionWindowBudget(
+            remaining_requests=_mapping_non_negative_int(
+                account_capacity,
+                "remaining_minute_requests",
+            ),
+            remaining_tokens=_mapping_non_negative_int(
+                account_capacity,
+                "remaining_minute_tokens",
+            ),
+            remaining_daily_requests=_mapping_non_negative_int(
+                account_capacity,
+                "remaining_daily_requests",
+            ),
+            remaining_daily_tokens=_mapping_non_negative_int(
+                account_capacity,
+                "remaining_daily_tokens",
+            ),
+        ),
+        worker=WorkerRef(
+            _payload_text(
+                workflow_command.payload,
+                "worker_ref",
+                fallback=DRAFT_CLAIM_COMPACTION_WORKER_REF,
+            ),
+        ),
+        lease_token_prefix=f"draft-claim-compaction-dispatch:{workflow_run_id}",
+        lease_expires_at=occurred_at + timedelta(seconds=90),
+        now=occurred_at,
+        max_admitted_items=_payload_positive_int(
+            workflow_command.payload,
+            "scheduled_work_item_count",
+        ),
+    )
+
+
+def _first_capacity_for_capacity_admission(
+    payload: Mapping[str, object],
+) -> Mapping[str, object]:
+    account_capacities = _account_capacity_payloads(payload)
+    if not account_capacities:
+        raise ValueError(
+            "capacity_window_admission_pass requires llm_dispatch_preparation "
+            "account_capacities"
+        )
+
+    active_model_ref = _active_model_ref_for_capacity_admission(payload)
+    for account_capacity in account_capacities:
+        if account_capacity.get("model_ref") == active_model_ref:
+            return account_capacity
+    return account_capacities[0]
+
+
+def _active_model_ref_for_capacity_admission(payload: Mapping[str, object]) -> str:
+    llm_dispatch_preparation = payload.get("llm_dispatch_preparation")
+    if isinstance(llm_dispatch_preparation, Mapping):
+        return _payload_text(
+            llm_dispatch_preparation,
+            "active_model_ref",
+            fallback=DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+        )
+    return _active_model_ref_from_payload(payload)
 
 
 def _provider_account_refs_from_payload(
