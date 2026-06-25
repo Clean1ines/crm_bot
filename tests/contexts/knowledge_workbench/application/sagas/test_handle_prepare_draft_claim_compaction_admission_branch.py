@@ -107,7 +107,7 @@ def _lane() -> CapacityAdmissionLaneSummary:
     return CapacityAdmissionLaneSummary(
         work_kind=DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.work_kind,
         provider="groq",
-        account_ref="groq-account-1",
+        account_ref=None,
         model_ref="openai/gpt-oss-120b",
     )
 
@@ -329,8 +329,11 @@ async def test_prepare_draft_claim_compaction_can_use_capacity_admission_branch(
         DRAFT_CLAIM_COMPACTION_ADMISSION_PHASE_PROFILE.work_kind
     )
     assert admission_command.lane_key.provider == "groq"
-    assert admission_command.lane_key.account_ref == "groq-account-1"
+    assert admission_command.lane_key.account_ref is None
     assert admission_command.lane_key.model_ref == "openai/gpt-oss-120b"
+    assert admission_command.execution_lane_key.provider == "groq"
+    assert admission_command.execution_lane_key.account_ref == "groq-account-1"
+    assert admission_command.execution_lane_key.model_ref == "openai/gpt-oss-120b"
     assert admission_command.budget.remaining_requests == 2
     assert admission_command.budget.remaining_tokens == 7000
     assert admission_command.budget.remaining_daily_requests == 100
