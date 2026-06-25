@@ -89,27 +89,6 @@ def claim_builder_groq_free_phase_route_policy() -> PhaseRoutePolicy:
                 model_ref=GPT_OSS_120B_MODEL_REF,
                 activation_scope=PhaseRouteActivationScope.WORK_ITEM,
             ),
-            PhaseRouteRule(
-                route_ref=CLAIM_BUILDER_SPECIAL_INPUT_TOO_LARGE_GPT_OSS_ROUTE_REF,
-                route_kind=PhaseRouteKind.SPECIAL,
-                route_reason=PhaseRouteReason.INPUT_TOO_LARGE,
-                model_ref=GPT_OSS_120B_MODEL_REF,
-                activation_scope=PhaseRouteActivationScope.WORK_ITEM,
-            ),
-            PhaseRouteRule(
-                route_ref=CLAIM_BUILDER_SPECIAL_OUTPUT_TOO_LARGE_GPT_OSS_ROUTE_REF,
-                route_kind=PhaseRouteKind.SPECIAL,
-                route_reason=PhaseRouteReason.OUTPUT_TOO_LARGE,
-                model_ref=GPT_OSS_120B_MODEL_REF,
-                activation_scope=PhaseRouteActivationScope.WORK_ITEM,
-            ),
-            PhaseRouteRule(
-                route_ref=CLAIM_BUILDER_SPECIAL_TRUNCATED_JSON_GPT_OSS_ROUTE_REF,
-                route_kind=PhaseRouteKind.SPECIAL,
-                route_reason=PhaseRouteReason.TRUNCATED_JSON,
-                model_ref=GPT_OSS_120B_MODEL_REF,
-                activation_scope=PhaseRouteActivationScope.WORK_ITEM,
-            ),
         ),
     )
 

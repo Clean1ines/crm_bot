@@ -13,6 +13,7 @@ from src.contexts.capacity_admission_queue.application.capacity_window_admission
     CapacityAdmissionCapacityReservationSummary,
 )
 from src.contexts.capacity_admission_queue.application.select_capacity_admission_work_item import (
+    CapacityAdmissionLaneKey,
     CapacityAdmissionSelectableWorkItem,
 )
 from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_repository_port import (
@@ -48,15 +49,22 @@ class StartAttemptCapacityWindowAdmissionExecutionBoundary:
         self,
         *,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
         leased_work_item: LeasedWorkItemRecord,
         projection_lease: CapacityAdmissionProjectionLeaseResult,
         capacity_reservation: CapacityAdmissionCapacityReservationSummary,
         now,
     ) -> CapacityWindowAdmissionExecutionReference:
         del projection_lease
-        lane = selected_work_item.lane_key
+        lane = execution_lane_key
         if lane.account_ref is None:
             raise ValueError("capacity admission execution requires account_ref")
+        if selected_work_item.lane_key.work_kind != lane.work_kind:
+            raise ValueError("execution lane work_kind must match selected work item")
+        if selected_work_item.lane_key.provider != lane.provider:
+            raise ValueError("execution lane provider must match selected work item")
+        if selected_work_item.lane_key.model_ref != lane.model_ref:
+            raise ValueError("execution lane model_ref must match selected work item")
 
         result = await StartLlmAdmittedWorkItemAttempts(
             repository=self.attempt_dispatch_repository,

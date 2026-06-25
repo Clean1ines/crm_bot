@@ -97,9 +97,13 @@ def test_claim_builder_admission_commands_are_built_for_each_active_model_window
     )
 
     assert len(commands) == 2
-    assert [item.lane_key.account_ref for item in commands] == [
+    assert [item.lane_key.account_ref for item in commands] == [None, None]
+    assert [item.execution_lane_key.account_ref for item in commands] == [
         "groq_org_1",
         "groq_org_3",
     ]
     assert {item.lane_key.model_ref for item in commands} == {"qwen/qwen3-32b"}
+    assert {item.execution_lane_key.model_ref for item in commands} == {
+        "qwen/qwen3-32b"
+    }
     assert all(item.max_admitted_items == 3 for item in commands)

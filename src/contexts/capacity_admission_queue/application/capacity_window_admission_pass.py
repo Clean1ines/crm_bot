@@ -83,11 +83,12 @@ class CapacityWindowAdmissionReservationPort(Protocol):
         *,
         reservation_ref: str,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
         budget: CapacityAdmissionWindowBudget,
         now: datetime,
         expires_at: datetime,
     ) -> CapacityWindowAdmissionReservationResult:
-        """Reserve capacity for a selected projection candidate."""
+        """Reserve execution capacity for the selected work item window."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +136,7 @@ class CapacityWindowAdmissionExecutionBoundaryPort(Protocol):
         self,
         *,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
         leased_work_item: LeasedWorkItemRecord,
         projection_lease: CapacityAdmissionProjectionLeaseResult,
         capacity_reservation: CapacityAdmissionCapacityReservationSummary,
@@ -159,6 +161,7 @@ class CapacityWindowAdmissionPassCommand:
     phase: str
     operation_key: str
     lane_key: CapacityAdmissionLaneKey
+    execution_lane_key: CapacityAdmissionLaneKey
     budget: CapacityAdmissionWindowBudget
     worker: WorkerRef
     lease_token_prefix: str
@@ -172,6 +175,16 @@ class CapacityWindowAdmissionPassCommand:
         _require_non_empty_text(self.operation_key, "operation_key")
         if not isinstance(self.lane_key, CapacityAdmissionLaneKey):
             raise TypeError("lane_key must be CapacityAdmissionLaneKey")
+        if not isinstance(self.execution_lane_key, CapacityAdmissionLaneKey):
+            raise TypeError("execution_lane_key must be CapacityAdmissionLaneKey")
+        if self.execution_lane_key.account_ref is None:
+            raise ValueError("execution_lane_key account_ref is required")
+        if self.execution_lane_key.work_kind != self.lane_key.work_kind:
+            raise ValueError("execution_lane_key work_kind must match lane_key")
+        if self.execution_lane_key.provider != self.lane_key.provider:
+            raise ValueError("execution_lane_key provider must match lane_key")
+        if self.execution_lane_key.model_ref != self.lane_key.model_ref:
+            raise ValueError("execution_lane_key model_ref must match lane_key")
         if not isinstance(self.budget, CapacityAdmissionWindowBudget):
             raise TypeError("budget must be CapacityAdmissionWindowBudget")
         if not isinstance(self.worker, WorkerRef):
@@ -237,6 +250,7 @@ class CapacityWindowAdmissionPass:
                 await self.capacity_reservation.reserve_capacity_for_selected_work_item(
                     reservation_ref=reservation_ref,
                     selected_work_item=selected_work_item,
+                    execution_lane_key=command.execution_lane_key,
                     budget=budget,
                     now=command.now,
                     expires_at=command.lease_expires_at,
@@ -298,6 +312,7 @@ class CapacityWindowAdmissionPass:
             execution_reference = (
                 await self.execution_boundary.start_or_append_execution(
                     selected_work_item=selected_work_item,
+                    execution_lane_key=command.execution_lane_key,
                     leased_work_item=lease_result.execution_lease,
                     projection_lease=lease_result.projection_lease,
                     capacity_reservation=reservation_summary,

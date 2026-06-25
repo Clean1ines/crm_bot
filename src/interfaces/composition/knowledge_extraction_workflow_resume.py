@@ -813,7 +813,9 @@ def make_knowledge_extraction_workflow_resume(
         )
 
     route_catalog = default_groq_llm_model_route_catalog()
-    groq_env_config = LlmRuntimeSettings.from_env_mapping(
+    # Projection targets describe shared queues. Concrete account windows are
+    # opened later from llm_dispatch_preparation account capacities.
+    _ = LlmRuntimeSettings.from_env_mapping(
         os.environ,
     ).to_groq_env_config()
 
@@ -823,12 +825,12 @@ def make_knowledge_extraction_workflow_resume(
             targets_by_work_kind={
                 "knowledge_workbench.claim_builder.section_extraction": CapacityAdmissionLaneTarget(
                     provider="groq",
-                    account_ref=groq_env_config.accounts[0].account_seed.account_ref,
+                    account_ref=None,
                     model_ref=route_catalog.primary_model_ref(),
                 ),
                 "knowledge_workbench.draft_claim_compaction": CapacityAdmissionLaneTarget(
                     provider="groq",
-                    account_ref=groq_env_config.accounts[0].account_seed.account_ref,
+                    account_ref=None,
                     model_ref=route_catalog.highest_input_limit_automatic_route_model_ref(),
                 ),
             }

@@ -273,6 +273,12 @@ def _capacity_window_admission_pass_command_for_capacity(
         lane_key=CapacityAdmissionLaneKey(
             work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
             provider=account_capacity.provider,
+            account_ref=None,
+            model_ref=account_capacity.model_ref,
+        ),
+        execution_lane_key=CapacityAdmissionLaneKey(
+            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
+            provider=account_capacity.provider,
             account_ref=account_capacity.account_ref,
             model_ref=account_capacity.model_ref,
         ),
@@ -307,6 +313,12 @@ def _capacity_window_admission_pass_command(
         phase=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.phase,
         operation_key=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.operation_key,
         lane_key=CapacityAdmissionLaneKey(
+            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
+            provider=account_capacity.provider,
+            account_ref=None,
+            model_ref=account_capacity.model_ref,
+        ),
+        execution_lane_key=CapacityAdmissionLaneKey(
             work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
             provider=account_capacity.provider,
             account_ref=account_capacity.account_ref,

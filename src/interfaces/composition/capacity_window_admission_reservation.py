@@ -13,6 +13,7 @@ from src.contexts.capacity_admission_queue.application.capacity_window_admission
     CapacityWindowAdmissionSkippedReason,
 )
 from src.contexts.capacity_admission_queue.application.select_capacity_admission_work_item import (
+    CapacityAdmissionLaneKey,
     CapacityAdmissionSelectableWorkItem,
     CapacityAdmissionWindowBudget,
 )
@@ -52,6 +53,7 @@ class ReserveLlmRouteCapacityForAdmission:
         *,
         reservation_ref: str,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
         budget: CapacityAdmissionWindowBudget,
         now: datetime,
         expires_at: datetime,
@@ -60,9 +62,15 @@ class ReserveLlmRouteCapacityForAdmission:
         _require_timezone_aware(now, "now")
         _require_timezone_aware(expires_at, "expires_at")
 
-        lane_key = selected_work_item.lane_key
+        lane_key = execution_lane_key
         if lane_key.account_ref is None:
             raise ValueError("capacity admission reservation requires account_ref")
+        if selected_work_item.lane_key.work_kind != lane_key.work_kind:
+            raise ValueError("execution lane work_kind must match selected work item")
+        if selected_work_item.lane_key.provider != lane_key.provider:
+            raise ValueError("execution lane provider must match selected work item")
+        if selected_work_item.lane_key.model_ref != lane_key.model_ref:
+            raise ValueError("execution lane model_ref must match selected work item")
 
         await self.reservation_repository.lock_route(
             provider=lane_key.provider,
