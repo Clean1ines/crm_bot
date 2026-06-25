@@ -157,6 +157,25 @@ class PostgresKnowledgeExtractionSagaStateRepository(
             state.completed_at,
             state.cancelled_at,
         )
+        await self._connection.execute(
+            """
+            UPDATE knowledge_workbench_documents
+            SET current_processing_run_id = $1,
+                status = CASE
+                    WHEN status IN ('processed', 'published')
+                    THEN status
+                    ELSE 'processing'
+                END,
+                updated_at = $2
+            WHERE document_id = $3
+              AND project_id = $4::uuid
+              AND deleted_at IS NULL
+            """,
+            state.workflow_run_id,
+            state.updated_at,
+            state.source_document_ref,
+            state.project_id,
+        )
 
     async def save_phase_checkpoint(
         self,

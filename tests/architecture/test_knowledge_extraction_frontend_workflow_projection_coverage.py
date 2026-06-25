@@ -691,3 +691,35 @@ def test_patch_19b_visible_knowledge_page_and_document_card_are_not_switched_to_
     assert "reduceCompactionProjectionEvent" not in page
     assert "WorkbenchWorkflowLiveStateResponse" in card
     assert "CompactionShadowState" not in card
+
+
+def test_workflow_state_save_updates_workbench_document_current_processing_run_id() -> (
+    None
+):
+    source = Path(
+        "src/contexts/knowledge_workbench/infrastructure/postgres/postgres_knowledge_extraction_saga_state_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "UPDATE knowledge_workbench_documents" in source
+    assert "current_processing_run_id = $1" in source
+    assert "state.workflow_run_id" in source
+    assert "state.source_document_ref" in source
+
+
+def test_workbench_document_delete_cleans_frontend_workflow_events() -> None:
+    source = Path(
+        "src/contexts/knowledge_workbench/infrastructure/postgres/postgres_workbench_document_run_cleanup_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "DELETE FROM frontend_workflow_events" in source
+    assert "_delete_frontend_workflow_events" in source
+    assert "document_id = $2" in source
+    assert "workflow_run_id = ANY" in source
+
+
+def test_project_clear_deletes_orphan_frontend_workflow_events() -> None:
+    source = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
+
+    assert "DELETE FROM frontend_workflow_events" in source
+    assert "source-document:{project_id}:%" in source
+    assert '"frontend_workflow_events"' in source

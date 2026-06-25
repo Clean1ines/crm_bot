@@ -1254,6 +1254,35 @@ async def _delete_timeline_entries(
     return _delete_count(status)
 
 
+async def _delete_frontend_workflow_events(
+    connection: asyncpg.Connection,
+    columns: Mapping[str, frozenset[str]],
+    refs: DocumentRunRefs,
+) -> int:
+    if not _has(columns, "frontend_workflow_events", "project_id", "document_id"):
+        return 0
+
+    clauses: list[str] = ["(project_id = $1 AND document_id = $2)"]
+    args: list[object] = [refs.project_id, refs.source_document_ref]
+
+    if refs.workflow_run_ids and _has(
+        columns,
+        "frontend_workflow_events",
+        "workflow_run_id",
+    ):
+        clauses.append(f"workflow_run_id = ANY(${len(args) + 1}::text[])")
+        args.append(refs.workflow_run_ids)
+
+    status = await connection.execute(
+        f"""
+        DELETE FROM frontend_workflow_events
+        WHERE {" OR ".join(clauses)}
+        """,
+        *args,
+    )
+    return _delete_count(status)
+
+
 async def _delete_saga_runs(
     connection: asyncpg.Connection,
     columns: Mapping[str, frozenset[str]],
