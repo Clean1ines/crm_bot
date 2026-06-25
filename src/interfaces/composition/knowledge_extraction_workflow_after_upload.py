@@ -71,9 +71,6 @@ from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extracti
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
 )
-from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
-    PrepareLlmDispatchBatchPort,
-)
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
@@ -208,7 +205,6 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         *,
         source_ingestion_runner: SourceIngestionFirstPhaseRunnerPort,
         pool: object,
-        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
         ) = None,
@@ -245,7 +241,6 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
-        self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
         self._execute_prepared_llm_dispatch_attempt = (
             execute_prepared_llm_dispatch_attempt
         )
@@ -419,7 +414,6 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                     )
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
-                prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt
                 ),

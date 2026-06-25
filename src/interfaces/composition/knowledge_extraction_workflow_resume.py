@@ -43,7 +43,6 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.capacity_runtime.infrastructure.postgres.postgres_llm_attempt_capacity_observation_repository import (
     PostgresLlmAttemptCapacityObservationRepository,
 )
-from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
@@ -125,9 +124,6 @@ from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extracti
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
 )
-from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
-    PrepareLlmDispatchBatchPort,
-)
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
@@ -149,12 +145,6 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     PostgresSourceManagementRepository,
 )
-from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
-    ProjectLlmCapacityToCapacityRuntime,
-)
-from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
-    SelectActiveLlmModelCapacity,
-)
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutorPort,
 )
@@ -164,9 +154,6 @@ from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
 )
 from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
     LlmRuntimeSettings,
-)
-from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
-    build_groq_free_plan_model_profiles,
 )
 from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
     PostgresLlmRouteCapacityReservationRepository,
@@ -192,13 +179,15 @@ from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttemptCommand,
     ExecutePreparedLlmDispatchAttemptResult,
 )
-from src.interfaces.composition.prepare_llm_dispatch_batch import (
-    AsyncPool,
-    PrepareLlmDispatchBatch,
-)
 from src.interfaces.composition.capacity_window_admission_reservation import (
     ReserveLlmRouteCapacityForAdmission,
 )
+
+
+class AsyncPool(Protocol):
+    async def acquire(self) -> asyncpg.Connection: ...
+
+    async def release(self, connection: asyncpg.Connection) -> None: ...
 
 
 class KnowledgeExtractionWorkflowResumeNotFoundError(LookupError):
@@ -206,9 +195,9 @@ class KnowledgeExtractionWorkflowResumeNotFoundError(LookupError):
 
 
 class _AsyncResumePoolLike(Protocol):
-    async def acquire(self) -> object: ...
+    async def acquire(self) -> asyncpg.Connection: ...
 
-    async def release(self, connection: object) -> None: ...
+    async def release(self, connection: asyncpg.Connection) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,7 +266,6 @@ class RunKnowledgeExtractionWorkflowResume:
         self,
         *,
         pool: object,
-        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
         ) = None,
@@ -321,7 +309,6 @@ class RunKnowledgeExtractionWorkflowResume:
         capacity_window_admission_route_catalog: LlmModelRouteCatalog | None = None,
     ) -> None:
         self._pool = cast(_AsyncResumePoolLike, pool)
-        self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
         self._execute_prepared_llm_dispatch_attempt = (
             execute_prepared_llm_dispatch_attempt
         )
@@ -543,7 +530,6 @@ class RunKnowledgeExtractionWorkflowResume:
                 ),
                 capacity_admission_lane_target=self._capacity_admission_lane_target,
                 workflow_unit_of_work=workflow_unit_of_work,
-                prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
                 capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt
@@ -846,18 +832,6 @@ def make_knowledge_extraction_workflow_resume(
                     model_ref="openai/gpt-oss-120b",
                 ),
             }
-        ),
-        prepare_llm_dispatch_batch=PrepareLlmDispatchBatch(
-            pool=pool,
-            capacity_policy=CapacityAdmissionPolicy(),
-            active_model_capacity_selector=SelectActiveLlmModelCapacity(
-                projector=ProjectLlmCapacityToCapacityRuntime(),
-            ),
-            route_catalog=route_catalog,
-            provider_account_refs=tuple(
-                account.account_seed.account_ref for account in groq_env_config.accounts
-            ),
-            model_profiles=build_groq_free_plan_model_profiles(),
         ),
         execute_prepared_llm_dispatch_attempt=(
             _TransactionalExecutePreparedLlmDispatchAttempt(

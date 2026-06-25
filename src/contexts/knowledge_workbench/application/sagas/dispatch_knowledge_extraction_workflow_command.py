@@ -103,7 +103,6 @@ from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_bui
     CapacityWindowAdmissionPassPort,
     HandlePrepareClaimBuilderDispatchBatchCommand,
     HandlePrepareClaimBuilderDispatchBatchCommandHandler,
-    PrepareLlmDispatchBatchPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_draft_claim_compaction_dispatch_batch_command import (
     HandlePrepareDraftClaimCompactionDispatchBatchCommand,
@@ -189,7 +188,6 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         source_unit_repository: SourceManagementRepositoryPort,
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
-        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
         capacity_window_admission_pass: CapacityWindowAdmissionPassPort | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
@@ -276,10 +274,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             command_type
             is KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH
         ):
-            if (
-                prepare_llm_dispatch_batch is None
-                and capacity_window_admission_pass is None
-            ):
+            if capacity_window_admission_pass is None:
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
                     command_type=command_type.value,
@@ -294,7 +289,6 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     HandlePrepareDraftClaimCompactionDispatchBatchCommand(
                         workflow_command=workflow_command,
                     ),
-                    prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
                     workflow_unit_of_work=workflow_unit_of_work,
                     capacity_window_admission_pass=capacity_window_admission_pass,
                 )
@@ -313,10 +307,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             command_type
             is KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
         ):
-            if (
-                prepare_llm_dispatch_batch is None
-                and capacity_window_admission_pass is None
-            ):
+            if capacity_window_admission_pass is None:
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
                     command_type=command_type.value,
@@ -330,7 +321,6 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 HandlePrepareClaimBuilderDispatchBatchCommand(
                     workflow_command=workflow_command,
                 ),
-                prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
                 workflow_unit_of_work=workflow_unit_of_work,
                 frontend_event_projection_writer=frontend_event_projection_writer,
                 capacity_window_admission_pass=capacity_window_admission_pass,

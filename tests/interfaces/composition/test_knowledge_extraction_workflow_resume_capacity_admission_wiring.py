@@ -12,7 +12,7 @@ def test_resume_transaction_builds_capacity_window_admission_pass() -> None:
 
     assert "_capacity_window_admission_pass_for_transaction" in source
     assert "capacity_window_admission_pass=capacity_window_admission_pass" in source
-    assert "prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch" in source
+    assert "prepare_llm_dispatch_batch=" not in source
 
 
 def test_resume_factory_wires_route_catalog_into_capacity_window_admission_pass() -> (

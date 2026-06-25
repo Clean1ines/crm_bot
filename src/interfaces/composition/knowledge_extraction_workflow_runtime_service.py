@@ -18,7 +18,6 @@ from src.contexts.workflow_runtime.infrastructure.postgres.postgres_due_knowledg
     PostgresDueKnowledgeExtractionWorkflowReader,
 )
 from src.interfaces.composition.knowledge_extraction_workflow_resume import (
-    AsyncPool,
     RunKnowledgeExtractionWorkflowResumeCommand,
     make_knowledge_extraction_workflow_resume,
 )
@@ -50,7 +49,7 @@ class _WorkflowRunner:
         workflow_run_id: str,
     ) -> None:
         await make_knowledge_extraction_workflow_resume(
-            pool=cast(AsyncPool, self.pool),
+            pool=self.pool,
             llm_executor=self.llm_executor,
         ).execute(
             RunKnowledgeExtractionWorkflowResumeCommand(

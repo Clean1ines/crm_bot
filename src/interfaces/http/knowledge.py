@@ -85,7 +85,6 @@ from src.interfaces.composition.knowledge_extraction_after_upload_composition im
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
     RunKnowledgeExtractionWorkflowAfterUploadCommand,
 )
-from src.interfaces.composition.prepare_llm_dispatch_batch import AsyncPool
 from src.interfaces.composition.knowledge_extraction_workflow_pause_resume import (
     make_pause_knowledge_extraction_workflow,
     make_resume_knowledge_extraction_workflow_transition,
@@ -223,6 +222,13 @@ from src.interfaces.http.dependencies import (
 )
 
 logger = get_logger(__name__)
+
+
+class AsyncPool(Protocol):
+    async def acquire(self) -> object: ...
+
+    async def release(self, connection: object) -> None: ...
+
 
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 
