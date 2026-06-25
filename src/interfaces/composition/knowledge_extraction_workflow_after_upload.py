@@ -110,6 +110,12 @@ from src.contexts.knowledge_workbench.observability.application.projectors.proje
 from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
     PostgresFrontendWorkflowEventRepository,
 )
+from src.interfaces.realtime.collecting_frontend_workflow_event_repository import (
+    CollectingFrontendWorkflowEventRepository,
+)
+from src.interfaces.realtime.redis_frontend_workflow_event_bus import (
+    publish_frontend_workflow_events,
+)
 
 
 class SourceIngestionFirstPhaseRunnerPort(Protocol):
@@ -389,11 +395,14 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 cast(DraftClaimObservationReadConnectionLike, connection)
             )
         )
-        frontend_event_projection_writer = ProjectFrontendWorkflowEvent(
-            projector=KnowledgeExtractionFrontendWorkflowEventProjector(),
-            repository=PostgresFrontendWorkflowEventRepository(
+        frontend_event_repository = CollectingFrontendWorkflowEventRepository(
+            inner=PostgresFrontendWorkflowEventRepository(
                 cast(asyncpg.Connection, connection),
             ),
+        )
+        frontend_event_projection_writer = ProjectFrontendWorkflowEvent(
+            projector=KnowledgeExtractionFrontendWorkflowEventProjector(),
+            repository=frontend_event_repository,
         )
 
         try:
@@ -482,6 +491,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 frontend_event_projection_writer=frontend_event_projection_writer,
             )
             await workflow_unit_of_work.commit()
+            await publish_frontend_workflow_events(
+                frontend_event_repository.persisted_events()
+            )
             return result
         except Exception:
             await workflow_unit_of_work.rollback()

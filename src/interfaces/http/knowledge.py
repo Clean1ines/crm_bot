@@ -7,7 +7,6 @@ vertical. Queue-based FAQ Workbench document upload is retired.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
@@ -66,6 +65,9 @@ from src.contexts.knowledge_workbench.observability.application.models.frontend_
 )
 from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
     PostgresFrontendWorkflowEventRepository,
+)
+from src.interfaces.realtime.redis_frontend_workflow_event_bus import (
+    subscribe_frontend_workflow_events,
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
@@ -1471,31 +1473,57 @@ async def stream_knowledge_frontend_workflow_events(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def event_stream():
-        poll_cursor = cursor
+        replay_cursor = cursor
         async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
             repository = PostgresFrontendWorkflowEventRepository(
                 cast(asyncpg.Connection, raw_connection)
             )
-            while True:
-                events = await repository.list_frontend_events(
-                    workflow_run_id,
-                    poll_cursor,
-                    200,
-                )
-                for event in events:
-                    poll_cursor = FrontendWorkflowEventCursor.from_event(event)
+            replay_events = await repository.list_frontend_events(
+                workflow_run_id,
+                replay_cursor,
+                200,
+            )
+
+        for event in replay_events:
+            replay_cursor = FrontendWorkflowEventCursor.from_event(event)
+            if (
+                event.project_id == project_id
+                and event.document_id == document_id
+                and event.workflow_run_id == workflow_run_id
+            ):
+                yield _frontend_workflow_event_sse(event)
+
+        if await request.is_disconnected():
+            return
+
+        try:
+            async with subscribe_frontend_workflow_events(
+                workflow_run_id=workflow_run_id,
+            ) as subscription:
+                while True:
+                    if await request.is_disconnected():
+                        return
+
+                    event = await subscription.next_event(timeout_seconds=15.0)
+                    if event is None:
+                        yield ": keepalive\n\n"
+                        continue
+
                     if (
                         event.project_id == project_id
                         and event.document_id == document_id
                         and event.workflow_run_id == workflow_run_id
+                        and event.source_sequence_number
+                        > replay_cursor.source_sequence_number
                     ):
+                        replay_cursor = FrontendWorkflowEventCursor.from_event(event)
                         yield _frontend_workflow_event_sse(event)
-
-                if await request.is_disconnected():
-                    return
-                if not events:
-                    yield ": keepalive\n\n"
-                await asyncio.sleep(1.0)
+        except Exception as exc:
+            logger.warning(
+                "Frontend workflow event Redis stream unavailable",
+                extra={"error": str(exc)},
+            )
+            return
 
     return StreamingResponse(
         event_stream(),

@@ -446,14 +446,33 @@ async def test_frontend_workflow_event_stream_does_not_call_runtime_paths(
 
 
 @pytest.mark.asyncio
-async def test_frontend_workflow_event_stream_polls_after_empty_backlog(
+async def test_frontend_workflow_event_stream_waits_for_redis_after_empty_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def publish_during_wait(delay: float) -> None:
-        assert delay == 1.0
-        FakeFrontendWorkflowEventRepository.events = (
-            _event(projection_event_id="projection-after-wait"),
-        )
+    class FakeFrontendWorkflowEventSubscription:
+        def __init__(self) -> None:
+            self._events = [
+                _event(projection_event_id="projection-from-redis"),
+                None,
+            ]
+
+        async def next_event(
+            self,
+            *,
+            timeout_seconds: float,
+        ) -> FrontendWorkflowEvent | None:
+            assert timeout_seconds == 15.0
+            if not self._events:
+                return None
+            return self._events.pop(0)
+
+    @asynccontextmanager
+    async def fake_subscribe_frontend_workflow_events(
+        *,
+        workflow_run_id: str,
+    ):
+        assert workflow_run_id == "workflow-1"
+        yield FakeFrontendWorkflowEventSubscription()
 
     monkeypatch.setattr(dependencies, "get_current_user_id", _allow_auth)
     monkeypatch.setattr(
@@ -461,13 +480,17 @@ async def test_frontend_workflow_event_stream_polls_after_empty_backlog(
         "PostgresFrontendWorkflowEventRepository",
         FakeFrontendWorkflowEventRepository,
     )
-    monkeypatch.setattr(knowledge.asyncio, "sleep", publish_during_wait)
+    monkeypatch.setattr(
+        knowledge,
+        "subscribe_frontend_workflow_events",
+        fake_subscribe_frontend_workflow_events,
+    )
 
     response = await knowledge.stream_knowledge_frontend_workflow_events(
         project_id="project-1",
         document_id="document-1",
         workflow_run_id="workflow-1",
-        request=cast(Request, FakeRequest(disconnect_after_checks=1)),
+        request=cast(Request, FakeRequest(disconnect_after_checks=2)),
         after_source_sequence=0,
         authorization="Bearer token",
         pool=FakePool(),
@@ -479,19 +502,13 @@ async def test_frontend_workflow_event_stream_polls_after_empty_backlog(
     text = "".join(
         chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks
     )
-    assert text.startswith(": keepalive\n\n")
-    assert "id: projection-after-wait" in text
+    assert "id: projection-from-redis" in text
     assert FakeFrontendWorkflowEventRepository.calls == [
         (
             "workflow-1",
             FrontendWorkflowEventCursor.from_legacy_source_sequence(0),
             200,
-        ),
-        (
-            "workflow-1",
-            FrontendWorkflowEventCursor.from_legacy_source_sequence(0),
-            200,
-        ),
+        )
     ]
 
 
@@ -499,6 +516,8 @@ def test_frontend_workflow_event_stream_is_projection_only_source_guard() -> Non
     source = inspect.getsource(knowledge.stream_knowledge_frontend_workflow_events)
 
     assert "PostgresFrontendWorkflowEventRepository" in source
+    assert "subscribe_frontend_workflow_events" in source
+    assert "await asyncio.sleep" not in source
     assert "workflow_live_state_changed" not in source
     for forbidden_marker in (
         "fetch_workbench_workflow_live_state",

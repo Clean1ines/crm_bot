@@ -53,6 +53,12 @@ from src.contexts.knowledge_workbench.observability.application.projectors.sourc
 from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
     PostgresFrontendWorkflowEventRepository,
 )
+from src.interfaces.realtime.collecting_frontend_workflow_event_repository import (
+    CollectingFrontendWorkflowEventRepository,
+)
+from src.interfaces.realtime.redis_frontend_workflow_event_bus import (
+    publish_frontend_workflow_events,
+)
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     AsyncSourceManagementConnectionLike,
     PostgresSourceManagementRepository,
@@ -393,9 +399,12 @@ class _TransactionalSourceIngestionFirstPhaseRunner(
                 timeline=PostgresTimelineRepository(connection),
                 resource_usage=PostgresResourceUsageRepository(connection),
             )
+            frontend_event_repository = CollectingFrontendWorkflowEventRepository(
+                inner=PostgresFrontendWorkflowEventRepository(connection),
+            )
             frontend_event_projection_writer = ProjectFrontendWorkflowEvent(
                 projector=SourceIngestionFrontendWorkflowEventProjector(),
-                repository=PostgresFrontendWorkflowEventRepository(connection),
+                repository=frontend_event_repository,
             )
             unit_of_work = _SourceIngestionFirstPhaseUnitOfWork(
                 source_management=source_management,
@@ -436,6 +445,9 @@ class _TransactionalSourceIngestionFirstPhaseRunner(
                     frontend_event_projection_writer=(frontend_event_projection_writer),
                 )
             await transaction.commit()
+            await publish_frontend_workflow_events(
+                frontend_event_repository.persisted_events()
+            )
             return result
         except Exception:
             await transaction.rollback()
