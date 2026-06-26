@@ -25,8 +25,8 @@ from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_p
 def _record(
     work_item_id: str,
     *,
-    estimated_input_tokens: int,
-    estimated_output_tokens: int,
+    input_tokens: int,
+    artifact_tokens: int,
 ) -> DueWorkItemRecord:
     return DueWorkItemRecord(
         work_item=WorkItem(
@@ -36,35 +36,32 @@ def _record(
         ),
         schedule_payload={
             "llm_capacity_estimate": {
-                "estimated_input_tokens": estimated_input_tokens,
-                "estimated_output_tokens": estimated_output_tokens,
-                "estimated_total_tokens": estimated_input_tokens
-                + estimated_output_tokens,
+                "input_tokens": input_tokens,
+                "artifact_tokens": artifact_tokens,
+                "estimated_total_tokens": input_tokens + artifact_tokens,
             },
         },
     )
 
 
-def test_profile_completion_estimate_comes_from_estimated_output_tokens() -> None:
+def test_profile_completion_estimate_comes_from_artifact_tokens() -> None:
     profile = (
         ClaimBuilderDispatchPreparationBuilder().build_profile_from_due_work_items(
             (
                 _record(
                     "work-1",
-                    estimated_input_tokens=5000,
-                    estimated_output_tokens=1200,
+                    input_tokens=5000,
+                    artifact_tokens=1200,
                 ),
                 _record(
                     "work-2",
-                    estimated_input_tokens=4000,
-                    estimated_output_tokens=1600,
+                    input_tokens=4000,
+                    artifact_tokens=1600,
                 ),
             ),
         )
     )
 
-    assert profile.estimated_input_tokens == 5000
-    assert profile.estimated_output_tokens == 1600
     assert profile.estimated_prompt_tokens == 5000
     assert profile.estimated_completion_tokens == 1600
     assert profile.estimated_requests == 1
@@ -98,8 +95,8 @@ def test_dispatch_preparation_payload_dual_writes_target_and_legacy_profile_keys
     profile = payload["profile"]
 
     assert isinstance(profile, dict)
-    assert profile["estimated_input_tokens"] == 5000
-    assert profile["estimated_output_tokens"] == 1600
+    assert profile["input_tokens"] == 5000
+    assert profile["artifact_tokens"] == 1600
     assert profile["estimated_prompt_tokens"] == 5000
     assert profile["estimated_completion_tokens"] == 1600
 
@@ -113,14 +110,14 @@ def test_profile_rejects_legacy_reserved_output_tokens_as_expected_output() -> N
         ),
         schedule_payload={
             "llm_capacity_estimate": {
-                "estimated_input_tokens": 5000,
+                "input_tokens": 5000,
                 "reserved_output_tokens": 1200,
                 "estimated_total_tokens": 6200,
             },
         },
     )
 
-    with pytest.raises(ValueError, match="estimated_output_tokens"):
+    with pytest.raises(ValueError, match="artifact_tokens"):
         ClaimBuilderDispatchPreparationBuilder().build_profile_from_due_work_items(
             (legacy_record,),
         )

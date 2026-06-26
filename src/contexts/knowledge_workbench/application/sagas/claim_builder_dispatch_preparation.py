@@ -45,6 +45,8 @@ class ClaimBuilderDispatchPreparation:
         return {
             "profile": {
                 "profile_id": self.profile.profile_id,
+                "input_tokens": self.profile.estimated_input_tokens,
+                "artifact_tokens": self.profile.estimated_output_tokens,
                 "estimated_input_tokens": self.profile.estimated_input_tokens,
                 "estimated_output_tokens": self.profile.estimated_output_tokens,
                 "estimated_prompt_tokens": self.profile.estimated_prompt_tokens,
@@ -112,10 +114,10 @@ class ClaimBuilderDispatchPreparationBuilder:
         return LlmTaskCapacityProfile(
             profile_id=CLAIM_BUILDER_DISPATCH_PROFILE_ID,
             estimated_prompt_tokens=max(
-                estimate.estimated_input_tokens for estimate in estimates
+                estimate.input_tokens for estimate in estimates
             ),
             estimated_completion_tokens=max(
-                estimate.estimated_output_tokens for estimate in estimates
+                estimate.artifact_tokens for estimate in estimates
             ),
             estimated_requests=1,
         )
@@ -188,8 +190,8 @@ class ClaimBuilderDispatchPreparationBuilder:
 
 @dataclass(frozen=True, slots=True)
 class _CapacityEstimate:
-    estimated_input_tokens: int
-    estimated_output_tokens: int
+    input_tokens: int
+    artifact_tokens: int
 
 
 def _capacity_estimate_from_schedule_payload(
@@ -200,13 +202,15 @@ def _capacity_estimate_from_schedule_payload(
         raise ValueError("schedule_payload.llm_capacity_estimate is required")
 
     return _CapacityEstimate(
-        estimated_input_tokens=_mapping_positive_int(
+        input_tokens=_mapping_positive_int(
             estimate_payload,
-            "estimated_input_tokens",
+            "input_tokens",
+            legacy_key="estimated_input_tokens",
         ),
-        estimated_output_tokens=_mapping_non_negative_int(
+        artifact_tokens=_mapping_non_negative_int(
             estimate_payload,
-            "estimated_output_tokens",
+            "artifact_tokens",
+            legacy_key="estimated_output_tokens",
         ),
     )
 
@@ -233,15 +237,29 @@ def _rate_limit_positive_int(value: int | None, *, field_name: str) -> int:
     return value
 
 
-def _mapping_positive_int(payload: Mapping[str, object], key: str) -> int:
+def _mapping_positive_int(
+    payload: Mapping[str, object],
+    key: str,
+    *,
+    legacy_key: str | None = None,
+) -> int:
     value = payload.get(key)
+    if value is None and legacy_key is not None:
+        value = payload.get(legacy_key)
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{key} must be positive int")
     return value
 
 
-def _mapping_non_negative_int(payload: Mapping[str, object], key: str) -> int:
+def _mapping_non_negative_int(
+    payload: Mapping[str, object],
+    key: str,
+    *,
+    legacy_key: str | None = None,
+) -> int:
     value = payload.get(key)
+    if value is None and legacy_key is not None:
+        value = payload.get(legacy_key)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{key} must be non-negative int")
     return value

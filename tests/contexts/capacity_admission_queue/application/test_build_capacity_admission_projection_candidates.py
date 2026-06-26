@@ -266,3 +266,32 @@ def test_rejects_non_schedule_plan_items() -> None:
 
 def _invalid_schedule_plan_sequence() -> tuple[WorkItemSchedulePlan, ...]:
     return cast(tuple[WorkItemSchedulePlan, ...], ("not-a-plan",))
+
+
+def test_builds_projection_candidate_from_minimal_v2_token_estimate() -> None:
+    plan = _plan(
+        payload={
+            "workflow_run_id": "workflow-run-1",
+            "llm_capacity_estimate": {
+                "budget_contract_version": "v2",
+                "model_ref": "qwen/qwen3-32b",
+                "prompt_tokens": 1953,
+                "artifact_tokens": 304,
+                "input_tokens": 2257,
+                "required_window_tokens": 2861,
+            },
+        }
+    )
+
+    candidates = BuildCapacityAdmissionProjectionCandidates(
+        lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            model_ref="qwen/qwen3-32b",
+        )
+    ).execute((plan,))
+
+    candidate = candidates[0]
+    assert candidate.estimated_input_tokens == 2257
+    assert candidate.estimated_output_tokens == 304
+    assert candidate.effective_output_cap_tokens == 304
+    assert candidate.reserved_total_tokens == 2861

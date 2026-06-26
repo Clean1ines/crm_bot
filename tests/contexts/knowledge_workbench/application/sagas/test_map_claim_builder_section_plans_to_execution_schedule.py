@@ -180,67 +180,26 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
 
     capacity_estimate = schedule.payload["llm_capacity_estimate"]
     assert isinstance(capacity_estimate, dict)
-    assert capacity_estimate["budget_contract_version"] == "v1"
-    assert capacity_estimate["provider"] == "groq"
-    assert capacity_estimate["model_ref"] == "qwen/qwen3-32b"
-    assert capacity_estimate["model_tpm_limit"] == 6000
-    assert capacity_estimate["model_char_to_token_multiplier"] == "3.3"
-    assert capacity_estimate["prompt_id"] == "faq_claim_observations"
-    assert capacity_estimate["prompt_version"] == "v1"
-    assert capacity_estimate["phase"] == "claim_builder"
-    assert capacity_estimate["operation"] == "section_claim_extraction"
-    assert capacity_estimate["input_artifact_kind"] == "source_unit"
-    assert capacity_estimate["output_artifact_kind"] == "draft_claims"
-    assert capacity_estimate["request_safety_gap_tokens"] == 300
-    assert capacity_estimate["output_safety_gap_tokens"] == 300
-    assert capacity_estimate["provider_default_completion_tokens"] == 2048
-
-    assert capacity_estimate["prompt_message_tokens"] == (1953,)
-    assert capacity_estimate["prompt_tokens"] == 1953
-    assert (
-        capacity_estimate["source_unit_token_count"]
-        == (capacity_estimate["artifact_token_estimate"])
-    )
-    assert (
-        capacity_estimate["batch_input_estimated_tokens"]
-        == (capacity_estimate["source_unit_token_count"])
-    )
-    assert capacity_estimate["max_artifact_input_tokens"] == 1873
-    assert capacity_estimate["batch_input_max_tokens"] == 1873
-    assert capacity_estimate["planned_output_reserve_tokens"] == 1874
-    assert capacity_estimate["estimated_output_tokens"] == 1874
-
-    assert capacity_estimate["estimated_input_tokens"] == (
-        1953 + capacity_estimate["source_unit_token_count"]
-    )
-    assert (
-        capacity_estimate["request_input_estimated_tokens"]
-        == (capacity_estimate["estimated_input_tokens"])
-    )
-    assert capacity_estimate["remaining_after_actual_input_tokens"] == (
-        6000 - capacity_estimate["estimated_input_tokens"] - 300
-    )
-    assert (
-        capacity_estimate["request_output_cap_tokens"]
-        == (capacity_estimate["remaining_after_actual_input_tokens"])
-    )
-    assert (
-        capacity_estimate["effective_output_cap_tokens"]
-        == (capacity_estimate["request_output_cap_tokens"])
-    )
-    assert capacity_estimate["reserved_total_tokens"] == (
-        capacity_estimate["estimated_input_tokens"]
-        + capacity_estimate["effective_output_cap_tokens"]
-    )
-    assert "reserved_output_tokens" not in capacity_estimate
-    assert capacity_estimate["estimated_total_tokens"] == (
-        capacity_estimate["estimated_input_tokens"]
-        + capacity_estimate["planned_output_reserve_tokens"]
-    )
-    assert (
-        capacity_estimate["request_total_estimated_tokens"]
-        == (capacity_estimate["estimated_total_tokens"])
-    )
+    assert capacity_estimate == {
+        "budget_contract_version": "v2",
+        "model_ref": "qwen/qwen3-32b",
+        "prompt_tokens": 1953,
+        "artifact_tokens": capacity_estimate["artifact_tokens"],
+        "input_tokens": 1953 + capacity_estimate["artifact_tokens"],
+        "required_window_tokens": (
+            1953
+            + capacity_estimate["artifact_tokens"]
+            + capacity_estimate["artifact_tokens"]
+            + 300
+        ),
+    }
+    assert capacity_estimate["artifact_tokens"] > 0
+    assert "estimated_input_tokens" not in capacity_estimate
+    assert "estimated_output_tokens" not in capacity_estimate
+    assert "effective_output_cap_tokens" not in capacity_estimate
+    assert "planned_output_reserve_tokens" not in capacity_estimate
+    assert "reserved_total_tokens" not in capacity_estimate
+    assert "request_total_estimated_tokens" not in capacity_estimate
 
 
 def test_prompt_token_count_can_be_overridden_from_env(
@@ -258,26 +217,19 @@ def test_prompt_token_count_can_be_overridden_from_env(
     )
 
     capacity_estimate = schedule.payload["llm_capacity_estimate"]
-    assert capacity_estimate["prompt_message_tokens"] == (4200,)
+    assert capacity_estimate["budget_contract_version"] == "v2"
+    assert capacity_estimate["model_ref"] == "qwen/qwen3-32b"
     assert capacity_estimate["prompt_tokens"] == 4200
-    assert capacity_estimate["max_artifact_input_tokens"] == 750
-    assert capacity_estimate["planned_output_reserve_tokens"] == 750
-    assert capacity_estimate["estimated_output_tokens"] == 750
-    assert capacity_estimate["estimated_input_tokens"] == (
-        4200 + capacity_estimate["source_unit_token_count"]
+    assert capacity_estimate["artifact_tokens"] > 0
+    assert capacity_estimate["input_tokens"] == (
+        4200 + capacity_estimate["artifact_tokens"]
     )
-    assert capacity_estimate["remaining_after_actual_input_tokens"] == (
-        6000 - capacity_estimate["estimated_input_tokens"] - 300
+    assert capacity_estimate["required_window_tokens"] == (
+        capacity_estimate["input_tokens"] + capacity_estimate["artifact_tokens"] + 300
     )
-    assert "request_output_cap_tokens" not in capacity_estimate
-    assert capacity_estimate["effective_output_cap_tokens"] == 750
-    assert capacity_estimate["reserved_total_tokens"] == (
-        capacity_estimate["estimated_input_tokens"] + 750
-    )
-    assert capacity_estimate["estimated_total_tokens"] == (
-        capacity_estimate["estimated_input_tokens"] + 750
-    )
-    assert capacity_estimate["estimator"].startswith("measured_prompt_4200_")
+    assert "estimated_input_tokens" not in capacity_estimate
+    assert "effective_output_cap_tokens" not in capacity_estimate
+    assert "reserved_total_tokens" not in capacity_estimate
 
 
 def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() -> None:

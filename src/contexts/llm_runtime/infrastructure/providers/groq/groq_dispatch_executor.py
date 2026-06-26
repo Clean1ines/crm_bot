@@ -369,11 +369,13 @@ def _resolve_max_completion_tokens(
 
 def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int:
     estimate_payload = _require_mapping(schedule_payload, "llm_capacity_estimate")
-    value = estimate_payload.get("estimated_input_tokens")
+    value = estimate_payload.get("input_tokens")
+    if value is None:
+        value = estimate_payload.get("estimated_input_tokens")
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("llm_capacity_estimate.estimated_input_tokens must be int")
+        raise ValueError("llm_capacity_estimate.input_tokens must be int")
     if value <= 0:
-        raise ValueError("llm_capacity_estimate.estimated_input_tokens must be > 0")
+        raise ValueError("llm_capacity_estimate.input_tokens must be > 0")
     return value
 
 

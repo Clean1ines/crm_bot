@@ -145,17 +145,19 @@ def _claim_builder_token_estimate(
         prompt_tokens=prompt_token_count,
     )
     budget = budget_policy.calculate_for_artifact_chars(len(plan.source_unit_text))
-    multiplier_marker = str(budget.model_char_to_token_multiplier).replace(".", "_")
 
-    return budget.to_capacity_estimate_payload(
-        estimator=(
-            f"measured_prompt_{prompt_token_count}_"
-            f"source_char_div_{multiplier_marker}_phase_token_budget"
+    return {
+        "budget_contract_version": "v2",
+        "model_ref": budget.model_ref,
+        "prompt_tokens": budget.prompt_tokens,
+        "artifact_tokens": budget.artifact_token_estimate,
+        "input_tokens": budget.request_input_estimated_tokens,
+        "required_window_tokens": (
+            budget.request_input_estimated_tokens
+            + budget.artifact_token_estimate
+            + budget.request_safety_gap_tokens
         ),
-        extra_metadata={
-            "source_unit_token_count": budget.artifact_token_estimate,
-        },
-    )
+    }
 
 
 def _claim_builder_prompt_tokens_from_env() -> int:

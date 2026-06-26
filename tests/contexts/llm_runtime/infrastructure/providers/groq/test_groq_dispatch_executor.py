@@ -77,7 +77,7 @@ def _dispatch_payload(
                 },
             ],
             "llm_capacity_estimate": {
-                "estimated_input_tokens": 1000,
+                "input_tokens": 1000,
             },
         },
         "llm_allocation": {
@@ -154,7 +154,7 @@ async def test_prepared_request_output_cap_becomes_max_completion_tokens() -> No
             },
         ],
         "llm_capacity_estimate": {
-            "estimated_input_tokens": 1000,
+            "input_tokens": 1000,
             "request_output_cap_tokens": 1234,
         },
     }
@@ -182,7 +182,7 @@ async def test_missing_prepared_request_output_cap_does_not_send_max_completion_
             },
         ],
         "llm_capacity_estimate": {
-            "estimated_input_tokens": 1000,
+            "input_tokens": 1000,
         },
     }
     transport = FakeGroqTransport(response=_success_response())

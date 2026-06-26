@@ -107,13 +107,19 @@ class BuildCapacityAdmissionProjectionCandidates:
             capacity_estimate = _capacity_estimate_from_payload(plan.payload)
             estimated_input_tokens = _positive_int_from_mapping_with_aliases(
                 capacity_estimate,
-                primary_key="estimated_input_tokens",
-                alias_keys=("request_input_estimated_tokens",),
+                primary_key="input_tokens",
+                alias_keys=(
+                    "estimated_input_tokens",
+                    "request_input_estimated_tokens",
+                ),
             )
             estimated_output_tokens = _non_negative_int_from_mapping_with_aliases(
                 capacity_estimate,
-                primary_key="estimated_output_tokens",
-                alias_keys=("planned_output_reserve_tokens",),
+                primary_key="artifact_tokens",
+                alias_keys=(
+                    "estimated_output_tokens",
+                    "planned_output_reserve_tokens",
+                ),
             )
             effective_output_cap_tokens = _optional_non_negative_int_from_mapping(
                 capacity_estimate,
@@ -124,8 +130,11 @@ class BuildCapacityAdmissionProjectionCandidates:
 
             reserved_total_tokens = _optional_positive_int_from_mapping_with_aliases(
                 capacity_estimate,
-                primary_key="reserved_total_tokens",
-                alias_keys=("request_total_estimated_tokens",),
+                primary_key="required_window_tokens",
+                alias_keys=(
+                    "reserved_total_tokens",
+                    "request_total_estimated_tokens",
+                ),
             )
             if reserved_total_tokens is None:
                 reserved_total_tokens = (
