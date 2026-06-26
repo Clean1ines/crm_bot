@@ -417,8 +417,15 @@ async def _schedule_next_work(
             "estimated_completion_tokens": next_work_item.estimated_completion_tokens,
             "estimated_requests": next_work_item.estimated_requests,
             "llm_capacity_estimate": {
+                "budget_contract_version": "v1",
                 "estimated_input_tokens": next_work_item.estimated_prompt_tokens,
                 "estimated_output_tokens": next_work_item.estimated_completion_tokens,
+                "request_input_estimated_tokens": next_work_item.estimated_prompt_tokens,
+                "planned_output_reserve_tokens": next_work_item.estimated_completion_tokens,
+                "request_total_estimated_tokens": (
+                    next_work_item.estimated_prompt_tokens
+                    + next_work_item.estimated_completion_tokens
+                ),
             },
         },
     )
@@ -708,12 +715,18 @@ def _next_work_profile_payload(
     next_work_item: DraftClaimCompactionNextWorkItem,
 ) -> dict[str, int | str]:
     estimated_prompt_tokens = max(next_work_item.estimated_prompt_tokens, 1)
+    estimated_completion_tokens = next_work_item.estimated_completion_tokens
     return {
         "profile_id": f"draft_claim_compaction:{batch_ref}",
         "estimated_input_tokens": estimated_prompt_tokens,
-        "estimated_output_tokens": next_work_item.estimated_completion_tokens,
+        "estimated_output_tokens": estimated_completion_tokens,
         "estimated_prompt_tokens": estimated_prompt_tokens,
-        "estimated_completion_tokens": next_work_item.estimated_completion_tokens,
+        "estimated_completion_tokens": estimated_completion_tokens,
+        "request_input_estimated_tokens": estimated_prompt_tokens,
+        "planned_output_reserve_tokens": estimated_completion_tokens,
+        "request_total_estimated_tokens": (
+            estimated_prompt_tokens + estimated_completion_tokens
+        ),
         "estimated_requests": next_work_item.estimated_requests,
     }
 

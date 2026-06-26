@@ -149,17 +149,24 @@ def _claim_builder_token_estimate(
     )
     estimated_input_tokens = prompt_token_count + source_unit_token_count
     estimated_output_tokens = source_unit_token_count
+    estimated_total_tokens = estimated_input_tokens + estimated_output_tokens
 
     return {
         "estimator": (
             f"measured_prompt_{prompt_token_count}_"
             "source_char_div_3_3_conservative_section_output"
         ),
+        "budget_contract_version": "v1",
         "prompt_message_tokens": (prompt_token_count,),
         "source_unit_token_count": source_unit_token_count,
         "estimated_input_tokens": estimated_input_tokens,
         "estimated_output_tokens": estimated_output_tokens,
-        "estimated_total_tokens": estimated_input_tokens + estimated_output_tokens,
+        "estimated_total_tokens": estimated_total_tokens,
+        "prompt_tokens": prompt_token_count,
+        "batch_input_estimated_tokens": source_unit_token_count,
+        "request_input_estimated_tokens": estimated_input_tokens,
+        "planned_output_reserve_tokens": estimated_output_tokens,
+        "request_total_estimated_tokens": estimated_total_tokens,
     }
 
 
