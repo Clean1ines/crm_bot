@@ -874,7 +874,7 @@ async def test_persists_capacity_projection_after_next_compacted_work_item() -> 
     assert candidates[0].provider == "groq"
     assert candidates[0].account_ref == "groq-account-1"
     assert candidates[0].model_ref == "llama-3.3-70b-versatile"
-    assert candidates[0].reserved_total_tokens > 0
+    assert candidates[0].required_window_tokens > 0
 
     payload = scheduling.saved_payloads[0]
     assert "llm_capacity_estimate" in payload
@@ -1008,8 +1008,8 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     assert dispatch_profile["required_window_tokens"] == _test_required_window_tokens(
         prompt_tokens=1, artifact_tokens=1
     )
-    assert dispatch_profile["estimated_input_tokens"] == 2
-    assert dispatch_profile["estimated_output_tokens"] == 1
+    assert dispatch_profile["input_tokens"] == 2
+    assert dispatch_profile["artifact_tokens"] == 1
     assert dispatch_profile["estimated_prompt_tokens"] == 1
     assert dispatch_profile["estimated_completion_tokens"] == 1
     assert dispatch_profile["estimated_requests"] == 1

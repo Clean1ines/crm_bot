@@ -120,10 +120,9 @@ def _admitted_result() -> CapacityWindowAdmissionPassResult:
                 work_item_id="work-item-1",
                 lane=_lane(),
                 selection_kind="fresh",
-                estimated_input_tokens=100,
-                estimated_output_tokens=10,
-                effective_output_cap_tokens=50,
-                reserved_total_tokens=150,
+                input_tokens=100,
+                artifact_tokens=10,
+                required_window_tokens=150,
                 dispatch_context=CapacityAdmissionDispatchContextSummary(
                     source_ref="source-document-1",
                     source_unit_ref="source-unit-1",

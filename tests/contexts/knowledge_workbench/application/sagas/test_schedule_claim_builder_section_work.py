@@ -337,8 +337,8 @@ async def test_persists_capacity_admission_projection_when_lane_target_is_config
         candidate.model_ref == "llama-3.3-70b-versatile" for candidate in candidates
     )
     assert all(
-        candidate.reserved_total_tokens
-        >= candidate.estimated_input_tokens + candidate.estimated_output_tokens
+        candidate.required_window_tokens
+        >= candidate.input_tokens + candidate.artifact_tokens
         for candidate in candidates
     )
     assert candidates[0].source_ref["source_unit_ref"] == (
