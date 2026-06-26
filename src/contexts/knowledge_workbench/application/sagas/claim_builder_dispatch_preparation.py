@@ -47,8 +47,6 @@ class ClaimBuilderDispatchPreparation:
                 "profile_id": self.profile.profile_id,
                 "input_tokens": self.profile.estimated_input_tokens,
                 "artifact_tokens": self.profile.estimated_output_tokens,
-                "estimated_input_tokens": self.profile.estimated_input_tokens,
-                "estimated_output_tokens": self.profile.estimated_output_tokens,
                 "estimated_prompt_tokens": self.profile.estimated_prompt_tokens,
                 "estimated_completion_tokens": self.profile.estimated_completion_tokens,
                 "estimated_requests": self.profile.estimated_requests,
@@ -205,12 +203,10 @@ def _capacity_estimate_from_schedule_payload(
         input_tokens=_mapping_positive_int(
             estimate_payload,
             "input_tokens",
-            legacy_key="estimated_input_tokens",
         ),
         artifact_tokens=_mapping_non_negative_int(
             estimate_payload,
             "artifact_tokens",
-            legacy_key="estimated_output_tokens",
         ),
     )
 
@@ -240,12 +236,8 @@ def _rate_limit_positive_int(value: int | None, *, field_name: str) -> int:
 def _mapping_positive_int(
     payload: Mapping[str, object],
     key: str,
-    *,
-    legacy_key: str | None = None,
 ) -> int:
     value = payload.get(key)
-    if value is None and legacy_key is not None:
-        value = payload.get(legacy_key)
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"{key} must be positive int")
     return value
@@ -254,12 +246,8 @@ def _mapping_positive_int(
 def _mapping_non_negative_int(
     payload: Mapping[str, object],
     key: str,
-    *,
-    legacy_key: str | None = None,
 ) -> int:
     value = payload.get(key)
-    if value is None and legacy_key is not None:
-        value = payload.get(legacy_key)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{key} must be non-negative int")
     return value

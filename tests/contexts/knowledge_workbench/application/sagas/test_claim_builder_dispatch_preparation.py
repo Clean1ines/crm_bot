@@ -38,7 +38,7 @@ def _record(
             "llm_capacity_estimate": {
                 "input_tokens": input_tokens,
                 "artifact_tokens": artifact_tokens,
-                "estimated_total_tokens": input_tokens + artifact_tokens,
+                "required_window_tokens": input_tokens + artifact_tokens,
             },
         },
     )
@@ -67,9 +67,7 @@ def test_profile_completion_estimate_comes_from_artifact_tokens() -> None:
     assert profile.estimated_requests == 1
 
 
-def test_dispatch_preparation_payload_dual_writes_target_and_legacy_profile_keys() -> (
-    None
-):
+def test_dispatch_preparation_payload_writes_canonical_profile_keys() -> None:
     preparation = ClaimBuilderDispatchPreparation(
         profile=LlmTaskCapacityProfile(
             profile_id="prompt-a",
@@ -99,6 +97,8 @@ def test_dispatch_preparation_payload_dual_writes_target_and_legacy_profile_keys
     assert profile["artifact_tokens"] == 1600
     assert profile["estimated_prompt_tokens"] == 5000
     assert profile["estimated_completion_tokens"] == 1600
+    assert "estimated_input_tokens" not in profile
+    assert "estimated_output_tokens" not in profile
 
 
 def test_profile_rejects_legacy_reserved_output_tokens_as_expected_output() -> None:
@@ -112,7 +112,7 @@ def test_profile_rejects_legacy_reserved_output_tokens_as_expected_output() -> N
             "llm_capacity_estimate": {
                 "input_tokens": 5000,
                 "reserved_output_tokens": 1200,
-                "estimated_total_tokens": 6200,
+                "required_window_tokens": 6200,
             },
         },
     )
