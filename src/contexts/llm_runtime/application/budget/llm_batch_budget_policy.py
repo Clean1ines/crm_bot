@@ -76,11 +76,11 @@ class LlmBatchBudgetPolicy:
             raise TypeError("model_profile must be ModelProfile")
         if not isinstance(self.prompt_profile, PromptProfile):
             raise TypeError("prompt_profile must be PromptProfile")
-        if str(self.model_profile.provider_id) != self.provider_profile.provider_id:
+        if self.model_profile.provider_id.value != self.provider_profile.provider_id:
             raise ValueError("model provider must match provider budget profile")
         if self.prompt_profile.provider_id != self.provider_profile.provider_id:
             raise ValueError("prompt provider must match provider budget profile")
-        if self.prompt_profile.model_ref != str(self.model_profile.model_id):
+        if self.prompt_profile.model_ref != self.model_profile.model_id.value:
             raise ValueError("prompt model_ref must match model profile")
 
     def decide(
