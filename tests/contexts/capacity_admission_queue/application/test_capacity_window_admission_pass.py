@@ -168,7 +168,7 @@ class FakeCapacityReservation:
         now: datetime,
         expires_at: datetime,
     ) -> CapacityWindowAdmissionReservationResult:
-        del attempt_id, execution_lane_key
+        del attempt_id
         self.calls += 1
         if self.deny_after_count is not None and self.calls > self.deny_after_count:
             return CapacityWindowAdmissionReservationResult(
@@ -182,10 +182,10 @@ class FakeCapacityReservation:
                 reservation_ref=reservation_ref,
                 work_item_id=selected_work_item.work_item_id,
                 lane=CapacityAdmissionLaneSummary(
-                    work_kind=selected_work_item.lane_key.work_kind,
-                    provider=selected_work_item.lane_key.provider,
-                    account_ref=selected_work_item.lane_key.account_ref,
-                    model_ref=selected_work_item.lane_key.model_ref,
+                    work_kind=execution_lane_key.work_kind,
+                    provider=execution_lane_key.provider,
+                    account_ref=execution_lane_key.account_ref,
+                    model_ref=execution_lane_key.model_ref,
                 ),
                 reserved_requests=1,
                 reserved_tokens=selected_work_item.reserved_total_tokens,
@@ -244,7 +244,16 @@ class FakeActiveLeaseInspector:
         return self.active
 
 
-def _lane() -> CapacityAdmissionLaneKey:
+def _shared_lane() -> CapacityAdmissionLaneKey:
+    return CapacityAdmissionLaneKey(
+        work_kind="knowledge_workbench.claim_builder.section_extraction",
+        provider="groq",
+        account_ref=None,
+        model_ref="qwen/qwen3-32b",
+    )
+
+
+def _execution_lane() -> CapacityAdmissionLaneKey:
     return CapacityAdmissionLaneKey(
         work_kind="knowledge_workbench.claim_builder.section_extraction",
         provider="groq",
@@ -268,8 +277,8 @@ def _command() -> CapacityWindowAdmissionPassCommand:
         workflow_run_id="workflow-run-1",
         phase="CLAIM_BUILDER_SECTION_EXTRACTION",
         operation_key="prepare_claim_builder_dispatch",
-        lane_key=_lane(),
-        execution_lane_key=_lane(),
+        lane_key=_shared_lane(),
+        execution_lane_key=_execution_lane(),
         budget=_budget(),
         worker=WorkerRef("capacity-admission-worker"),
         lease_token_prefix="capacity-admission:workflow-run-1",
@@ -288,7 +297,7 @@ def _item(
     if status == "retryable_failed":
         return CapacityAdmissionSelectableWorkItem(
             work_item_id=work_item_id,
-            lane_key=_lane(),
+            lane_key=_shared_lane(),
             status="retryable_failed",
             reserved_total_tokens=reserved_total_tokens,
             estimated_input_tokens=100,
@@ -297,7 +306,7 @@ def _item(
         )
     return CapacityAdmissionSelectableWorkItem(
         work_item_id=work_item_id,
-        lane_key=_lane(),
+        lane_key=_shared_lane(),
         status="ready",
         reserved_total_tokens=reserved_total_tokens,
         estimated_input_tokens=100,
@@ -355,6 +364,14 @@ async def test_pass_admits_retryable_before_ready_and_returns_started_attempts()
     assert result.frontend_event_summary is not None
     assert result.frontend_event_summary.admitted_count == 2
     assert result.capacity_reservations[0].reservation_ref.endswith("work-item-retry")
+
+    assert result.lane.account_ref is None
+    assert all(item.lane.account_ref is None for item in result.admitted_items)
+    assert all(lease.lane.account_ref is None for lease in result.projection_leases)
+    assert all(
+        reservation.lane.account_ref == "groq-account-1"
+        for reservation in result.capacity_reservations
+    )
 
 
 @pytest.mark.asyncio

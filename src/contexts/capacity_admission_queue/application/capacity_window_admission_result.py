@@ -323,7 +323,10 @@ class CapacityWindowAdmissionPassResult:
                     "capacity_reservations must contain "
                     "CapacityAdmissionCapacityReservationSummary"
                 )
-            if reservation.lane != self.lane:
+            if not _capacity_reservation_lane_matches_result_lane(
+                reservation_lane=reservation.lane,
+                result_lane=self.lane,
+            ):
                 raise ValueError("capacity reservation lane must match result lane")
 
         for attempt in self.started_attempts:
@@ -486,3 +489,15 @@ def _require_timezone_aware(value: datetime, field_name: str) -> None:
         raise TypeError(f"{field_name} must be datetime")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
+
+
+def _capacity_reservation_lane_matches_result_lane(
+    *,
+    reservation_lane: CapacityAdmissionLaneSummary,
+    result_lane: CapacityAdmissionLaneSummary,
+) -> bool:
+    return (
+        reservation_lane.work_kind == result_lane.work_kind
+        and reservation_lane.provider == result_lane.provider
+        and reservation_lane.model_ref == result_lane.model_ref
+    )
