@@ -6,11 +6,9 @@ import os
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     WorkItemSchedulePlan,
 )
-from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR,
+from src.contexts.knowledge_workbench.application.sagas.knowledge_workbench_llm_budget_catalog import (
+    claim_builder_phase_token_budget_policy,
 )
-
-
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     ClaimBuilderSectionWorkPlan,
 )
@@ -22,8 +20,6 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 
 CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 1_953
 CLAIM_BUILDER_PROMPT_TOKENS_ENV = "CLAIM_BUILDER_PROMPT_TOKENS"
-CLAIM_BUILDER_MODEL_TPM_TOKENS = 6_000
-CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,32 +138,24 @@ def _claim_builder_token_estimate(
     plan: ClaimBuilderSectionWorkPlan,
     prompt_contract: ClaimBuilderSectionExtractionPromptContract,
 ) -> dict[str, object]:
-    del prompt_contract
     prompt_token_count = _claim_builder_prompt_tokens_from_env()
-    source_unit_token_count = CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(
-        plan.source_unit_text
+    budget_policy = claim_builder_phase_token_budget_policy(
+        prompt_id=prompt_contract.prompt_id,
+        prompt_version=prompt_contract.prompt_version,
+        prompt_tokens=prompt_token_count,
     )
-    estimated_input_tokens = prompt_token_count + source_unit_token_count
-    estimated_output_tokens = source_unit_token_count
-    estimated_total_tokens = estimated_input_tokens + estimated_output_tokens
+    budget = budget_policy.calculate_for_artifact_chars(len(plan.source_unit_text))
+    multiplier_marker = str(budget.model_char_to_token_multiplier).replace(".", "_")
 
-    return {
-        "estimator": (
+    return budget.to_capacity_estimate_payload(
+        estimator=(
             f"measured_prompt_{prompt_token_count}_"
-            "source_char_div_3_3_conservative_section_output"
+            f"source_char_div_{multiplier_marker}_phase_token_budget"
         ),
-        "budget_contract_version": "v1",
-        "prompt_message_tokens": (prompt_token_count,),
-        "source_unit_token_count": source_unit_token_count,
-        "estimated_input_tokens": estimated_input_tokens,
-        "estimated_output_tokens": estimated_output_tokens,
-        "estimated_total_tokens": estimated_total_tokens,
-        "prompt_tokens": prompt_token_count,
-        "batch_input_estimated_tokens": source_unit_token_count,
-        "request_input_estimated_tokens": estimated_input_tokens,
-        "planned_output_reserve_tokens": estimated_output_tokens,
-        "request_total_estimated_tokens": estimated_total_tokens,
-    }
+        extra_metadata={
+            "source_unit_token_count": budget.artifact_token_estimate,
+        },
+    )
 
 
 def _claim_builder_prompt_tokens_from_env() -> int:
