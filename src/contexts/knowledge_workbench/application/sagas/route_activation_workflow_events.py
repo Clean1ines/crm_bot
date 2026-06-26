@@ -110,8 +110,8 @@ def work_item_reroute_requested_event(
     source_unit_ref: str | None = None,
     previous_model_ref: str | None = None,
     next_model_ref: str | None = None,
-    estimated_input_tokens: int | None = None,
-    reserved_total_tokens: int | None = None,
+    input_tokens: int | None = None,
+    required_window_tokens: int | None = None,
     causation_command_id: WorkflowCommandId | None = None,
     correlation_id: str | None = None,
 ) -> WorkflowEvent:
@@ -129,8 +129,8 @@ def work_item_reroute_requested_event(
         source_unit_ref=source_unit_ref,
         previous_model_ref=previous_model_ref,
         next_model_ref=next_model_ref,
-        estimated_input_tokens=estimated_input_tokens,
-        reserved_total_tokens=reserved_total_tokens,
+        input_tokens=input_tokens,
+        required_window_tokens=required_window_tokens,
         causation_command_id=causation_command_id,
         correlation_id=correlation_id,
     )
@@ -150,8 +150,8 @@ def work_item_rerouted_event(
     source_unit_ref: str | None = None,
     previous_model_ref: str | None = None,
     next_model_ref: str | None = None,
-    estimated_input_tokens: int | None = None,
-    reserved_total_tokens: int | None = None,
+    input_tokens: int | None = None,
+    required_window_tokens: int | None = None,
     causation_command_id: WorkflowCommandId | None = None,
     correlation_id: str | None = None,
 ) -> WorkflowEvent:
@@ -169,8 +169,8 @@ def work_item_rerouted_event(
         source_unit_ref=source_unit_ref,
         previous_model_ref=previous_model_ref,
         next_model_ref=next_model_ref,
-        estimated_input_tokens=estimated_input_tokens,
-        reserved_total_tokens=reserved_total_tokens,
+        input_tokens=input_tokens,
+        required_window_tokens=required_window_tokens,
         causation_command_id=causation_command_id,
         correlation_id=correlation_id,
     )
@@ -244,8 +244,8 @@ def _reroute_event(
     source_unit_ref: str | None,
     previous_model_ref: str | None,
     next_model_ref: str | None,
-    estimated_input_tokens: int | None,
-    reserved_total_tokens: int | None,
+    input_tokens: int | None,
+    required_window_tokens: int | None,
     causation_command_id: WorkflowCommandId | None,
     correlation_id: str | None,
 ) -> WorkflowEvent:
@@ -265,10 +265,10 @@ def _reroute_event(
         payload["previous_model_ref"] = previous_model_ref
     if next_model_ref is not None:
         payload["next_model_ref"] = next_model_ref
-    if estimated_input_tokens is not None:
-        payload["estimated_input_tokens"] = estimated_input_tokens
-    if reserved_total_tokens is not None:
-        payload["reserved_total_tokens"] = reserved_total_tokens
+    if input_tokens is not None:
+        payload["input_tokens"] = input_tokens
+    if required_window_tokens is not None:
+        payload["required_window_tokens"] = required_window_tokens
     if causation_command_id is not None:
         payload["causation_command_id"] = causation_command_id.value
 

@@ -97,8 +97,6 @@ def test_dispatch_preparation_payload_writes_canonical_profile_keys() -> None:
     assert profile["artifact_tokens"] == 1600
     assert profile["estimated_prompt_tokens"] == 5000
     assert profile["estimated_completion_tokens"] == 1600
-    assert "estimated_input_tokens" not in profile
-    assert "estimated_output_tokens" not in profile
 
 
 def test_profile_rejects_legacy_reserved_output_tokens_as_expected_output() -> None:

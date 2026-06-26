@@ -714,10 +714,6 @@ def _next_work_profile_payload(
         "artifact_tokens": next_work_item.artifact_tokens,
         "input_tokens": next_work_item.input_tokens,
         "required_window_tokens": next_work_item.required_window_tokens,
-        "estimated_input_tokens": next_work_item.input_tokens,
-        "estimated_output_tokens": next_work_item.artifact_tokens,
-        "estimated_prompt_tokens": next_work_item.prompt_tokens,
-        "estimated_completion_tokens": next_work_item.artifact_tokens,
         "estimated_requests": next_work_item.estimated_requests,
     }
 
@@ -842,11 +838,11 @@ async def _append_next_event(
                 "group_ref": apply_command.group_ref,
                 "node_refs": list(outcome.next_decision.next_work_item.node_refs),
                 "resume_work_type": resume_work_type.value,
-                "estimated_prompt_tokens": (
-                    outcome.next_decision.next_work_item.estimated_prompt_tokens
-                ),
-                "estimated_completion_tokens": (
-                    outcome.next_decision.next_work_item.estimated_completion_tokens
+                "prompt_tokens": outcome.next_decision.next_work_item.prompt_tokens,
+                "artifact_tokens": outcome.next_decision.next_work_item.artifact_tokens,
+                "input_tokens": outcome.next_decision.next_work_item.input_tokens,
+                "required_window_tokens": (
+                    outcome.next_decision.next_work_item.required_window_tokens
                 ),
             }
         )

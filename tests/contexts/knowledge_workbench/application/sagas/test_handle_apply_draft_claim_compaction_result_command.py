@@ -1010,8 +1010,11 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     )
     assert dispatch_profile["input_tokens"] == 2
     assert dispatch_profile["artifact_tokens"] == 1
-    assert dispatch_profile["estimated_prompt_tokens"] == 1
-    assert dispatch_profile["estimated_completion_tokens"] == 1
+    assert dispatch_profile["prompt_tokens"] == 1
+    assert dispatch_profile["artifact_tokens"] == 1
+    assert dispatch_profile["input_tokens"] == 2
+    assert "estimated_prompt_tokens" not in dispatch_profile
+    assert "estimated_completion_tokens" not in dispatch_profile
     assert dispatch_profile["estimated_requests"] == 1
     scheduled_payload = scheduling.saved_payloads[0]
     assert isinstance(scheduled_payload, dict)

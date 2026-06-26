@@ -259,8 +259,8 @@ def _claim_builder_dispatch_preparation_payload(
         "requested_items": scheduled_work_item_count,
         "profile": {
             "profile_id": CLAIM_BUILDER_DISPATCH_PROFILE_ID,
-            "estimated_input_tokens": 1,
-            "estimated_output_tokens": 1,
+            "input_tokens": 1,
+            "artifact_tokens": 1,
             "estimated_prompt_tokens": 1,
             "estimated_completion_tokens": 1,
             "estimated_requests": 1,

@@ -221,8 +221,8 @@ def _graph_prepare_payload(
                 "profile_id": (
                     f"draft_claim_compaction:user_choice:{decision.source_command_id.value}"
                 ),
-                "estimated_input_tokens": decision.estimated_prompt_tokens,
-                "estimated_output_tokens": decision.estimated_completion_tokens,
+                "input_tokens": decision.estimated_prompt_tokens,
+                "artifact_tokens": decision.estimated_completion_tokens,
                 "estimated_prompt_tokens": decision.estimated_prompt_tokens,
                 "estimated_completion_tokens": decision.estimated_completion_tokens,
                 "estimated_requests": 1,
