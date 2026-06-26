@@ -183,28 +183,32 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
     assert capacity_estimate["budget_contract_version"] == "v1"
     assert capacity_estimate["prompt_message_tokens"] == (1953,)
     assert capacity_estimate["prompt_tokens"] == 1953
-    assert capacity_estimate["batch_input_estimated_tokens"] == (
-        capacity_estimate["source_unit_token_count"]
+    assert (
+        capacity_estimate["batch_input_estimated_tokens"]
+        == (capacity_estimate["source_unit_token_count"])
     )
     assert capacity_estimate["estimated_input_tokens"] == (
         1953 + capacity_estimate["source_unit_token_count"]
     )
-    assert capacity_estimate["request_input_estimated_tokens"] == (
-        capacity_estimate["estimated_input_tokens"]
+    assert (
+        capacity_estimate["request_input_estimated_tokens"]
+        == (capacity_estimate["estimated_input_tokens"])
     )
     assert "reserved_output_tokens" not in capacity_estimate
     assert (
         capacity_estimate["estimated_output_tokens"]
         == capacity_estimate["source_unit_token_count"]
     )
-    assert capacity_estimate["planned_output_reserve_tokens"] == (
-        capacity_estimate["estimated_output_tokens"]
+    assert (
+        capacity_estimate["planned_output_reserve_tokens"]
+        == (capacity_estimate["estimated_output_tokens"])
     )
     assert capacity_estimate["estimated_total_tokens"] == (
         1953 + capacity_estimate["source_unit_token_count"] * 2
     )
-    assert capacity_estimate["request_total_estimated_tokens"] == (
-        capacity_estimate["estimated_total_tokens"]
+    assert (
+        capacity_estimate["request_total_estimated_tokens"]
+        == (capacity_estimate["estimated_total_tokens"])
     )
 
 

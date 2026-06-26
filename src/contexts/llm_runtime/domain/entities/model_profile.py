@@ -43,7 +43,9 @@ class ModelProfile:
         if self.model_rank < 0:
             raise ValueError("ModelProfile.model_rank must be >= 0")
         if not isinstance(self.model_char_to_token_multiplier, Decimal):
-            raise TypeError("ModelProfile.model_char_to_token_multiplier must be Decimal")
+            raise TypeError(
+                "ModelProfile.model_char_to_token_multiplier must be Decimal"
+            )
         if self.model_char_to_token_multiplier <= 0:
             raise ValueError("ModelProfile.model_char_to_token_multiplier must be > 0")
 

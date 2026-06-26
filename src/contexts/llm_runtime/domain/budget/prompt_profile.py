@@ -23,7 +23,9 @@ class PromptProfile:
         _require_non_empty_text(self.model_ref, field_name="model_ref")
         _require_positive_int(self.prompt_tokens, field_name="prompt_tokens")
         _require_non_empty_text(self.prompt_source_ref, field_name="prompt_source_ref")
-        _require_non_empty_text(self.output_contract_ref, field_name="output_contract_ref")
+        _require_non_empty_text(
+            self.output_contract_ref, field_name="output_contract_ref"
+        )
 
     @property
     def key(self) -> PromptProfileKey:
