@@ -71,6 +71,60 @@ def test_builds_ready_projection_candidate_from_schedule_plan_and_lane_target() 
     }
 
 
+def test_builds_projection_candidate_from_canonical_capacity_estimate_aliases() -> None:
+    plan = _plan(
+        payload={
+            "workflow_run_id": "workflow-run-1",
+            "llm_capacity_estimate": {
+                "request_input_estimated_tokens": 100,
+                "planned_output_reserve_tokens": 30,
+                "request_total_estimated_tokens": 150,
+            },
+        }
+    )
+
+    candidates = BuildCapacityAdmissionProjectionCandidates(
+        lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            model_ref="llama-3.3-70b-versatile",
+        )
+    ).execute((plan,))
+
+    candidate = candidates[0]
+    assert candidate.estimated_input_tokens == 100
+    assert candidate.estimated_output_tokens == 30
+    assert candidate.effective_output_cap_tokens == 30
+    assert candidate.reserved_total_tokens == 150
+
+
+def test_legacy_capacity_estimate_keys_take_precedence_over_canonical_aliases() -> None:
+    plan = _plan(
+        payload={
+            "workflow_run_id": "workflow-run-1",
+            "llm_capacity_estimate": {
+                "estimated_input_tokens": 100,
+                "request_input_estimated_tokens": 999,
+                "estimated_output_tokens": 30,
+                "planned_output_reserve_tokens": 999,
+                "reserved_total_tokens": 130,
+                "request_total_estimated_tokens": 999,
+            },
+        }
+    )
+
+    candidates = BuildCapacityAdmissionProjectionCandidates(
+        lane_target=CapacityAdmissionLaneTarget(
+            provider="groq",
+            model_ref="llama-3.3-70b-versatile",
+        )
+    ).execute((plan,))
+
+    candidate = candidates[0]
+    assert candidate.estimated_input_tokens == 100
+    assert candidate.estimated_output_tokens == 30
+    assert candidate.reserved_total_tokens == 130
+
+
 def test_uses_explicit_effective_output_cap_and_reserved_total_when_present() -> None:
     plan = _plan(
         payload={
