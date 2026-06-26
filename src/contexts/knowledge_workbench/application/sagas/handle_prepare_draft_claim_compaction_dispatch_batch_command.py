@@ -670,11 +670,9 @@ def _capacity_window_leased_work_item_event(
         lease_expires_at=lease_expires_at,
         selection_kind=leased_item.selection_kind,
         occurred_at=occurred_at,
-        token_estimate=_optional_mapping_int(
-            schedule_payload, "estimated_prompt_tokens"
-        ),
-        reserved_tokens=_optional_mapping_int(
-            schedule_payload, "estimated_total_tokens"
+        input_tokens=_optional_mapping_int(schedule_payload, "input_tokens"),
+        required_window_tokens=_optional_mapping_int(
+            schedule_payload, "required_window_tokens"
         ),
         compaction_context=compaction_context_from_schedule_payload(
             schedule_payload,

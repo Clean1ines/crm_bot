@@ -249,8 +249,8 @@ def capacity_window_leased_work_item_event(
     selection_kind: CapacityWindowSelectionKind,
     occurred_at: datetime,
     source_unit_ref: str | None = None,
-    token_estimate: int | None = None,
-    reserved_tokens: int | None = None,
+    input_tokens: int | None = None,
+    required_window_tokens: int | None = None,
     compaction_context: Mapping[str, object] | None = None,
     causation_command_id: WorkflowCommandId | None = None,
     operation_key: str = CLAIM_BUILDER_PREPARE_OPERATION_KEY,
@@ -276,10 +276,10 @@ def capacity_window_leased_work_item_event(
     }
     if source_unit_ref is not None:
         payload["source_unit_ref"] = source_unit_ref
-    if token_estimate is not None:
-        payload["token_estimate"] = token_estimate
-    if reserved_tokens is not None:
-        payload["reserved_tokens"] = reserved_tokens
+    if input_tokens is not None:
+        payload["input_tokens"] = input_tokens
+    if required_window_tokens is not None:
+        payload["required_window_tokens"] = required_window_tokens
     if compaction_context is not None:
         payload["compaction_context"] = _compaction_context_payload(compaction_context)
     if causation_command_id is not None:
