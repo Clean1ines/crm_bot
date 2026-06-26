@@ -114,10 +114,32 @@ def _selection_kind(
 
 
 def _slot_index_from_reservation_ref(reservation_ref: str) -> int:
+    prefix_end = reservation_ref.find(":knowledge-extraction:source-document:")
+    if prefix_end < 0:
+        return _slot_index_from_simple_reservation_ref(reservation_ref)
+
+    after_prefix = reservation_ref[prefix_end + 1 :]
+    parts = after_prefix.split(":")
+
+    # Expected after_prefix:
+    # knowledge-extraction:source-document:<project_id>:<document_hash>:<admission_number>:<work_item_id...>
+    if len(parts) < 5:
+        raise ValueError(
+            "reservation_ref must include workflow scope and admission index"
+        )
+
+    raw_index = parts[4]
+    return _slot_index_from_raw_admission_number(raw_index)
+
+
+def _slot_index_from_simple_reservation_ref(reservation_ref: str) -> int:
     parts = reservation_ref.split(":")
-    if len(parts) < 2:
+    if len(parts) < 3:
         raise ValueError("reservation_ref must include admission index")
-    raw_index = parts[-2]
+    return _slot_index_from_raw_admission_number(parts[1])
+
+
+def _slot_index_from_raw_admission_number(raw_index: str) -> int:
     if not raw_index.isdigit():
         raise ValueError("reservation_ref admission index must be numeric")
     admission_number = int(raw_index)

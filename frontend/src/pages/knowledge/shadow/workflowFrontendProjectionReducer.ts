@@ -688,7 +688,10 @@ const applyManualPaused = (
   response.workflow.workflow_status = "paused";
   response.workflow.timer.mode = "paused";
   response.workflow.timer.is_live = false;
-  response.workflow.timer.current_active_started_at = null;
+  response.workflow.timer.current_active_started_at =
+    response.workflow.timer.current_active_started_at ||
+    response.workflow.timer.started_at ||
+    event.occurred_at;
   setWorkflowActions(response, "paused");
   appendTimeline(response, event, "Обработка документа приостановлена");
 };
