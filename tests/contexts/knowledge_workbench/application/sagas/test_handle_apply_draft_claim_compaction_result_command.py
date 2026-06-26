@@ -1001,8 +1001,12 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     ]
     assert scheduled_payload["estimated_requests"] == 1
     assert scheduled_payload["llm_capacity_estimate"] == {
+        "budget_contract_version": "v1",
         "estimated_input_tokens": 1,
         "estimated_output_tokens": 4000,
+        "request_input_estimated_tokens": 1,
+        "planned_output_reserve_tokens": 4000,
+        "request_total_estimated_tokens": 4001,
     }
 
 
@@ -1092,8 +1096,12 @@ def _expected_next_work_schedule_payload(
         "estimated_completion_tokens": 4000,
         "estimated_requests": 1,
         "llm_capacity_estimate": {
+            "budget_contract_version": "v1",
             "estimated_input_tokens": 1,
             "estimated_output_tokens": 4000,
+            "request_input_estimated_tokens": 1,
+            "planned_output_reserve_tokens": 4000,
+            "request_total_estimated_tokens": 4001,
         },
     }
 

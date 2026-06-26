@@ -44,11 +44,18 @@ def _group(ref: str, members: tuple[str, ...]) -> DraftClaimCompactionGroupCandi
     )
 
 
+def token_count_by_chars(text: str) -> int:
+    return len(text)
+
+
 def test_singleton_group_gets_single_draft_claim_enrichment_prompt_variant() -> None:
     claims = (_claim("claim-a"),)
     groups = (_group("group-a", ("claim-a",)),)
 
-    plan = DraftClaimCompactionBatchBudgetPolicy().build_batches(claims, groups)
+    plan = DraftClaimCompactionBatchBudgetPolicy(
+        max_batch_tokens=1_000,
+        token_estimator=token_count_by_chars,
+    ).build_batches(claims, groups)
 
     assert len(plan.batches) == 1
     assert plan.batches[0].prompt_variant == "single_draft_claim_enrichment"
@@ -59,7 +66,10 @@ def test_multi_member_group_keeps_draft_vs_draft_prompt_variant() -> None:
     claims = (_claim("claim-a"), _claim("claim-b"))
     groups = (_group("group-a", ("claim-a", "claim-b")),)
 
-    plan = DraftClaimCompactionBatchBudgetPolicy().build_batches(claims, groups)
+    plan = DraftClaimCompactionBatchBudgetPolicy(
+        max_batch_tokens=1_000,
+        token_estimator=token_count_by_chars,
+    ).build_batches(claims, groups)
 
     assert len(plan.batches) == 1
     assert plan.batches[0].prompt_variant == "draft_vs_draft"
@@ -69,13 +79,12 @@ def test_multi_member_group_keeps_draft_vs_draft_prompt_variant() -> None:
 def test_capacity_split_inside_multi_member_group_does_not_schedule_singleton_chunks() -> (
     None
 ):
-    claims = (_claim("claim-a"), _claim("claim-b"))
+    claims = (_claim("claim-a", text="aa"), _claim("claim-b", text="bb"))
     groups = (_group("group-a", ("claim-a", "claim-b")),)
 
     plan = DraftClaimCompactionBatchBudgetPolicy(
-        max_input_tokens=2052,
-        prompt_reserve_tokens=2050,
-        input_safety_multiplier=1,
+        max_batch_tokens=2,
+        token_estimator=token_count_by_chars,
     ).build_batches(claims, groups)
 
     assert plan.groups[0].member_count == 2
@@ -87,10 +96,10 @@ def test_singleton_chunk_inside_larger_group_waits_for_compacted_frontier() -> N
     claims = tuple(_claim(f"claim-{index}", text="x" * 120) for index in range(3))
     groups = (_group("group-a", tuple(claim.observation_ref for claim in claims)),)
 
-    plan = DraftClaimCompactionBatchBudgetPolicy(max_input_tokens=2145).build_batches(
-        claims,
-        groups,
-    )
+    plan = DraftClaimCompactionBatchBudgetPolicy(
+        max_batch_tokens=200,
+        token_estimator=token_count_by_chars,
+    ).build_batches(claims, groups)
 
     assert plan.groups[0].member_count == 3
     assert plan.groups[0].requires_split is True
