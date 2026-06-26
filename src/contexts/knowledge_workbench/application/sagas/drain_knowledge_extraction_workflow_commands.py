@@ -223,46 +223,6 @@ class DrainKnowledgeExtractionWorkflowCommands:
             workflow_run_id=command.workflow_run_id,
             max_commands=command.max_commands,
         )
-        pending_commands = (
-            await workflow_unit_of_work.command_log.list_pending_commands(
-                workflow_run_id=command.workflow_run_id,
-                limit=command.max_commands,
-            )
-        )
-        logger.info(
-            "Knowledge workflow pending commands loaded",
-            workflow_run_id=command.workflow_run_id,
-            pending_count=len(pending_commands),
-            pending_command_types=[
-                pending_command.command_type for pending_command in pending_commands
-            ],
-        )
-        if workflow_state_repository is not None:
-            workflow_state = await workflow_state_repository.load_workflow_state(
-                command.workflow_run_id,
-            )
-            if (
-                workflow_state is not None
-                and workflow_state.status is KnowledgeExtractionWorkflowStatus.PAUSED
-            ):
-                next_command_type = (
-                    pending_commands[0].command_type if pending_commands else None
-                )
-                logger.info(
-                    "Knowledge workflow command drain blocked by paused workflow",
-                    workflow_run_id=command.workflow_run_id,
-                    next_command_type=next_command_type,
-                    workflow_status=workflow_state.status.value,
-                )
-                return DrainKnowledgeExtractionWorkflowCommandsResult(
-                    workflow_run_id=command.workflow_run_id,
-                    inspected_count=1 if pending_commands else 0,
-                    dispatched_count=0,
-                    blocked_count=1,
-                    last_blocked_command_type=next_command_type,
-                    last_blocked_reason=WORKFLOW_MANUALLY_PAUSED,
-                )
-
         dispatcher = DispatchKnowledgeExtractionWorkflowCommandHandler()
 
         inspected_count = 0
@@ -271,7 +231,50 @@ class DrainKnowledgeExtractionWorkflowCommands:
         last_blocked_command_type: str | None = None
         last_blocked_reason: str | None = None
 
-        for workflow_command in pending_commands:
+        while inspected_count < command.max_commands:
+            pending_commands = (
+                await workflow_unit_of_work.command_log.list_pending_commands(
+                    workflow_run_id=command.workflow_run_id,
+                    limit=1,
+                )
+            )
+            logger.info(
+                "Knowledge workflow pending commands loaded",
+                workflow_run_id=command.workflow_run_id,
+                pending_count=len(pending_commands),
+                pending_command_types=[
+                    pending_command.command_type for pending_command in pending_commands
+                ],
+            )
+            if not pending_commands:
+                break
+
+            if workflow_state_repository is not None:
+                workflow_state = await workflow_state_repository.load_workflow_state(
+                    command.workflow_run_id,
+                )
+                if (
+                    workflow_state is not None
+                    and workflow_state.status
+                    is KnowledgeExtractionWorkflowStatus.PAUSED
+                ):
+                    next_command_type = pending_commands[0].command_type
+                    logger.info(
+                        "Knowledge workflow command drain blocked by paused workflow",
+                        workflow_run_id=command.workflow_run_id,
+                        next_command_type=next_command_type,
+                        workflow_status=workflow_state.status.value,
+                    )
+                    return DrainKnowledgeExtractionWorkflowCommandsResult(
+                        workflow_run_id=command.workflow_run_id,
+                        inspected_count=inspected_count + 1,
+                        dispatched_count=dispatched_count,
+                        blocked_count=1,
+                        last_blocked_command_type=next_command_type,
+                        last_blocked_reason=WORKFLOW_MANUALLY_PAUSED,
+                    )
+
+            workflow_command = pending_commands[0]
             inspected_count += 1
             dispatch_result = await dispatcher.execute(
                 DispatchKnowledgeExtractionWorkflowCommand(
