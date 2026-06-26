@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 from fractions import Fraction
 
@@ -23,7 +25,7 @@ def test_rough_token_estimator_rejects_invalid_input() -> None:
     estimator = RoughTokenEstimator(multiplier=Fraction(5, 2))
 
     with pytest.raises(TypeError, match="text"):
-        estimator.estimate_tokens(123)  # type: ignore[arg-type]
+        estimator.estimate_tokens(cast(str, 123))
 
 
 def test_rough_token_estimator_rejects_invalid_multiplier() -> None:
