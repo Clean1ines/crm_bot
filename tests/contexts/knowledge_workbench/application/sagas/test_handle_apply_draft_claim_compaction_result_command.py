@@ -57,6 +57,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_o
     DraftClaimObservationReadModel,
     DraftClaimObservationReadRepositoryPort,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_budget_profile import (
+    draft_claim_compaction_request_safety_gap_tokens,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_provider_messages import (
     build_draft_claim_compaction_provider_messages,
 )
@@ -760,13 +763,31 @@ async def test_rejects_non_pending_command() -> None:
         )
 
 
+def _test_required_window_tokens(
+    *,
+    prompt_tokens: int,
+    artifact_tokens: int,
+) -> int:
+    input_tokens = prompt_tokens + artifact_tokens
+    return (
+        input_tokens
+        + artifact_tokens
+        + draft_claim_compaction_request_safety_gap_tokens()
+    )
+
+
 def _decision(
     work_type: DraftClaimCompactionNextWorkItemType,
     *,
     node_refs: tuple[str, ...] = (),
-    estimated_prompt_tokens: int = 1,
-    estimated_completion_tokens: int | None = None,
+    prompt_tokens: int = 1,
+    artifact_tokens: int = 1,
 ) -> DraftClaimCompactionPlannerDecision:
+    input_tokens = prompt_tokens + artifact_tokens
+    required_window_tokens = _test_required_window_tokens(
+        prompt_tokens=prompt_tokens,
+        artifact_tokens=artifact_tokens,
+    )
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=work_type,
@@ -781,10 +802,10 @@ def _decision(
                 is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
                 else None
             ),
-            estimated_prompt_tokens=estimated_prompt_tokens,
-            estimated_completion_tokens=4000
-            if estimated_completion_tokens is None
-            else estimated_completion_tokens,
+            prompt_tokens=prompt_tokens,
+            artifact_tokens=artifact_tokens,
+            input_tokens=input_tokens,
+            required_window_tokens=required_window_tokens,
         ),
         reason="test decision",
     )
@@ -981,10 +1002,16 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     )
     assert dispatch_payload["account_capacities"] == ()
     dispatch_profile = _mapping_value(dispatch_payload["profile"])
-    assert dispatch_profile["estimated_input_tokens"] == 1
-    assert dispatch_profile["estimated_output_tokens"] == 4000
+    assert dispatch_profile["prompt_tokens"] == 1
+    assert dispatch_profile["artifact_tokens"] == 1
+    assert dispatch_profile["input_tokens"] == 2
+    assert dispatch_profile["required_window_tokens"] == _test_required_window_tokens(
+        prompt_tokens=1, artifact_tokens=1
+    )
+    assert dispatch_profile["estimated_input_tokens"] == 2
+    assert dispatch_profile["estimated_output_tokens"] == 1
     assert dispatch_profile["estimated_prompt_tokens"] == 1
-    assert dispatch_profile["estimated_completion_tokens"] == 4000
+    assert dispatch_profile["estimated_completion_tokens"] == 1
     assert dispatch_profile["estimated_requests"] == 1
     scheduled_payload = scheduling.saved_payloads[0]
     assert isinstance(scheduled_payload, dict)
@@ -993,20 +1020,27 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         "compacted-b",
     ]
     assert scheduled_payload["raw_claim_refs"] == []
-    assert scheduled_payload["estimated_prompt_tokens"] == 1
-    assert scheduled_payload["estimated_completion_tokens"] == 4000
+    assert scheduled_payload["prompt_tokens"] == 1
+    assert scheduled_payload["artifact_tokens"] == 1
+    assert scheduled_payload["input_tokens"] == 2
+    assert scheduled_payload["required_window_tokens"] == _test_required_window_tokens(
+        prompt_tokens=1, artifact_tokens=1
+    )
     assert [message["role"] for message in scheduled_payload["provider_messages"]] == [
         "system",
         "user",
     ]
     assert scheduled_payload["estimated_requests"] == 1
     assert scheduled_payload["llm_capacity_estimate"] == {
-        "budget_contract_version": "v1",
-        "estimated_input_tokens": 1,
-        "estimated_output_tokens": 4000,
-        "request_input_estimated_tokens": 1,
-        "planned_output_reserve_tokens": 4000,
-        "request_total_estimated_tokens": 4001,
+        "budget_contract_version": "v2",
+        "model_ref": "openai/gpt-oss-120b",
+        "prompt_variant": "compacted_vs_compacted",
+        "prompt_tokens": 1,
+        "artifact_tokens": 1,
+        "input_tokens": 2,
+        "required_window_tokens": _test_required_window_tokens(
+            prompt_tokens=1, artifact_tokens=1
+        ),
     }
 
 
@@ -1092,16 +1126,23 @@ def _expected_next_work_schedule_payload(
         "raw_claim_refs": list(node_refs)
         if work_type is DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT
         else [],
-        "estimated_prompt_tokens": 1,
-        "estimated_completion_tokens": 4000,
+        "prompt_tokens": 1,
+        "artifact_tokens": 1,
+        "input_tokens": 2,
+        "required_window_tokens": _test_required_window_tokens(
+            prompt_tokens=1, artifact_tokens=1
+        ),
         "estimated_requests": 1,
         "llm_capacity_estimate": {
-            "budget_contract_version": "v1",
-            "estimated_input_tokens": 1,
-            "estimated_output_tokens": 4000,
-            "request_input_estimated_tokens": 1,
-            "planned_output_reserve_tokens": 4000,
-            "request_total_estimated_tokens": 4001,
+            "budget_contract_version": "v2",
+            "model_ref": "openai/gpt-oss-120b",
+            "prompt_variant": work_type.value,
+            "prompt_tokens": 1,
+            "artifact_tokens": 1,
+            "input_tokens": 2,
+            "required_window_tokens": _test_required_window_tokens(
+                prompt_tokens=1, artifact_tokens=1
+            ),
         },
     }
 

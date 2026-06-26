@@ -121,6 +121,12 @@ def test_next_work_item_carries_prompt_estimate_from_node_refs() -> None:
         is DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
     )
     assert decision.node_refs == ("A", "B")
+    assert decision.next_work_item.prompt_tokens == 2150
+    assert decision.next_work_item.artifact_tokens == 2600
+    assert decision.next_work_item.input_tokens == 4750
+    assert decision.next_work_item.prompt_tokens == 2150
+    assert decision.next_work_item.artifact_tokens == 2600
+    assert decision.next_work_item.input_tokens == 4750
     assert decision.next_work_item.estimated_prompt_tokens == 4750
     assert decision.next_work_item.estimated_completion_tokens == 2600
 
@@ -139,6 +145,12 @@ def test_compacted_pair_uses_enriched_prompt_for_tpm_boundary() -> None:
         DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
     )
     assert decision.node_refs == ("A", "B")
+    assert decision.next_work_item.prompt_tokens == 2150
+    assert decision.next_work_item.artifact_tokens == 2950
+    assert decision.next_work_item.input_tokens == 5100
+    assert decision.next_work_item.prompt_tokens == 2150
+    assert decision.next_work_item.artifact_tokens == 2950
+    assert decision.next_work_item.input_tokens == 5100
     assert decision.next_work_item.estimated_prompt_tokens == 5100
     assert decision.next_work_item.estimated_completion_tokens == 2950
 

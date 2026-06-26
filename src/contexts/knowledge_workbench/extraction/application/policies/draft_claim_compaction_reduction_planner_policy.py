@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.contexts.llm_runtime.domain.budget.token_budget import (
+    input_tokens as calculate_input_tokens,
+    required_window_tokens as calculate_required_window_tokens,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionBudgetFitStatus,
     DraftClaimCompactionComparison,
@@ -13,10 +17,11 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionPlannerDecision,
     DraftClaimCompactionPlannerState,
 )
-
-DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS = 2_050
-ENRICHED_CLAIM_COMPACTION_PROMPT_TOKENS = 2_150
-GPT_OSS_FREE_PLAN_TPM = 8_000
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_budget_profile import (
+    draft_claim_compaction_max_batch_tokens,
+    draft_claim_compaction_prompt_tokens,
+    draft_claim_compaction_request_safety_gap_tokens,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -524,9 +529,8 @@ def _work_item_fits_primary_tpm(
     work_type: DraftClaimCompactionNextWorkItemType,
     node_refs: tuple[str, ...],
 ) -> bool:
-    task_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
-    prompt_tokens = _prompt_tokens_for_work_type(work_type)
-    return prompt_tokens + task_tokens + task_tokens <= GPT_OSS_FREE_PLAN_TPM
+    artifact_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
+    return artifact_tokens <= draft_claim_compaction_max_batch_tokens(work_type.value)
 
 
 def _node_pairs(
@@ -551,18 +555,39 @@ def _decision(
     node_refs: tuple[str, ...],
     reason: str,
 ) -> DraftClaimCompactionPlannerDecision:
-    task_tokens = _estimated_task_tokens(
+    if work_type is DraftClaimCompactionNextWorkItemType.DONE:
+        return DraftClaimCompactionPlannerDecision(
+            next_work_item=DraftClaimCompactionNextWorkItem(
+                work_type=work_type,
+                node_refs=node_refs,
+                primary_model_id=state.primary_model_id,
+            ),
+            reason=reason,
+        )
+
+    artifact_tokens = _estimated_task_tokens(
         state=state,
         node_refs=node_refs,
     )
     prompt_tokens = _prompt_tokens_for_work_type(work_type)
+    input_tokens = calculate_input_tokens(
+        prompt_tokens=prompt_tokens,
+        artifact_tokens=artifact_tokens,
+    )
+    required_window_tokens = calculate_required_window_tokens(
+        input_tokens=input_tokens,
+        artifact_tokens=artifact_tokens,
+        safety_gap_tokens=draft_claim_compaction_request_safety_gap_tokens(),
+    )
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=work_type,
             node_refs=node_refs,
             primary_model_id=state.primary_model_id,
-            estimated_prompt_tokens=prompt_tokens + task_tokens,
-            estimated_completion_tokens=task_tokens,
+            prompt_tokens=prompt_tokens,
+            artifact_tokens=artifact_tokens,
+            input_tokens=input_tokens,
+            required_window_tokens=required_window_tokens,
         ),
         reason=reason,
     )
@@ -589,13 +614,7 @@ def _estimated_task_tokens(
 def _prompt_tokens_for_work_type(
     work_type: DraftClaimCompactionNextWorkItemType,
 ) -> int:
-    if work_type in {
-        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
-        DraftClaimCompactionNextWorkItemType.MIXED,
-        DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
-    }:
-        return ENRICHED_CLAIM_COMPACTION_PROMPT_TOKENS
-    return DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS
+    return draft_claim_compaction_prompt_tokens(work_type.value)
 
 
 def _wait_for_user_model_choice(
@@ -605,7 +624,16 @@ def _wait_for_user_model_choice(
     node_refs: tuple[str, ...],
     resume_work_type: DraftClaimCompactionNextWorkItemType,
 ) -> DraftClaimCompactionPlannerDecision:
-    task_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
+    artifact_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
+    prompt_tokens = _prompt_tokens_for_work_type(resume_work_type)
+    input_tokens = calculate_input_tokens(
+        prompt_tokens=prompt_tokens, artifact_tokens=artifact_tokens
+    )
+    required_window_tokens = calculate_required_window_tokens(
+        input_tokens=input_tokens,
+        artifact_tokens=artifact_tokens,
+        safety_gap_tokens=draft_claim_compaction_request_safety_gap_tokens(),
+    )
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE,
@@ -613,10 +641,10 @@ def _wait_for_user_model_choice(
             primary_model_id=state.primary_model_id,
             degraded_model_id=state.degraded_candidate_model_id,
             user_choice_resume_work_type=resume_work_type,
-            estimated_prompt_tokens=(
-                _prompt_tokens_for_work_type(resume_work_type) + task_tokens
-            ),
-            estimated_completion_tokens=task_tokens,
+            prompt_tokens=prompt_tokens,
+            artifact_tokens=artifact_tokens,
+            input_tokens=input_tokens,
+            required_window_tokens=required_window_tokens,
         ),
         reason=reason,
     )

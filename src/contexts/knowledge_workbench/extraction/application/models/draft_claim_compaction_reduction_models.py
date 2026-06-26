@@ -550,8 +550,10 @@ class DraftClaimCompactionNextWorkItem:
     primary_model_id: str = PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID
     degraded_model_id: str | None = None
     user_choice_resume_work_type: DraftClaimCompactionNextWorkItemType | None = None
-    estimated_prompt_tokens: int = 0
-    estimated_completion_tokens: int = 4000
+    prompt_tokens: int = 0
+    artifact_tokens: int = 0
+    input_tokens: int = 0
+    required_window_tokens: int = 0
     estimated_requests: int = 1
 
     def __post_init__(self) -> None:
@@ -577,15 +579,28 @@ class DraftClaimCompactionNextWorkItem:
                 DraftClaimCompactionNextWorkItemType.DONE,
             }:
                 raise ValueError("user choice resume work type must be executable")
-        _non_negative_int(
-            self.estimated_prompt_tokens,
-            "estimated_prompt_tokens",
-        )
-        _non_negative_int(
-            self.estimated_completion_tokens,
-            "estimated_completion_tokens",
-        )
+        _non_negative_int(self.prompt_tokens, "prompt_tokens")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
+        _non_negative_int(self.input_tokens, "input_tokens")
+        _non_negative_int(self.required_window_tokens, "required_window_tokens")
         _positive_int(self.estimated_requests, "estimated_requests")
+        if self.input_tokens and self.input_tokens != (
+            self.prompt_tokens + self.artifact_tokens
+        ):
+            raise ValueError("input_tokens must equal prompt_tokens + artifact_tokens")
+        if (
+            self.required_window_tokens
+            and self.required_window_tokens < self.input_tokens
+        ):
+            raise ValueError("required_window_tokens must be >= input_tokens")
+
+    @property
+    def estimated_prompt_tokens(self) -> int:
+        return self.input_tokens
+
+    @property
+    def estimated_completion_tokens(self) -> int:
+        return self.artifact_tokens
 
 
 @dataclass(frozen=True, slots=True)

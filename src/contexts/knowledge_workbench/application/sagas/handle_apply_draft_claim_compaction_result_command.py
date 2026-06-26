@@ -48,6 +48,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionNextWorkItem,
     DraftClaimCompactionNextWorkItemType,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_budget_profile import (
+    DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
     DraftClaimCompactionOutputValidator,
 )
@@ -107,7 +110,6 @@ class DraftClaimCompactionWorkItemCompletionPort(Protocol):
 
 
 WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
-DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
 DRAFT_CLAIM_COMPACTION_WORKER_REF = (
     "knowledge-workbench-draft-claim-compaction-dispatch"
 )
@@ -413,20 +415,12 @@ async def _schedule_next_work(
             "source_node_refs": list(next_work_item.node_refs),
             "compacted_node_refs": list(_compacted_node_refs(next_work_item)),
             "raw_claim_refs": list(_raw_claim_refs(next_work_item)),
-            "estimated_prompt_tokens": next_work_item.estimated_prompt_tokens,
-            "estimated_completion_tokens": next_work_item.estimated_completion_tokens,
+            "prompt_tokens": next_work_item.prompt_tokens,
+            "artifact_tokens": next_work_item.artifact_tokens,
+            "input_tokens": next_work_item.input_tokens,
+            "required_window_tokens": next_work_item.required_window_tokens,
             "estimated_requests": next_work_item.estimated_requests,
-            "llm_capacity_estimate": {
-                "budget_contract_version": "v1",
-                "estimated_input_tokens": next_work_item.estimated_prompt_tokens,
-                "estimated_output_tokens": next_work_item.estimated_completion_tokens,
-                "request_input_estimated_tokens": next_work_item.estimated_prompt_tokens,
-                "planned_output_reserve_tokens": next_work_item.estimated_completion_tokens,
-                "request_total_estimated_tokens": (
-                    next_work_item.estimated_prompt_tokens
-                    + next_work_item.estimated_completion_tokens
-                ),
-            },
+            "llm_capacity_estimate": _next_work_capacity_estimate(next_work_item),
         },
     )
     schedule = await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
@@ -714,20 +708,31 @@ def _next_work_profile_payload(
     batch_ref: str,
     next_work_item: DraftClaimCompactionNextWorkItem,
 ) -> dict[str, int | str]:
-    estimated_prompt_tokens = max(next_work_item.estimated_prompt_tokens, 1)
-    estimated_completion_tokens = next_work_item.estimated_completion_tokens
     return {
         "profile_id": f"draft_claim_compaction:{batch_ref}",
-        "estimated_input_tokens": estimated_prompt_tokens,
-        "estimated_output_tokens": estimated_completion_tokens,
-        "estimated_prompt_tokens": estimated_prompt_tokens,
-        "estimated_completion_tokens": estimated_completion_tokens,
-        "request_input_estimated_tokens": estimated_prompt_tokens,
-        "planned_output_reserve_tokens": estimated_completion_tokens,
-        "request_total_estimated_tokens": (
-            estimated_prompt_tokens + estimated_completion_tokens
-        ),
+        "prompt_tokens": next_work_item.prompt_tokens,
+        "artifact_tokens": next_work_item.artifact_tokens,
+        "input_tokens": next_work_item.input_tokens,
+        "required_window_tokens": next_work_item.required_window_tokens,
+        "estimated_input_tokens": next_work_item.input_tokens,
+        "estimated_output_tokens": next_work_item.artifact_tokens,
+        "estimated_prompt_tokens": next_work_item.prompt_tokens,
+        "estimated_completion_tokens": next_work_item.artifact_tokens,
         "estimated_requests": next_work_item.estimated_requests,
+    }
+
+
+def _next_work_capacity_estimate(
+    next_work_item: DraftClaimCompactionNextWorkItem,
+) -> dict[str, object]:
+    return {
+        "budget_contract_version": "v2",
+        "model_ref": next_work_item.primary_model_id,
+        "prompt_variant": next_work_item.work_type.value,
+        "prompt_tokens": next_work_item.prompt_tokens,
+        "artifact_tokens": next_work_item.artifact_tokens,
+        "input_tokens": next_work_item.input_tokens,
+        "required_window_tokens": next_work_item.required_window_tokens,
     }
 
 

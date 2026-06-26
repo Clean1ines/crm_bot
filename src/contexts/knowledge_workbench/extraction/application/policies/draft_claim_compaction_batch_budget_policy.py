@@ -95,8 +95,8 @@ class DraftClaimCompactionBatchBudgetPolicy:
                         group_ref=group.group_ref,
                         prompt_variant=prompt_variant,
                         model_id=self.model_id,
-                        estimated_input_tokens=sum(
-                            self._estimate(by_ref[ref]) for ref in refs
+                        estimated_input_tokens=self._estimate_batch(
+                            tuple(by_ref[ref] for ref in refs)
                         ),
                         member_observation_refs=refs,
                     )
@@ -110,6 +110,11 @@ class DraftClaimCompactionBatchBudgetPolicy:
 
     def _estimate(self, claim: DraftClaimForCompaction) -> int:
         return self.token_estimator(_claim_budget_text(claim))
+
+    def _estimate_batch(self, claims: tuple[DraftClaimForCompaction, ...]) -> int:
+        return self.token_estimator(
+            "\n\n".join(_claim_budget_text(claim) for claim in claims)
+        )
 
 
 def _prompt_variant_for_batch(
