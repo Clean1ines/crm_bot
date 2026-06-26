@@ -99,9 +99,9 @@ async def test_capacity_observation_appends_single_account_prepare_wakeup() -> N
                 "active_model_ref": "qwen/qwen3-32b",
                 "profile": {
                     "profile_id": "claim-builder",
-                    "estimated_prompt_tokens": 1000,
-                    "estimated_completion_tokens": 2000,
-                    "estimated_requests": 1,
+                    "input_tokens": 1000,
+                    "artifact_tokens": 2000,
+                    "request_count": 1,
                 },
                 "account_capacities": [
                     {

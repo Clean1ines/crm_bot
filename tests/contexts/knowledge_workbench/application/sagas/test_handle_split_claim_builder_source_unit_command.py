@@ -157,7 +157,7 @@ def _command(
             "affected_work_item_refs": ("work-parent",),
             "work_kind": "knowledge_workbench.claim_builder.section_extraction",
             "scheduled_work_item_count": 1,
-            "estimated_prompt_tokens": 200000,
+            "input_tokens": 200000,
             "active_model_ref": "qwen/qwen3-32b",
             "input_size_preflight_decision": "SOURCE_SPLIT_REQUIRED",
             "input_size_preflight_reason": (
@@ -168,8 +168,8 @@ def _command(
             "llm_dispatch_preparation": {
                 "profile": {
                     "profile_id": "faq_claim_observations",
-                    "estimated_prompt_tokens": 200000,
-                    "estimated_completion_tokens": 500,
+                    "input_tokens": 200000,
+                    "artifact_tokens": 500,
                 },
                 "account_capacities": (),
                 "active_model_ref": "qwen/qwen3-32b",

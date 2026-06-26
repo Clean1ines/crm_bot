@@ -423,7 +423,7 @@ def _draft_claim_compaction_dispatch_profile_payload() -> dict[str, object]:
         "profile_id": "draft_claim_compaction.real_due_batch",
         "input_tokens": prompt_tokens,
         "artifact_tokens": 0,
-        "estimated_requests": 1,
+        "request_count": 1,
     }
 
 

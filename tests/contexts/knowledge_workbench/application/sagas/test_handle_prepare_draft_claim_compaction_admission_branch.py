@@ -80,7 +80,7 @@ def _workflow_command() -> WorkflowCommand:
                     "profile_id": "draft_claim_compaction",
                     "input_tokens": 100,
                     "artifact_tokens": 10,
-                    "estimated_requests": 1,
+                    "request_count": 1,
                 },
                 "account_capacities": (
                     {

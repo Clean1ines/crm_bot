@@ -78,9 +78,9 @@ def _dispatch_preparation() -> dict[str, object]:
     return {
         "profile": {
             "profile_id": "faq_claim_observations",
-            "estimated_prompt_tokens": 3000,
-            "estimated_completion_tokens": 500,
-            "estimated_requests": 1,
+            "input_tokens": 3000,
+            "artifact_tokens": 500,
+            "request_count": 1,
         },
         "account_capacities": (
             {

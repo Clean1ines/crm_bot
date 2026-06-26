@@ -78,9 +78,9 @@ def _workflow_command() -> WorkflowCommand:
             "llm_dispatch_preparation": {
                 "profile": {
                     "profile_id": "faq_claim_observations",
-                    "estimated_prompt_tokens": 100,
-                    "estimated_completion_tokens": 10,
-                    "estimated_requests": 1,
+                    "input_tokens": 100,
+                    "artifact_tokens": 10,
+                    "request_count": 1,
                 },
                 "account_capacities": (
                     {

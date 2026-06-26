@@ -1013,9 +1013,12 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     assert dispatch_profile["prompt_tokens"] == 1
     assert dispatch_profile["artifact_tokens"] == 1
     assert dispatch_profile["input_tokens"] == 2
+    assert dispatch_profile["input_tokens"] == 2
+    assert dispatch_profile["artifact_tokens"] == 1
+    assert dispatch_profile["request_count"] == 1
     assert "estimated_prompt_tokens" not in dispatch_profile
     assert "estimated_completion_tokens" not in dispatch_profile
-    assert dispatch_profile["estimated_requests"] == 1
+    assert "estimated_requests" not in dispatch_profile
     scheduled_payload = scheduling.saved_payloads[0]
     assert isinstance(scheduled_payload, dict)
     assert scheduled_payload["compacted_node_refs"] == [
@@ -1033,7 +1036,7 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         "system",
         "user",
     ]
-    assert scheduled_payload["estimated_requests"] == 1
+    assert scheduled_payload["request_count"] == 1
     assert scheduled_payload["llm_capacity_estimate"] == {
         "budget_contract_version": "v2",
         "model_ref": "openai/gpt-oss-120b",
@@ -1135,7 +1138,7 @@ def _expected_next_work_schedule_payload(
         "required_window_tokens": _test_required_window_tokens(
             prompt_tokens=1, artifact_tokens=1
         ),
-        "estimated_requests": 1,
+        "request_count": 1,
         "llm_capacity_estimate": {
             "budget_contract_version": "v2",
             "model_ref": "openai/gpt-oss-120b",

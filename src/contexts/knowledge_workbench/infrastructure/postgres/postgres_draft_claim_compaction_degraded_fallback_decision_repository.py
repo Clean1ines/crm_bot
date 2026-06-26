@@ -96,11 +96,11 @@ class PostgresDraftClaimCompactionDegradedFallbackDecisionRepository(
             group_ref=_optional_text(waiting_payload, "group_ref"),
             node_refs=_text_tuple(waiting_payload.get("node_refs")),
             resume_work_type=_optional_text(waiting_payload, "resume_work_type"),
-            estimated_prompt_tokens=_optional_int(
+            input_tokens=_optional_int(
                 waiting_payload,
                 "estimated_prompt_tokens",
             ),
-            estimated_completion_tokens=_optional_int(
+            artifact_tokens=_optional_int(
                 waiting_payload,
                 "estimated_completion_tokens",
             ),

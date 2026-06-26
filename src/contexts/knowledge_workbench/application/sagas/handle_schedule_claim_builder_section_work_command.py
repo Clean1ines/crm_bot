@@ -261,9 +261,7 @@ def _claim_builder_dispatch_preparation_payload(
             "profile_id": CLAIM_BUILDER_DISPATCH_PROFILE_ID,
             "input_tokens": 1,
             "artifact_tokens": 1,
-            "estimated_prompt_tokens": 1,
-            "estimated_completion_tokens": 1,
-            "estimated_requests": 1,
+            "request_count": 1,
         },
         "account_capacities": [
             {

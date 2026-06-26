@@ -166,9 +166,9 @@ def _dispatch_preparation() -> dict[str, object]:
     return {
         "profile": {
             "profile_id": "faq_claim_observations",
-            "estimated_prompt_tokens": 3000,
-            "estimated_completion_tokens": 500,
-            "estimated_requests": 1,
+            "input_tokens": 3000,
+            "artifact_tokens": 500,
+            "request_count": 1,
         },
         "account_capacities": (
             {
@@ -783,9 +783,9 @@ def _draft_claim_compaction_dispatch_payload() -> dict[str, object]:
         "llm_dispatch_preparation": {
             "profile": {
                 "profile_id": "draft_claim_compaction",
-                "estimated_prompt_tokens": 90000,
-                "estimated_completion_tokens": 4000,
-                "estimated_requests": 1,
+                "input_tokens": 90000,
+                "artifact_tokens": 4000,
+                "request_count": 1,
             },
             "account_capacities": (
                 {

@@ -110,17 +110,17 @@ class _PostgresDegradedFallbackScheduler:
     ) -> None:
         if decision.group_ref is None or decision.resume_work_type is None:
             raise ValueError("graph fallback decision is incomplete")
-        if decision.estimated_prompt_tokens is None:
+        if decision.input_tokens is None:
             raise ValueError("estimated_prompt_tokens is required")
-        if decision.estimated_completion_tokens is None:
+        if decision.artifact_tokens is None:
             raise ValueError("estimated_completion_tokens is required")
 
         resume_work_type = DraftClaimCompactionNextWorkItemType(
             decision.resume_work_type
         )
-        artifact_tokens = decision.estimated_completion_tokens
+        artifact_tokens = decision.artifact_tokens
         prompt_tokens = max(
-            decision.estimated_prompt_tokens - artifact_tokens,
+            decision.input_tokens - artifact_tokens,
             0,
         )
         input_tokens = calculate_input_tokens(

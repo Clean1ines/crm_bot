@@ -419,7 +419,7 @@ async def _schedule_next_work(
             "artifact_tokens": next_work_item.artifact_tokens,
             "input_tokens": next_work_item.input_tokens,
             "required_window_tokens": next_work_item.required_window_tokens,
-            "estimated_requests": next_work_item.estimated_requests,
+            "request_count": next_work_item.estimated_requests,
             "llm_capacity_estimate": _next_work_capacity_estimate(next_work_item),
         },
     )
@@ -714,7 +714,7 @@ def _next_work_profile_payload(
         "artifact_tokens": next_work_item.artifact_tokens,
         "input_tokens": next_work_item.input_tokens,
         "required_window_tokens": next_work_item.required_window_tokens,
-        "estimated_requests": next_work_item.estimated_requests,
+        "request_count": next_work_item.estimated_requests,
     }
 
 
