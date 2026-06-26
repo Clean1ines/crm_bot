@@ -105,13 +105,15 @@ class BuildCapacityAdmissionProjectionCandidates:
                 raise TypeError("plans must contain WorkItemSchedulePlan")
 
             capacity_estimate = _capacity_estimate_from_payload(plan.payload)
-            estimated_input_tokens = _positive_int_from_mapping(
+            estimated_input_tokens = _positive_int_from_mapping_with_aliases(
                 capacity_estimate,
-                "estimated_input_tokens",
+                primary_key="estimated_input_tokens",
+                alias_keys=("request_input_estimated_tokens",),
             )
-            estimated_output_tokens = _non_negative_int_from_mapping(
+            estimated_output_tokens = _non_negative_int_from_mapping_with_aliases(
                 capacity_estimate,
-                "estimated_output_tokens",
+                primary_key="estimated_output_tokens",
+                alias_keys=("planned_output_reserve_tokens",),
             )
             effective_output_cap_tokens = _optional_non_negative_int_from_mapping(
                 capacity_estimate,
@@ -120,9 +122,10 @@ class BuildCapacityAdmissionProjectionCandidates:
             if effective_output_cap_tokens is None:
                 effective_output_cap_tokens = estimated_output_tokens
 
-            reserved_total_tokens = _optional_positive_int_from_mapping(
+            reserved_total_tokens = _optional_positive_int_from_mapping_with_aliases(
                 capacity_estimate,
-                "reserved_total_tokens",
+                primary_key="reserved_total_tokens",
+                alias_keys=("request_total_estimated_tokens",),
             )
             if reserved_total_tokens is None:
                 reserved_total_tokens = (
@@ -196,6 +199,20 @@ def _positive_int_from_mapping(payload: Mapping[str, object], key: str) -> int:
     return _positive_int_value(payload.get(key), field_name=key)
 
 
+def _positive_int_from_mapping_with_aliases(
+    payload: Mapping[str, object],
+    *,
+    primary_key: str,
+    alias_keys: tuple[str, ...],
+) -> int:
+    key, value = _value_from_mapping_with_aliases(
+        payload,
+        primary_key=primary_key,
+        alias_keys=alias_keys,
+    )
+    return _positive_int_value(value, field_name=key)
+
+
 def _optional_positive_int_from_mapping(
     payload: Mapping[str, object],
     key: str,
@@ -206,8 +223,38 @@ def _optional_positive_int_from_mapping(
     return _positive_int_value(value, field_name=key)
 
 
+def _optional_positive_int_from_mapping_with_aliases(
+    payload: Mapping[str, object],
+    *,
+    primary_key: str,
+    alias_keys: tuple[str, ...],
+) -> int | None:
+    key, value = _optional_value_from_mapping_with_aliases(
+        payload,
+        primary_key=primary_key,
+        alias_keys=alias_keys,
+    )
+    if value is None:
+        return None
+    return _positive_int_value(value, field_name=key)
+
+
 def _non_negative_int_from_mapping(payload: Mapping[str, object], key: str) -> int:
     return _non_negative_int_value(payload.get(key), field_name=key)
+
+
+def _non_negative_int_from_mapping_with_aliases(
+    payload: Mapping[str, object],
+    *,
+    primary_key: str,
+    alias_keys: tuple[str, ...],
+) -> int:
+    key, value = _value_from_mapping_with_aliases(
+        payload,
+        primary_key=primary_key,
+        alias_keys=alias_keys,
+    )
+    return _non_negative_int_value(value, field_name=key)
 
 
 def _optional_non_negative_int_from_mapping(
@@ -218,6 +265,36 @@ def _optional_non_negative_int_from_mapping(
     if value is None:
         return None
     return _non_negative_int_value(value, field_name=key)
+
+
+def _value_from_mapping_with_aliases(
+    payload: Mapping[str, object],
+    *,
+    primary_key: str,
+    alias_keys: tuple[str, ...],
+) -> tuple[str, object]:
+    key, value = _optional_value_from_mapping_with_aliases(
+        payload,
+        primary_key=primary_key,
+        alias_keys=alias_keys,
+    )
+    if value is None:
+        return primary_key, None
+    return key, value
+
+
+def _optional_value_from_mapping_with_aliases(
+    payload: Mapping[str, object],
+    *,
+    primary_key: str,
+    alias_keys: tuple[str, ...],
+) -> tuple[str, object | None]:
+    if primary_key in payload:
+        return primary_key, payload.get(primary_key)
+    for alias_key in alias_keys:
+        if alias_key in payload:
+            return alias_key, payload.get(alias_key)
+    return primary_key, None
 
 
 def _require_non_empty_text(value: object, *, field_name: str) -> None:
