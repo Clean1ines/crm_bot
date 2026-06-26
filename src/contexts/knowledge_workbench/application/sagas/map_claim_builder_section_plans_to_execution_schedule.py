@@ -150,11 +150,11 @@ def _claim_builder_token_estimate(
         "budget_contract_version": "v2",
         "model_ref": budget.model_ref,
         "prompt_tokens": budget.prompt_tokens,
-        "artifact_tokens": budget.artifact_token_estimate,
-        "input_tokens": budget.request_input_estimated_tokens,
+        "artifact_tokens": budget.artifact_tokens,
+        "input_tokens": budget.input_tokens,
         "required_window_tokens": (
-            budget.request_input_estimated_tokens
-            + budget.artifact_token_estimate
+            budget.input_tokens
+            + budget.artifact_tokens
             + budget.request_safety_gap_tokens
         ),
     }

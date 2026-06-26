@@ -117,16 +117,16 @@ def test_claim_builder_budget_uses_qwen_model_tpm_prompt_and_provider_gaps() -> 
 
     assert budget.model_tpm_limit == 6000
     assert budget.model_char_to_token_multiplier == Decimal("3.3")
-    assert budget.artifact_token_estimate == 1000
-    assert budget.max_artifact_input_tokens == 1873
-    assert budget.planned_output_reserve_tokens == 1874
-    assert budget.request_input_estimated_tokens == 2953
-    assert budget.remaining_after_estimated_input_tokens == 2747
-    assert budget.request_output_cap_tokens == 2747
-    assert budget.effective_output_cap_tokens == 2747
-    assert budget.reserved_total_tokens == 5700
+    assert budget.artifact_tokens == 1000
+    assert budget.max_artifact_tokens == 1873
+    assert budget.artifact_tokens == 1000
+    assert budget.input_tokens == 2953
+    assert budget.remaining_after_input_tokens == 2747
+    assert budget.max_completion_tokens == 2747
+    assert budget.max_completion_tokens == 2747
+    assert budget.required_window_tokens == 4253
 
-    assert payload["budget_contract_version"] == "v1"
+    assert payload["budget_contract_version"] == "v2"
     assert payload["provider"] == "groq"
     assert payload["model_ref"] == "qwen/qwen3-32b"
     assert payload["model_tpm_limit"] == 6000
@@ -135,25 +135,20 @@ def test_claim_builder_budget_uses_qwen_model_tpm_prompt_and_provider_gaps() -> 
     assert payload["prompt_version"] == "v1"
     assert payload["prompt_tokens"] == 1953
     assert payload["request_safety_gap_tokens"] == 300
-    assert payload["output_safety_gap_tokens"] == 300
+    assert payload["completion_safety_gap_tokens"] == 300
     assert payload["provider_default_completion_tokens"] == 2048
     assert payload["input_artifact_kind"] == "source_unit"
     assert payload["output_artifact_kind"] == "draft_claims"
-    assert payload["artifact_token_estimate"] == 1000
-    assert payload["batch_input_estimated_tokens"] == 1000
-    assert payload["max_artifact_input_tokens"] == 1873
-    assert payload["batch_input_max_tokens"] == 1873
-    assert payload["planned_output_reserve_tokens"] == 1874
-    assert payload["request_input_estimated_tokens"] == 2953
-    assert payload["request_output_cap_tokens"] == 2747
-    assert payload["effective_output_cap_tokens"] == 2747
-    assert payload["reserved_total_tokens"] == 5700
+    assert payload["artifact_tokens"] == 1000
+    assert payload["artifact_tokens"] == 1000
+    assert payload["max_artifact_tokens"] == 1873
+    assert payload["max_artifact_tokens"] == 1873
+    assert payload["artifact_tokens"] == 1000
+    assert payload["input_tokens"] == 2953
+    assert payload["max_completion_tokens"] == 2747
+    assert payload["max_completion_tokens"] == 2747
+    assert payload["required_window_tokens"] == 4253
     assert payload["source_unit_ref"] == "source-unit-1"
-
-    # legacy aliases stay available during migration
-    assert payload["prompt_message_tokens"] == (1953,)
-    assert payload["estimated_input_tokens"] == 2953
-    assert payload["estimated_output_tokens"] == 1874
 
 
 def test_omits_request_output_cap_when_remaining_does_not_exceed_provider_default() -> (
@@ -170,11 +165,11 @@ def test_omits_request_output_cap_when_remaining_does_not_exceed_provider_defaul
         estimator="claim_builder_phase_budget",
     )
 
-    assert budget.request_input_estimated_tokens == 3826
-    assert budget.remaining_after_estimated_input_tokens == 1874
-    assert budget.request_output_cap_tokens is None
-    assert budget.effective_output_cap_tokens == 1874
-    assert "request_output_cap_tokens" not in payload
+    assert budget.input_tokens == 3826
+    assert budget.remaining_after_input_tokens == 1874
+    assert budget.max_completion_tokens is None
+    assert budget.max_completion_tokens is None
+    assert "max_completion_tokens" not in payload
 
 
 def test_compaction_budget_uses_gpt_oss_model_tpm_and_prompt_profile() -> None:
@@ -192,13 +187,13 @@ def test_compaction_budget_uses_gpt_oss_model_tpm_and_prompt_profile() -> None:
 
     assert budget.model_tpm_limit == 8000
     assert budget.model_char_to_token_multiplier == Decimal("3.7")
-    assert budget.artifact_token_estimate == 1000
-    assert budget.max_artifact_input_tokens == 2825
-    assert budget.planned_output_reserve_tokens == 2825
-    assert budget.request_input_estimated_tokens == 3050
-    assert budget.remaining_after_estimated_input_tokens == 4650
-    assert budget.request_output_cap_tokens == 4650
-    assert budget.effective_output_cap_tokens == 4650
+    assert budget.artifact_tokens == 1000
+    assert budget.max_artifact_tokens == 2825
+    assert budget.artifact_tokens == 1000
+    assert budget.input_tokens == 3050
+    assert budget.remaining_after_input_tokens == 4650
+    assert budget.max_completion_tokens == 4650
+    assert budget.max_completion_tokens == 4650
 
 
 def test_rejects_prompt_profile_for_different_model() -> None:
