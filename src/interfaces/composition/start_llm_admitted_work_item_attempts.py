@@ -106,7 +106,7 @@ def _build_dispatch_record(
     if work_item.attempt_count <= 0:
         raise ValueError("leased work_item attempt_count must be > 0")
 
-    attempt_id = f"{work_item.work_item_id}:attempt:{work_item.attempt_count}"
+    attempt_id = work_item.lease_token.value
     llm_allocation_payload = item.allocation.to_payload()
     dispatch_payload = item.to_dispatch_payload()
 

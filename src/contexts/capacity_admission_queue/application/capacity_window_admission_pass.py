@@ -81,6 +81,7 @@ class CapacityWindowAdmissionReservationPort(Protocol):
     async def reserve_capacity_for_selected_work_item(
         self,
         *,
+        attempt_id: str,
         reservation_ref: str,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
         execution_lane_key: CapacityAdmissionLaneKey,
@@ -246,32 +247,6 @@ class CapacityWindowAdmissionPass:
                 admission_index=admission_index,
                 work_item_id=selected_work_item.work_item_id,
             )
-            reservation = (
-                await self.capacity_reservation.reserve_capacity_for_selected_work_item(
-                    reservation_ref=reservation_ref,
-                    selected_work_item=selected_work_item,
-                    execution_lane_key=command.execution_lane_key,
-                    budget=budget,
-                    now=command.now,
-                    expires_at=command.lease_expires_at,
-                )
-            )
-            if not reservation.reserved:
-                skipped_reason = (
-                    reservation.skipped_reason
-                    or CapacityWindowAdmissionSkippedReason.CAPACITY_EXHAUSTED
-                )
-                if admitted_items:
-                    return self._admitted_result(
-                        command=command,
-                        admitted_items=tuple(admitted_items),
-                        projection_leases=tuple(projection_leases),
-                        capacity_reservations=tuple(capacity_reservations),
-                        started_attempts=tuple(started_attempts),
-                        execute_command_refs=tuple(execute_command_refs),
-                    )
-                return self._skipped_result(command, skipped_reason)
-
             lease_result = await LeaseSelectedCapacityAdmissionWorkItem(
                 execution_lease_repository=self.execution_lease_repository,
                 projection_admitter=self.projection_admitter,
@@ -305,9 +280,17 @@ class CapacityWindowAdmissionPass:
                 raise RuntimeError("leased result must include execution_lease")
             if lease_result.projection_lease is None:
                 raise RuntimeError("leased result must include projection_lease")
-            if reservation.reservation_summary is None:
-                raise RuntimeError("reserved result must include reservation_summary")
-            reservation_summary = reservation.reservation_summary
+
+            provisional_reservation_summary = (
+                CapacityAdmissionCapacityReservationSummary(
+                    reservation_ref=reservation_ref,
+                    work_item_id=selected_work_item.work_item_id,
+                    lane=_lane_summary(command.execution_lane_key),
+                    reserved_requests=1,
+                    reserved_tokens=selected_work_item.reserved_total_tokens,
+                    expires_at=command.lease_expires_at,
+                )
+            )
 
             execution_reference = (
                 await self.execution_boundary.start_or_append_execution(
@@ -315,10 +298,56 @@ class CapacityWindowAdmissionPass:
                     execution_lane_key=command.execution_lane_key,
                     leased_work_item=lease_result.execution_lease,
                     projection_lease=lease_result.projection_lease,
-                    capacity_reservation=reservation_summary,
+                    capacity_reservation=provisional_reservation_summary,
                     now=command.now,
                 )
             )
+
+            if execution_reference.attempt_id is None:
+                if execution_reference.execute_command_ref is None:
+                    raise RuntimeError("execution boundary returned invalid reference")
+                admitted_items.append(
+                    _admitted_item_summary(
+                        selected_work_item,
+                        schedule_payload=lease_result.execution_lease.schedule_payload,
+                    )
+                )
+                projection_leases.append(
+                    _projection_lease_summary(lease_result.projection_lease)
+                )
+                execute_command_refs.append(execution_reference.execute_command_ref)
+                continue
+
+            reservation = (
+                await self.capacity_reservation.reserve_capacity_for_selected_work_item(
+                    attempt_id=execution_reference.attempt_id,
+                    reservation_ref=reservation_ref,
+                    selected_work_item=selected_work_item,
+                    execution_lane_key=command.execution_lane_key,
+                    budget=budget,
+                    now=command.now,
+                    expires_at=command.lease_expires_at,
+                )
+            )
+            if not reservation.reserved:
+                skipped_reason = (
+                    reservation.skipped_reason
+                    or CapacityWindowAdmissionSkippedReason.CAPACITY_EXHAUSTED
+                )
+                if admitted_items:
+                    return self._admitted_result(
+                        command=command,
+                        admitted_items=tuple(admitted_items),
+                        projection_leases=tuple(projection_leases),
+                        capacity_reservations=tuple(capacity_reservations),
+                        started_attempts=tuple(started_attempts),
+                        execute_command_refs=tuple(execute_command_refs),
+                    )
+                return self._skipped_result(command, skipped_reason)
+
+            if reservation.reservation_summary is None:
+                raise RuntimeError("reserved result must include reservation_summary")
+            reservation_summary = reservation.reservation_summary
 
             admitted_items.append(
                 _admitted_item_summary(

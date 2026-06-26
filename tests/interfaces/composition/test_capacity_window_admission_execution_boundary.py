@@ -102,6 +102,7 @@ async def test_execution_boundary_starts_real_dispatch_attempt() -> None:
             estimated_output_tokens=10,
             effective_output_cap_tokens=50,
         ),
+        execution_lane_key=_lane_key(),
         leased_work_item=_leased_work_item(),
         projection_lease=CapacityAdmissionProjectionLeaseResult(
             work_item_id="work-1",
@@ -127,12 +128,12 @@ async def test_execution_boundary_starts_real_dispatch_attempt() -> None:
     )
 
     assert result.work_item_id == "work-1"
-    assert result.attempt_id == "work-1:attempt:3"
+    assert result.attempt_id == "lease-token-1"
     assert result.attempt_number == 3
     assert result.execute_command_ref is None
 
     record = repository.records[0]
-    assert record.attempt_id == "work-1:attempt:3"
+    assert record.attempt_id == "lease-token-1"
     assert record.work_item_id == "work-1"
     assert record.attempt_number == 3
     assert record.llm_allocation_payload == {

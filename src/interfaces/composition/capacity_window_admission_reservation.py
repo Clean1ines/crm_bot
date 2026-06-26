@@ -51,6 +51,7 @@ class ReserveLlmRouteCapacityForAdmission:
     async def reserve_capacity_for_selected_work_item(
         self,
         *,
+        attempt_id: str,
         reservation_ref: str,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
         execution_lane_key: CapacityAdmissionLaneKey,
@@ -58,6 +59,7 @@ class ReserveLlmRouteCapacityForAdmission:
         now: datetime,
         expires_at: datetime,
     ) -> CapacityWindowAdmissionReservationResult:
+        _require_non_empty_text(attempt_id, "attempt_id")
         _require_non_empty_text(reservation_ref, "reservation_ref")
         _require_timezone_aware(now, "now")
         _require_timezone_aware(expires_at, "expires_at")
@@ -112,7 +114,7 @@ class ReserveLlmRouteCapacityForAdmission:
 
         await self.reservation_repository.reserve(
             LlmRouteCapacityReservation(
-                attempt_id=reservation_ref,
+                attempt_id=attempt_id,
                 provider=lane_key.provider,
                 account_ref=lane_key.account_ref,
                 model_ref=lane_key.model_ref,

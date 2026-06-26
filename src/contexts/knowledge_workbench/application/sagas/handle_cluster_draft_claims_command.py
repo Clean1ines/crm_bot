@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -26,6 +27,9 @@ from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_
     COMPACTION_ROUGH_TOKEN_ESTIMATOR,
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -406,6 +410,12 @@ def _prepare_dispatch_batch_command(
                 "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
                 "requested_items": scheduled_work_item_count,
                 "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+                "profile": _draft_claim_compaction_dispatch_profile_payload(),
+                "account_capacities": (
+                    _draft_claim_compaction_account_capacities_payload(
+                        active_model_ref=DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+                    )
+                ),
             },
         },
         status=WorkflowCommandStatus.PENDING,
@@ -413,6 +423,76 @@ def _prepare_dispatch_batch_command(
         created_at=occurred_at,
         updated_at=occurred_at,
     )
+
+
+def _draft_claim_compaction_dispatch_profile_payload() -> dict[str, object]:
+    return {
+        "profile_id": "draft_claim_compaction.real_due_batch",
+        "estimated_input_tokens": DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS,
+        "estimated_output_tokens": 4096,
+        "estimated_prompt_tokens": DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS,
+        "estimated_completion_tokens": 4096,
+        "estimated_requests": 1,
+    }
+
+
+def _draft_claim_compaction_account_capacities_payload(
+    *,
+    active_model_ref: str,
+) -> list[dict[str, object]]:
+    provider_account_refs = _configured_groq_account_refs()
+    model_profile = _groq_model_profile_for_ref(active_model_ref)
+
+    requests_per_minute = model_profile.rate_limits.requests_per_minute
+    tokens_per_minute = model_profile.rate_limits.tokens_per_minute
+    requests_per_day = model_profile.rate_limits.requests_per_day
+    tokens_per_day = model_profile.rate_limits.tokens_per_day
+
+    if requests_per_minute is None:
+        raise ValueError("draft compaction model requests_per_minute is not configured")
+    if tokens_per_minute is None:
+        raise ValueError("draft compaction model tokens_per_minute is not configured")
+    if requests_per_day is None:
+        raise ValueError("draft compaction model requests_per_day is not configured")
+    if tokens_per_day is None:
+        raise ValueError("draft compaction model tokens_per_day is not configured")
+
+    return [
+        {
+            "provider": "groq",
+            "account_ref": account_ref,
+            "model_ref": active_model_ref,
+            "remaining_minute_requests": requests_per_minute,
+            "remaining_minute_tokens": tokens_per_minute,
+            "remaining_daily_requests": requests_per_day,
+            "remaining_daily_tokens": tokens_per_day,
+        }
+        for account_ref in provider_account_refs
+    ]
+
+
+def _configured_groq_account_refs() -> tuple[str, ...]:
+    env_account_pairs = (
+        ("GROQ_API_KEY", "groq_org_primary"),
+        ("GROQ_API_KEY2", "groq_org_secondary"),
+        ("GROQ_API_KEY3", "groq_org_tertiary"),
+        ("GROQ_API_KEY4", "groq_org_quaternary"),
+    )
+    configured = tuple(
+        account_ref
+        for env_name, account_ref in env_account_pairs
+        if os.environ.get(env_name, "").strip()
+    )
+    if configured:
+        return configured
+    return ("groq_org_primary",)
+
+
+def _groq_model_profile_for_ref(active_model_ref: str):
+    for model_profile in build_groq_free_plan_model_profiles():
+        if model_profile.model_id.value == active_model_ref:
+            return model_profile
+    raise ValueError(f"Groq model profile not found: {active_model_ref}")
 
 
 def _command_causation_scope(workflow_command: WorkflowCommand) -> str:

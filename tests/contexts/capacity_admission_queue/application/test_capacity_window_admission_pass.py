@@ -160,12 +160,15 @@ class FakeCapacityReservation:
     async def reserve_capacity_for_selected_work_item(
         self,
         *,
+        attempt_id: str,
         reservation_ref: str,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
         budget: CapacityAdmissionWindowBudget,
         now: datetime,
         expires_at: datetime,
     ) -> CapacityWindowAdmissionReservationResult:
+        del attempt_id, execution_lane_key
         self.calls += 1
         if self.deny_after_count is not None and self.calls > self.deny_after_count:
             return CapacityWindowAdmissionReservationResult(
@@ -208,11 +211,13 @@ class FakeExecutionBoundary:
         self,
         *,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
         leased_work_item: LeasedWorkItemRecord,
         projection_lease: CapacityAdmissionProjectionLeaseResult,
         capacity_reservation: CapacityAdmissionCapacityReservationSummary,
         now: datetime,
     ) -> CapacityWindowAdmissionExecutionReference:
+        del execution_lane_key
         self.started_work_item_ids.append(selected_work_item.work_item_id)
         if self.append_command:
             return CapacityWindowAdmissionExecutionReference(
@@ -221,7 +226,7 @@ class FakeExecutionBoundary:
             )
         return CapacityWindowAdmissionExecutionReference(
             work_item_id=selected_work_item.work_item_id,
-            attempt_id=capacity_reservation.reservation_ref,
+            attempt_id=leased_work_item.work_item.lease_token.value,
             attempt_number=1,
         )
 
@@ -264,6 +269,7 @@ def _command() -> CapacityWindowAdmissionPassCommand:
         phase="CLAIM_BUILDER_SECTION_EXTRACTION",
         operation_key="prepare_claim_builder_dispatch",
         lane_key=_lane(),
+        execution_lane_key=_lane(),
         budget=_budget(),
         worker=WorkerRef("capacity-admission-worker"),
         lease_token_prefix="capacity-admission:workflow-run-1",
@@ -359,6 +365,7 @@ async def test_pass_returns_capacity_exhausted_without_selector_calls() -> None:
         phase=command.phase,
         operation_key=command.operation_key,
         lane_key=command.lane_key,
+        execution_lane_key=command.execution_lane_key,
         budget=CapacityAdmissionWindowBudget(
             remaining_requests=0,
             remaining_tokens=10,
@@ -449,6 +456,7 @@ async def test_pass_stops_at_safety_cap() -> None:
         phase=command.phase,
         operation_key=command.operation_key,
         lane_key=command.lane_key,
+        execution_lane_key=command.execution_lane_key,
         budget=command.budget,
         worker=command.worker,
         lease_token_prefix=command.lease_token_prefix,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Protocol, cast
 
 import asyncpg
@@ -135,6 +136,9 @@ from src.interfaces.realtime.collecting_frontend_workflow_event_repository impor
 from src.interfaces.realtime.redis_frontend_workflow_event_bus import (
     publish_frontend_workflow_events,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SourceIngestionFirstPhaseRunnerPort(Protocol):
@@ -343,13 +347,33 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         if workflow_run_id is None or not workflow_run_id.strip():
             raise ValueError("completed source ingestion must return workflow_run_id")
 
-        drain_result = await self._drain_until_blocked_or_idle(
-            workflow_run_id=workflow_run_id,
-            max_drain_commands=command.max_drain_commands,
-            source_document_ref=source_result.source_document_ref,
-            source_unit_count=source_result.source_unit_count,
-            source_ingestion_admission_status=source_result.admission_status,
-        )
+        try:
+            drain_result = await self._drain_until_blocked_or_idle(
+                workflow_run_id=workflow_run_id,
+                max_drain_commands=command.max_drain_commands,
+                source_document_ref=source_result.source_document_ref,
+                source_unit_count=source_result.source_unit_count,
+                source_ingestion_admission_status=source_result.admission_status,
+            )
+        except Exception:
+            LOGGER.exception(
+                "knowledge_extraction_after_upload_drain_failed_after_ingestion",
+                extra={
+                    "workflow_run_id": workflow_run_id,
+                    "source_document_ref": source_result.source_document_ref,
+                },
+            )
+            drain_result = RunKnowledgeExtractionWorkflowAfterUploadResult(
+                workflow_run_id=workflow_run_id,
+                source_ingestion_completed=True,
+                drained_inspected_count=0,
+                drained_dispatched_count=0,
+                blocked_command_type=None,
+                blocked_reason="after_upload_drain_failed",
+                source_document_ref=source_result.source_document_ref,
+                source_unit_count=source_result.source_unit_count,
+                source_ingestion_admission_status=source_result.admission_status,
+            )
         return RunKnowledgeExtractionWorkflowAfterUploadResult(
             workflow_run_id=workflow_run_id,
             source_ingestion_completed=True,
