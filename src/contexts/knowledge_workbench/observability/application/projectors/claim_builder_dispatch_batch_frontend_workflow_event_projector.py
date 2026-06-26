@@ -84,18 +84,28 @@ def _dispatch_batch_prepared_patch(
         ),
         "dispatch_attempt_ids": _payload_text_sequence(payload, "dispatch_attempt_ids"),
         "work_item_ids": _payload_text_sequence(payload, "work_item_ids"),
-        "input_size_preflight_decision": _payload_text(
-            payload,
-            "input_size_preflight_decision",
-        ),
-        "input_size_preflight_reason": _payload_text(
-            payload,
-            "input_size_preflight_reason",
-        ),
     }
+
+    input_size_preflight_decision = _optional_payload_text(
+        payload,
+        "input_size_preflight_decision",
+    )
+    if input_size_preflight_decision is not None:
+        patch["input_size_preflight_decision"] = input_size_preflight_decision
+
+    input_size_preflight_reason = _optional_payload_text(
+        payload,
+        "input_size_preflight_reason",
+    )
+    if input_size_preflight_reason is not None:
+        patch["input_size_preflight_reason"] = input_size_preflight_reason
+
     active_model_ref = _optional_payload_text(
         payload,
         "input_size_preflight_active_model_ref",
+    ) or _optional_payload_text(
+        payload,
+        "active_model_ref",
     )
     if active_model_ref is not None:
         patch["input_size_preflight_active_model_ref"] = active_model_ref
