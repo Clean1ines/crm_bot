@@ -38,7 +38,7 @@ def test_claim_builder_groq_free_policy_uses_qwen_primary_and_two_auto_fallbacks
     )
 
 
-def test_claim_builder_groq_free_policy_keeps_gpt_oss_as_special_not_daily_fallback() -> (
+def test_claim_builder_groq_free_policy_keeps_empty_claims_gpt_oss_as_only_special_route() -> (
     None
 ):
     policy = claim_builder_groq_free_phase_route_policy()
@@ -47,24 +47,19 @@ def test_claim_builder_groq_free_policy_keeps_gpt_oss_as_special_not_daily_fallb
         route.model_ref for route in policy.automatic_fallback_routes()
     )
 
-    expected_special_reasons = {
-        PhaseRouteReason.EMPTY_CLAIMS_VALIDATION,
-        PhaseRouteReason.INPUT_TOO_LARGE,
-        PhaseRouteReason.OUTPUT_TOO_LARGE,
-        PhaseRouteReason.TRUNCATED_JSON,
-    }
     actual_special_reasons = {
         route.route_reason
         for route in policy.routes
         if route.route_kind is PhaseRouteKind.SPECIAL
     }
 
-    assert actual_special_reasons == expected_special_reasons
-    for reason in expected_special_reasons:
-        routes = policy.special_routes_for_reason(reason)
-        assert len(routes) == 1
-        assert routes[0].model_ref == GPT_OSS_120B_MODEL_REF
-        assert routes[0].activation_scope is PhaseRouteActivationScope.WORK_ITEM
+    assert actual_special_reasons == {PhaseRouteReason.EMPTY_CLAIMS_VALIDATION}
+
+    routes = policy.special_routes_for_reason(PhaseRouteReason.EMPTY_CLAIMS_VALIDATION)
+
+    assert len(routes) == 1
+    assert routes[0].model_ref == GPT_OSS_120B_MODEL_REF
+    assert routes[0].activation_scope is PhaseRouteActivationScope.WORK_ITEM
 
 
 def test_claim_builder_groq_free_policy_uses_llama_instant_as_manual_fallback() -> None:

@@ -24,15 +24,6 @@ CLAIM_BUILDER_MANUAL_LLAMA_INSTANT_ROUTE_REF = (
 CLAIM_BUILDER_SPECIAL_EMPTY_CLAIMS_GPT_OSS_ROUTE_REF = (
     "claim_builder:special:empty_claims_validation:gpt_oss"
 )
-CLAIM_BUILDER_SPECIAL_INPUT_TOO_LARGE_GPT_OSS_ROUTE_REF = (
-    "claim_builder:special:input_too_large:gpt_oss"
-)
-CLAIM_BUILDER_SPECIAL_OUTPUT_TOO_LARGE_GPT_OSS_ROUTE_REF = (
-    "claim_builder:special:output_too_large:gpt_oss"
-)
-CLAIM_BUILDER_SPECIAL_TRUNCATED_JSON_GPT_OSS_ROUTE_REF = (
-    "claim_builder:special:truncated_json:gpt_oss"
-)
 
 DRAFT_CLAIM_COMPACTION_PRIMARY_GPT_OSS_ROUTE_REF = (
     "draft_claim_compaction:primary:gpt_oss"

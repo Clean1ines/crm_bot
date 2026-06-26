@@ -14,6 +14,7 @@ from src.contexts.llm_runtime.domain.routing.provider_capacity_windows import (
     ProviderParallelismPolicyKind,
     RouteActivation,
 )
+from src.contexts.llm_runtime.domain.routing.phase_route_policy import PhaseRouteReason
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_chat_request_builder import (
     JsonValue,
 )
@@ -171,9 +172,8 @@ def test_capacity_profile_expands_claim_builder_special_gpt_oss_route_without_re
         ),
     ).build()
     policy = claim_builder_groq_free_phase_route_policy()
-    special_route = policy.special_routes_for_reason(
-        route_reason := policy.routes[-3].route_reason
-    )[0]
+    route_reason = PhaseRouteReason.EMPTY_CLAIMS_VALIDATION
+    special_route = policy.special_routes_for_reason(route_reason)[0]
 
     primary_windows = ProviderCapacityExecutionWindowExpander().expand_activation(
         provider_profile=components.capacity_profile,
@@ -189,11 +189,11 @@ def test_capacity_profile_expands_claim_builder_special_gpt_oss_route_without_re
             phase=policy.phase,
             work_kind=policy.work_kind,
             route=special_route,
-            target_work_item_id="work-item-input-too-large",
+            target_work_item_id="work-item-empty-claims-validation",
         ),
     )
 
-    assert route_reason.value == "input_too_large"
+    assert route_reason.value == "empty_claims_validation"
     assert len(primary_windows) == 4
     assert len(special_windows) == 4
     assert {window.model_id.value for window in primary_windows} == {"qwen/qwen3-32b"}

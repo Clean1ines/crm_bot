@@ -81,9 +81,13 @@ def test_phase_route_policies_keep_gpt_oss_out_of_claim_builder_daily_fallbacks(
     ).read_text(encoding="utf-8")
 
     assert "CLAIM_BUILDER_SPECIAL_EMPTY_CLAIMS_GPT_OSS_ROUTE_REF" in policy_source
-    assert "CLAIM_BUILDER_SPECIAL_INPUT_TOO_LARGE_GPT_OSS_ROUTE_REF" in policy_source
-    assert "CLAIM_BUILDER_SPECIAL_OUTPUT_TOO_LARGE_GPT_OSS_ROUTE_REF" in policy_source
-    assert "CLAIM_BUILDER_SPECIAL_TRUNCATED_JSON_GPT_OSS_ROUTE_REF" in policy_source
+    assert (
+        "CLAIM_BUILDER_SPECIAL_INPUT_TOO_LARGE_GPT_OSS_ROUTE_REF" not in policy_source
+    )
+    assert (
+        "CLAIM_BUILDER_SPECIAL_OUTPUT_TOO_LARGE_GPT_OSS_ROUTE_REF" not in policy_source
+    )
+    assert "CLAIM_BUILDER_SPECIAL_TRUNCATED_JSON_GPT_OSS_ROUTE_REF" not in policy_source
     assert "CLAIM_BUILDER_AUTO_LLAMA_VERSATILE_ROUTE_REF" in policy_source
     assert "CLAIM_BUILDER_AUTO_LLAMA_SCOUT_ROUTE_REF" in policy_source
 
