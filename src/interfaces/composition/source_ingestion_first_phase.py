@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from pathlib import Path
 from typing import Protocol, cast, runtime_checkable
 
@@ -101,6 +102,7 @@ class SourceIngestionFirstPhaseSegmentationConfig:
     primary_model_profile_name: str
     max_request_input_tokens: int
     segmentation_input_safety_gap_tokens: int
+    char_to_token_multiplier: Decimal
 
     def __post_init__(self) -> None:
         if not isinstance(self.prompt_name, str) or not self.prompt_name.strip():
@@ -122,6 +124,10 @@ class SourceIngestionFirstPhaseSegmentationConfig:
             raise TypeError("segmentation_input_safety_gap_tokens must be int")
         if self.segmentation_input_safety_gap_tokens < 0:
             raise ValueError("segmentation_input_safety_gap_tokens must be >= 0")
+        if not isinstance(self.char_to_token_multiplier, Decimal):
+            raise TypeError("char_to_token_multiplier must be Decimal")
+        if self.char_to_token_multiplier <= 0:
+            raise ValueError("char_to_token_multiplier must be > 0")
         if (
             self.prompt_token_count + self.segmentation_input_safety_gap_tokens
             >= self.max_request_input_tokens
@@ -141,6 +147,7 @@ class SourceIngestionFirstPhaseSegmentationConfig:
                 profile_name=self.primary_model_profile_name,
                 max_request_input_tokens=self.max_request_input_tokens,
                 segmentation_input_safety_gap_tokens=self.segmentation_input_safety_gap_tokens,
+                char_to_token_multiplier=self.char_to_token_multiplier,
             ),
         )
 
@@ -154,6 +161,7 @@ def segmentation_config_from_profile(
         primary_model_profile_name=profile.primary_model.profile_name,
         max_request_input_tokens=profile.primary_model.max_request_input_tokens,
         segmentation_input_safety_gap_tokens=profile.primary_model.segmentation_input_safety_gap_tokens,
+        char_to_token_multiplier=profile.primary_model.char_to_token_multiplier,
     )
 
 

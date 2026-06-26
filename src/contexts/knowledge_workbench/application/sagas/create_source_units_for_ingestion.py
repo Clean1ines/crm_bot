@@ -3,6 +3,14 @@ from datetime import datetime
 from hashlib import sha256
 from typing import Protocol
 
+from src.contexts.knowledge_workbench.application.sagas.claim_builder_source_ingestion_budget import (
+    CLAIM_BUILDER_PROMPT_NAME,
+    CLAIM_BUILDER_PROMPT_TOKEN_COUNT,
+    CLAIM_BUILDER_SEGMENTATION_PROFILE_NAME,
+    claim_builder_char_to_token_multiplier,
+    claim_builder_model_tpm,
+    claim_builder_request_safety_gap_tokens,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_saga_state import (
     KnowledgeExtractionPhaseCheckpoint,
     KnowledgeExtractionPhaseKey,
@@ -18,6 +26,7 @@ from src.contexts.knowledge_workbench.document_segmentation.domain import (
     MarkdownSegmentationPolicy,
     SegmentationModelBudgetProfile,
     SegmentationPromptProfile,
+    TokenEstimator,
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_document import (
     SourceDocument,
@@ -210,17 +219,16 @@ class CreateSourceUnitsForIngestion:
 
 
 def default_source_ingestion_segmentation_budget() -> DocumentSegmentationBudget:
-    # Keep only a small input safety gap here. Concrete output budget belongs
-    # to LLM dispatch, not document segmentation.
     return DocumentSegmentationBudget(
         prompt=SegmentationPromptProfile(
-            prompt_name="claim_builder_section_extraction",
-            prompt_token_count=1_953,
+            prompt_name=CLAIM_BUILDER_PROMPT_NAME,
+            prompt_token_count=CLAIM_BUILDER_PROMPT_TOKEN_COUNT,
         ),
         model=SegmentationModelBudgetProfile(
-            profile_name="primary_model",
-            max_request_input_tokens=6_000,
-            segmentation_input_safety_gap_tokens=100,
+            profile_name=CLAIM_BUILDER_SEGMENTATION_PROFILE_NAME,
+            max_request_input_tokens=claim_builder_model_tpm(),
+            segmentation_input_safety_gap_tokens=claim_builder_request_safety_gap_tokens(),
+            char_to_token_multiplier=claim_builder_char_to_token_multiplier(),
         ),
     )
 
@@ -297,7 +305,7 @@ def _markdown_heading_first_segments(
     ordinal = 0
 
     for heading_path, section_text in sections:
-        estimated_tokens = max(1, (len(section_text) + 3) // 4)
+        estimated_tokens = segmentation_budget.estimate_tokens(section_text)
         if estimated_tokens <= segmentation_budget.max_source_segment_tokens:
             text_hash = sha256(section_text.encode("utf-8")).hexdigest()
             segments.append(
@@ -464,6 +472,7 @@ def _fallback_non_markdown_segments(
     packed_paragraph_groups = _pack_adjacent_paragraphs(
         paragraphs=paragraphs,
         max_tokens=segmentation_budget.max_source_segment_tokens,
+        token_estimator=segmentation_budget.estimate_tokens,
     )
 
     return tuple(
@@ -471,6 +480,7 @@ def _fallback_non_markdown_segments(
             document_key=document_key,
             text=paragraph_group,
             ordinal=ordinal,
+            estimated_tokens=segmentation_budget.estimate_tokens(paragraph_group),
         )
         for ordinal, paragraph_group in enumerate(packed_paragraph_groups)
     )
@@ -481,6 +491,7 @@ def _build_fallback_document_segment(
     document_key: str,
     text: str,
     ordinal: int,
+    estimated_tokens: int,
 ) -> DocumentSegment:
     text_hash = sha256(text.encode("utf-8")).hexdigest()
     return DocumentSegment(
@@ -492,7 +503,7 @@ def _build_fallback_document_segment(
         text=text,
         heading_path=(),
         ordinal=ordinal,
-        estimated_tokens=max(1, (len(text) + 3) // 4),
+        estimated_tokens=estimated_tokens,
     )
 
 
@@ -520,6 +531,7 @@ def _pack_adjacent_paragraphs(
     *,
     paragraphs: tuple[str, ...],
     max_tokens: int,
+    token_estimator: TokenEstimator,
 ) -> tuple[str, ...]:
     if max_tokens <= 0:
         raise ValueError("max_tokens must be > 0")
@@ -529,7 +541,7 @@ def _pack_adjacent_paragraphs(
 
     for paragraph in paragraphs:
         candidate = "\n\n".join((*current, paragraph)).strip()
-        if current and max(1, (len(candidate) + 3) // 4) > max_tokens:
+        if current and token_estimator(candidate) > max_tokens:
             groups.append("\n\n".join(current).strip())
             current = [paragraph]
             continue

@@ -17,7 +17,7 @@ def test_provider_message_capacity_estimate_uses_estimated_output_tokens() -> No
 
     assert estimate.estimated_output_tokens == 1024
     assert estimate.to_payload() == {
-        "estimator": "rough_char_div_4_actual_provider_messages",
+        "estimator": "claim_builder_primary_model_char_multiplier_actual_provider_messages",
         "estimated_input_tokens": 100,
         "estimated_output_tokens": 1024,
         "estimated_total_tokens": 1124,

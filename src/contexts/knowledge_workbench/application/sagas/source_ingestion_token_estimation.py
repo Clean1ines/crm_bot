@@ -4,13 +4,15 @@ from dataclasses import dataclass, replace
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_segmentation_profiles import (
     SourceIngestionSegmentationProfile,
 )
-from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR,
+from src.contexts.knowledge_workbench.application.sagas.claim_builder_source_ingestion_budget import (
+    CLAIM_BUILDER_PROMPT_NODE_ID,
+    CLAIM_BUILDER_PROMPT_TOKEN_COUNT,
+    claim_builder_artifact_tokens,
 )
 
 
 MEASURED_PROMPT_TOKEN_COUNTS: dict[str, int] = {
-    "faq_claim_observations": 1_953,
+    CLAIM_BUILDER_PROMPT_NODE_ID: CLAIM_BUILDER_PROMPT_TOKEN_COUNT,
 }
 
 
@@ -21,7 +23,7 @@ class WorkbenchTokenEstimatorPort(Protocol):
 @dataclass(frozen=True, slots=True)
 class RoughWorkbenchTokenEstimator:
     def estimate_tokens(self, text: str) -> int:
-        return CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(text)
+        return claim_builder_artifact_tokens(text)
 
 
 @dataclass(frozen=True, slots=True)

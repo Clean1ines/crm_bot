@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_CEILING
 from fractions import Fraction
 
 TokenEstimator = Callable[[str], int]
@@ -26,16 +27,9 @@ class RoughTokenEstimator:
         return max(1, (len(text) * denominator + numerator - 1) // numerator)
 
 
-CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR = RoughTokenEstimator(
-    multiplier=Fraction(33, 10),
-)
 COMPACTION_ROUGH_TOKEN_ESTIMATOR = RoughTokenEstimator(
     multiplier=Fraction(37, 10),
 )
-
-
-def estimate_tokens_roughly(text: str) -> int:
-    return CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +51,7 @@ class SegmentationModelBudgetProfile:
     profile_name: str
     max_request_input_tokens: int
     segmentation_input_safety_gap_tokens: int
+    char_to_token_multiplier: Decimal
 
     def __post_init__(self) -> None:
         if not isinstance(self.profile_name, str) or not self.profile_name.strip():
@@ -73,6 +68,10 @@ class SegmentationModelBudgetProfile:
             raise ValueError(
                 "segmentation_input_safety_gap_tokens must be < max_request_input_tokens"
             )
+        if not isinstance(self.char_to_token_multiplier, Decimal):
+            raise TypeError("char_to_token_multiplier must be Decimal")
+        if self.char_to_token_multiplier <= 0:
+            raise ValueError("char_to_token_multiplier must be > 0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,10 +89,25 @@ class DocumentSegmentationBudget:
 
     @property
     def max_source_segment_tokens(self) -> int:
-        return (
+        available_tokens = (
             self.model.max_request_input_tokens
             - self.prompt.prompt_token_count
             - self.model.segmentation_input_safety_gap_tokens
+        )
+        return available_tokens // 2
+
+    def estimate_tokens(self, text: str) -> int:
+        if not isinstance(text, str):
+            raise TypeError("text must be str")
+        if not text.strip():
+            return 0
+        return max(
+            1,
+            int(
+                (
+                    Decimal(len(text)) / self.model.char_to_token_multiplier
+                ).to_integral_value(rounding=ROUND_CEILING)
+            ),
         )
 
 
@@ -101,9 +115,12 @@ def text_fits_segmentation_budget(
     *,
     text: str,
     budget: DocumentSegmentationBudget,
-    token_estimator: TokenEstimator = estimate_tokens_roughly,
+    token_estimator: TokenEstimator | None = None,
 ) -> bool:
-    return token_estimator(text) <= budget.max_source_segment_tokens
+    effective_token_estimator = (
+        budget.estimate_tokens if token_estimator is None else token_estimator
+    )
+    return effective_token_estimator(text) <= budget.max_source_segment_tokens
 
 
 def required_segment_count(
