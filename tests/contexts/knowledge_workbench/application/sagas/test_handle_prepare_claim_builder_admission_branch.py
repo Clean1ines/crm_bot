@@ -290,8 +290,10 @@ async def test_prepare_claim_builder_can_use_capacity_admission_branch() -> None
         CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.work_kind
     )
     assert admission_command.lane_key.provider == "groq"
-    assert admission_command.lane_key.account_ref == "groq-account-1"
+    assert admission_command.lane_key.account_ref is None
     assert admission_command.lane_key.model_ref == "qwen/qwen3-32b"
+    assert admission_command.execution_lane_key.account_ref == "groq-account-1"
+    assert admission_command.execution_lane_key.model_ref == "qwen/qwen3-32b"
     assert admission_command.budget.remaining_requests == 2
     assert admission_command.budget.remaining_tokens == 7000
     assert admission_command.budget.remaining_daily_requests == 100

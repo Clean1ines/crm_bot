@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+import os
 
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
     CapacityAdmissionLaneTarget,
@@ -19,6 +20,10 @@ from src.contexts.execution_runtime.application.ports.work_item_scheduling_repos
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
+)
+from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
+    CLAIM_BUILDER_DISPATCH_PROFILE_ID,
+    ClaimBuilderDispatchPreparationBuilder,
 )
 from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_section_work import (
     ClaimBuilderScheduledWorkItemSummary,
@@ -57,6 +62,15 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import
 )
 from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
     WorkflowIdempotencyKey,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    default_groq_llm_model_route_catalog,
+)
+from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
+    LlmRuntimeSettings,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
 )
 
 
@@ -219,6 +233,53 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
         )
 
 
+def _claim_builder_dispatch_preparation_payload(
+    *,
+    scheduled_work_item_count: int,
+) -> dict[str, object]:
+    if scheduled_work_item_count <= 0:
+        raise ValueError("scheduled_work_item_count must be positive")
+
+    route_catalog = default_groq_llm_model_route_catalog()
+    active_model_ref = route_catalog.primary_model_ref()
+    groq_config = LlmRuntimeSettings.from_env_mapping(os.environ).to_groq_env_config()
+    provider_account_refs = tuple(
+        account.account_seed.account_ref for account in groq_config.accounts
+    )
+    account_capacities = (
+        ClaimBuilderDispatchPreparationBuilder().build_account_capacities(
+            active_model_ref=active_model_ref,
+            provider_account_refs=provider_account_refs,
+            model_profiles=build_groq_free_plan_model_profiles(),
+        )
+    )
+
+    return {
+        "active_model_ref": active_model_ref,
+        "requested_items": scheduled_work_item_count,
+        "profile": {
+            "profile_id": CLAIM_BUILDER_DISPATCH_PROFILE_ID,
+            "estimated_input_tokens": 1,
+            "estimated_output_tokens": 1,
+            "estimated_prompt_tokens": 1,
+            "estimated_completion_tokens": 1,
+            "estimated_requests": 1,
+        },
+        "account_capacities": [
+            {
+                "provider": account.provider,
+                "account_ref": account.account_ref,
+                "model_ref": account.model_ref,
+                "remaining_minute_requests": account.remaining_minute_requests,
+                "remaining_minute_tokens": account.remaining_minute_tokens,
+                "remaining_daily_requests": account.remaining_daily_requests,
+                "remaining_daily_tokens": account.remaining_daily_tokens,
+            }
+            for account in account_capacities
+        ],
+    }
+
+
 def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
     if (
         workflow_command.command_type
@@ -305,6 +366,9 @@ def _prepare_dispatch_batch_command(
         "workflow_run_id": workflow_run_id,
         "source_document_ref": source_document_ref.value,
         "scheduled_work_item_count": scheduled_work_item_count,
+        "llm_dispatch_preparation": _claim_builder_dispatch_preparation_payload(
+            scheduled_work_item_count=scheduled_work_item_count,
+        ),
     }
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
