@@ -665,11 +665,59 @@ export const KnowledgePage: React.FC = () => {
   >({});
 
   useEffect(() => {
-    if (!projectId || workflowProjectionTargets.length === 0) return undefined;
+    if (!projectId || workflowProjectionTargets.length === 0) {
+      setWorkflowLiveStates({});
+      setWorkflowProjectionErrors({});
+      return undefined;
+    }
+
+    const activeWorkflowRunsByDocument = new Map(
+      workflowProjectionTargets.map((target) => [
+        target.documentId,
+        target.workflowRunId,
+      ]),
+    );
+
+    setWorkflowLiveStates((previous) => {
+      const next: KnowledgeWorkflowLiveStateByDocument = {};
+      let changed = false;
+
+      for (const [documentId, state] of Object.entries(previous)) {
+        const activeWorkflowRunId = activeWorkflowRunsByDocument.get(documentId);
+        if (
+          activeWorkflowRunId &&
+          state.current_processing_run_id === activeWorkflowRunId
+        ) {
+          next[documentId] = state;
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? next : previous;
+    });
+
+    setWorkflowProjectionErrors((previous) => {
+      const next: Record<string, string | null> = {};
+      let changed = false;
+
+      for (const [documentId, error] of Object.entries(previous)) {
+        if (activeWorkflowRunsByDocument.has(documentId)) {
+          next[documentId] = error;
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? next : previous;
+    });
 
     const stops = workflowProjectionTargets.map((target) => {
       setWorkflowLiveStates((previous) => {
-        if (previous[target.documentId]) return previous;
+        const current = previous[target.documentId];
+        if (current?.current_processing_run_id === target.workflowRunId) {
+          return previous;
+        }
 
         return {
           ...previous,

@@ -180,6 +180,8 @@ def _workflow_event(
             "workflow_run_id": state.workflow_run_id,
             "project_id": state.project_id,
             "source_document_ref": state.source_document_ref,
+            "operation_key": "manual_resume",
+            "canonical_phase": KnowledgeExtractionCanonicalPhase.SOURCE_INGESTION.value,
             "actor_user_id": actor_user_id,
         },
         occurred_at=occurred_at,
