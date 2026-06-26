@@ -103,8 +103,8 @@ class ReserveLlmRouteCapacityForAdmission:
             )
 
         if (
-            selected_work_item.reserved_total_tokens
-            > available_budget.max_reserved_total_tokens
+            selected_work_item.required_window_tokens
+            > available_budget.max_required_window_tokens
         ):
             return CapacityWindowAdmissionReservationResult(
                 reserved=False,
@@ -119,7 +119,7 @@ class ReserveLlmRouteCapacityForAdmission:
                 account_ref=lane_key.account_ref,
                 model_ref=lane_key.model_ref,
                 reserved_requests=1,
-                reserved_tokens=selected_work_item.reserved_total_tokens,
+                reserved_tokens=selected_work_item.required_window_tokens,
                 expires_at=expires_at,
                 created_at=now,
             )
@@ -127,7 +127,7 @@ class ReserveLlmRouteCapacityForAdmission:
 
         budget_after = _budget_after_new_reservation(
             available_budget,
-            reserved_tokens=selected_work_item.reserved_total_tokens,
+            reserved_tokens=selected_work_item.required_window_tokens,
         )
         return CapacityWindowAdmissionReservationResult(
             reserved=True,
@@ -142,7 +142,7 @@ class ReserveLlmRouteCapacityForAdmission:
                     model_ref=lane_key.model_ref,
                 ),
                 reserved_requests=1,
-                reserved_tokens=selected_work_item.reserved_total_tokens,
+                reserved_tokens=selected_work_item.required_window_tokens,
                 expires_at=expires_at,
             ),
         )

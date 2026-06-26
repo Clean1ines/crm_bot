@@ -34,24 +34,24 @@ class PostgresCapacityAdmissionWorkItemSelector:
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         return await self._select_first_fit(
             lane_key=lane_key,
             status="retryable_failed",
-            max_reserved_total_tokens=max_reserved_total_tokens,
+            max_required_window_tokens=max_required_window_tokens,
         )
 
     async def select_first_ready_fit(
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         return await self._select_first_fit(
             lane_key=lane_key,
             status="ready",
-            max_reserved_total_tokens=max_reserved_total_tokens,
+            max_required_window_tokens=max_required_window_tokens,
         )
 
     async def _select_first_fit(
@@ -59,10 +59,10 @@ class PostgresCapacityAdmissionWorkItemSelector:
         *,
         lane_key: CapacityAdmissionLaneKey,
         status: str,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
-        if max_reserved_total_tokens <= 0:
-            raise ValueError("max_reserved_total_tokens must be positive")
+        if max_required_window_tokens <= 0:
+            raise ValueError("max_required_window_tokens must be positive")
 
         row = await self._connection.fetchrow(
             """
@@ -73,17 +73,16 @@ class PostgresCapacityAdmissionWorkItemSelector:
                 account_ref,
                 model_ref,
                 status,
-                estimated_input_tokens,
-                estimated_output_tokens,
-                effective_output_cap_tokens,
-                reserved_total_tokens
+                input_tokens,
+                artifact_tokens,
+                required_window_tokens
             FROM capacity_admission_work_items
             WHERE work_kind = $1
               AND provider = $2
               AND account_ref IS NOT DISTINCT FROM $3
               AND model_ref = $4
               AND status = $5
-              AND reserved_total_tokens <= $6
+              AND required_window_tokens <= $6
             ORDER BY updated_at ASC, work_item_id ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
@@ -93,7 +92,7 @@ class PostgresCapacityAdmissionWorkItemSelector:
             lane_key.account_ref,
             lane_key.model_ref,
             status,
-            max_reserved_total_tokens,
+            max_required_window_tokens,
         )
         if row is None:
             return None
@@ -120,21 +119,17 @@ def _row_to_selectable_work_item(
             work_item_id=_required_str(row, "work_item_id"),
             lane_key=lane_key,
             status="retryable_failed",
-            reserved_total_tokens=_required_positive_int(
+            required_window_tokens=_required_positive_int(
                 row,
-                "reserved_total_tokens",
+                "required_window_tokens",
             ),
-            estimated_input_tokens=_optional_positive_int(
+            input_tokens=_optional_positive_int(
                 row,
-                "estimated_input_tokens",
+                "input_tokens",
             ),
-            estimated_output_tokens=_optional_non_negative_int(
+            artifact_tokens=_optional_non_negative_int(
                 row,
-                "estimated_output_tokens",
-            ),
-            effective_output_cap_tokens=_optional_non_negative_int(
-                row,
-                "effective_output_cap_tokens",
+                "artifact_tokens",
             ),
         )
 
@@ -142,21 +137,17 @@ def _row_to_selectable_work_item(
         work_item_id=_required_str(row, "work_item_id"),
         lane_key=lane_key,
         status="ready",
-        reserved_total_tokens=_required_positive_int(
+        required_window_tokens=_required_positive_int(
             row,
-            "reserved_total_tokens",
+            "required_window_tokens",
         ),
-        estimated_input_tokens=_optional_positive_int(
+        input_tokens=_optional_positive_int(
             row,
-            "estimated_input_tokens",
+            "input_tokens",
         ),
-        estimated_output_tokens=_optional_non_negative_int(
+        artifact_tokens=_optional_non_negative_int(
             row,
-            "estimated_output_tokens",
-        ),
-        effective_output_cap_tokens=_optional_non_negative_int(
-            row,
-            "effective_output_cap_tokens",
+            "artifact_tokens",
         ),
     )
 

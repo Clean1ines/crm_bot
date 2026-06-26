@@ -35,10 +35,9 @@ class CapacityAdmissionWorkItemProjectionCandidate:
     model_ref: str
     status: WorkItemStatus
     retry_plan: str | None
-    estimated_input_tokens: int
-    estimated_output_tokens: int
-    effective_output_cap_tokens: int
-    reserved_total_tokens: int
+    input_tokens: int
+    artifact_tokens: int
+    required_window_tokens: int
     source_ref: Mapping[str, object]
 
     def __post_init__(self) -> None:
@@ -59,30 +58,20 @@ class CapacityAdmissionWorkItemProjectionCandidate:
         if self.retry_plan is not None:
             _require_non_empty_text(self.retry_plan, field_name="retry_plan")
         _require_positive_int(
-            self.estimated_input_tokens,
-            field_name="estimated_input_tokens",
+            self.input_tokens,
+            field_name="input_tokens",
         )
         _require_non_negative_int(
-            self.estimated_output_tokens,
-            field_name="estimated_output_tokens",
-        )
-        _require_non_negative_int(
-            self.effective_output_cap_tokens,
-            field_name="effective_output_cap_tokens",
+            self.artifact_tokens,
+            field_name="artifact_tokens",
         )
         _require_positive_int(
-            self.reserved_total_tokens,
-            field_name="reserved_total_tokens",
+            self.required_window_tokens,
+            field_name="required_window_tokens",
         )
-        if self.effective_output_cap_tokens < self.estimated_output_tokens:
+        if self.required_window_tokens < (self.input_tokens + self.artifact_tokens):
             raise ValueError(
-                "effective_output_cap_tokens must be >= estimated_output_tokens",
-            )
-        if self.reserved_total_tokens < (
-            self.estimated_input_tokens + self.estimated_output_tokens
-        ):
-            raise ValueError(
-                "reserved_total_tokens must cover estimated input and output tokens",
+                "required_window_tokens must cover input and output tokens",
             )
 
 
@@ -105,42 +94,18 @@ class BuildCapacityAdmissionProjectionCandidates:
                 raise TypeError("plans must contain WorkItemSchedulePlan")
 
             capacity_estimate = _capacity_estimate_from_payload(plan.payload)
-            estimated_input_tokens = _positive_int_from_mapping_with_aliases(
+            input_tokens = _positive_int_from_mapping(
                 capacity_estimate,
-                primary_key="input_tokens",
-                alias_keys=(
-                    "estimated_input_tokens",
-                    "request_input_estimated_tokens",
-                ),
+                "input_tokens",
             )
-            estimated_output_tokens = _non_negative_int_from_mapping_with_aliases(
+            artifact_tokens = _non_negative_int_from_mapping(
                 capacity_estimate,
-                primary_key="artifact_tokens",
-                alias_keys=(
-                    "estimated_output_tokens",
-                    "planned_output_reserve_tokens",
-                ),
+                "artifact_tokens",
             )
-            effective_output_cap_tokens = _optional_non_negative_int_from_mapping(
+            required_window_tokens = _positive_int_from_mapping(
                 capacity_estimate,
-                "effective_output_cap_tokens",
+                "required_window_tokens",
             )
-            if effective_output_cap_tokens is None:
-                effective_output_cap_tokens = estimated_output_tokens
-
-            reserved_total_tokens = _optional_positive_int_from_mapping_with_aliases(
-                capacity_estimate,
-                primary_key="required_window_tokens",
-                alias_keys=(
-                    "reserved_total_tokens",
-                    "request_total_estimated_tokens",
-                ),
-            )
-            if reserved_total_tokens is None:
-                reserved_total_tokens = (
-                    estimated_input_tokens + effective_output_cap_tokens
-                )
-
             candidates.append(
                 CapacityAdmissionWorkItemProjectionCandidate(
                     work_item_id=plan.work_item_id,
@@ -155,10 +120,9 @@ class BuildCapacityAdmissionProjectionCandidates:
                     model_ref=self.lane_target.model_ref,
                     status=WorkItemStatus.READY,
                     retry_plan=None,
-                    estimated_input_tokens=estimated_input_tokens,
-                    estimated_output_tokens=estimated_output_tokens,
-                    effective_output_cap_tokens=effective_output_cap_tokens,
-                    reserved_total_tokens=reserved_total_tokens,
+                    input_tokens=input_tokens,
+                    artifact_tokens=artifact_tokens,
+                    required_window_tokens=required_window_tokens,
                     source_ref=_source_ref_from_payload(plan.payload),
                 )
             )
@@ -208,20 +172,6 @@ def _positive_int_from_mapping(payload: Mapping[str, object], key: str) -> int:
     return _positive_int_value(payload.get(key), field_name=key)
 
 
-def _positive_int_from_mapping_with_aliases(
-    payload: Mapping[str, object],
-    *,
-    primary_key: str,
-    alias_keys: tuple[str, ...],
-) -> int:
-    key, value = _value_from_mapping_with_aliases(
-        payload,
-        primary_key=primary_key,
-        alias_keys=alias_keys,
-    )
-    return _positive_int_value(value, field_name=key)
-
-
 def _optional_positive_int_from_mapping(
     payload: Mapping[str, object],
     key: str,
@@ -232,38 +182,8 @@ def _optional_positive_int_from_mapping(
     return _positive_int_value(value, field_name=key)
 
 
-def _optional_positive_int_from_mapping_with_aliases(
-    payload: Mapping[str, object],
-    *,
-    primary_key: str,
-    alias_keys: tuple[str, ...],
-) -> int | None:
-    key, value = _optional_value_from_mapping_with_aliases(
-        payload,
-        primary_key=primary_key,
-        alias_keys=alias_keys,
-    )
-    if value is None:
-        return None
-    return _positive_int_value(value, field_name=key)
-
-
 def _non_negative_int_from_mapping(payload: Mapping[str, object], key: str) -> int:
     return _non_negative_int_value(payload.get(key), field_name=key)
-
-
-def _non_negative_int_from_mapping_with_aliases(
-    payload: Mapping[str, object],
-    *,
-    primary_key: str,
-    alias_keys: tuple[str, ...],
-) -> int:
-    key, value = _value_from_mapping_with_aliases(
-        payload,
-        primary_key=primary_key,
-        alias_keys=alias_keys,
-    )
-    return _non_negative_int_value(value, field_name=key)
 
 
 def _optional_non_negative_int_from_mapping(
@@ -274,36 +194,6 @@ def _optional_non_negative_int_from_mapping(
     if value is None:
         return None
     return _non_negative_int_value(value, field_name=key)
-
-
-def _value_from_mapping_with_aliases(
-    payload: Mapping[str, object],
-    *,
-    primary_key: str,
-    alias_keys: tuple[str, ...],
-) -> tuple[str, object]:
-    key, value = _optional_value_from_mapping_with_aliases(
-        payload,
-        primary_key=primary_key,
-        alias_keys=alias_keys,
-    )
-    if value is None:
-        return primary_key, None
-    return key, value
-
-
-def _optional_value_from_mapping_with_aliases(
-    payload: Mapping[str, object],
-    *,
-    primary_key: str,
-    alias_keys: tuple[str, ...],
-) -> tuple[str, object | None]:
-    if primary_key in payload:
-        return primary_key, payload.get(primary_key)
-    for alias_key in alias_keys:
-        if alias_key in payload:
-            return alias_key, payload.get(alias_key)
-    return primary_key, None
 
 
 def _require_non_empty_text(value: object, *, field_name: str) -> None:

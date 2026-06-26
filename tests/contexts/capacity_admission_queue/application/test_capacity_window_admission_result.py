@@ -45,10 +45,9 @@ def _admitted_item() -> CapacityAdmissionAdmittedItemSummary:
         work_item_id="work-item-1",
         lane=_lane(),
         selection_kind="fresh",
-        estimated_input_tokens=100,
-        estimated_output_tokens=40,
-        effective_output_cap_tokens=80,
-        reserved_total_tokens=180,
+        input_tokens=100,
+        artifact_tokens=40,
+        required_window_tokens=180,
         dispatch_context=_context(),
     )
 

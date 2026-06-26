@@ -123,10 +123,9 @@ class CapacityAdmissionAdmittedItemSummary:
     work_item_id: str
     lane: CapacityAdmissionLaneSummary
     selection_kind: str
-    estimated_input_tokens: int
-    estimated_output_tokens: int
-    effective_output_cap_tokens: int
-    reserved_total_tokens: int
+    input_tokens: int
+    artifact_tokens: int
+    required_window_tokens: int
     dispatch_context: CapacityAdmissionDispatchContextSummary | None = None
 
     def __post_init__(self) -> None:
@@ -135,19 +134,11 @@ class CapacityAdmissionAdmittedItemSummary:
             raise TypeError("lane must be CapacityAdmissionLaneSummary")
         if self.selection_kind not in {"fresh", "retryable"}:
             raise ValueError("selection_kind must be fresh or retryable")
-        _require_positive_int(self.estimated_input_tokens, "estimated_input_tokens")
-        _require_non_negative_int(
-            self.estimated_output_tokens, "estimated_output_tokens"
-        )
-        _require_positive_int(
-            self.effective_output_cap_tokens,
-            "effective_output_cap_tokens",
-        )
-        _require_positive_int(self.reserved_total_tokens, "reserved_total_tokens")
-        if self.reserved_total_tokens < self.estimated_input_tokens:
-            raise ValueError(
-                "reserved_total_tokens must be at least estimated_input_tokens"
-            )
+        _require_positive_int(self.input_tokens, "input_tokens")
+        _require_non_negative_int(self.artifact_tokens, "artifact_tokens")
+        _require_positive_int(self.required_window_tokens, "required_window_tokens")
+        if self.required_window_tokens < self.input_tokens:
+            raise ValueError("required_window_tokens must be at least input_tokens")
         if self.dispatch_context is not None and not isinstance(
             self.dispatch_context,
             CapacityAdmissionDispatchContextSummary,

@@ -40,7 +40,7 @@ def _retryable_failed_item(
         work_item_id=work_item_id,
         lane_key=_lane(),
         status="retryable_failed",
-        reserved_total_tokens=tokens,
+        required_window_tokens=tokens,
     )
 
 
@@ -53,7 +53,7 @@ def _ready_item(
         work_item_id=work_item_id,
         lane_key=_lane(),
         status="ready",
-        reserved_total_tokens=tokens,
+        required_window_tokens=tokens,
     )
 
 
@@ -68,22 +68,22 @@ class FakeSelector:
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         assert lane_key == _lane()
         self.calls.append("retryable_failed")
-        self.max_token_limits.append(max_reserved_total_tokens)
+        self.max_token_limits.append(max_required_window_tokens)
         return self.retryable_failed
 
     async def select_first_ready_fit(
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         assert lane_key == _lane()
         self.calls.append("ready")
-        self.max_token_limits.append(max_reserved_total_tokens)
+        self.max_token_limits.append(max_required_window_tokens)
         return self.ready
 
 

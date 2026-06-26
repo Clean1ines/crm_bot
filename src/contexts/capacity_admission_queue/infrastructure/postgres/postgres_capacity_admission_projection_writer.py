@@ -85,17 +85,16 @@ class PostgresCapacityAdmissionProjectionWriter(CapacityAdmissionProjectionWrite
                 model_ref,
                 status,
                 retry_plan,
-                estimated_input_tokens,
-                estimated_output_tokens,
-                effective_output_cap_tokens,
-                reserved_total_tokens,
+                input_tokens,
+                artifact_tokens,
+                required_window_tokens,
                 source_ref,
                 created_at,
                 updated_at
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14::jsonb, $15, $16
+                $10, $11, $12, $13::jsonb, $14, $15
             )
             ON CONFLICT (work_item_id) DO UPDATE SET
                 work_kind = EXCLUDED.work_kind,
@@ -106,10 +105,9 @@ class PostgresCapacityAdmissionProjectionWriter(CapacityAdmissionProjectionWrite
                 model_ref = EXCLUDED.model_ref,
                 status = EXCLUDED.status,
                 retry_plan = EXCLUDED.retry_plan,
-                estimated_input_tokens = EXCLUDED.estimated_input_tokens,
-                estimated_output_tokens = EXCLUDED.estimated_output_tokens,
-                effective_output_cap_tokens = EXCLUDED.effective_output_cap_tokens,
-                reserved_total_tokens = EXCLUDED.reserved_total_tokens,
+                input_tokens = EXCLUDED.input_tokens,
+                artifact_tokens = EXCLUDED.artifact_tokens,
+                required_window_tokens = EXCLUDED.required_window_tokens,
                 source_ref = EXCLUDED.source_ref,
                 updated_at = EXCLUDED.updated_at
             """,
@@ -122,10 +120,9 @@ class PostgresCapacityAdmissionProjectionWriter(CapacityAdmissionProjectionWrite
             candidate.model_ref,
             candidate.status.value,
             candidate.retry_plan,
-            candidate.estimated_input_tokens,
-            candidate.estimated_output_tokens,
-            candidate.effective_output_cap_tokens,
-            candidate.reserved_total_tokens,
+            candidate.input_tokens,
+            candidate.artifact_tokens,
+            candidate.required_window_tokens,
             _jsonb(candidate.source_ref),
             occurred_at,
             occurred_at,
@@ -208,7 +205,7 @@ class PostgresCapacityAdmissionProjectionWriter(CapacityAdmissionProjectionWrite
                 {
                     "work_item_id": candidate.work_item_id,
                     "status": candidate.status.value,
-                    "reserved_total_tokens": candidate.reserved_total_tokens,
+                    "required_window_tokens": candidate.required_window_tokens,
                 }
             ),
             occurred_at,

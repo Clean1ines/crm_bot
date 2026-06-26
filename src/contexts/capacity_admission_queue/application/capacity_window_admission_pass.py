@@ -287,7 +287,7 @@ class CapacityWindowAdmissionPass:
                     work_item_id=selected_work_item.work_item_id,
                     lane=_lane_summary(command.execution_lane_key),
                     reserved_requests=1,
-                    reserved_tokens=selected_work_item.reserved_total_tokens,
+                    reserved_tokens=selected_work_item.required_window_tokens,
                     expires_at=command.lease_expires_at,
                 )
             )
@@ -478,30 +478,24 @@ def _admitted_item_summary(
     *,
     schedule_payload: Mapping[str, object],
 ) -> CapacityAdmissionAdmittedItemSummary:
-    estimated_input_tokens = (
-        selected_work_item.estimated_input_tokens
-        if selected_work_item.estimated_input_tokens is not None
-        else selected_work_item.reserved_total_tokens
+    input_tokens = (
+        selected_work_item.input_tokens
+        if selected_work_item.input_tokens is not None
+        else selected_work_item.required_window_tokens
     )
-    estimated_output_tokens = (
-        selected_work_item.estimated_output_tokens
-        if selected_work_item.estimated_output_tokens is not None
+    artifact_tokens = (
+        selected_work_item.artifact_tokens
+        if selected_work_item.artifact_tokens is not None
         else 0
-    )
-    effective_output_cap_tokens = (
-        selected_work_item.effective_output_cap_tokens
-        if selected_work_item.effective_output_cap_tokens is not None
-        else max(estimated_output_tokens, 1)
     )
 
     return CapacityAdmissionAdmittedItemSummary(
         work_item_id=selected_work_item.work_item_id,
         lane=_lane_summary(selected_work_item.lane_key),
         selection_kind=_selection_kind(selected_work_item),
-        estimated_input_tokens=estimated_input_tokens,
-        estimated_output_tokens=estimated_output_tokens,
-        effective_output_cap_tokens=effective_output_cap_tokens,
-        reserved_total_tokens=selected_work_item.reserved_total_tokens,
+        input_tokens=input_tokens,
+        artifact_tokens=artifact_tokens,
+        required_window_tokens=selected_work_item.required_window_tokens,
         dispatch_context=_dispatch_context_from_schedule_payload(schedule_payload),
     )
 

@@ -55,26 +55,25 @@ class FakeSelector:
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
-        del lane_key, max_reserved_total_tokens
+        del lane_key, max_required_window_tokens
         return None
 
     async def select_first_ready_fit(
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
-        del max_reserved_total_tokens
+        del max_required_window_tokens
         return CapacityAdmissionSelectableWorkItem(
             work_item_id="work-1",
             lane_key=lane_key,
             status="ready",
-            reserved_total_tokens=150,
-            estimated_input_tokens=100,
-            estimated_output_tokens=10,
-            effective_output_cap_tokens=50,
+            required_window_tokens=150,
+            input_tokens=100,
+            artifact_tokens=10,
         )
 
 
@@ -83,12 +82,14 @@ class FakeReservation:
         self,
         *,
         reservation_ref: str,
+        attempt_id: str,
+        execution_lane_key: CapacityAdmissionLaneKey,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
         budget: CapacityAdmissionWindowBudget,
         now: datetime,
         expires_at: datetime,
     ) -> CapacityWindowAdmissionReservationResult:
-        del selected_work_item, budget, now
+        del attempt_id, execution_lane_key, selected_work_item, budget, now
         return CapacityWindowAdmissionReservationResult(
             reserved=True,
             budget_after=CapacityAdmissionWindowBudget(
@@ -167,6 +168,7 @@ class FakeExecutionBoundary:
         self,
         *,
         selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
         leased_work_item: LeasedWorkItemRecord,
         projection_lease: CapacityAdmissionProjectionLeaseResult,
         capacity_reservation: CapacityAdmissionCapacityReservationSummary,
@@ -174,6 +176,7 @@ class FakeExecutionBoundary:
     ) -> CapacityWindowAdmissionExecutionReference:
         del (
             selected_work_item,
+            execution_lane_key,
             leased_work_item,
             projection_lease,
             capacity_reservation,
@@ -213,6 +216,7 @@ async def test_capacity_window_admission_pass_carries_dispatch_context_from_sche
             phase="draft_claim_compaction",
             operation_key="prepare_draft_claim_compaction_dispatch",
             lane_key=_lane_key(),
+            execution_lane_key=_lane_key(),
             budget=CapacityAdmissionWindowBudget(
                 remaining_requests=2,
                 remaining_tokens=10000,

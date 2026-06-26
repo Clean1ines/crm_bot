@@ -41,7 +41,7 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 @dataclass(slots=True)
 class SelectorCall:
     status: str
-    max_reserved_total_tokens: int
+    max_required_window_tokens: int
 
 
 class FakeSelector:
@@ -59,37 +59,39 @@ class FakeSelector:
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         self.calls.append(
             SelectorCall(
                 status="retryable_failed",
-                max_reserved_total_tokens=max_reserved_total_tokens,
+                max_required_window_tokens=max_required_window_tokens,
             )
         )
-        return self._pop_fitting(self.retryable_failed_items, max_reserved_total_tokens)
+        return self._pop_fitting(
+            self.retryable_failed_items, max_required_window_tokens
+        )
 
     async def select_first_ready_fit(
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         self.calls.append(
             SelectorCall(
                 status="ready",
-                max_reserved_total_tokens=max_reserved_total_tokens,
+                max_required_window_tokens=max_required_window_tokens,
             )
         )
-        return self._pop_fitting(self.ready_items, max_reserved_total_tokens)
+        return self._pop_fitting(self.ready_items, max_required_window_tokens)
 
     def _pop_fitting(
         self,
         items: list[CapacityAdmissionSelectableWorkItem],
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         for index, item in enumerate(items):
-            if item.reserved_total_tokens <= max_reserved_total_tokens:
+            if item.required_window_tokens <= max_required_window_tokens:
                 return items.pop(index)
         return None
 
@@ -188,16 +190,16 @@ class FakeCapacityReservation:
                     model_ref=execution_lane_key.model_ref,
                 ),
                 reserved_requests=1,
-                reserved_tokens=selected_work_item.reserved_total_tokens,
+                reserved_tokens=selected_work_item.required_window_tokens,
                 expires_at=expires_at,
             ),
             budget_after=CapacityAdmissionWindowBudget(
                 remaining_requests=budget.remaining_requests - 1,
                 remaining_tokens=budget.remaining_tokens
-                - selected_work_item.reserved_total_tokens,
+                - selected_work_item.required_window_tokens,
                 remaining_daily_requests=budget.remaining_daily_requests - 1,
                 remaining_daily_tokens=budget.remaining_daily_tokens
-                - selected_work_item.reserved_total_tokens,
+                - selected_work_item.required_window_tokens,
             ),
         )
 
@@ -292,26 +294,24 @@ def _item(
     work_item_id: str,
     *,
     status: str = "ready",
-    reserved_total_tokens: int = 150,
+    required_window_tokens: int = 150,
 ) -> CapacityAdmissionSelectableWorkItem:
     if status == "retryable_failed":
         return CapacityAdmissionSelectableWorkItem(
             work_item_id=work_item_id,
             lane_key=_shared_lane(),
             status="retryable_failed",
-            reserved_total_tokens=reserved_total_tokens,
-            estimated_input_tokens=100,
-            estimated_output_tokens=40,
-            effective_output_cap_tokens=50,
+            required_window_tokens=required_window_tokens,
+            input_tokens=100,
+            artifact_tokens=40,
         )
     return CapacityAdmissionSelectableWorkItem(
         work_item_id=work_item_id,
         lane_key=_shared_lane(),
         status="ready",
-        reserved_total_tokens=reserved_total_tokens,
-        estimated_input_tokens=100,
-        estimated_output_tokens=40,
-        effective_output_cap_tokens=50,
+        required_window_tokens=required_window_tokens,
+        input_tokens=100,
+        artifact_tokens=40,
     )
 
 

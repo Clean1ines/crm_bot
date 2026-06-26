@@ -16,10 +16,9 @@ CREATE TABLE IF NOT EXISTS capacity_admission_work_items (
     model_ref TEXT NOT NULL,
     status TEXT NOT NULL,
     retry_plan TEXT NULL,
-    estimated_input_tokens INTEGER NOT NULL,
-    estimated_output_tokens INTEGER NOT NULL,
-    effective_output_cap_tokens INTEGER NOT NULL,
-    reserved_total_tokens INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    artifact_tokens INTEGER NOT NULL,
+    required_window_tokens INTEGER NOT NULL,
     source_ref JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
@@ -38,11 +37,10 @@ CREATE TABLE IF NOT EXISTS capacity_admission_work_items (
         ),
     CONSTRAINT chk_capacity_admission_work_items_token_estimates
         CHECK (
-            estimated_input_tokens > 0
-            AND estimated_output_tokens >= 0
-            AND effective_output_cap_tokens >= estimated_output_tokens
-            AND reserved_total_tokens >= estimated_input_tokens
-            AND reserved_total_tokens >= estimated_input_tokens + estimated_output_tokens
+            input_tokens > 0
+            AND artifact_tokens >= 0
+            AND required_window_tokens >= input_tokens
+            AND required_window_tokens >= input_tokens + artifact_tokens
         ),
     CONSTRAINT chk_capacity_admission_work_items_non_empty_text
         CHECK (
@@ -62,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_capacity_admission_retry_fit
         provider,
         model_ref,
         work_kind,
-        reserved_total_tokens,
+        required_window_tokens,
         updated_at,
         work_item_id
     )
@@ -73,7 +71,7 @@ CREATE INDEX IF NOT EXISTS idx_capacity_admission_ready_fit
         provider,
         model_ref,
         work_kind,
-        reserved_total_tokens,
+        required_window_tokens,
         updated_at,
         work_item_id
     )

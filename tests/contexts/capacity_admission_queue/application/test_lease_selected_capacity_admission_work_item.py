@@ -49,7 +49,7 @@ def _selected_work_item() -> CapacityAdmissionSelectableWorkItem:
         work_item_id="work-item-1",
         lane_key=_lane(),
         status="ready",
-        reserved_total_tokens=4096,
+        required_window_tokens=4096,
     )
 
 

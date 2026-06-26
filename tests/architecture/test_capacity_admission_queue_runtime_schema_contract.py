@@ -28,17 +28,16 @@ def test_capacity_admission_work_items_projection_has_required_contract_columns(
     assert "work_item_id TEXT PRIMARY KEY" in sql
     assert "REFERENCES execution_work_items(work_item_id)" in sql
     assert "work_kind TEXT NOT NULL" in sql
-    assert "workflow_run_id UUID NULL" in sql
-    assert "project_id UUID NULL" in sql
+    assert "workflow_run_id TEXT NULL" in sql
+    assert "project_id TEXT NULL" in sql
     assert "provider TEXT NOT NULL" in sql
     assert "account_ref TEXT NULL" in sql
     assert "model_ref TEXT NOT NULL" in sql
     assert "status TEXT NOT NULL" in sql
     assert "retry_plan TEXT NULL" in sql
-    assert "estimated_input_tokens INTEGER NOT NULL" in sql
-    assert "estimated_output_tokens INTEGER NOT NULL" in sql
-    assert "effective_output_cap_tokens INTEGER NOT NULL" in sql
-    assert "reserved_total_tokens INTEGER NOT NULL" in sql
+    assert "input_tokens INTEGER NOT NULL" in sql
+    assert "artifact_tokens INTEGER NOT NULL" in sql
+    assert "required_window_tokens INTEGER NOT NULL" in sql
     assert "source_ref JSONB NOT NULL DEFAULT '{}'::jsonb" in sql
 
 
@@ -61,14 +60,10 @@ def test_capacity_admission_work_items_status_contract_is_projection_not_new_lif
 def test_capacity_admission_work_items_token_contract_is_not_jsonb_hot_path() -> None:
     sql = _migration_sql()
 
-    assert "estimated_input_tokens > 0" in sql
-    assert "estimated_output_tokens >= 0" in sql
-    assert "effective_output_cap_tokens >= estimated_output_tokens" in sql
-    assert "reserved_total_tokens >= estimated_input_tokens" in sql
-    assert (
-        "reserved_total_tokens >= estimated_input_tokens + estimated_output_tokens"
-        in sql
-    )
+    assert "input_tokens > 0" in sql
+    assert "artifact_tokens >= 0" in sql
+    assert "required_window_tokens >= input_tokens" in sql
+    assert "required_window_tokens >= input_tokens + artifact_tokens" in sql
 
 
 def test_capacity_admission_fit_indexes_are_retry_then_ready_specific() -> None:
@@ -79,7 +74,7 @@ def test_capacity_admission_fit_indexes_are_retry_then_ready_specific() -> None:
     assert "idx_capacity_admission_ready_fit" in sql
     assert "WHERE status = 'ready'" in sql
     assert (
-        "provider,\n        model_ref,\n        work_kind,\n        reserved_total_tokens,\n        updated_at,\n        work_item_id"
+        "provider,\n        model_ref,\n        work_kind,\n        required_window_tokens,\n        updated_at,\n        work_item_id"
         in sql
     )
 
