@@ -62,17 +62,17 @@ def test_profile_completion_estimate_comes_from_artifact_tokens() -> None:
         )
     )
 
-    assert profile.estimated_prompt_tokens == 5000
-    assert profile.estimated_completion_tokens == 1600
-    assert profile.estimated_requests == 1
+    assert profile.input_tokens == 5000
+    assert profile.artifact_tokens == 1600
+    assert profile.request_count == 1
 
 
 def test_dispatch_preparation_payload_writes_canonical_profile_keys() -> None:
     preparation = ClaimBuilderDispatchPreparation(
         profile=LlmTaskCapacityProfile(
             profile_id="prompt-a",
-            estimated_prompt_tokens=5000,
-            estimated_completion_tokens=1600,
+            input_tokens=5000,
+            artifact_tokens=1600,
         ),
         account_capacities=(
             LlmProviderAccountCapacity(
@@ -95,8 +95,8 @@ def test_dispatch_preparation_payload_writes_canonical_profile_keys() -> None:
     assert isinstance(profile, dict)
     assert profile["input_tokens"] == 5000
     assert profile["artifact_tokens"] == 1600
-    assert profile["estimated_prompt_tokens"] == 5000
-    assert profile["estimated_completion_tokens"] == 1600
+    assert profile["input_tokens"] == 5000
+    assert profile["artifact_tokens"] == 1600
 
 
 def test_profile_rejects_legacy_reserved_output_tokens_as_expected_output() -> None:

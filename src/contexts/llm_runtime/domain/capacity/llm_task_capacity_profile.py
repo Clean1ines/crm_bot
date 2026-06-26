@@ -6,36 +6,19 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class LlmTaskCapacityProfile:
     profile_id: str
-    estimated_prompt_tokens: int
-    estimated_completion_tokens: int
-    estimated_requests: int = 1
+    input_tokens: int
+    artifact_tokens: int
+    request_count: int = 1
 
     def __post_init__(self) -> None:
         _require_non_empty_text(self.profile_id, field_name="profile_id")
-        if not isinstance(self.estimated_prompt_tokens, int):
-            raise TypeError("estimated_prompt_tokens must be int")
-        if self.estimated_prompt_tokens <= 0:
-            raise ValueError("estimated_prompt_tokens must be > 0")
-        if not isinstance(self.estimated_completion_tokens, int):
-            raise TypeError("estimated_completion_tokens must be int")
-        if self.estimated_completion_tokens < 0:
-            raise ValueError("estimated_completion_tokens must be >= 0")
-        if not isinstance(self.estimated_requests, int):
-            raise TypeError("estimated_requests must be int")
-        if self.estimated_requests <= 0:
-            raise ValueError("estimated_requests must be > 0")
+        _require_positive_int(self.input_tokens, field_name="input_tokens")
+        _require_non_negative_int(self.artifact_tokens, field_name="artifact_tokens")
+        _require_positive_int(self.request_count, field_name="request_count")
 
     @property
-    def estimated_input_tokens(self) -> int:
-        return self.estimated_prompt_tokens
-
-    @property
-    def estimated_output_tokens(self) -> int:
-        return self.estimated_completion_tokens
-
-    @property
-    def estimated_total_tokens(self) -> int:
-        return self.estimated_input_tokens + self.estimated_output_tokens
+    def required_window_tokens(self) -> int:
+        return self.input_tokens + self.artifact_tokens
 
 
 def _require_non_empty_text(value: str, *, field_name: str) -> None:
@@ -43,3 +26,17 @@ def _require_non_empty_text(value: str, *, field_name: str) -> None:
         raise TypeError(f"{field_name} must be str")
     if not value.strip():
         raise ValueError(f"{field_name} must be non-empty")
+
+
+def _require_positive_int(value: int, *, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")
+    if value <= 0:
+        raise ValueError(f"{field_name} must be > 0")
+
+
+def _require_non_negative_int(value: int, *, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")
+    if value < 0:
+        raise ValueError(f"{field_name} must be >= 0")

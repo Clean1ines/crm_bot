@@ -45,11 +45,9 @@ class ClaimBuilderDispatchPreparation:
         return {
             "profile": {
                 "profile_id": self.profile.profile_id,
-                "input_tokens": self.profile.estimated_input_tokens,
-                "artifact_tokens": self.profile.estimated_output_tokens,
-                "estimated_prompt_tokens": self.profile.estimated_prompt_tokens,
-                "estimated_completion_tokens": self.profile.estimated_completion_tokens,
-                "estimated_requests": self.profile.estimated_requests,
+                "input_tokens": self.profile.input_tokens,
+                "artifact_tokens": self.profile.artifact_tokens,
+                "request_count": self.profile.request_count,
             },
             "account_capacities": [
                 {
@@ -111,13 +109,9 @@ class ClaimBuilderDispatchPreparationBuilder:
         )
         return LlmTaskCapacityProfile(
             profile_id=CLAIM_BUILDER_DISPATCH_PROFILE_ID,
-            estimated_prompt_tokens=max(
-                estimate.input_tokens for estimate in estimates
-            ),
-            estimated_completion_tokens=max(
-                estimate.artifact_tokens for estimate in estimates
-            ),
-            estimated_requests=1,
+            input_tokens=max(estimate.input_tokens for estimate in estimates),
+            artifact_tokens=max(estimate.artifact_tokens for estimate in estimates),
+            request_count=1,
         )
 
     def build_account_capacities(

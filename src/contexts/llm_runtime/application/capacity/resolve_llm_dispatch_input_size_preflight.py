@@ -52,12 +52,12 @@ class ResolveLlmDispatchInputSizePreflight:
         self,
         command: ResolveLlmDispatchInputSizePreflightCommand,
     ) -> ResolveLlmDispatchInputSizePreflightResult:
-        estimated_input_tokens = command.profile.estimated_input_tokens
+        input_tokens = command.profile.input_tokens
         active_limits = command.route_catalog.capacity_limits_for_model_ref(
             command.active_model_ref,
         )
 
-        if estimated_input_tokens <= active_limits.input_token_limit:
+        if input_tokens <= active_limits.input_token_limit:
             return ResolveLlmDispatchInputSizePreflightResult(
                 decision=LlmDispatchInputSizePreflightDecision.USE_ACTIVE_MODEL,
                 active_model_ref=command.active_model_ref,
@@ -67,7 +67,7 @@ class ResolveLlmDispatchInputSizePreflight:
         fallback_model_ref = None
         if command.allow_automatic_fallbacks:
             fallback_model_ref = _first_fallback_that_fits_input(
-                estimated_input_tokens=estimated_input_tokens,
+                input_tokens=input_tokens,
                 current_model_ref=command.active_model_ref,
                 route_catalog=command.route_catalog,
             )
@@ -90,7 +90,7 @@ class ResolveLlmDispatchInputSizePreflight:
 
 def _first_fallback_that_fits_input(
     *,
-    estimated_input_tokens: int,
+    input_tokens: int,
     current_model_ref: str,
     route_catalog: LlmModelRouteCatalog,
 ) -> str | None:
@@ -100,7 +100,7 @@ def _first_fallback_that_fits_input(
         current_model_ref,
     ):
         limits = route_catalog.capacity_limits_for_model_ref(model_ref)
-        if estimated_input_tokens <= limits.input_token_limit:
+        if input_tokens <= limits.input_token_limit:
             return model_ref
     return None
 

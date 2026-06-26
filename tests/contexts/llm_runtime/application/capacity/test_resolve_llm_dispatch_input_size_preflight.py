@@ -16,8 +16,8 @@ from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
 def _profile(input_tokens: int) -> LlmTaskCapacityProfile:
     return LlmTaskCapacityProfile(
         profile_id="prompt-a",
-        estimated_prompt_tokens=input_tokens,
-        estimated_completion_tokens=500,
+        input_tokens=input_tokens,
+        artifact_tokens=500,
     )
 
 

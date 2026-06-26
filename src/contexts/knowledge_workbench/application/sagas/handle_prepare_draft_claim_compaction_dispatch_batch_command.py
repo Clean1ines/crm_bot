@@ -467,17 +467,17 @@ def _profile_from_payload(
 
     return LlmTaskCapacityProfile(
         profile_id=_payload_text(profile_payload, "profile_id"),
-        estimated_prompt_tokens=_payload_positive_int(
+        input_tokens=_payload_positive_int(
             profile_payload,
             "input_tokens",
         ),
-        estimated_completion_tokens=_payload_non_negative_int(
+        artifact_tokens=_payload_non_negative_int(
             profile_payload,
             "artifact_tokens",
         ),
-        estimated_requests=_payload_positive_int(
+        request_count=_payload_positive_int(
             profile_payload,
-            "estimated_requests",
+            "request_count",
             fallback=1,
         ),
     )
