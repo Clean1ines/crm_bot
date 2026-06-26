@@ -76,7 +76,6 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             max_completion_tokens = _resolve_max_completion_tokens(
                 parsed=parsed,
                 model_profile=model_profile,
-                completion_gap_tokens=self.max_completion_token_gap,
             )
             request = self.request_builder.build(
                 route=parsed.route,
@@ -103,7 +102,6 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 has_max_completion_tokens="max_completion_tokens" in request.payload,
                 max_completion_tokens=request.payload.get("max_completion_tokens"),
                 estimated_input_tokens=parsed.estimated_input_tokens,
-                effective_output_cap_tokens=parsed.effective_output_cap_tokens,
                 request_output_cap_tokens=parsed.request_output_cap_tokens,
                 response_format=request.payload.get("response_format"),
                 temperature=request.payload.get("temperature"),
@@ -305,7 +303,6 @@ class _ParsedGroqDispatchPayload:
     messages: tuple[GroqChatMessage, ...]
     execution_settings: LlmModelExecutionSettings
     estimated_input_tokens: int
-    effective_output_cap_tokens: int
     request_output_cap_tokens: int | None
 
     @classmethod
@@ -349,9 +346,6 @@ class _ParsedGroqDispatchPayload:
                 execution_settings_payload,
             ),
             estimated_input_tokens=_parse_estimated_input_tokens(schedule_payload),
-            effective_output_cap_tokens=_parse_effective_output_cap_tokens(
-                schedule_payload,
-            ),
             request_output_cap_tokens=_parse_request_output_cap_tokens(
                 schedule_payload,
             ),
@@ -362,24 +356,15 @@ def _resolve_max_completion_tokens(
     *,
     parsed: _ParsedGroqDispatchPayload,
     model_profile: ModelProfile,
-    completion_gap_tokens: int,
 ) -> int | None:
-    if parsed.request_output_cap_tokens is not None:
-        if parsed.request_output_cap_tokens > model_profile.max_output_tokens:
-            raise ValueError(
-                "llm_capacity_estimate.request_output_cap_tokens must not exceed "
-                "model max_output_tokens"
-            )
-        return parsed.request_output_cap_tokens
-
-    requested_output_tokens = parsed.effective_output_cap_tokens - completion_gap_tokens
-    requested_output_tokens = min(
-        requested_output_tokens,
-        model_profile.max_output_tokens,
-    )
-    if requested_output_tokens <= 0:
+    if parsed.request_output_cap_tokens is None:
         return None
-    return requested_output_tokens
+    if parsed.request_output_cap_tokens > model_profile.max_output_tokens:
+        raise ValueError(
+            "llm_capacity_estimate.request_output_cap_tokens must not exceed "
+            "model max_output_tokens"
+        )
+    return parsed.request_output_cap_tokens
 
 
 def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int:
@@ -389,20 +374,6 @@ def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int
         raise ValueError("llm_capacity_estimate.estimated_input_tokens must be int")
     if value <= 0:
         raise ValueError("llm_capacity_estimate.estimated_input_tokens must be > 0")
-    return value
-
-
-def _parse_effective_output_cap_tokens(schedule_payload: Mapping[str, object]) -> int:
-    estimate_payload = _require_mapping(schedule_payload, "llm_capacity_estimate")
-    value = estimate_payload.get("effective_output_cap_tokens")
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError(
-            "llm_capacity_estimate.effective_output_cap_tokens must be int"
-        )
-    if value < 0:
-        raise ValueError(
-            "llm_capacity_estimate.effective_output_cap_tokens must be >= 0"
-        )
     return value
 
 

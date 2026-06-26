@@ -78,8 +78,6 @@ def _dispatch_payload(
             ],
             "llm_capacity_estimate": {
                 "estimated_input_tokens": 1000,
-                "effective_output_cap_tokens": 1000,
-                "estimated_total_tokens": 2000,
             },
         },
         "llm_allocation": {
@@ -157,10 +155,7 @@ async def test_prepared_request_output_cap_becomes_max_completion_tokens() -> No
         ],
         "llm_capacity_estimate": {
             "estimated_input_tokens": 1000,
-            "effective_output_cap_tokens": 1234,
             "request_output_cap_tokens": 1234,
-            "estimated_total_tokens": 2234,
-            "reserved_total_tokens": 2234,
         },
     }
     transport = FakeGroqTransport(response=_success_response())
@@ -176,7 +171,7 @@ async def test_prepared_request_output_cap_becomes_max_completion_tokens() -> No
 
 
 @pytest.mark.asyncio
-async def test_missing_prepared_request_output_cap_is_not_rejected_by_executor() -> (
+async def test_missing_prepared_request_output_cap_does_not_send_max_completion_tokens() -> (
     None
 ):
     schedule_payload = {
@@ -188,8 +183,6 @@ async def test_missing_prepared_request_output_cap_is_not_rejected_by_executor()
         ],
         "llm_capacity_estimate": {
             "estimated_input_tokens": 1000,
-            "effective_output_cap_tokens": 100,
-            "estimated_total_tokens": 1100,
         },
     }
     transport = FakeGroqTransport(response=_success_response())
