@@ -57,7 +57,7 @@ class DraftClaimCompactionGroupingPolicy:
                     member_source_unit_refs=tuple(
                         claim.source_unit_ref for claim in claims_in_group
                     ),
-                    estimated_input_tokens=0,
+                    artifact_tokens=0,
                     requires_split=False,
                 )
             )

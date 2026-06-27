@@ -45,7 +45,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             """
             SELECT group_ref, workflow_run_id, source_document_ref,
                    embedding_model_id, group_algorithm, group_threshold,
-                   member_count, estimated_input_tokens, requires_split, created_at
+                   member_count, artifact_tokens, requires_split, created_at
             FROM draft_claim_compaction_groups
             WHERE workflow_run_id = $1
             ORDER BY created_at ASC, group_ref ASC
@@ -66,7 +66,7 @@ class PostgresDraftClaimCompactionPlanRepository(
         rows = await self._connection.fetch(
             """
             SELECT batch_ref, workflow_run_id, group_ref, prompt_variant, model_id,
-                   estimated_input_tokens, batch_status, member_count, created_at
+                   artifact_tokens, batch_status, member_count, created_at
             FROM draft_claim_compaction_batches
             WHERE workflow_run_id = $1
             ORDER BY group_ref ASC, created_at ASC, batch_ref ASC
@@ -113,7 +113,7 @@ class PostgresDraftClaimCompactionPlanRepository(
         rows = await self._connection.fetch(
             """
             SELECT b.batch_ref, b.workflow_run_id, b.group_ref, b.prompt_variant,
-                   b.model_id, b.estimated_input_tokens,
+                   b.model_id, b.artifact_tokens,
                    COALESCE(
                        array_agg(gm.observation_ref ORDER BY gm.member_rank)
                        FILTER (WHERE gm.observation_ref IS NOT NULL),
@@ -124,7 +124,7 @@ class PostgresDraftClaimCompactionPlanRepository(
                 ON gm.group_ref = b.group_ref
             WHERE b.batch_ref = $1
             GROUP BY b.batch_ref, b.workflow_run_id, b.group_ref, b.prompt_variant,
-                     b.model_id, b.estimated_input_tokens
+                     b.model_id, b.artifact_tokens
             """,
             batch_ref,
         )
@@ -281,7 +281,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             """
             INSERT INTO draft_claim_compaction_groups
             (group_ref, workflow_run_id, source_document_ref, embedding_model_id,
-             group_algorithm, group_threshold, member_count, estimated_input_tokens,
+             group_algorithm, group_threshold, member_count, artifact_tokens,
              requires_split, created_at)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             ON CONFLICT (workflow_run_id, group_ref) DO NOTHING
@@ -293,7 +293,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             group.group_algorithm,
             group.group_threshold,
             group.member_count,
-            group.estimated_input_tokens,
+            group.artifact_tokens,
             group.requires_split,
             created_at,
         )
@@ -328,7 +328,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             """
             INSERT INTO draft_claim_compaction_batches
             (batch_ref, workflow_run_id, group_ref, prompt_variant, model_id,
-             estimated_input_tokens, batch_status, member_count, created_at)
+             artifact_tokens, batch_status, member_count, created_at)
             VALUES ($1,$2,$3,$4,$5,$6,'planned',$7,$8)
             ON CONFLICT (workflow_run_id, group_ref, batch_ref) DO NOTHING
             """,
@@ -337,7 +337,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             batch.group_ref,
             batch.prompt_variant,
             batch.model_id,
-            batch.estimated_input_tokens,
+            batch.artifact_tokens,
             batch.member_count,
             created_at,
         )
@@ -352,7 +352,7 @@ def _group_read_model(row: Mapping[str, object]) -> DraftClaimCompactionGroupRea
         group_algorithm=_s(row, "group_algorithm"),
         group_threshold=_f(row, "group_threshold"),
         member_count=_i(row, "member_count"),
-        estimated_input_tokens=_i(row, "estimated_input_tokens"),
+        artifact_tokens=_i(row, "artifact_tokens"),
         requires_split=_b(row, "requires_split"),
         created_at=_dt(row, "created_at"),
     )
@@ -365,7 +365,7 @@ def _batch_read_model(row: Mapping[str, object]) -> DraftClaimCompactionBatchRea
         group_ref=_s(row, "group_ref"),
         prompt_variant=_s(row, "prompt_variant"),
         model_id=_s(row, "model_id"),
-        estimated_input_tokens=_i(row, "estimated_input_tokens"),
+        artifact_tokens=_i(row, "artifact_tokens"),
         batch_status=_s(row, "batch_status"),
         member_count=_i(row, "member_count"),
         created_at=_dt(row, "created_at"),
@@ -395,7 +395,7 @@ def _batch_for_dispatch(
         group_ref=_s(row, "group_ref"),
         prompt_variant=_s(row, "prompt_variant"),
         model_id=_s(row, "model_id"),
-        estimated_input_tokens=_i(row, "estimated_input_tokens"),
+        artifact_tokens=_i(row, "artifact_tokens"),
         member_observation_refs=_strings(row["member_observation_refs"]),
     )
 

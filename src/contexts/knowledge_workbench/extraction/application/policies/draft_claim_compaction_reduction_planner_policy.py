@@ -604,7 +604,7 @@ def _estimated_task_tokens(
         node = nodes_by_ref.get(node_ref)
         if node is None:
             continue
-        total += node.estimated_input_tokens
+        total += node.artifact_tokens
 
     if node_refs and total <= 0:
         return 1

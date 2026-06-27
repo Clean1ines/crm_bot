@@ -329,7 +329,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rows = await self._connection.fetch(
             """
             SELECT workflow_run_id, group_ref, node_ref, node_kind, active,
-                   source_claim_refs, supersedes_node_refs, estimated_input_tokens,
+                   source_claim_refs, supersedes_node_refs, artifact_tokens,
                    compacted_key, compacted_claim, compacted_claim_kind,
                    compacted_granularity, compacted_merge_decision,
                    created_at, updated_at
@@ -540,7 +540,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         node_rows = await self._connection.fetch(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
-                   supersedes_node_refs, estimated_input_tokens,
+                   supersedes_node_refs, artifact_tokens,
                    compacted_key, compacted_claim, compacted_claim_kind,
                    compacted_granularity, compacted_merge_decision,
                    compacted_triples, compacted_payload
@@ -707,7 +707,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     """
                     INSERT INTO draft_claim_compaction_nodes
                     (node_ref, workflow_run_id, group_ref, node_kind, active,
-                     source_claim_refs, supersedes_node_refs, estimated_input_tokens,
+                     source_claim_refs, supersedes_node_refs, artifact_tokens,
                      compacted_key, compacted_claim, compacted_claim_kind,
                      compacted_granularity, compacted_merge_decision,
                      compacted_triples, compacted_payload, created_at, updated_at)
@@ -875,7 +875,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 """
                 INSERT INTO draft_claim_compaction_nodes
                 (node_ref, workflow_run_id, group_ref, node_kind, active,
-                 source_claim_refs, supersedes_node_refs, estimated_input_tokens,
+                 source_claim_refs, supersedes_node_refs, artifact_tokens,
                  compacted_key, compacted_claim, compacted_claim_kind,
                  compacted_granularity, compacted_merge_decision,
                  compacted_triples, compacted_payload, created_at, updated_at)
@@ -1021,7 +1021,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rows = await self._connection.fetch(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
-                   supersedes_node_refs, estimated_input_tokens,
+                   supersedes_node_refs, artifact_tokens,
                    compacted_key, compacted_claim, compacted_claim_kind,
                    compacted_granularity, compacted_merge_decision,
                    compacted_triples, compacted_payload
@@ -1381,7 +1381,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     """
                     INSERT INTO draft_claim_compaction_nodes
                     (node_ref, workflow_run_id, group_ref, node_kind, active,
-                     source_claim_refs, supersedes_node_refs, estimated_input_tokens,
+                     source_claim_refs, supersedes_node_refs, artifact_tokens,
                      created_at, updated_at)
                     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10)
                     ON CONFLICT (node_ref) DO NOTHING
@@ -1393,7 +1393,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     node.active,
                     json.dumps(list(node.source_claim_refs), sort_keys=True),
                     json.dumps(list(node.supersedes_node_refs), sort_keys=True),
-                    node.estimated_input_tokens,
+                    node.artifact_tokens,
                     created_at,
                     created_at,
                 )
@@ -1445,7 +1445,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rows = await self._connection.fetch(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
-                   supersedes_node_refs, estimated_input_tokens,
+                   supersedes_node_refs, artifact_tokens,
                    compacted_key, compacted_claim, compacted_claim_kind,
                    compacted_granularity, compacted_merge_decision,
                    compacted_triples, compacted_payload
@@ -1513,7 +1513,7 @@ def build_initial_raw_node(
     workflow_run_id: str,
     group_ref: str,
     observation_ref: str,
-    estimated_input_tokens: int,
+    artifact_tokens: int,
 ) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
         node_ref=raw_node_ref(
@@ -1530,7 +1530,7 @@ def build_initial_raw_node(
             ),
         ),
         active=True,
-        estimated_input_tokens=estimated_input_tokens,
+        artifact_tokens=artifact_tokens,
     )
 
 
@@ -1697,7 +1697,7 @@ def _node_read_model(row: Mapping[str, object]) -> DraftClaimCompactionNodeReadM
         active=_read_model_bool(row, "active"),
         source_claim_refs=_read_model_json_text_tuple(row, "source_claim_refs"),
         supersedes_node_refs=_read_model_json_text_tuple(row, "supersedes_node_refs"),
-        estimated_input_tokens=_read_model_int(row, "estimated_input_tokens"),
+        artifact_tokens=_read_model_int(row, "artifact_tokens"),
         compacted_key=_read_model_optional_text(row, "compacted_key"),
         compacted_claim=_read_model_optional_text(row, "compacted_claim"),
         compacted_claim_kind=_read_model_optional_text(row, "compacted_claim_kind"),
@@ -1731,7 +1731,7 @@ def _frontier_node_read_model(
         source_claim_count=len(node.source_claim_refs),
         supersedes_node_refs=node.supersedes_node_refs,
         supersedes_node_count=len(node.supersedes_node_refs),
-        estimated_input_tokens=node.estimated_input_tokens,
+        artifact_tokens=node.artifact_tokens,
         compacted_key=node.compacted_key,
         compacted_claim=node.compacted_claim,
         compacted_claim_kind=node.compacted_claim_kind,
@@ -1814,7 +1814,7 @@ def _node(
             row["supersedes_node_refs"],
             "supersedes_node_refs",
         ),
-        estimated_input_tokens=_int(row, "estimated_input_tokens"),
+        artifact_tokens=_int(row, "artifact_tokens"),
         compacted_key=_optional_str(row, "compacted_key"),
         compacted_claim=_optional_str(row, "compacted_claim"),
         compacted_triples=_triples(row.get("compacted_triples", [])),

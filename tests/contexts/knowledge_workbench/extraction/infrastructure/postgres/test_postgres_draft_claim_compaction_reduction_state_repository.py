@@ -122,7 +122,7 @@ class FakeReductionStateConnection:
                 "active": _bool_arg(args[4]),
                 "source_claim_refs": json.loads(_str_arg(args[5])),
                 "supersedes_node_refs": json.loads(_str_arg(args[6])),
-                "estimated_input_tokens": _int_arg(args[7]),
+                "artifact_tokens": _int_arg(args[7]),
                 "compacted_key": _optional_str_arg(args[8])
                 if is_enriched_compacted_insert
                 else None,
@@ -500,13 +500,13 @@ async def test_seeds_raw_nodes_and_sources_idempotently() -> None:
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref="claim-a",
-            estimated_input_tokens=10,
+            artifact_tokens=10,
         ),
         build_initial_raw_node(
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref="claim-b",
-            estimated_input_tokens=11,
+            artifact_tokens=11,
         ),
     )
 
@@ -546,7 +546,7 @@ async def test_load_planner_state_returns_active_raw_nodes_and_sources() -> None
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -609,7 +609,7 @@ def _compacted_node_row(
         "active": True,
         "source_claim_refs": json.dumps((f"source-{node_ref}",)),
         "supersedes_node_refs": json.dumps(()),
-        "estimated_input_tokens": 10,
+        "artifact_tokens": 10,
         "compacted_key": f"key-{node_ref}",
         "compacted_claim": f"Compacted claim {node_ref}",
         "compacted_claim_kind": "definition",
@@ -660,13 +660,13 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -716,7 +716,7 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
     assert active_nodes[0].source_claim_refs == ("claim-a", "claim-b")
     assert active_nodes[0].compacted_key == "refund_support"
     assert active_nodes[0].compacted_claim == "Product supports refunds."
-    assert active_nodes[0].estimated_input_tokens > 0
+    assert active_nodes[0].artifact_tokens > 0
     assert active_nodes[0].compacted_triples == (_triple(),)
     assert active_nodes[0].compacted_claim_kind == "capability"
     assert active_nodes[0].compacted_granularity == "atomic"
@@ -741,7 +741,7 @@ async def test_apply_compacted_claims_result_marks_distinct_outputs_not_merged()
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref=claim_ref,
-            estimated_input_tokens=10,
+            artifact_tokens=10,
         )
         for claim_ref in ("claim-1", "claim-2", "claim-3", "claim-4")
     )
@@ -801,19 +801,19 @@ async def test_not_merged_lineage_survives_reload_after_mixed_merge() -> None:
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-c",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1028,7 +1028,7 @@ def _active_compacted_node_row(
         "active": True,
         "source_claim_refs": source_claim_refs_list,
         "supersedes_node_refs": [],
-        "estimated_input_tokens": 0,
+        "artifact_tokens": 0,
         "compacted_key": node_ref,
         "compacted_claim": node_ref,
         "compacted_claim_kind": "capability",
@@ -1060,13 +1060,13 @@ async def test_summarize_compaction_progress_completes_from_lineage_comparisons(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1120,13 +1120,13 @@ async def test_summarize_compaction_progress_counts_done_and_active_groups() -> 
                 workflow_run_id="workflow-1",
                 group_ref="group-done",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-done",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1148,7 +1148,7 @@ async def test_summarize_compaction_progress_counts_done_and_active_groups() -> 
                 workflow_run_id="workflow-1",
                 group_ref="group-active",
                 observation_ref="claim-c",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1177,7 +1177,7 @@ async def test_partial_non_merge_persists_origin_level_separation_edges() -> Non
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref=claim_ref,
-            estimated_input_tokens=10,
+            artifact_tokens=10,
         )
         for claim_ref in ("claim-4", "claim-5", "claim-6")
     )
@@ -1220,7 +1220,7 @@ async def test_origin_separation_blocks_descendant_comparison_after_mixed_merge(
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref=claim_ref,
-            estimated_input_tokens=10,
+            artifact_tokens=10,
         )
         for claim_ref in ("claim-4", "claim-5", "claim-6", "claim-7")
     )
@@ -1291,7 +1291,7 @@ async def test_existing_compacted_artifact_preserves_stored_payload_when_returne
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1352,13 +1352,13 @@ async def test_list_compaction_frontier_returns_active_raw_and_compacted_nodes()
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1409,7 +1409,7 @@ async def test_list_compaction_frontier_includes_separation_summary_count() -> N
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref=claim_ref,
-            estimated_input_tokens=10,
+            artifact_tokens=10,
         )
         for claim_ref in ("claim-1", "claim-2", "claim-3")
     )
@@ -1462,7 +1462,7 @@ async def test_singleton_waiting_raw_node_is_visible_in_active_frontier() -> Non
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),

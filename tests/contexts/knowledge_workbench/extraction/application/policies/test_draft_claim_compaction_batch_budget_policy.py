@@ -39,7 +39,7 @@ def _group(ref: str, members: tuple[str, ...]) -> DraftClaimCompactionGroupCandi
         member_observation_refs=members,
         member_embedding_refs=tuple(f"embedding:{member}" for member in members),
         member_source_unit_refs=tuple(f"unit:{member}" for member in members),
-        estimated_input_tokens=0,
+        artifact_tokens=0,
         requires_split=False,
     )
 

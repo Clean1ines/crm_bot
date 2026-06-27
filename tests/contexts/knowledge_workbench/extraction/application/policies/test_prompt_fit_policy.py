@@ -92,7 +92,7 @@ def test_exact_fit_returns_fits() -> None:
     )
 
     assert decision.kind is PromptFitDecisionKind.FITS
-    assert decision.estimated_input_tokens == 80
+    assert decision.input_tokens == 80
     assert decision.output_token_budget == 20
     assert decision.context_window_tokens == 100
     assert decision.max_output_tokens == 20
@@ -110,7 +110,7 @@ def test_normal_fit_returns_fits() -> None:
     )
 
     assert decision.kind is PromptFitDecisionKind.FITS
-    assert decision.estimated_input_tokens == 30
+    assert decision.input_tokens == 30
 
 
 def test_input_too_large_returns_input_too_large() -> None:
@@ -125,7 +125,7 @@ def test_input_too_large_returns_input_too_large() -> None:
     )
 
     assert decision.kind is PromptFitDecisionKind.INPUT_TOO_LARGE
-    assert decision.estimated_input_tokens == 90
+    assert decision.input_tokens == 90
 
 
 def test_output_budget_too_large_returns_output_budget_too_large() -> None:

@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS draft_claim_compaction_groups (
     group_algorithm text NOT NULL,
     group_threshold double precision NOT NULL CHECK (group_threshold >= 0 AND group_threshold <= 1),
     member_count integer NOT NULL CHECK (member_count > 0),
-    estimated_input_tokens integer NOT NULL CHECK (estimated_input_tokens >= 0),
+    artifact_tokens integer NOT NULL CHECK (artifact_tokens >= 0),
     requires_split boolean NOT NULL,
     created_at timestamptz NOT NULL,
     CONSTRAINT uq_draft_claim_compaction_groups_workflow_group
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS draft_claim_compaction_batches (
     group_ref text NOT NULL REFERENCES draft_claim_compaction_groups(group_ref) ON DELETE CASCADE,
     prompt_variant text NOT NULL,
     model_id text NOT NULL,
-    estimated_input_tokens integer NOT NULL CHECK (estimated_input_tokens >= 0),
+    artifact_tokens integer NOT NULL CHECK (artifact_tokens >= 0),
     batch_status text NOT NULL,
     member_count integer NOT NULL CHECK (member_count > 0),
     created_at timestamptz NOT NULL,

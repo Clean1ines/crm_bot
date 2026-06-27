@@ -75,7 +75,7 @@ class DraftClaimCompactionBatchBudgetPolicy:
             planned_groups.append(
                 replace(
                     group,
-                    estimated_input_tokens=total,
+                    artifact_tokens=total,
                     requires_split=len(chunks) > 1,
                 )
             )
@@ -95,7 +95,7 @@ class DraftClaimCompactionBatchBudgetPolicy:
                         group_ref=group.group_ref,
                         prompt_variant=prompt_variant,
                         model_id=self.model_id,
-                        estimated_input_tokens=self._estimate_batch(
+                        artifact_tokens=self._estimate_batch(
                             tuple(by_ref[ref] for ref in refs)
                         ),
                         member_observation_refs=refs,

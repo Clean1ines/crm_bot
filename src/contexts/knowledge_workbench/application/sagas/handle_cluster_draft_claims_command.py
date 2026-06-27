@@ -444,9 +444,7 @@ def _raw_nodes_for_group(
             workflow_run_id=workflow_run_id,
             group_ref=group.group_ref,
             observation_ref=observation_ref,
-            estimated_input_tokens=_estimated_raw_claim_tokens(
-                claims_by_ref[observation_ref]
-            ),
+            artifact_tokens=_estimated_raw_claim_tokens(claims_by_ref[observation_ref]),
         )
         for observation_ref in group.member_observation_refs
     )
@@ -457,7 +455,7 @@ def _build_initial_raw_node(
     workflow_run_id: str,
     group_ref: str,
     observation_ref: str,
-    estimated_input_tokens: int,
+    artifact_tokens: int,
 ) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
         node_ref=raw_claim_node_ref(
@@ -474,7 +472,7 @@ def _build_initial_raw_node(
             ),
         ),
         active=True,
-        estimated_input_tokens=estimated_input_tokens,
+        artifact_tokens=artifact_tokens,
     )
 
 
@@ -536,7 +534,7 @@ def _plan(
 
 
 def _batch_capacity_estimate(batch) -> dict[str, object]:
-    artifact_tokens = max(1, batch.estimated_input_tokens)
+    artifact_tokens = max(1, batch.artifact_tokens)
     prompt_tokens = draft_claim_compaction_prompt_tokens(batch.prompt_variant)
     input_tokens = prompt_tokens + artifact_tokens
     required_window_tokens = (
