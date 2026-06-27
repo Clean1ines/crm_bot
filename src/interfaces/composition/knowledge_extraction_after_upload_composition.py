@@ -35,6 +35,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
     DraftClaimCompactionOutputValidator,
 )
+from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
+    ExecutePreparedLlmDispatchAttemptPort,
+)
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutorPort,
 )
@@ -72,9 +75,77 @@ class AsyncPool(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class _ConnectionBoundExecutePreparedLlmDispatchAttempt:
+    connection: asyncpg.Connection
+    llm_executor: LlmDispatchExecutorPort
+
+    async def execute(
+        self,
+        command: ExecutePreparedLlmDispatchAttemptCommand,
+    ) -> ExecutePreparedLlmDispatchAttemptResult:
+        outcome_repository = PostgresWorkItemAttemptOutcomeRepository(
+            self.connection,
+        )
+        result = await ExecutePreparedLlmDispatchAttempt(
+            dispatch_repository=PostgresReadWorkItemAttemptDispatchRepository(
+                self.connection,
+            ),
+            llm_executor=self.llm_executor,
+            outcome_recorder=RecordWorkItemAttemptOutcome(
+                repository=outcome_repository,
+            ),
+            recorded_outcome_reader=outcome_repository,
+        ).execute(command)
+
+        actual_tokens = actual_tokens_from_capacity_observation(
+            result.llm_result.capacity_observation
+        )
+        await PostgresLlmRouteCapacityReservationRepository(self.connection).finalize(
+            attempt_id=result.dispatch.attempt_id,
+            final_status="committed" if actual_tokens is not None else "released",
+            actual_tokens=actual_tokens,
+            finalized_at=result.llm_result.finished_at,
+        )
+        await _sync_capacity_admission_projection_lifecycle(
+            self.connection,
+            work_item=result.outcome_result.work_item,
+            changed_at=result.llm_result.finished_at,
+        )
+        return result
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
+    ) -> object:
+        work_item = await PostgresWorkItemAttemptOutcomeRepository(
+            self.connection,
+        ).complete_work_item_after_domain_apply(
+            work_item_id=work_item_id,
+            lease_token=lease_token,
+        )
+        await _sync_capacity_admission_projection_lifecycle(
+            self.connection,
+            work_item=work_item,
+            changed_at=datetime.now(UTC),
+        )
+        return work_item
+
+
+@dataclass(frozen=True, slots=True)
 class _TransactionalExecutePreparedLlmDispatchAttempt:
     pool: AsyncPool
     llm_executor: LlmDispatchExecutorPort
+
+    def for_connection(
+        self,
+        connection: asyncpg.Connection,
+    ) -> ExecutePreparedLlmDispatchAttemptPort:
+        return _ConnectionBoundExecutePreparedLlmDispatchAttempt(
+            connection=connection,
+            llm_executor=self.llm_executor,
+        )
 
     async def execute(
         self,

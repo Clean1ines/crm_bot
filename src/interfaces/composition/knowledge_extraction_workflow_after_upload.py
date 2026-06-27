@@ -431,6 +431,26 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             source_ingestion_admission_status=source_ingestion_admission_status,
         )
 
+    def _execute_prepared_llm_dispatch_attempt_for_transaction(
+        self,
+        connection: asyncpg.Connection,
+    ) -> ExecutePreparedLlmDispatchAttemptPort | None:
+        if self._execute_prepared_llm_dispatch_attempt is None:
+            return None
+
+        for_connection = getattr(
+            self._execute_prepared_llm_dispatch_attempt,
+            "for_connection",
+            None,
+        )
+        if callable(for_connection):
+            return cast(
+                ExecutePreparedLlmDispatchAttemptPort,
+                for_connection(connection),
+            )
+
+        return self._execute_prepared_llm_dispatch_attempt
+
     async def _run_one_drain_transaction(
         self,
         *,
@@ -520,7 +540,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 workflow_unit_of_work=workflow_unit_of_work,
                 capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
-                    self._execute_prepared_llm_dispatch_attempt
+                    self._execute_prepared_llm_dispatch_attempt_for_transaction(
+                        asyncpg_connection,
+                    )
                 ),
                 capacity_observation_repository=(
                     self._capacity_observation_repository

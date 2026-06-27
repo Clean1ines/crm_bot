@@ -460,6 +460,26 @@ class RunKnowledgeExtractionWorkflowResume:
             blocked_reason=blocked_reason,
         )
 
+    def _execute_prepared_llm_dispatch_attempt_for_transaction(
+        self,
+        connection: asyncpg.Connection,
+    ) -> ExecutePreparedLlmDispatchAttemptPort | None:
+        if self._execute_prepared_llm_dispatch_attempt is None:
+            return None
+
+        for_connection = getattr(
+            self._execute_prepared_llm_dispatch_attempt,
+            "for_connection",
+            None,
+        )
+        if callable(for_connection):
+            return cast(
+                ExecutePreparedLlmDispatchAttemptPort,
+                for_connection(connection),
+            )
+
+        return self._execute_prepared_llm_dispatch_attempt
+
     async def _run_one_drain_transaction(
         self,
         *,
@@ -549,7 +569,9 @@ class RunKnowledgeExtractionWorkflowResume:
                 workflow_unit_of_work=workflow_unit_of_work,
                 capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
-                    self._execute_prepared_llm_dispatch_attempt
+                    self._execute_prepared_llm_dispatch_attempt_for_transaction(
+                        asyncpg_connection,
+                    )
                 ),
                 capacity_observation_repository=(
                     self._capacity_observation_repository
@@ -628,9 +650,77 @@ class RunKnowledgeExtractionWorkflowResume:
 
 
 @dataclass(frozen=True, slots=True)
+class _ConnectionBoundExecutePreparedLlmDispatchAttempt:
+    connection: asyncpg.Connection
+    llm_executor: LlmDispatchExecutorPort
+
+    async def execute(
+        self,
+        command: ExecutePreparedLlmDispatchAttemptCommand,
+    ) -> ExecutePreparedLlmDispatchAttemptResult:
+        outcome_repository = PostgresWorkItemAttemptOutcomeRepository(
+            self.connection,
+        )
+        result = await ExecutePreparedLlmDispatchAttempt(
+            dispatch_repository=PostgresReadWorkItemAttemptDispatchRepository(
+                self.connection,
+            ),
+            llm_executor=self.llm_executor,
+            outcome_recorder=RecordWorkItemAttemptOutcome(
+                repository=outcome_repository,
+            ),
+            recorded_outcome_reader=outcome_repository,
+        ).execute(command)
+
+        actual_tokens = actual_tokens_from_capacity_observation(
+            result.llm_result.capacity_observation
+        )
+        await PostgresLlmRouteCapacityReservationRepository(self.connection).finalize(
+            attempt_id=result.dispatch.attempt_id,
+            final_status="committed" if actual_tokens is not None else "released",
+            actual_tokens=actual_tokens,
+            finalized_at=result.llm_result.finished_at,
+        )
+        await _sync_capacity_admission_projection_lifecycle(
+            self.connection,
+            work_item=result.outcome_result.work_item,
+            changed_at=result.llm_result.finished_at,
+        )
+        return result
+
+    async def complete_work_item_after_domain_apply(
+        self,
+        *,
+        work_item_id: str,
+        lease_token: LeaseToken,
+    ) -> object:
+        work_item = await PostgresWorkItemAttemptOutcomeRepository(
+            self.connection,
+        ).complete_work_item_after_domain_apply(
+            work_item_id=work_item_id,
+            lease_token=lease_token,
+        )
+        await _sync_capacity_admission_projection_lifecycle(
+            self.connection,
+            work_item=work_item,
+            changed_at=datetime.now(UTC),
+        )
+        return work_item
+
+
+@dataclass(frozen=True, slots=True)
 class _TransactionalExecutePreparedLlmDispatchAttempt:
     pool: AsyncPool
     llm_executor: LlmDispatchExecutorPort
+
+    def for_connection(
+        self,
+        connection: asyncpg.Connection,
+    ) -> ExecutePreparedLlmDispatchAttemptPort:
+        return _ConnectionBoundExecutePreparedLlmDispatchAttempt(
+            connection=connection,
+            llm_executor=self.llm_executor,
+        )
 
     async def execute(
         self,
