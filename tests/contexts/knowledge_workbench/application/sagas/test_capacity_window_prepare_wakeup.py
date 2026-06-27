@@ -155,4 +155,17 @@ async def test_capacity_observation_appends_single_account_prepare_wakeup() -> N
     assert command.payload["capacity_window_model_ref"] == "qwen/qwen3-32b"
     dispatch_preparation = command.payload["llm_dispatch_preparation"]
     assert isinstance(dispatch_preparation, dict)
-    assert "account_capacities" not in dispatch_preparation
+    assert dispatch_preparation["active_model_ref"] == "qwen/qwen3-32b"
+    account_capacities = dispatch_preparation["account_capacities"]
+    assert isinstance(account_capacities, list)
+    assert account_capacities == [
+        {
+            "provider": "groq",
+            "account_ref": "groq_org_2",
+            "model_ref": "qwen/qwen3-32b",
+            "remaining_minute_requests": 1,
+            "remaining_minute_tokens": 6000,
+            "remaining_daily_requests": 100,
+            "remaining_daily_tokens": 500000,
+        }
+    ]

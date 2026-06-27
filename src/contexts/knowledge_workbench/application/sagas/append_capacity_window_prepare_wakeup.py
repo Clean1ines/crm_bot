@@ -163,13 +163,70 @@ def _capacity_window_prepare_payload(
         updated_dispatch_preparation["active_model_ref"] = (
             capacity_observation.model_ref
         )
-        # Critical: do not carry an old all-accounts seed into a window wakeup.
-        # The generic prepare runner will rebuild seed capacity for the single
-        # provider_account_refs override and then apply latest Groq observations.
-        updated_dispatch_preparation.pop("account_capacities", None)
+        updated_dispatch_preparation["account_capacities"] = (
+            _capacity_window_account_capacities(
+                dispatch_preparation=dispatch_preparation,
+                capacity_observation=capacity_observation,
+            )
+        )
         payload["llm_dispatch_preparation"] = updated_dispatch_preparation
 
     return payload
+
+
+def _capacity_window_account_capacities(
+    *,
+    dispatch_preparation: Mapping[str, object],
+    capacity_observation: LlmAttemptCapacityObservation,
+) -> list[dict[str, object]]:
+    value = dispatch_preparation.get("account_capacities")
+    if not isinstance(value, list):
+        return [_account_capacity_from_observation(capacity_observation)]
+
+    matched: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("provider") != capacity_observation.provider:
+            continue
+        if item.get("account_ref") != capacity_observation.account_ref:
+            continue
+        if item.get("model_ref") != capacity_observation.model_ref:
+            continue
+
+        account_capacity = dict(item)
+        account_capacity["remaining_minute_requests"] = (
+            capacity_observation.remaining_minute_requests
+        )
+        account_capacity["remaining_minute_tokens"] = (
+            capacity_observation.remaining_minute_tokens
+        )
+        account_capacity["remaining_daily_requests"] = (
+            capacity_observation.remaining_daily_requests
+        )
+        account_capacity["remaining_daily_tokens"] = (
+            capacity_observation.remaining_daily_tokens
+        )
+        matched.append(account_capacity)
+
+    if matched:
+        return matched
+
+    return [_account_capacity_from_observation(capacity_observation)]
+
+
+def _account_capacity_from_observation(
+    capacity_observation: LlmAttemptCapacityObservation,
+) -> dict[str, object]:
+    return {
+        "provider": capacity_observation.provider,
+        "account_ref": capacity_observation.account_ref,
+        "model_ref": capacity_observation.model_ref,
+        "remaining_minute_requests": capacity_observation.remaining_minute_requests,
+        "remaining_minute_tokens": capacity_observation.remaining_minute_tokens,
+        "remaining_daily_requests": capacity_observation.remaining_daily_requests,
+        "remaining_daily_tokens": capacity_observation.remaining_daily_tokens,
+    }
 
 
 def _has_scheduled_work_count(payload: Mapping[str, object]) -> bool:
