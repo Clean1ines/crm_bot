@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -21,6 +22,9 @@ from src.contexts.workflow_runtime.domain.entities.workflow_command import (
 from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
     WorkflowCommandId,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +103,19 @@ class HandleTriggerClaimBuilderCapacityDrainCommandHandler:
                     worker_ref=f"{worker_ref}:window:{window_index}",
                     max_items=max_items,
                 )
+            )
+            LOGGER.info(
+                "Claim builder capacity drain trigger executed",
+                extra={
+                    "workflow_run_id": workflow_run_id,
+                    "skipped": result.skipped,
+                    "skipped_reason": result.skipped_reason,
+                    "drained_count": result.drained_count,
+                    "execute_command_count": result.execute_command_count,
+                    "provider_call_count": result.provider_call_count,
+                    "work_item_ids": list(result.work_item_ids),
+                    "attempt_ids": list(result.attempt_ids),
+                },
             )
             if result.skipped:
                 if result.skipped_reason is not None:
