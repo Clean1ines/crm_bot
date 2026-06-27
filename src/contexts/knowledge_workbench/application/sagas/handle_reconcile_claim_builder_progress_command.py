@@ -20,6 +20,10 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
 )
+from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership import (
+    CAPACITY_QUEUE_OWNS_LLM_DISPATCH,
+    CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED,
+)
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
 )
@@ -283,6 +287,17 @@ def _next_command(
     retry_action_summary: WorkItemRetryActionSummary,
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
+    if (
+        CAPACITY_QUEUE_OWNS_LLM_DISPATCH
+        and CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED
+        and decision
+        in {
+            ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW,
+            ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER,
+        }
+    ):
+        return None
+
     selected_retry_plan = _selected_retry_plan(retry_action_summary)
     prepare_suffix_scope = _prepare_command_suffix_scope(
         selected_retry_plan=selected_retry_plan,

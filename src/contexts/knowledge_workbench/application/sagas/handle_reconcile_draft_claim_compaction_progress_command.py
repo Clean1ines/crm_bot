@@ -11,6 +11,10 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
 )
+from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership import (
+    CAPACITY_QUEUE_OWNS_LLM_DISPATCH,
+    DRAFT_CLAIM_COMPACTION_CAPACITY_DRAIN_BRIDGE_ENABLED,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_progress import (
     DraftClaimCompactionProgressSummary,
 )
@@ -211,6 +215,17 @@ def _next_command(
     decision: DraftClaimCompactionProgressDecision,
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
+    if (
+        CAPACITY_QUEUE_OWNS_LLM_DISPATCH
+        and DRAFT_CLAIM_COMPACTION_CAPACITY_DRAIN_BRIDGE_ENABLED
+        and decision
+        in {
+            DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_NOW,
+            DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_LATER,
+        }
+    ):
+        return None
+
     if decision is DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_NOW:
         return _prepare_dispatch_batch_command(
             workflow_command=workflow_command,

@@ -21,6 +21,10 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
 )
+from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership import (
+    CAPACITY_QUEUE_OWNS_LLM_DISPATCH,
+    CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED,
+)
 from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
     CLAIM_BUILDER_DISPATCH_PROFILE_ID,
     ClaimBuilderDispatchPreparationBuilder,
@@ -194,13 +198,22 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
                 await frontend_event_projection_writer.execute(persisted_item_event)
             appended_event_count += 1
 
-        next_command = _prepare_dispatch_batch_command(
-            workflow_run_id=workflow_run_id,
-            source_document_ref=source_document_ref,
-            scheduled_work_item_count=scheduled_work_item_count,
-            occurred_at=occurred_at,
-        )
-        await workflow_unit_of_work.command_log.append_pending_command(next_command)
+        next_command: WorkflowCommand | None = None
+        appended_next_command_count = 0
+        if not (
+            CAPACITY_QUEUE_OWNS_LLM_DISPATCH
+            and CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED
+        ):
+            next_command = _prepare_dispatch_batch_command(
+                workflow_run_id=workflow_run_id,
+                source_document_ref=source_document_ref,
+                scheduled_work_item_count=scheduled_work_item_count,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.command_log.append_pending_command(
+                next_command,
+            )
+            appended_next_command_count = 1
 
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
@@ -228,7 +241,7 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
             workflow_run_id=workflow_run_id,
             scheduled_work_item_count=scheduled_work_item_count,
             appended_event_count=appended_event_count,
-            appended_next_command_count=1,
+            appended_next_command_count=appended_next_command_count,
             completed_command_id=workflow_command.command_id,
         )
 
@@ -438,12 +451,12 @@ def _timeline_entries(
     *,
     workflow_command: WorkflowCommand,
     scheduled_event: WorkflowEvent,
-    next_command: WorkflowCommand,
+    next_command: WorkflowCommand | None,
     source_document_ref: SourceDocumentRef,
     scheduled_work_item_count: int,
     occurred_at: datetime,
 ) -> tuple[WorkflowTimelineEntry, ...]:
-    return (
+    entries = [
         WorkflowTimelineEntry(
             timeline_entry_id=(
                 f"workflow-timeline:{workflow_command.workflow_run_id}:"
@@ -458,20 +471,25 @@ def _timeline_entries(
             occurred_at=occurred_at,
             source_ref=source_document_ref.value,
         ),
-        WorkflowTimelineEntry(
-            timeline_entry_id=(
-                f"workflow-timeline:{workflow_command.workflow_run_id}:"
-                "PrepareClaimBuilderDispatchBatch:requested"
-            ),
-            workflow_run_id=workflow_command.workflow_run_id,
-            event_type=next_command.command_type,
-            phase="CLAIM_BUILDER_WORK_SCHEDULING",
-            severity=WorkflowTimelineSeverity.INFO,
-            message="Prepare claim builder dispatch batch requested",
-            payload_summary=next_command.payload,
-            occurred_at=occurred_at,
-            source_ref=source_document_ref.value,
-        ),
+    ]
+    if next_command is not None:
+        entries.append(
+            WorkflowTimelineEntry(
+                timeline_entry_id=(
+                    f"workflow-timeline:{workflow_command.workflow_run_id}:"
+                    "PrepareClaimBuilderDispatchBatch:requested"
+                ),
+                workflow_run_id=workflow_command.workflow_run_id,
+                event_type=next_command.command_type,
+                phase="CLAIM_BUILDER_WORK_SCHEDULING",
+                severity=WorkflowTimelineSeverity.INFO,
+                message="Prepare claim builder dispatch batch requested",
+                payload_summary=next_command.payload,
+                occurred_at=occurred_at,
+                source_ref=source_document_ref.value,
+            )
+        )
+    entries.append(
         WorkflowTimelineEntry(
             timeline_entry_id=(
                 f"workflow-timeline:{workflow_command.workflow_run_id}:"
@@ -491,6 +509,7 @@ def _timeline_entries(
             source_ref=source_document_ref.value,
         ),
     )
+    return tuple(entries)
 
 
 def _payload_optional_text(
