@@ -9,6 +9,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_draft_c
     HandleReconcileDraftClaimCompactionProgressCommand,
     HandleReconcileDraftClaimCompactionProgressCommandHandler,
 )
+from src.contexts.knowledge_workbench.application.sagas import (
+    handle_reconcile_draft_claim_compaction_progress_command as compaction_reconcile_module,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -277,6 +280,42 @@ async def test_active_due_work_items_appends_prepare_command() -> None:
     assert dispatch_preparation["active_model_ref"] == "openai/gpt-oss-120b"
     assert dispatch_preparation["requested_items"] == 1
     assert "account_capacities" not in dispatch_preparation
+
+
+@pytest.mark.asyncio
+async def test_compaction_still_appends_prepare_when_ownership_true_but_bridge_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        compaction_reconcile_module,
+        "CAPACITY_QUEUE_OWNS_LLM_DISPATCH",
+        True,
+    )
+    monkeypatch.setattr(
+        compaction_reconcile_module,
+        "DRAFT_CLAIM_COMPACTION_CAPACITY_DRAIN_BRIDGE_ENABLED",
+        False,
+    )
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(
+            active_group_count=2,
+            active_work_item_count=1,
+            ready_work_item_count=1,
+            due_waiting_work_item_count=1,
+        )
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+    )
+
+    assert result.appended_next_command_count == 1
+    assert workflow_uow.command_log.pending_commands[0].command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
 
 
 @pytest.mark.asyncio

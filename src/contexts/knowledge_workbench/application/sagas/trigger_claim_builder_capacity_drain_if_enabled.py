@@ -11,6 +11,9 @@ from src.contexts.knowledge_workbench.application.sagas.run_claim_builder_capaci
 )
 
 
+DEFAULT_CLAIM_BUILDER_CAPACITY_DRAIN_WORKER_REF = "claim-builder-capacity-drain"
+
+
 class RunClaimBuilderCapacityQueueOncePort(Protocol):
     async def execute(
         self,
@@ -25,7 +28,7 @@ class TriggerClaimBuilderCapacityDrainIfEnabledCommand:
     model_ref: str
     account_ref: str
     now: datetime
-    worker_ref: str = "claim-builder-capacity-drain"
+    worker_ref: str = DEFAULT_CLAIM_BUILDER_CAPACITY_DRAIN_WORKER_REF
     max_items: int | None = 1
 
 

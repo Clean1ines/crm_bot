@@ -33,6 +33,10 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalCommandType,
     operation_by_command_type,
 )
+from src.contexts.knowledge_workbench.application.sagas.trigger_claim_builder_capacity_drain_if_enabled import (
+    TriggerClaimBuilderCapacityDrainIfEnabledCommand,
+    TriggerClaimBuilderCapacityDrainIfEnabledResult,
+)
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_progress import (
     DraftClaimCompactionProgressSummary,
 )
@@ -157,6 +161,19 @@ def _default_payload_for_command(
             "workflow_run_id": _workflow_run_id(),
             "scheduled_work_item_count": 1,
             "llm_dispatch_preparation": _dispatch_preparation(),
+        }
+
+    if (
+        command_type
+        is KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN
+    ):
+        return {
+            "workflow_run_id": _workflow_run_id(),
+            "provider": "groq",
+            "model_ref": "qwen/qwen3-32b",
+            "account_ref": "groq_org_primary",
+            "worker_ref": "claim-builder-capacity-drain",
+            "max_items": 1,
         }
 
     return {"workflow_run_id": _workflow_run_id()}
@@ -1128,6 +1145,28 @@ class FakeCapacityWindowAdmissionPass:
         return self.result
 
 
+@dataclass(slots=True)
+class FakeTriggerClaimBuilderCapacityDrain:
+    calls: list[TriggerClaimBuilderCapacityDrainIfEnabledCommand] = field(
+        default_factory=list
+    )
+
+    async def execute(
+        self,
+        command: TriggerClaimBuilderCapacityDrainIfEnabledCommand,
+    ) -> TriggerClaimBuilderCapacityDrainIfEnabledResult:
+        self.calls.append(command)
+        return TriggerClaimBuilderCapacityDrainIfEnabledResult(
+            skipped=False,
+            skipped_reason=None,
+            drained_count=1,
+            execute_command_count=1,
+            provider_call_count=0,
+            work_item_ids=("work-1",),
+            attempt_ids=("attempt-1",),
+        )
+
+
 def _claim_builder_admission_result() -> CapacityWindowAdmissionPassResult:
     lane = CapacityAdmissionLaneSummary(
         work_kind=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.work_kind,
@@ -1256,6 +1295,55 @@ def _draft_claim_compaction_admission_result() -> CapacityWindowAdmissionPassRes
         ),
         log_event=CapacityWindowAdmissionLogEvent.PASS_COMPLETED,
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_trigger_claim_builder_capacity_drain_when_dependency_provided() -> (
+    None
+):
+    trigger = FakeTriggerClaimBuilderCapacityDrain()
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
+
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN,
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=workflow_unit_of_work,
+        trigger_claim_builder_capacity_drain_if_enabled=trigger,
+    )
+
+    assert result.dispatched is True
+    assert result.blocked_reason is None
+    assert len(trigger.calls) == 1
+    assert trigger.calls[0].account_ref == "groq_org_primary"
+    assert workflow_unit_of_work.command_log.completed_command_ids == [
+        _workflow_command(
+            KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN,
+        ).command_id
+    ]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_trigger_claim_builder_capacity_drain_missing_dependency_blocks() -> (
+    None
+):
+    result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
+        DispatchKnowledgeExtractionWorkflowCommand(
+            workflow_command=_workflow_command(
+                KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN,
+            )
+        ),
+        source_unit_repository=FakeSourceManagementRepository(),
+        knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
+        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+    )
+
+    assert result.dispatched is False
+    assert result.blocked_reason == COMMAND_HANDLER_NOT_IMPLEMENTED
 
 
 @pytest.mark.asyncio

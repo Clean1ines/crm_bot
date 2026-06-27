@@ -29,6 +29,10 @@ from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_p
     CLAIM_BUILDER_DISPATCH_PROFILE_ID,
     ClaimBuilderDispatchPreparationBuilder,
 )
+from src.contexts.knowledge_workbench.application.sagas.build_claim_builder_capacity_drain_trigger_command import (
+    BuildClaimBuilderCapacityDrainTriggerCommand,
+    build_claim_builder_capacity_drain_trigger_command,
+)
 from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_section_work import (
     ClaimBuilderScheduledWorkItemSummary,
     ScheduleClaimBuilderSectionWork,
@@ -200,10 +204,21 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
 
         next_command: WorkflowCommand | None = None
         appended_next_command_count = 0
-        if not (
+        if (
             CAPACITY_QUEUE_OWNS_LLM_DISPATCH
             and CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED
         ):
+            next_command = _capacity_drain_trigger_command(
+                workflow_run_id=workflow_run_id,
+                source_document_ref=source_document_ref,
+                scheduled_work_item_count=scheduled_work_item_count,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.command_log.append_pending_command(
+                next_command,
+            )
+            appended_next_command_count = 1
+        else:
             next_command = _prepare_dispatch_batch_command(
                 workflow_run_id=workflow_run_id,
                 source_document_ref=source_document_ref,
@@ -289,6 +304,27 @@ def _claim_builder_dispatch_preparation_payload(
             for account in account_capacities
         ],
     }
+
+
+def _capacity_drain_trigger_command(
+    *,
+    workflow_run_id: str,
+    source_document_ref: SourceDocumentRef,
+    scheduled_work_item_count: int,
+    occurred_at: datetime,
+) -> WorkflowCommand:
+    return build_claim_builder_capacity_drain_trigger_command(
+        BuildClaimBuilderCapacityDrainTriggerCommand(
+            workflow_run_id=workflow_run_id,
+            source_document_ref=source_document_ref.value,
+            llm_dispatch_preparation=_claim_builder_dispatch_preparation_payload(
+                scheduled_work_item_count=scheduled_work_item_count,
+            ),
+            max_items=scheduled_work_item_count,
+            run_after=occurred_at,
+            occurred_at=occurred_at,
+        )
+    )
 
 
 def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
@@ -473,17 +509,23 @@ def _timeline_entries(
         ),
     ]
     if next_command is not None:
+        next_command_label = (
+            "TriggerClaimBuilderCapacityDrain"
+            if next_command.command_type
+            == KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN.value
+            else "PrepareClaimBuilderDispatchBatch"
+        )
         entries.append(
             WorkflowTimelineEntry(
                 timeline_entry_id=(
                     f"workflow-timeline:{workflow_command.workflow_run_id}:"
-                    "PrepareClaimBuilderDispatchBatch:requested"
+                    f"{next_command_label}:requested"
                 ),
                 workflow_run_id=workflow_command.workflow_run_id,
                 event_type=next_command.command_type,
                 phase="CLAIM_BUILDER_WORK_SCHEDULING",
                 severity=WorkflowTimelineSeverity.INFO,
-                message="Prepare claim builder dispatch batch requested",
+                message=f"{next_command_label} requested",
                 payload_summary=next_command.payload,
                 occurred_at=occurred_at,
                 source_ref=source_document_ref.value,

@@ -25,6 +25,7 @@ class KnowledgeExtractionCanonicalCommandType(StrEnum):
     INGEST_SOURCE_DOCUMENT = "IngestSourceDocument"
     SCHEDULE_CLAIM_BUILDER_SECTION_WORK = "ScheduleClaimBuilderSectionWork"
     PREPARE_CLAIM_BUILDER_DISPATCH_BATCH = "PrepareClaimBuilderDispatchBatch"
+    TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN = "TriggerClaimBuilderCapacityDrain"
     SPLIT_CLAIM_BUILDER_SOURCE_UNIT = "SplitClaimBuilderSourceUnit"
     EXECUTE_CLAIM_BUILDER_SECTION = "ExecuteClaimBuilderSection"
     RECONCILE_CLAIM_BUILDER_PROGRESS = "ReconcileClaimBuilderProgress"
@@ -270,6 +271,7 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH,
+                KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN,
             ),
             affected_read_models=(
                 KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
@@ -278,6 +280,37 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             recovery_scopes=(
                 KnowledgeExtractionRecoveryScope.PHASE,
                 KnowledgeExtractionRecoveryScope.SOURCE_UNIT,
+            ),
+            frontend_visibility=True,
+        ),
+        KnowledgeExtractionOperationContract(
+            operation_key="trigger_claim_builder_capacity_drain",
+            phase=KnowledgeExtractionCanonicalPhase.CLAIM_BUILDER_SECTION_EXTRACTION,
+            command_type=(
+                KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN
+            ),
+            owner_contexts=(
+                "knowledge_workbench",
+                "capacity_admission_queue",
+                "workflow_runtime",
+            ),
+            unit_of_work_name="ClaimBuilderCapacityDrainTriggerUnitOfWork",
+            idempotency_key_template=(
+                "trigger-claim-builder-capacity-drain:{workflow_run_id}:"
+                "{source_document_ref}:{provider}:{model_ref}:{account_ref}"
+            ),
+            next_command_types=(
+                KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION,
+            ),
+            affected_read_models=(
+                KnowledgeExtractionReadModelName.ACTIVE_ATTEMPTS,
+                KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,
+                KnowledgeExtractionReadModelName.TIMELINE,
+                KnowledgeExtractionReadModelName.CAPACITY_STATUS,
+            ),
+            recovery_scopes=(
+                KnowledgeExtractionRecoveryScope.WORK_ITEM_ATTEMPT,
+                KnowledgeExtractionRecoveryScope.CLAIM_BUILDER_SECTION,
             ),
             frontend_visibility=True,
         ),
@@ -425,6 +458,7 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.GENERATE_DRAFT_CLAIM_EMBEDDINGS,
+                KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN,
             ),
             affected_read_models=(
                 KnowledgeExtractionReadModelName.PROGRESS_SNAPSHOT,

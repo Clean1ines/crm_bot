@@ -23,6 +23,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_bu
     HandleScheduleClaimBuilderSectionWorkCommand,
     HandleScheduleClaimBuilderSectionWorkCommandHandler,
 )
+from src.contexts.knowledge_workbench.application.sagas import (
+    handle_schedule_claim_builder_section_work_command as schedule_module,
+)
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
 )
@@ -562,6 +565,85 @@ async def test_appends_prepare_claim_builder_dispatch_batch_next_command() -> No
 
 
 @pytest.mark.asyncio
+async def test_legacy_mode_still_appends_prepare_claim_builder_dispatch_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(schedule_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", False)
+
+    _, _, _, workflow_unit_of_work = await _execute()
+
+    command_types = tuple(
+        command.command_type
+        for command in workflow_unit_of_work.command_log.pending_commands
+    )
+    assert (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+        in command_types
+    )
+
+
+@pytest.mark.asyncio
+async def test_ownership_mode_appends_trigger_claim_builder_capacity_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(schedule_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True)
+    monkeypatch.setattr(
+        schedule_module,
+        "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED",
+        True,
+    )
+
+    result, _, _, workflow_unit_of_work = await _execute()
+
+    assert result.appended_next_command_count == 1
+    command_types = tuple(
+        command.command_type
+        for command in workflow_unit_of_work.command_log.pending_commands
+    )
+    assert (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+        not in command_types
+    )
+    assert command_types == (
+        KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN.value,
+    )
+    trigger = workflow_unit_of_work.command_log.pending_commands[0]
+    assert trigger.payload["workflow_run_id"] == _workflow_run_id()
+    assert trigger.payload["provider"] == "groq"
+    assert trigger.payload["model_ref"] == "qwen/qwen3-32b"
+    assert isinstance(trigger.payload["account_ref"], str)
+    assert trigger.payload["account_ref"]
+    assert trigger.payload["max_items"] == 2
+    assert trigger.payload["worker_ref"] == "claim-builder-capacity-drain"
+
+
+@pytest.mark.asyncio
+async def test_ownership_mode_timeline_reports_trigger_not_prepare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(schedule_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True)
+    monkeypatch.setattr(
+        schedule_module,
+        "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED",
+        True,
+    )
+
+    _, _, _, workflow_unit_of_work = await _execute()
+
+    timeline_event_types = tuple(
+        entry.event_type for entry in workflow_unit_of_work.timeline.entries
+    )
+    assert (
+        KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN.value
+        in timeline_event_types
+    )
+    assert (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+        not in timeline_event_types
+    )
+
+
+@pytest.mark.asyncio
 async def test_marks_original_command_completed() -> None:
     result, _, _, workflow_unit_of_work = await _execute()
 
@@ -682,7 +764,6 @@ def test_schedule_handler_does_not_touch_live_state_or_execution_paths() -> None
     for forbidden_marker in (
         "live_state",
         "fetch_workbench",
-        "drain",
         "workflow_runner",
         "execution_runtime",
         "capacity_runtime",

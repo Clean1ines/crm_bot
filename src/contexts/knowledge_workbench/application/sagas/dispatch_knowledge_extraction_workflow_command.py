@@ -112,9 +112,16 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_claim_b
     HandleReconcileClaimBuilderProgressCommand,
     HandleReconcileClaimBuilderProgressCommandHandler,
 )
+from src.contexts.knowledge_workbench.application.sagas.handle_trigger_claim_builder_capacity_drain_command import (
+    HandleTriggerClaimBuilderCapacityDrainCommand,
+    HandleTriggerClaimBuilderCapacityDrainCommandHandler,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_builder_section_work_command import (
     HandleScheduleClaimBuilderSectionWorkCommand,
     HandleScheduleClaimBuilderSectionWorkCommandHandler,
+)
+from src.contexts.knowledge_workbench.application.sagas.trigger_claim_builder_capacity_drain_if_enabled import (
+    TriggerClaimBuilderCapacityDrainIfEnabled,
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
@@ -220,6 +227,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         capacity_admission_lane_target_resolver: (
             CapacityAdmissionLaneTargetResolverPort | None
         ) = None,
+        trigger_claim_builder_capacity_drain_if_enabled: (
+            TriggerClaimBuilderCapacityDrainIfEnabled | None
+        ) = None,
         draft_claim_embedding_read_repository: (
             DraftClaimEmbeddingReadRepositoryPort | None
         ) = None,
@@ -316,6 +326,39 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 workflow_unit_of_work=workflow_unit_of_work,
                 frontend_event_projection_writer=frontend_event_projection_writer,
                 capacity_window_admission_pass=capacity_window_admission_pass,
+            )
+            return DispatchKnowledgeExtractionWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN
+        ):
+            if trigger_claim_builder_capacity_drain_if_enabled is None:
+                return DispatchKnowledgeExtractionWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleTriggerClaimBuilderCapacityDrainCommandHandler().execute(
+                HandleTriggerClaimBuilderCapacityDrainCommand(
+                    workflow_command=workflow_command,
+                ),
+                trigger_claim_builder_capacity_drain_if_enabled=(
+                    trigger_claim_builder_capacity_drain_if_enabled
+                ),
+                workflow_unit_of_work=workflow_unit_of_work,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

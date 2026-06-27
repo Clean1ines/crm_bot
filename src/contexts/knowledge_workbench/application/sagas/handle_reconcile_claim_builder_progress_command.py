@@ -20,6 +20,10 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
 )
+from src.contexts.knowledge_workbench.application.sagas.build_claim_builder_capacity_drain_trigger_command import (
+    BuildClaimBuilderCapacityDrainTriggerCommand,
+    build_claim_builder_capacity_drain_trigger_command,
+)
 from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership import (
     CAPACITY_QUEUE_OWNS_LLM_DISPATCH,
     CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED,
@@ -296,7 +300,20 @@ def _next_command(
             ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER,
         }
     ):
-        return None
+        return _capacity_drain_trigger_command(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            decision=decision,
+            summary=summary,
+            retry_action_summary=retry_action_summary,
+            run_after=_capacity_drain_trigger_run_after(
+                decision=decision,
+                summary=summary,
+                retry_action_summary=retry_action_summary,
+                occurred_at=occurred_at,
+            ),
+            occurred_at=occurred_at,
+        )
 
     selected_retry_plan = _selected_retry_plan(retry_action_summary)
     prepare_suffix_scope = _prepare_command_suffix_scope(
@@ -403,6 +420,64 @@ def _prepare_command_causation_scope(workflow_command: WorkflowCommand) -> str:
 
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
     return f"cause:{digest[:16]}"
+
+
+def _capacity_drain_trigger_run_after(
+    *,
+    decision: ClaimBuilderProgressReconcileDecision,
+    summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
+    occurred_at: datetime,
+) -> datetime:
+    if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW:
+        return occurred_at
+    if decision is ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER:
+        next_due_at = retry_action_summary.next_run_after or summary.next_due_at
+        if next_due_at is None:
+            raise ValueError("next_due_at is required for delayed capacity drain")
+        return next_due_at
+    raise ValueError("capacity drain trigger requires prepare decision")
+
+
+def _capacity_drain_trigger_command(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    decision: ClaimBuilderProgressReconcileDecision,
+    summary: WorkItemProgressSummary,
+    retry_action_summary: WorkItemRetryActionSummary,
+    run_after: datetime,
+    occurred_at: datetime,
+) -> WorkflowCommand:
+    dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
+    if not isinstance(dispatch_preparation, Mapping):
+        raise ValueError("llm_dispatch_preparation must be mapping")
+    selected_retry_plan = _selected_retry_plan(retry_action_summary)
+    context_payload: dict[str, object] = {
+        "trigger": "claim_builder_progress_reconcile",
+        "reconcile_command_id": workflow_command.command_id.value,
+        "reconcile_decision": decision.value,
+        "scheduled_work_item_count": summary.total_count,
+    }
+    if selected_retry_plan is not None:
+        context_payload["selected_retry_plan"] = selected_retry_plan
+        context_payload["claim_builder_retry_plan"] = selected_retry_plan
+        context_payload["retry_plan"] = selected_retry_plan
+
+    return build_claim_builder_capacity_drain_trigger_command(
+        BuildClaimBuilderCapacityDrainTriggerCommand(
+            workflow_run_id=workflow_run_id,
+            source_document_ref=_source_document_ref(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+            ),
+            llm_dispatch_preparation=dispatch_preparation,
+            max_items=max(1, summary.total_count),
+            run_after=run_after,
+            occurred_at=occurred_at,
+            context_payload=context_payload,
+        )
+    )
 
 
 def _prepare_dispatch_batch_command(

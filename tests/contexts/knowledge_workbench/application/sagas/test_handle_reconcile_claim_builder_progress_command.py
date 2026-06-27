@@ -21,6 +21,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_claim_b
     HandleReconcileClaimBuilderProgressCommand,
     HandleReconcileClaimBuilderProgressCommandHandler,
 )
+from src.contexts.knowledge_workbench.application.sagas import (
+    handle_reconcile_claim_builder_progress_command as reconcile_module,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -554,6 +557,79 @@ async def test_retryable_work_appends_prepare_dispatch_batch_now_even_with_legac
         KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
     )
     assert next_command.run_after == _now()
+
+
+@pytest.mark.asyncio
+async def test_legacy_mode_still_returns_prepare_dispatch_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(reconcile_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", False)
+
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(ready_count=1, completed_count=2),
+    )
+
+    assert workflow_unit_of_work.command_log.pending_commands[0].command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_ownership_mode_returns_trigger_for_prepare_next_batch_now(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(reconcile_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True)
+    monkeypatch.setattr(
+        reconcile_module,
+        "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED",
+        True,
+    )
+
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(ready_count=1, completed_count=2),
+    )
+
+    trigger = workflow_unit_of_work.command_log.pending_commands[0]
+    assert trigger.command_type == (
+        KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN.value
+    )
+    assert trigger.run_after == _now()
+    assert trigger.payload["workflow_run_id"] == _workflow_run_id()
+    assert trigger.payload["provider"] == "groq"
+    assert trigger.payload["model_ref"] == "qwen/qwen3-32b"
+    assert trigger.payload["account_ref"] == "groq_org_primary"
+    assert trigger.payload["max_items"] == 3
+
+
+@pytest.mark.asyncio
+async def test_ownership_mode_returns_trigger_for_prepare_next_batch_later(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(reconcile_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True)
+    monkeypatch.setattr(
+        reconcile_module,
+        "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED",
+        True,
+    )
+    next_due_at = _now() + timedelta(minutes=5)
+
+    _, _, _, workflow_unit_of_work = await _execute(
+        summary=_summary(ready_count=1, completed_count=2),
+        retry_action_summary=_retry_action_summary(
+            retry_fallback_model_count=1,
+            next_run_after=next_due_at,
+            selected_retry_plan=WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE,
+        ),
+    )
+
+    trigger = workflow_unit_of_work.command_log.pending_commands[0]
+    assert trigger.command_type == (
+        KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN.value
+    )
+    assert trigger.run_after == next_due_at
+    assert trigger.payload["provider"] == "groq"
+    assert trigger.payload["model_ref"] == "qwen/qwen3-32b"
+    assert trigger.payload["account_ref"] == "groq_org_primary"
 
 
 @pytest.mark.asyncio

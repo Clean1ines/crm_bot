@@ -36,6 +36,12 @@ IMPLEMENTED_KNOWLEDGE_EXTRACTION_COMMAND_HANDLERS = (
     ),
     KnowledgeExtractionImplementedCommandHandler(
         command_type=(
+            KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN
+        ),
+        handler_name="HandleTriggerClaimBuilderCapacityDrainCommandHandler",
+    ),
+    KnowledgeExtractionImplementedCommandHandler(
+        command_type=(
             KnowledgeExtractionCanonicalCommandType.SPLIT_CLAIM_BUILDER_SOURCE_UNIT
         ),
         handler_name="HandleSplitClaimBuilderSourceUnitCommandHandler",
