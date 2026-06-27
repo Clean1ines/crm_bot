@@ -554,7 +554,7 @@ class DraftClaimCompactionNextWorkItem:
     artifact_tokens: int = 0
     input_tokens: int = 0
     required_window_tokens: int = 0
-    estimated_requests: int = 1
+    request_count: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "work_type", _next_work_item_type(self.work_type))
@@ -583,7 +583,7 @@ class DraftClaimCompactionNextWorkItem:
         _non_negative_int(self.artifact_tokens, "artifact_tokens")
         _non_negative_int(self.input_tokens, "input_tokens")
         _non_negative_int(self.required_window_tokens, "required_window_tokens")
-        _positive_int(self.estimated_requests, "estimated_requests")
+        _positive_int(self.request_count, "request_count")
         if self.input_tokens and self.input_tokens != (
             self.prompt_tokens + self.artifact_tokens
         ):
