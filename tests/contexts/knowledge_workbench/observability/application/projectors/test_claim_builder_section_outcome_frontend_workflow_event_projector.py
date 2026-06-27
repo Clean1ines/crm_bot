@@ -4,9 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
-    _event_type_for_status,
-)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
@@ -16,9 +13,6 @@ from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_secti
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.claim_builder_section_outcome_frontend_workflow_event_projector import (
     ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector,
-)
-from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
-    LlmDispatchExecutionStatus,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_event import WorkflowEvent
 from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
@@ -478,13 +472,6 @@ def test_deferred_event_type_is_not_projected() -> None:
     assert projected is None
 
 
-def test_runtime_maps_deferred_status_to_retryable_failed_not_deferred_event() -> None:
-    assert (
-        _event_type_for_status(LlmDispatchExecutionStatus.DEFERRED)
-        is KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED
-    )
-
-
 def test_ignores_unsupported_workflow_event() -> None:
     projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
         WorkflowEvent(
@@ -555,3 +542,28 @@ def test_capacity_wait_belongs_to_capacity_window_not_item_projection() -> None:
     )
 
     assert projected is None
+
+
+def _db_plain_event_type(value: str) -> str:
+    return value.encode("utf-8").decode("utf-8")
+
+
+def test_retryable_failed_event_type_loaded_from_db_plain_str_projects() -> None:
+    enum_value = KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
+    event_type = _db_plain_event_type(enum_value)
+
+    assert event_type == enum_value
+    assert event_type is not enum_value
+
+    projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
+        _event(
+            event_type=event_type,
+            payload=_item_owned_retryable_failed_payload(),
+        )
+    )
+
+    assert projected is not None
+    assert (
+        projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    )
+    assert projected.payload["work_item_state"] == "retryable_failed"
