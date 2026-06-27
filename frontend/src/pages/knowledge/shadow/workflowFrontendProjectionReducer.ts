@@ -1,5 +1,6 @@
 import type {
   FrontendWorkflowEventEnvelope,
+  WorkbenchCapacityWindowLiveState,
   WorkbenchLlmAttemptLiveState,
   WorkbenchSectionLaneLiveState,
   WorkbenchSectionQueueItemLiveState,
@@ -98,6 +99,7 @@ export const createInitialWorkflowLiveStateResponse = (
         },
       ],
       llm_attempts: [],
+      capacity_windows: [],
       timeline: [],
       claim_clusters: [],
       claim_compaction_comparisons: [],
@@ -146,6 +148,30 @@ const stringArray = (
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 };
 
+const nestedRecord = (
+  payload: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> => {
+  const value = payload[key];
+  return isRecord(value) ? value : {};
+};
+
+const pushUnique = (items: string[], value: string | null): string[] => {
+  if (!value || items.includes(value)) return items;
+  return [...items, value];
+};
+
+const durationMs = (
+  startedAt: string | null | undefined,
+  completedAt: string | null | undefined,
+): number | null => {
+  if (!startedAt || !completedAt) return null;
+  const started = Date.parse(startedAt);
+  const completed = Date.parse(completedAt);
+  if (!Number.isFinite(started) || !Number.isFinite(completed)) return null;
+  return Math.max(0, completed - started);
+};
+
 const normalize = (value: string | null | undefined): string =>
   (value || "").trim().toLowerCase();
 
@@ -171,6 +197,11 @@ const cloneResponse = (
       })),
     })),
     llm_attempts: current.workflow.llm_attempts.map((item) => ({ ...item })),
+    capacity_windows: current.workflow.capacity_windows?.map((item) => ({
+      ...item,
+      linked_work_item_ids: [...item.linked_work_item_ids],
+      linked_dispatch_attempt_ids: [...item.linked_dispatch_attempt_ids],
+    })) ?? [],
     timeline: current.workflow.timeline.map((item) => ({ ...item })),
     claim_clusters: current.workflow.claim_clusters?.map((item) => ({
       ...item,
@@ -302,6 +333,15 @@ const upsertAttempt = (
     totalTokens?: number | null;
     errorKind?: string | null;
     errorMessageUser?: string | null;
+    nextAttemptAt?: string | null;
+    retryPlan?: string | null;
+    blockedReason?: string | null;
+    remainingMinuteRequests?: number | null;
+    remainingMinuteTokens?: number | null;
+    minuteResetAt?: string | null;
+    remainingDailyRequests?: number | null;
+    remainingDailyTokens?: number | null;
+    dailyResetAt?: string | null;
   },
 ): WorkbenchLlmAttemptLiveState => {
   const existing = response.workflow.llm_attempts.find(
@@ -316,7 +356,13 @@ const upsertAttempt = (
     status: patch.status,
     started_at: patch.startedAt ?? existing?.started_at ?? null,
     completed_at: patch.completedAt ?? existing?.completed_at ?? null,
-    duration_ms: existing?.duration_ms ?? null,
+    duration_ms:
+      patch.completedAt !== undefined || patch.startedAt !== undefined
+        ? durationMs(
+            patch.startedAt ?? existing?.started_at ?? null,
+            patch.completedAt ?? existing?.completed_at ?? null,
+          )
+        : existing?.duration_ms ?? null,
     model_provider: patch.provider ?? existing?.model_provider ?? null,
     model_name: patch.modelRef ?? existing?.model_name ?? null,
     account_ref: patch.accountRef ?? existing?.account_ref ?? null,
@@ -328,9 +374,20 @@ const upsertAttempt = (
       (patch.promptTokens ?? 0) + (patch.completionTokens ?? 0),
     error_kind: patch.errorKind ?? existing?.error_kind ?? null,
     error_message_user: patch.errorMessageUser ?? existing?.error_message_user ?? null,
-    retry_plan: existing?.retry_plan ?? null,
+    remaining_minute_requests:
+      patch.remainingMinuteRequests ?? existing?.remaining_minute_requests ?? null,
+    remaining_minute_tokens:
+      patch.remainingMinuteTokens ?? existing?.remaining_minute_tokens ?? null,
+    minute_reset_at: patch.minuteResetAt ?? existing?.minute_reset_at ?? null,
+    remaining_daily_requests:
+      patch.remainingDailyRequests ?? existing?.remaining_daily_requests ?? null,
+    remaining_daily_tokens:
+      patch.remainingDailyTokens ?? existing?.remaining_daily_tokens ?? null,
+    daily_reset_at: patch.dailyResetAt ?? existing?.daily_reset_at ?? null,
+    next_attempt_at: patch.nextAttemptAt ?? existing?.next_attempt_at ?? null,
+    retry_plan: patch.retryPlan ?? existing?.retry_plan ?? null,
     user_action_required: existing?.user_action_required ?? false,
-    blocked_reason: existing?.blocked_reason ?? null,
+    blocked_reason: patch.blockedReason ?? existing?.blocked_reason ?? null,
   };
 
   if (existing) {
@@ -341,6 +398,150 @@ const upsertAttempt = (
   }
 
   return attempt;
+};
+
+const capacityWindowStatus = (projectionType: string, payload: Record<string, unknown>): string => {
+  if (projectionType === "workflow_capacity_window_observed") {
+    const outcome = text(payload, "outcome_class");
+    if (outcome === "succeeded") return "ready";
+    if (outcome === "retryable_failed" || outcome === "rate_limited") return "waiting_for_reset";
+    return outcome || "observed";
+  }
+  if (projectionType === "workflow_capacity_window_scheduled_wakeup") return "waiting_for_reset";
+  if (projectionType === "workflow_capacity_window_exhausted") return "exhausted";
+  if (projectionType === "workflow_capacity_window_leased_work_item") return "leased";
+  if (projectionType === "workflow_capacity_window_waiting_due_work") return "waiting_due_work";
+  if (projectionType === "workflow_capacity_window_admission_skipped") return "skipped";
+  return projectionType;
+};
+
+const upsertCapacityWindow = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+): WorkbenchCapacityWindowLiveState | null => {
+  const payload = event.payload;
+  const provider = text(payload, "provider");
+  const accountRef = text(payload, "account_ref");
+  const modelRef = text(payload, "model_ref");
+  const fallbackWindowKey =
+    provider && accountRef && modelRef ? `${provider}:${accountRef}:${modelRef}` : null;
+  const windowKey = text(payload, "window_key") ?? fallbackWindowKey;
+  if (!windowKey) return null;
+
+  const existing = response.workflow.capacity_windows?.find(
+    (item) => item.window_key === windowKey,
+  );
+
+  const workItemId = text(payload, "work_item_id");
+  const dispatchAttemptId = text(payload, "dispatch_attempt_id");
+  const resetAt =
+    text(payload, "reset_at") ??
+    text(payload, "run_after") ??
+    text(payload, "minute_reset_at") ??
+    existing?.reset_at ??
+    null;
+
+  const next: WorkbenchCapacityWindowLiveState = {
+    window_key: windowKey,
+    provider: provider ?? existing?.provider ?? null,
+    account_ref: accountRef ?? existing?.account_ref ?? null,
+    model_ref: modelRef ?? existing?.model_ref ?? null,
+    status: capacityWindowStatus(event.projection_type, payload),
+    remaining_minute_requests:
+      intValue(payload, "remaining_minute_requests") ?? existing?.remaining_minute_requests ?? null,
+    remaining_minute_tokens:
+      intValue(payload, "remaining_minute_tokens") ?? existing?.remaining_minute_tokens ?? null,
+    minute_reset_at: text(payload, "minute_reset_at") ?? existing?.minute_reset_at ?? null,
+    remaining_daily_requests:
+      intValue(payload, "remaining_daily_requests") ?? existing?.remaining_daily_requests ?? null,
+    remaining_daily_tokens:
+      intValue(payload, "remaining_daily_tokens") ?? existing?.remaining_daily_tokens ?? null,
+    daily_reset_at: text(payload, "daily_reset_at") ?? existing?.daily_reset_at ?? null,
+    reset_at: resetAt,
+    run_after: text(payload, "run_after") ?? existing?.run_after ?? null,
+    observed_at: text(payload, "observed_at") ?? event.occurred_at,
+    last_outcome_class: text(payload, "outcome_class") ?? existing?.last_outcome_class ?? null,
+    last_error_kind: text(payload, "error_kind") ?? existing?.last_error_kind ?? null,
+    last_total_tokens: intValue(payload, "actual_total_tokens") ?? existing?.last_total_tokens ?? null,
+    linked_work_item_ids: pushUnique(existing?.linked_work_item_ids ?? [], workItemId),
+    linked_dispatch_attempt_ids: pushUnique(
+      existing?.linked_dispatch_attempt_ids ?? [],
+      dispatchAttemptId,
+    ),
+  };
+
+  const windows = response.workflow.capacity_windows ?? [];
+  if (existing) {
+    windows[windows.indexOf(existing)] = next;
+  } else {
+    windows.push(next);
+  }
+  response.workflow.capacity_windows = windows.sort((left, right) =>
+    left.window_key.localeCompare(right.window_key),
+  );
+
+  if (dispatchAttemptId) {
+    upsertAttempt(response, {
+      dispatchAttemptId,
+      status: next.status,
+      provider: next.provider,
+      accountRef: next.account_ref,
+      modelRef: next.model_ref,
+      completedAt: event.occurred_at,
+      promptTokens: intValue(payload, "actual_prompt_tokens"),
+      completionTokens: intValue(payload, "actual_completion_tokens"),
+      totalTokens: intValue(payload, "actual_total_tokens"),
+      errorKind: next.last_error_kind,
+      nextAttemptAt: next.reset_at ?? next.minute_reset_at ?? null,
+      blockedReason: next.status === "waiting_for_reset" ? "capacity_window_reset" : null,
+      remainingMinuteRequests: next.remaining_minute_requests,
+      remainingMinuteTokens: next.remaining_minute_tokens,
+      minuteResetAt: next.minute_reset_at,
+      remainingDailyRequests: next.remaining_daily_requests,
+      remainingDailyTokens: next.remaining_daily_tokens,
+      dailyResetAt: next.daily_reset_at,
+    });
+  }
+
+  return next;
+};
+
+const applyCapacityWindowEvent = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+): void => {
+  const window = upsertCapacityWindow(response, event);
+  if (!window) return;
+
+  const workItemId = text(event.payload, "work_item_id");
+  const linkedAttemptId = text(event.payload, "dispatch_attempt_id");
+
+  if (workItemId) {
+    const lane = claimBuilderLane(response);
+    const item = lane.items.find((candidate) => candidate.queue_item_id === workItemId);
+    if (item) {
+      if (window.status === "waiting_for_reset" || window.status === "exhausted") {
+        item.status = "deferred";
+        item.blocked_reason = "capacity_window_reset";
+        item.next_attempt_at = window.reset_at ?? window.minute_reset_at ?? item.next_attempt_at ?? null;
+        item.retry_timer = {
+          retry_available_at: item.next_attempt_at,
+          seconds_until_retry: null,
+        };
+      }
+      if (linkedAttemptId) {
+        item.attempt_count = Math.max(item.attempt_count, 1);
+      }
+    }
+  }
+
+  appendTimeline(
+    response,
+    event,
+    window.status === "waiting_for_reset" || window.status === "exhausted"
+      ? "Окно лимитов ИИ ждёт сброса"
+      : "Обновлено окно лимитов ИИ",
+  );
 };
 
 const appendTimeline = (
@@ -609,20 +810,45 @@ const applySectionOutcome = (
   });
 
   if (dispatchAttemptId) {
+    const attemptOutcome = nestedRecord(event.payload, "attempt_outcome");
+    const providerOutcome = nestedRecord(attemptOutcome, "provider_outcome");
+    const capacityAnnotation = nestedRecord(attemptOutcome, "capacity_annotation");
+    const workItemOutcome = nestedRecord(attemptOutcome, "work_item_outcome");
+
     upsertAttempt(response, {
       dispatchAttemptId,
       sourceUnitRef,
       status,
-      provider: text(event.payload, "provider"),
-      accountRef: text(event.payload, "account_ref"),
-      modelRef: text(event.payload, "model_ref"),
+      provider:
+        text(event.payload, "provider") ??
+        text(providerOutcome, "provider") ??
+        text(capacityAnnotation, "provider"),
+      accountRef:
+        text(event.payload, "account_ref") ??
+        text(providerOutcome, "account_ref") ??
+        text(capacityAnnotation, "account_ref"),
+      modelRef:
+        text(event.payload, "model_ref") ??
+        text(providerOutcome, "model_ref") ??
+        text(capacityAnnotation, "model_ref"),
       attemptNumber,
       completedAt: event.occurred_at,
-      promptTokens: intValue(event.payload, "actual_prompt_tokens"),
-      completionTokens: intValue(event.payload, "actual_completion_tokens"),
-      totalTokens: intValue(event.payload, "actual_total_tokens"),
-      errorKind: text(event.payload, "error_kind"),
+      promptTokens:
+        intValue(event.payload, "actual_prompt_tokens") ??
+        intValue(providerOutcome, "actual_prompt_tokens"),
+      completionTokens:
+        intValue(event.payload, "actual_completion_tokens") ??
+        intValue(providerOutcome, "actual_completion_tokens"),
+      totalTokens:
+        intValue(event.payload, "actual_total_tokens") ??
+        intValue(providerOutcome, "actual_total_tokens"),
+      errorKind: text(event.payload, "error_kind") ?? text(providerOutcome, "provider_error_kind"),
       errorMessageUser: text(event.payload, "validation_failure_reason"),
+      nextAttemptAt:
+        text(event.payload, "next_attempt_at") ??
+        text(event.payload, "claim_builder_next_run_after"),
+      retryPlan: text(workItemOutcome, "retry_driver"),
+      blockedReason: text(event.payload, "failure_reason_category"),
     });
   }
 
@@ -870,6 +1096,14 @@ export const reduceWorkflowFrontendProjectionEvent = (
       break;
     case "workflow_claim_builder_section_terminal_failed":
       applySectionOutcome(next, normalizedEvent, "terminal_failed");
+      break;
+    case "workflow_capacity_window_observed":
+    case "workflow_capacity_window_exhausted":
+    case "workflow_capacity_window_scheduled_wakeup":
+    case "workflow_capacity_window_leased_work_item":
+    case "workflow_capacity_window_waiting_due_work":
+    case "workflow_capacity_window_admission_skipped":
+      applyCapacityWindowEvent(next, normalizedEvent);
       break;
     case "workflow_claim_builder_all_sections_extracted": {
       const claimStage = stageById(next, "prompt_a_claim_extraction");

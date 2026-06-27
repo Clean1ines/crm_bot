@@ -767,6 +767,12 @@ export const KnowledgePage: React.FC = () => {
               queryKey: ["knowledge-source-units", projectId],
             });
           }
+
+          if (event.projection_type === "workflow_claim_builder_section_extracted") {
+            void queryClient.invalidateQueries({
+              queryKey: ["knowledge-answer-drafts", projectId],
+            });
+          }
         },
         (error) => {
           setWorkflowProjectionErrors((previous) => ({

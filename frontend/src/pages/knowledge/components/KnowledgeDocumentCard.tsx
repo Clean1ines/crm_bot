@@ -10,6 +10,7 @@ import {
   type WorkbenchWorkflowLiveStateResponse,
   type WorkbenchWorkflowStageLiveState,
   type WorkbenchSectionQueueItemLiveState,
+  type WorkbenchCapacityWindowLiveState,
   type WorkbenchLlmAttemptLiveState,
   type WorkbenchClaimClusterClaimLiveState,
 } from '@shared/api/modules/knowledge';
@@ -37,7 +38,7 @@ type KnowledgeDocumentCardProps = {
   knowledgeProcessingModeLabel: (value: string) => string;
 };
 
-type CapacityWindowDebugRow = {
+type CapacityWindowDisplayRow = {
   windowKey: string;
   provider: string;
   accountRef: string;
@@ -49,11 +50,15 @@ type CapacityWindowDebugRow = {
   remainingDailyRequests: number | null;
   remainingDailyTokens: number | null;
   dailyResetAt: string | null;
-  lastAttemptId: string | null;
+  resetAt: string | null;
+  observedAt: string | null;
+  lastOutcomeClass: string | null;
   lastErrorKind: string | null;
-  lastTotalTokens: number;
-  lastObservedAtMs: number;
+  lastTotalTokens: number | null;
+  linkedWorkItemCount: number;
+  linkedAttemptCount: number;
 };
+
 
 
 const formatNumber = (value: number): string =>
@@ -82,7 +87,7 @@ const formatMilliseconds = (value: number | null | undefined): string => {
 };
 
 const formatNullableNumber = (value: number | null | undefined): string => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  if (typeof value !== 'number' || !Number.isFinite(value)) return 'нет данных';
   return formatNumber(value);
 };
 
@@ -90,15 +95,15 @@ const formatResetCountdown = (
   resetAt: string | null | undefined,
   nowMs: number,
 ): string => {
-  if (!resetAt) return 'reset unknown';
+  if (!resetAt) return 'нет данных от провайдера';
 
   const resetAtMs = Date.parse(resetAt);
-  if (!Number.isFinite(resetAtMs)) return 'reset invalid';
+  if (!Number.isFinite(resetAtMs)) return 'некорректное время';
 
   const secondsUntilReset = Math.ceil((resetAtMs - nowMs) / 1000);
-  if (secondsUntilReset <= 0) return 'reset due';
+  if (secondsUntilReset <= 0) return 'можно пробовать снова';
 
-  return `reset через ${formatDuration(secondsUntilReset)}`;
+  return `через ${formatDuration(secondsUntilReset)}`;
 };
 
 
@@ -107,6 +112,54 @@ const normalize = (value: string | null | undefined): string =>
 
 const normalizeUpper = (value: string | null | undefined): string =>
   (value || '').trim().toUpperCase();
+
+const providerLabel = (provider: string | null | undefined): string => {
+  const value = normalize(provider);
+  const labels: Record<string, string> = {
+    groq: 'Groq',
+    openai: 'OpenAI',
+  };
+  return labels[value] || provider || 'провайдер не указан';
+};
+
+const modelLabel = (modelRef: string | null | undefined): string => {
+  const value = modelRef || '';
+  const labels: Record<string, string> = {
+    'qwen/qwen3-32b': 'Qwen 32B',
+    'llama-3.1-8b-instant': 'Llama 3.1 8B',
+    'llama-3.3-70b-versatile': 'Llama 3.3 70B',
+  };
+  return labels[value] || value || 'модель не указана';
+};
+
+const accountLabel = (accountRef: string | null | undefined): string => {
+  const value = normalize(accountRef);
+  const labels: Record<string, string> = {
+    groq_org_primary: 'основной ключ',
+    groq_org_secondary: 'резервный ключ 1',
+    groq_org_tertiary: 'резервный ключ 2',
+    groq_org_quaternary: 'резервный ключ 3',
+  };
+  return labels[value] || accountRef || 'ключ не указан';
+};
+
+const capacityStatusLabel = (status: string | null | undefined): string => {
+  const value = normalize(status);
+  const labels: Record<string, string> = {
+    ready: 'окно доступно',
+    observed: 'лимит обновлён',
+    succeeded: 'лимит обновлён',
+    completed: 'лимит обновлён',
+    leased: 'сейчас используется',
+    exhausted: 'лимит исчерпан',
+    waiting_for_reset: 'ждёт сброса лимита',
+    waiting_due_work: 'ждёт подходящую задачу',
+    skipped: 'пропущено',
+    retryable_failed: 'временная ошибка',
+    rate_limited: 'лимит исчерпан',
+  };
+  return labels[value] || status || 'состояние уточняется';
+};
 
 const workflowStatusLabel = (status: string | null | undefined): string => {
   const value = normalize(status);
@@ -607,68 +660,45 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const stages = workflow?.stages ?? [];
   const lanes = workflow?.section_lanes ?? [];
   const attempts = workflow?.llm_attempts ?? [];
-  const capacityWindowRows = useMemo((): CapacityWindowDebugRow[] => {
-    const rows = new Map<string, CapacityWindowDebugRow>();
-
-    for (const attempt of attempts) {
-      const provider = attempt.model_provider?.trim() || 'unknown-provider';
-      const accountRef = attempt.account_ref?.trim() || 'unknown-account';
-      const modelRef = attempt.model_name?.trim() || 'unknown-model';
-
-      if (
-        provider === 'unknown-provider' &&
-        accountRef === 'unknown-account' &&
-        modelRef === 'unknown-model'
-      ) {
-        continue;
-      }
-
-      const windowKey = `${provider}:${accountRef}:${modelRef}`;
-      const observedAtMs = Date.parse(
-        attempt.completed_at || attempt.started_at || '',
-      );
-      const safeObservedAtMs = Number.isFinite(observedAtMs) ? observedAtMs : 0;
-      const previous = rows.get(windowKey);
-
-      if (previous && previous.lastObservedAtMs > safeObservedAtMs) {
-        continue;
-      }
-
-      rows.set(windowKey, {
-        windowKey,
-        provider,
-        accountRef,
-        modelRef,
-        status: attempt.status || 'unknown',
+  const capacityWindows: WorkbenchCapacityWindowLiveState[] =
+    workflow?.capacity_windows ?? [];
+  const capacityWindowRows = useMemo((): CapacityWindowDisplayRow[] => {
+    return capacityWindows
+      .map((window) => ({
+        windowKey: window.window_key,
+        provider: window.provider || 'unknown-provider',
+        accountRef: window.account_ref || 'unknown-account',
+        modelRef: window.model_ref || 'unknown-model',
+        status: window.status || 'unknown',
         remainingMinuteRequests:
-          typeof attempt.remaining_minute_requests === 'number'
-            ? attempt.remaining_minute_requests
-            : previous?.remainingMinuteRequests ?? null,
+          typeof window.remaining_minute_requests === 'number'
+            ? window.remaining_minute_requests
+            : null,
         remainingMinuteTokens:
-          typeof attempt.remaining_minute_tokens === 'number'
-            ? attempt.remaining_minute_tokens
-            : previous?.remainingMinuteTokens ?? null,
-        minuteResetAt: attempt.minute_reset_at ?? previous?.minuteResetAt ?? null,
+          typeof window.remaining_minute_tokens === 'number'
+            ? window.remaining_minute_tokens
+            : null,
+        minuteResetAt: window.minute_reset_at ?? null,
         remainingDailyRequests:
-          typeof attempt.remaining_daily_requests === 'number'
-            ? attempt.remaining_daily_requests
-            : previous?.remainingDailyRequests ?? null,
+          typeof window.remaining_daily_requests === 'number'
+            ? window.remaining_daily_requests
+            : null,
         remainingDailyTokens:
-          typeof attempt.remaining_daily_tokens === 'number'
-            ? attempt.remaining_daily_tokens
-            : previous?.remainingDailyTokens ?? null,
-        dailyResetAt: attempt.daily_reset_at ?? previous?.dailyResetAt ?? null,
-        lastAttemptId: (attempt.node_run_id || previous?.lastAttemptId) ?? null,
-        lastErrorKind: attempt.error_kind ?? previous?.lastErrorKind ?? null,
-        lastTotalTokens: Math.max(0, attempt.total_tokens || 0),
-        lastObservedAtMs: safeObservedAtMs,
-      });
-    }
-
-    return Array.from(rows.values()).sort((left, right) =>
-      left.windowKey.localeCompare(right.windowKey),
-    );
-  }, [attempts]);
+          typeof window.remaining_daily_tokens === 'number'
+            ? window.remaining_daily_tokens
+            : null,
+        dailyResetAt: window.daily_reset_at ?? null,
+        resetAt: window.reset_at ?? window.minute_reset_at ?? window.run_after ?? null,
+        observedAt: window.observed_at ?? null,
+        lastOutcomeClass: window.last_outcome_class ?? null,
+        lastErrorKind: window.last_error_kind ?? null,
+        lastTotalTokens:
+          typeof window.last_total_tokens === 'number' ? window.last_total_tokens : null,
+        linkedWorkItemCount: window.linked_work_item_ids.length,
+        linkedAttemptCount: window.linked_dispatch_attempt_ids.length,
+      }))
+      .sort((left, right) => left.windowKey.localeCompare(right.windowKey));
+  }, [capacityWindows]);
   const actions = workflow?.actions ?? [];
   const hasClaimClusters = Array.isArray(workflow?.claim_clusters);
   const claimClusters = workflow?.claim_clusters ?? [];
@@ -1035,6 +1065,25 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     return bySection?.section_index ?? null;
   };
 
+  const attemptsForSection = (
+    item: WorkbenchSectionQueueItemLiveState,
+  ): WorkbenchLlmAttemptLiveState[] =>
+    attempts
+      .filter(
+        (attempt) =>
+          attempt.section_id === item.section_id ||
+          attempt.section_id === item.section_key ||
+          attempt.node_run_id.includes(item.queue_item_id),
+      )
+      .sort((left, right) => {
+        const leftStarted = Date.parse(left.started_at || '');
+        const rightStarted = Date.parse(right.started_at || '');
+        return (
+          (Number.isFinite(leftStarted) ? leftStarted : 0) -
+          (Number.isFinite(rightStarted) ? rightStarted : 0)
+        );
+      });
+
   return (
     <div
       id={`knowledge-doc-card-${doc.id}`}
@@ -1243,10 +1292,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <div className="font-medium text-[var(--text-primary)]">
-                    Capacity windows
+                    Лимиты ИИ-сервиса
                   </div>
                   <div className="text-[11px] text-[var(--text-muted)]">
-                    Provider/account/model · остаток окна · таймер reset
+                    Сколько осталось токенов и когда система сможет продолжить
                   </div>
                 </div>
                 <div className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
@@ -1256,65 +1305,63 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
               <div className="space-y-1.5">
                 {capacityWindowRows.map((row) => (
-                  <div
+                  <details
                     key={row.windowKey}
                     className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-2"
                   >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="break-all font-mono text-[11px] text-[var(--text-primary)]">
-                          {row.windowKey}
-                        </div>
-                        <div className="mt-1 text-[11px] text-[var(--text-muted)]">
-                          status: {attemptStatusLabel(row.status)}
-                          {row.lastErrorKind ? ` · error: ${row.lastErrorKind}` : ''}
-                          {row.lastAttemptId ? ` · attempt: ${row.lastAttemptId}` : ''}
-                        </div>
-                      </div>
-                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${statusPillTone(row.status)}`}>
-                        {row.status}
+                    <summary className="cursor-pointer list-none">
+                      <span className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="font-medium text-[var(--text-primary)]">
+                            {providerLabel(row.provider)} · {modelLabel(row.modelRef)}
+                          </span>
+                          <span className="ml-2 text-[var(--text-muted)]">
+                            {capacityStatusLabel(row.status)}
+                          </span>
+                        </span>
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${statusPillTone(row.status)}`}>
+                          {formatResetCountdown(row.resetAt, nowMs)}
+                        </span>
                       </span>
-                    </div>
+                    </summary>
 
-                    <div className="mt-2 grid gap-1.5 text-[11px] [grid-template-columns:repeat(auto-fit,minmax(145px,1fr))]">
+                    <div className="mt-2 grid gap-1.5 text-[11px] [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
                       <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
-                        TPM left:{' '}
+                        Токенов в минуте:{' '}
                         <span className="font-semibold text-[var(--text-primary)]">
                           {formatNullableNumber(row.remainingMinuteTokens)}
                         </span>
                       </div>
                       <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
-                        RPM left:{' '}
+                        Запросов в минуте:{' '}
                         <span className="font-semibold text-[var(--text-primary)]">
                           {formatNullableNumber(row.remainingMinuteRequests)}
                         </span>
                       </div>
                       <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
-                        minute:{' '}
-                        <span className="font-semibold text-[var(--text-primary)]">
-                          {formatResetCountdown(row.minuteResetAt, nowMs)}
-                        </span>
-                      </div>
-                      <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
-                        daily tokens:{' '}
+                        Дневные токены:{' '}
                         <span className="font-semibold text-[var(--text-primary)]">
                           {formatNullableNumber(row.remainingDailyTokens)}
                         </span>
                       </div>
                       <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
-                        daily req:{' '}
-                        <span className="font-semibold text-[var(--text-primary)]">
-                          {formatNullableNumber(row.remainingDailyRequests)}
-                        </span>
-                      </div>
-                      <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
-                        last total:{' '}
+                        Последний запрос:{' '}
                         <span className="font-semibold text-[var(--text-primary)]">
                           {formatNullableNumber(row.lastTotalTokens)}
                         </span>
                       </div>
                     </div>
-                  </div>
+
+                    <div className="mt-2 space-y-1 text-[11px] text-[var(--text-muted)]">
+                      <div>Ключ: {accountLabel(row.accountRef)}</div>
+                      {row.lastErrorKind && <div>Последняя ошибка: {userErrorLabel(row.lastErrorKind)}</div>}
+                      <div className="break-all font-mono">{row.windowKey}</div>
+                      <div>
+                        Связано задач: {formatNumber(row.linkedWorkItemCount)} · попыток:{' '}
+                        {formatNumber(row.linkedAttemptCount)}
+                      </div>
+                    </div>
+                  </details>
                 ))}
               </div>
             </div>
@@ -1532,6 +1579,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                     {sectionItems.map((item) => {
                       const sourceUnit = sourceUnitForSection(item);
                       const sectionClaims = draftClaimsForSection(sourceUnit, item.section_id);
+                      const sectionAttempts = attemptsForSection(item);
                       return (
                         <details
                           key={item.queue_item_id}
@@ -1572,6 +1620,77 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                                 Текст раздела ещё не загружен.
                               </div>
                             )}
+                            {sectionAttempts.length > 0 && (
+                              <details className="rounded bg-[var(--control-bg)] p-2" open>
+                                <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                                  Попытки ИИ: {formatNumber(sectionAttempts.length)}
+                                </summary>
+                                <div className="mt-2 space-y-2">
+                                  {sectionAttempts.map((attempt, attemptIndex) => (
+                                    <details
+                                      key={attempt.node_run_id}
+                                      className={`rounded-lg border px-3 py-2 ${attemptRowTone(attempt.status)}`}
+                                    >
+                                      <summary className="cursor-pointer list-none">
+                                        <span className="flex flex-wrap items-center justify-between gap-2">
+                                          <span>
+                                            <span className="font-semibold text-[var(--text-primary)]">
+                                              Попытка {formatNumber(attemptIndex + 1)}
+                                            </span>
+                                            <span className="ml-2 text-[var(--text-muted)]">
+                                              {providerLabel(attempt.model_provider)} · {modelLabel(attempt.model_name)}
+                                            </span>
+                                          </span>
+                                          <span className={`rounded-full px-2.5 py-1 font-medium ${statusPillTone(attempt.status)}`}>
+                                            {attemptStatusLabel(attempt.status)}
+                                          </span>
+                                        </span>
+                                      </summary>
+
+                                      <div className="mt-2 grid gap-1.5 text-[11px] [grid-template-columns:repeat(auto-fit,minmax(145px,1fr))]">
+                                        <div className="rounded bg-[var(--surface-elevated)] px-2 py-1">
+                                          Время: {formatMilliseconds(attempt.duration_ms)}
+                                        </div>
+                                        <div className="rounded bg-[var(--surface-elevated)] px-2 py-1">
+                                          Токены: {formatNumber(attempt.total_tokens)}
+                                        </div>
+                                        <div className="rounded bg-[var(--surface-elevated)] px-2 py-1">
+                                          Prompt: {formatNumber(attempt.prompt_tokens)}
+                                        </div>
+                                        <div className="rounded bg-[var(--surface-elevated)] px-2 py-1">
+                                          Completion: {formatNumber(attempt.completion_tokens)}
+                                        </div>
+                                        <div className="rounded bg-[var(--surface-elevated)] px-2 py-1">
+                                          Лимит: {formatNullableNumber(attempt.remaining_minute_tokens)} токенов
+                                        </div>
+                                        <div className="rounded bg-[var(--surface-elevated)] px-2 py-1">
+                                          Сброс: {formatResetCountdown(attempt.minute_reset_at ?? attempt.next_attempt_at, nowMs)}
+                                        </div>
+                                      </div>
+
+                                      {(attempt.error_message_user || attempt.error_kind) && (
+                                        <div className="mt-2 rounded bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-300">
+                                          {userErrorLabel(attempt.error_message_user || attempt.error_kind)}
+                                        </div>
+                                      )}
+
+                                      <details className="mt-2 rounded bg-[var(--surface-elevated)] p-2">
+                                        <summary className="cursor-pointer text-[var(--text-muted)]">
+                                          Технические данные
+                                        </summary>
+                                        <div className="mt-2 space-y-1 break-all font-mono text-[11px] text-[var(--text-muted)]">
+                                          <div>attempt: {attempt.node_run_id}</div>
+                                          <div>account: {attempt.account_ref || '—'}</div>
+                                          <div>status: {attempt.status}</div>
+                                          <div>retry_plan: {attempt.retry_plan || '—'}</div>
+                                        </div>
+                                      </details>
+                                    </details>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
+
                             {sectionClaims.length > 0 && (
                               <details className="rounded bg-[var(--control-bg)] p-2">
                                 <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
@@ -1622,56 +1741,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                     })}
                   </div>
                 </details>
-              )}
-
-              {attempts.length > 0 && (
-                <section>
-                  <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
-                    <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                      Попытки обработки ИИ: {formatNumber(attempts.length)}
-                    </summary>
-                    <div className="mt-2 space-y-1">
-                    {attempts.map((attempt) => {
-                      const sectionIndex = attemptSectionIndex(attempt);
-                      return (
-                        <details
-                          key={attempt.node_run_id}
-                          className={`rounded-lg border px-3 py-2 ${attemptRowTone(attempt.status)}`}
-                        >
-                          <summary className="cursor-pointer list-none">
-                            <span className="flex flex-wrap items-center justify-between gap-2">
-                              <span>
-                                <span className="font-semibold text-[var(--text-primary)]">
-                                  {sectionIndex !== null
-                                    ? `Раздел ${sectionDisplayNumber(sectionIndex)}`
-                                    : 'Раздел не определён'}
-                                </span>
-                                <span className="ml-2 text-[var(--text-muted)]">
-                                  {attempt.model_name || attempt.model_provider || 'модель не определена'}
-                                </span>
-                              </span>
-                              <span className={`rounded-full px-2.5 py-1 font-medium ${statusPillTone(attempt.status)}`}>
-                                {attemptStatusLabel(attempt.status)}
-                              </span>
-                            </span>
-                          </summary>
-                          <div className="mt-1 text-[var(--text-muted)]">
-                            Время: {formatMilliseconds(attempt.duration_ms)}
-                            {attempt.total_tokens > 0
-                              ? ` · токены: ${formatNumber(attempt.total_tokens)}`
-                              : ''}
-                          </div>
-                          {(attempt.error_message_user || attempt.error_kind) && (
-                            <div className="mt-1 rounded bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-300">
-                              {userErrorLabel(attempt.error_message_user || attempt.error_kind)}
-                            </div>
-                          )}
-                        </details>
-                      );
-                    })}
-                    </div>
-                  </details>
-                </section>
               )}
 
               {actions.filter((action) => action.visible).length > 0 && (

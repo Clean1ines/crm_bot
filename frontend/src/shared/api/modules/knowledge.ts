@@ -339,6 +339,29 @@ export type WorkbenchLlmAttemptLiveState = {
   blocked_reason?: string | null;
 };
 
+export type WorkbenchCapacityWindowLiveState = {
+  window_key: string;
+  provider?: string | null;
+  account_ref?: string | null;
+  model_ref?: string | null;
+  status: string;
+  remaining_minute_requests?: number | null;
+  remaining_minute_tokens?: number | null;
+  minute_reset_at?: string | null;
+  remaining_daily_requests?: number | null;
+  remaining_daily_tokens?: number | null;
+  daily_reset_at?: string | null;
+  reset_at?: string | null;
+  run_after?: string | null;
+  observed_at?: string | null;
+  last_outcome_class?: string | null;
+  last_error_kind?: string | null;
+  last_total_tokens?: number | null;
+  linked_work_item_ids: string[];
+  linked_dispatch_attempt_ids: string[];
+};
+
+
 export type WorkbenchClaimClusterClaimLiveState = {
   observation_ref: string;
   claim: string;
@@ -435,6 +458,7 @@ export type WorkbenchWorkflowLiveState = {
   stages: WorkbenchWorkflowStageLiveState[];
   section_lanes: WorkbenchSectionLaneLiveState[];
   llm_attempts: WorkbenchLlmAttemptLiveState[];
+  capacity_windows: WorkbenchCapacityWindowLiveState[];
   timeline: WorkbenchWorkflowTimelineEntryLiveState[];
   claim_clusters?: WorkbenchClaimClusterLiveState[];
   claim_compaction_comparisons?: WorkbenchClaimCompactionComparisonLiveState[];

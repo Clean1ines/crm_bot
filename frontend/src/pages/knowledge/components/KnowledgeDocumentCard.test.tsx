@@ -57,6 +57,7 @@ const workflowLiveState: WorkbenchWorkflowLiveStateResponse = {
     ],
     section_lanes: [],
     llm_attempts: [],
+    capacity_windows: [],
     timeline: [],
     claim_clusters: [
       {
@@ -239,7 +240,7 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
     expect(normalizedMarkup).toContain('завершено · 1 / 1');
     expect(normalizedMarkup).toContain('идёт · 0 / 1');
     expect(normalizedMarkup).toContain('Кластеры утверждений: 1');
-    expect(normalizedMarkup).toContain('Технические сравнения: 2');
+    expect(normalizedMarkup).toContain('сравнений: 2 · ожидают: 1');
     expect(normalizedMarkup).toContain('<details');
     expect(normalizedMarkup).toContain('Кластер 1');
     expect(normalizedMarkup).toContain('Поддержка отвечает круглосуточно.');
@@ -259,7 +260,7 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
     expect(normalizedMarkup).toContain('Кластер 1');
     expect(normalizedMarkup).toContain('Частично готов');
     expect(normalizedMarkup).toContain('bg-sky-500/10');
-    expect(normalizedMarkup).toContain('Технические сравнения');
+    expect(normalizedMarkup).toContain('сравнений: 2 · ожидают: 1');
     expect(normalizedMarkup).toContain('Извлечённые факты: 2');
     expect(normalizedMarkup).toContain('Поддержка отвечает круглосуточно.');
     expect(normalizedMarkup).toContain('Оператор подключается по запросу.');
