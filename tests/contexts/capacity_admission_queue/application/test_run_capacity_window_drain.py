@@ -87,16 +87,15 @@ class FakeBudget:
     reserve_allowed: bool = True
     reservations: list[CapacityReservation] = field(default_factory=list)
     released: list[CapacityReservation] = field(default_factory=list)
-    seeded_windows: list[str | None] = field(default_factory=list)
+    observed_windows: list[str | None] = field(default_factory=list)
     frozen_windows: list[str | None] = field(default_factory=list)
 
-    async def get_or_seed_window(
+    async def get_window(
         self,
         *,
         account_ref: str | None,
         **_: object,
     ) -> CapacityWindowBudgetSnapshot:
-        self.seeded_windows.append(account_ref)
         return self.snapshot
 
     async def try_reserve(
@@ -131,8 +130,12 @@ class FakeBudget:
         self.released.append(reservation)
 
     async def apply_capacity_observation(
-        self, **_: object
+        self,
+        *,
+        account_ref: str | None,
+        **_: object,
     ) -> CapacityWindowBudgetSnapshot:
+        self.observed_windows.append(account_ref)
         return self.snapshot
 
     async def freeze_until(self, *, account_ref: str | None, **_: object) -> None:
@@ -321,6 +324,10 @@ def test_drain_rejects_execution_window_without_account_ref() -> None:
             execution_window_key=_selection_lane(),
             worker_ref="worker-1",
             now=_now(),
+            remaining_minute_requests=60,
+            remaining_minute_tokens=6000,
+            remaining_daily_requests=1000,
+            remaining_daily_tokens=500000,
         )
 
 
@@ -337,7 +344,7 @@ async def test_drain_uses_selection_lane_for_selector_and_execution_window_for_b
         strategy=strategy,
     ).execute(_command(max_items=1))
 
-    assert budget.seeded_windows == ["account-1"]
+    assert budget.observed_windows == ["account-1"]
     assert budget.reservations[0].account_ref == "account-1"
     assert strategy.execution_accounts == ["account-1"]
 
@@ -394,6 +401,10 @@ async def test_two_windows_have_independent_reservations() -> None:
             execution_window_key=_lane("account-2"),
             worker_ref="worker-2",
             now=_now(),
+            remaining_minute_requests=60,
+            remaining_minute_tokens=6000,
+            remaining_daily_requests=1000,
+            remaining_daily_tokens=500000,
             max_items=1,
         )
     )
@@ -409,6 +420,10 @@ def _command(max_items: int | None = None) -> RunCapacityWindowDrainCommand:
         execution_window_key=_lane(),
         worker_ref="worker-1",
         now=_now(),
+        remaining_minute_requests=60,
+        remaining_minute_tokens=6000,
+        remaining_daily_requests=1000,
+        remaining_daily_tokens=500000,
         max_items=max_items,
     )
 

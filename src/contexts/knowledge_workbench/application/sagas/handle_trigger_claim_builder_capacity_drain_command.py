@@ -28,6 +28,17 @@ LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
+class _CapacityWindow:
+    provider: str
+    model_ref: str
+    account_ref: str
+    remaining_minute_requests: int
+    remaining_minute_tokens: int
+    remaining_daily_requests: int
+    remaining_daily_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
 class HandleTriggerClaimBuilderCapacityDrainCommand:
     workflow_command: WorkflowCommand
 
@@ -96,10 +107,14 @@ class HandleTriggerClaimBuilderCapacityDrainCommandHandler:
             result = await trigger_claim_builder_capacity_drain_if_enabled.execute(
                 TriggerClaimBuilderCapacityDrainIfEnabledCommand(
                     workflow_run_id=workflow_run_id,
-                    provider=window["provider"],
-                    model_ref=window["model_ref"],
-                    account_ref=window["account_ref"],
+                    provider=window.provider,
+                    model_ref=window.model_ref,
+                    account_ref=window.account_ref,
                     now=now,
+                    remaining_minute_requests=window.remaining_minute_requests,
+                    remaining_minute_tokens=window.remaining_minute_tokens,
+                    remaining_daily_requests=window.remaining_daily_requests,
+                    remaining_daily_tokens=window.remaining_daily_tokens,
                     worker_ref=f"{worker_ref}:window:{window_index}",
                     max_items=max_items,
                 )
@@ -113,6 +128,7 @@ class HandleTriggerClaimBuilderCapacityDrainCommandHandler:
                     "drained_count": result.drained_count,
                     "execute_command_count": result.execute_command_count,
                     "provider_call_count": result.provider_call_count,
+                    "stop_reason": result.stop_reason,
                     "work_item_ids": list(result.work_item_ids),
                     "attempt_ids": list(result.attempt_ids),
                 },
@@ -143,23 +159,17 @@ class HandleTriggerClaimBuilderCapacityDrainCommandHandler:
         )
 
 
-def _capacity_windows(payload: Mapping[str, object]) -> tuple[dict[str, str], ...]:
+def _capacity_windows(payload: Mapping[str, object]) -> tuple[_CapacityWindow, ...]:
     dispatch_preparation = payload.get("llm_dispatch_preparation")
     if not isinstance(dispatch_preparation, Mapping):
-        return (
-            {
-                "provider": _payload_text(payload, "provider"),
-                "model_ref": _payload_text(payload, "model_ref"),
-                "account_ref": _payload_text(payload, "account_ref"),
-            },
-        )
+        raise ValueError("llm_dispatch_preparation is required for capacity drain")
 
     raw_windows = dispatch_preparation.get("account_capacities")
     if not isinstance(raw_windows, Sequence) or isinstance(raw_windows, str | bytes):
         raise ValueError("llm_dispatch_preparation account_capacities must be sequence")
 
     active_model_ref = dispatch_preparation.get("active_model_ref")
-    windows: list[dict[str, str]] = []
+    windows: list[_CapacityWindow] = []
     for raw_window in raw_windows:
         if not isinstance(raw_window, Mapping):
             continue
@@ -169,11 +179,27 @@ def _capacity_windows(payload: Mapping[str, object]) -> tuple[dict[str, str], ..
         ):
             continue
         windows.append(
-            {
-                "provider": _mapping_text(raw_window, "provider"),
-                "model_ref": _mapping_text(raw_window, "model_ref"),
-                "account_ref": _mapping_text(raw_window, "account_ref"),
-            }
+            _CapacityWindow(
+                provider=_mapping_text(raw_window, "provider"),
+                model_ref=_mapping_text(raw_window, "model_ref"),
+                account_ref=_mapping_text(raw_window, "account_ref"),
+                remaining_minute_requests=_mapping_non_negative_int(
+                    raw_window,
+                    "remaining_minute_requests",
+                ),
+                remaining_minute_tokens=_mapping_non_negative_int(
+                    raw_window,
+                    "remaining_minute_tokens",
+                ),
+                remaining_daily_requests=_mapping_non_negative_int(
+                    raw_window,
+                    "remaining_daily_requests",
+                ),
+                remaining_daily_tokens=_mapping_non_negative_int(
+                    raw_window,
+                    "remaining_daily_tokens",
+                ),
+            )
         )
 
     if not windows:
@@ -185,6 +211,13 @@ def _mapping_text(payload: Mapping[str, object], key: str) -> str:
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"capacity account must include {key}")
+    return value
+
+
+def _mapping_non_negative_int(payload: Mapping[str, object], key: str) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"capacity account must include non-negative {key}")
     return value
 
 

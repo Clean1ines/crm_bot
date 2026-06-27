@@ -85,7 +85,7 @@ class FakeLaneClaims:
 class FakeBudget:
     reservations: list[CapacityReservation] = field(default_factory=list)
 
-    async def get_or_seed_window(self, **_: object) -> CapacityWindowBudgetSnapshot:
+    async def get_window(self, **_: object) -> CapacityWindowBudgetSnapshot:
         return CapacityWindowBudgetSnapshot(
             provider="groq",
             account_ref="account-1",
@@ -130,7 +130,7 @@ class FakeBudget:
     async def apply_capacity_observation(
         self, **_: object
     ) -> CapacityWindowBudgetSnapshot:
-        return await self.get_or_seed_window()
+        return await self.get_window()
 
     async def freeze_until(self, **_: object) -> None:
         return None
@@ -265,6 +265,10 @@ def _command() -> RunClaimBuilderCapacityQueueOnceCommand:
         model_ref="qwen/qwen3-32b",
         account_ref="account-1",
         now=_now(),
+        remaining_minute_requests=60,
+        remaining_minute_tokens=6000,
+        remaining_daily_requests=1000,
+        remaining_daily_tokens=500000,
     )
 
 

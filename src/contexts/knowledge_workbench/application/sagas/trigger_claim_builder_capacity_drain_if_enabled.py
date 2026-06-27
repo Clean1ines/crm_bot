@@ -28,6 +28,10 @@ class TriggerClaimBuilderCapacityDrainIfEnabledCommand:
     model_ref: str
     account_ref: str
     now: datetime
+    remaining_minute_requests: int
+    remaining_minute_tokens: int
+    remaining_daily_requests: int
+    remaining_daily_tokens: int
     worker_ref: str = DEFAULT_CLAIM_BUILDER_CAPACITY_DRAIN_WORKER_REF
     max_items: int | None = 1
 
@@ -39,6 +43,7 @@ class TriggerClaimBuilderCapacityDrainIfEnabledResult:
     drained_count: int
     execute_command_count: int
     provider_call_count: int
+    stop_reason: str | None
     work_item_ids: tuple[str, ...]
     attempt_ids: tuple[str, ...]
 
@@ -63,6 +68,10 @@ class TriggerClaimBuilderCapacityDrainIfEnabled:
                 model_ref=command.model_ref,
                 account_ref=command.account_ref,
                 now=command.now,
+                remaining_minute_requests=command.remaining_minute_requests,
+                remaining_minute_tokens=command.remaining_minute_tokens,
+                remaining_daily_requests=command.remaining_daily_requests,
+                remaining_daily_tokens=command.remaining_daily_tokens,
                 worker_ref=command.worker_ref,
                 max_items=command.max_items,
             )
@@ -73,6 +82,7 @@ class TriggerClaimBuilderCapacityDrainIfEnabled:
             drained_count=result.drained_count,
             execute_command_count=result.drained_count,
             provider_call_count=result.provider_call_count,
+            stop_reason=result.stop_reason,
             work_item_ids=result.work_item_ids,
             attempt_ids=result.attempt_ids,
         )
@@ -85,6 +95,7 @@ def _skipped(reason: str) -> TriggerClaimBuilderCapacityDrainIfEnabledResult:
         drained_count=0,
         execute_command_count=0,
         provider_call_count=0,
+        stop_reason=None,
         work_item_ids=(),
         attempt_ids=(),
     )

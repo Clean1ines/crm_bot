@@ -22,6 +22,10 @@ class RunClaimBuilderCapacityQueueOnceCommand:
     model_ref: str
     account_ref: str
     now: datetime
+    remaining_minute_requests: int
+    remaining_minute_tokens: int
+    remaining_daily_requests: int
+    remaining_daily_tokens: int
     worker_ref: str = "claim-builder-capacity-drain"
     max_items: int | None = 1
 
@@ -64,6 +68,10 @@ class RunClaimBuilderCapacityQueueOnce:
                 execution_window_key=execution_window_key,
                 worker_ref=command.worker_ref,
                 now=command.now,
+                remaining_minute_requests=command.remaining_minute_requests,
+                remaining_minute_tokens=command.remaining_minute_tokens,
+                remaining_daily_requests=command.remaining_daily_requests,
+                remaining_daily_tokens=command.remaining_daily_tokens,
                 max_items=command.max_items,
             )
         )

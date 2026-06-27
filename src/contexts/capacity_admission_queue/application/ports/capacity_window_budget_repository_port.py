@@ -34,13 +34,12 @@ class CapacityReservation:
 
 
 class CapacityWindowBudgetRepositoryPort(Protocol):
-    async def get_or_seed_window(
+    async def get_window(
         self,
         *,
         provider: str,
         account_ref: str | None,
         model_ref: str,
-        now: datetime,
     ) -> CapacityWindowBudgetSnapshot: ...
 
     async def try_reserve(

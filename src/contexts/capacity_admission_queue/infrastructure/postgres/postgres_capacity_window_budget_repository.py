@@ -11,10 +11,6 @@ from src.contexts.capacity_admission_queue.application.ports.capacity_window_bud
 )
 
 
-CONSERVATIVE_SEED_REQUESTS = 1
-CONSERVATIVE_SEED_TOKENS = 1024
-
-
 class CapacityWindowBudgetConnectionLike(Protocol):
     async def fetchrow(
         self, query: str, *args: object
@@ -27,43 +23,27 @@ class PostgresCapacityWindowBudgetRepository(CapacityWindowBudgetRepositoryPort)
     def __init__(self, connection: CapacityWindowBudgetConnectionLike) -> None:
         self._connection = connection
 
-    async def get_or_seed_window(
+    async def get_window(
         self,
         *,
         provider: str,
         account_ref: str | None,
         model_ref: str,
-        now: datetime,
     ) -> CapacityWindowBudgetSnapshot:
         row = await self._connection.fetchrow(
             """
-            INSERT INTO capacity_window_budget_state (
-                provider,
-                account_ref,
-                model_ref,
-                remaining_minute_requests,
-                remaining_minute_tokens,
-                remaining_daily_requests,
-                remaining_daily_tokens,
-                created_at,
-                updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
-            ON CONFLICT (provider, account_ref, model_ref) DO UPDATE SET
-                updated_at = capacity_window_budget_state.updated_at
-            RETURNING *
+            SELECT *
+            FROM capacity_window_budget_state
+            WHERE provider = $1
+              AND account_ref IS NOT DISTINCT FROM $2
+              AND model_ref = $3
             """,
             provider,
             account_ref,
             model_ref,
-            CONSERVATIVE_SEED_REQUESTS,
-            CONSERVATIVE_SEED_TOKENS,
-            CONSERVATIVE_SEED_REQUESTS,
-            CONSERVATIVE_SEED_TOKENS,
-            now,
         )
         if row is None:
-            raise RuntimeError("budget seed query returned no row")
+            raise RuntimeError("capacity budget window is not initialized")
         return _snapshot_from_row(row)
 
     async def try_reserve(
@@ -82,24 +62,7 @@ class PostgresCapacityWindowBudgetRepository(CapacityWindowBudgetRepositoryPort)
             raise ValueError("token_count must be positive")
         row = await self._connection.fetchrow(
             """
-            WITH seeded AS (
-                INSERT INTO capacity_window_budget_state (
-                    provider,
-                    account_ref,
-                    model_ref,
-                    remaining_minute_requests,
-                    remaining_minute_tokens,
-                    remaining_daily_requests,
-                    remaining_daily_tokens,
-                    created_at,
-                    updated_at
-                )
-                VALUES ($1, $2, $3, 1, 1024, 1, 1024, $6, $6)
-                ON CONFLICT (provider, account_ref, model_ref) DO UPDATE SET
-                    updated_at = capacity_window_budget_state.updated_at
-                RETURNING *
-            ),
-            locked AS (
+            WITH locked AS (
                 SELECT *
                 FROM capacity_window_budget_state
                 WHERE provider = $1
@@ -257,22 +220,16 @@ class PostgresCapacityWindowBudgetRepository(CapacityWindowBudgetRepositoryPort)
     ) -> None:
         await self._connection.execute(
             """
-            INSERT INTO capacity_window_budget_state (
-                provider,
-                account_ref,
-                model_ref,
-                remaining_minute_requests,
-                remaining_minute_tokens,
-                remaining_daily_requests,
-                remaining_daily_tokens,
-                frozen_until,
-                created_at,
-                updated_at
-            )
-            VALUES ($1, $2, $3, 1, 1024, 1, 1024, $4, $5, $5)
-            ON CONFLICT (provider, account_ref, model_ref) DO UPDATE SET
-                frozen_until = GREATEST(capacity_window_budget_state.frozen_until, EXCLUDED.frozen_until),
-                updated_at = EXCLUDED.updated_at
+            UPDATE capacity_window_budget_state
+            SET
+                frozen_until = CASE
+                    WHEN frozen_until IS NULL OR frozen_until < $4 THEN $4
+                    ELSE frozen_until
+                END,
+                updated_at = $5
+            WHERE provider = $1
+              AND account_ref IS NOT DISTINCT FROM $2
+              AND model_ref = $3
             """,
             provider,
             account_ref,

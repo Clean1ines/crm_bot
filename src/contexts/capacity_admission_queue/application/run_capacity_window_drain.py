@@ -42,12 +42,24 @@ class RunCapacityWindowDrainCommand:
     execution_window_key: CapacityAdmissionLaneKey
     worker_ref: str
     now: datetime
+    remaining_minute_requests: int
+    remaining_minute_tokens: int
+    remaining_daily_requests: int
+    remaining_daily_tokens: int
     max_items: int | None = None
     claim_ttl_seconds: int = 90
 
     def __post_init__(self) -> None:
         if self.execution_window_key.account_ref is None:
             raise ValueError("execution_window_key account_ref is required")
+        for field_name, value in (
+            ("remaining_minute_requests", self.remaining_minute_requests),
+            ("remaining_minute_tokens", self.remaining_minute_tokens),
+            ("remaining_daily_requests", self.remaining_daily_requests),
+            ("remaining_daily_tokens", self.remaining_daily_tokens),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative int")
         if self.selection_lane_key.work_kind != self.execution_window_key.work_kind:
             raise ValueError("selection and execution work_kind must match")
         if self.selection_lane_key.provider != self.execution_window_key.provider:
@@ -157,11 +169,17 @@ class RunCapacityWindowDrain:
                     stop_reason = CapacityWindowDrainStopReason.PAUSE_REQUESTED
                     break
 
-                snapshot = await self.budget_repository.get_or_seed_window(
+                snapshot = await self.budget_repository.apply_capacity_observation(
                     provider=command.execution_window_key.provider,
                     account_ref=command.execution_window_key.account_ref,
                     model_ref=command.execution_window_key.model_ref,
-                    now=command.now,
+                    remaining_minute_requests=command.remaining_minute_requests,
+                    remaining_minute_tokens=command.remaining_minute_tokens,
+                    remaining_daily_requests=command.remaining_daily_requests,
+                    remaining_daily_tokens=command.remaining_daily_tokens,
+                    minute_reset_at=None,
+                    daily_reset_at=None,
+                    observed_at=command.now,
                 )
                 if (
                     snapshot.frozen_until is not None
