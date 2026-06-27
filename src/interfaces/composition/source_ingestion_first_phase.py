@@ -185,7 +185,7 @@ def _load_workbench_prompt_text(
     )
 
 
-def source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
+def source_ingestion_segmentation_profile_with_input_tokens(
     *,
     profile: SourceIngestionSegmentationProfile | None = None,
     repo_root: Path | None = None,
@@ -198,7 +198,7 @@ def source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
     service = SourceIngestionPromptTokenEstimationService(
         token_estimator=RoughWorkbenchTokenEstimator(),
     )
-    return service.with_estimated_prompt_tokens(
+    return service.with_input_tokens(
         profile=base_profile,
         prompt_text=prompt_text,
     )
@@ -209,7 +209,7 @@ def default_source_ingestion_first_phase_segmentation_config(
     repo_root: Path | None = None,
 ) -> SourceIngestionFirstPhaseSegmentationConfig:
     return segmentation_config_from_profile(
-        source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
+        source_ingestion_segmentation_profile_with_input_tokens(
             repo_root=repo_root,
         )
     )

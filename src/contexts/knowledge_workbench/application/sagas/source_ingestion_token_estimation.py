@@ -86,7 +86,7 @@ class SourceIngestionPromptTokenEstimationService:
             prompt_token_count=count,
         )
 
-    def with_estimated_prompt_tokens(
+    def with_input_tokens(
         self,
         *,
         profile: SourceIngestionSegmentationProfile,

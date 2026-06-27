@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from decimal import Decimal
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,7 +52,7 @@ from src.interfaces.composition.source_ingestion_first_phase import (
     default_source_ingestion_first_phase_segmentation_config,
     make_source_ingestion_first_phase,
     segmentation_config_from_profile,
-    source_ingestion_segmentation_profile_with_estimated_prompt_tokens,
+    source_ingestion_segmentation_profile_with_input_tokens,
 )
 
 
@@ -426,6 +427,7 @@ def _custom_segmentation_budget() -> DocumentSegmentationBudget:
             profile_name="custom_primary_model",
             max_request_input_tokens=55,
             segmentation_input_safety_gap_tokens=5,
+            char_to_token_multiplier=Decimal("3.3"),
         ),
     )
 
@@ -722,6 +724,7 @@ def test_segmentation_config_converts_to_document_segmentation_budget() -> None:
         primary_model_profile_name="custom_primary_model",
         max_request_input_tokens=100,
         segmentation_input_safety_gap_tokens=20,
+        char_to_token_multiplier=Decimal("3.3"),
     )
 
     budget = config.to_document_segmentation_budget()
@@ -731,7 +734,8 @@ def test_segmentation_config_converts_to_document_segmentation_budget() -> None:
     assert budget.model.profile_name == "custom_primary_model"
     assert budget.model.max_request_input_tokens == 100
     assert budget.model.segmentation_input_safety_gap_tokens == 20
-    assert budget.max_source_segment_tokens == 68
+    assert budget.model.char_to_token_multiplier == Decimal("3.3")
+    assert budget.max_source_segment_tokens == 34
 
 
 def test_default_segmentation_config_is_request_budget_without_provider_names(
@@ -748,10 +752,12 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
 
     assert budget.prompt.prompt_name == "claim_builder_section_extraction"
     assert budget.prompt.prompt_token_count == expected_prompt_tokens
-    assert budget.model.profile_name == "primary_model"
+    assert budget.model.profile_name == "claim_builder_primary_model"
     assert budget.model.max_request_input_tokens == 6_000
-    assert budget.model.segmentation_input_safety_gap_tokens == 100
-    assert budget.max_source_segment_tokens == (6_000 - expected_prompt_tokens - 100)
+    assert budget.model.segmentation_input_safety_gap_tokens == 300
+    assert (
+        budget.max_source_segment_tokens == (6_000 - expected_prompt_tokens - 300) // 2
+    )
 
 
 @pytest.mark.asyncio
@@ -780,7 +786,7 @@ async def test_factory_runner_injects_default_segmentation_budget(
     assert budget is not None
     assert budget.prompt.prompt_name == "claim_builder_section_extraction"
     assert budget.prompt.prompt_token_count == expected_prompt_tokens
-    assert budget.model.profile_name == "primary_model"
+    assert budget.model.profile_name == "claim_builder_primary_model"
 
 
 @pytest.mark.asyncio
@@ -812,6 +818,7 @@ def test_invalid_segmentation_config_is_rejected() -> None:
             primary_model_profile_name="primary_model",
             max_request_input_tokens=10,
             segmentation_input_safety_gap_tokens=1,
+            char_to_token_multiplier=Decimal("3.3"),
         )
 
     with pytest.raises(ValueError, match="prompt_token_count must be >= 0"):
@@ -821,6 +828,7 @@ def test_invalid_segmentation_config_is_rejected() -> None:
             primary_model_profile_name="primary_model",
             max_request_input_tokens=10,
             segmentation_input_safety_gap_tokens=1,
+            char_to_token_multiplier=Decimal("3.3"),
         )
 
     with pytest.raises(ValueError, match="primary_model_profile_name must be"):
@@ -830,6 +838,7 @@ def test_invalid_segmentation_config_is_rejected() -> None:
             primary_model_profile_name=" ",
             max_request_input_tokens=10,
             segmentation_input_safety_gap_tokens=1,
+            char_to_token_multiplier=Decimal("3.3"),
         )
 
     with pytest.raises(ValueError, match="must be < max_request_input_tokens"):
@@ -839,6 +848,7 @@ def test_invalid_segmentation_config_is_rejected() -> None:
             primary_model_profile_name="primary_model",
             max_request_input_tokens=10,
             segmentation_input_safety_gap_tokens=1,
+            char_to_token_multiplier=Decimal("3.3"),
         )
 
 
@@ -858,7 +868,7 @@ def test_composition_segmentation_budget_source_guard() -> None:
         "default_source_ingestion_segmentation_profile",
         "SourceIngestionSegmentationProfile",
         "_load_workbench_prompt_text",
-        "source_ingestion_segmentation_profile_with_estimated_prompt_tokens",
+        "source_ingestion_segmentation_profile_with_input_tokens",
         "SourceIngestionPromptTokenEstimationService",
         "RoughWorkbenchTokenEstimator",
         "WorkbenchPromptText",
@@ -898,7 +908,7 @@ def test_default_segmentation_config_is_derived_from_profile_catalog(
 ) -> None:
     prompt_text = "alpha beta gamma delta"
     _write_prompt_text(tmp_path, prompt_text)
-    profile = source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
+    profile = source_ingestion_segmentation_profile_with_input_tokens(
         repo_root=tmp_path,
     )
     config = default_source_ingestion_first_phase_segmentation_config(
@@ -930,6 +940,7 @@ def test_segmentation_config_from_profile_maps_custom_profile() -> None:
             profile_name="custom_primary_model",
             max_request_input_tokens=4_000,
             segmentation_input_safety_gap_tokens=500,
+            char_to_token_multiplier=Decimal("3.3"),
         ),
     )
 
@@ -940,14 +951,15 @@ def test_segmentation_config_from_profile_maps_custom_profile() -> None:
     assert config.primary_model_profile_name == "custom_primary_model"
     assert config.max_request_input_tokens == 4_000
     assert config.segmentation_input_safety_gap_tokens == 500
-    assert config.to_document_segmentation_budget().max_source_segment_tokens == 3_377
+    assert config.char_to_token_multiplier == Decimal("3.3")
+    assert config.to_document_segmentation_budget().max_source_segment_tokens == 1_688
 
 
 def test_loads_prompt_text_and_estimates_prompt_tokens(tmp_path: Path) -> None:
     prompt_text = "alpha beta gamma delta"
     _write_prompt_text(tmp_path, prompt_text)
 
-    profile = source_ingestion_segmentation_profile_with_estimated_prompt_tokens(
+    profile = source_ingestion_segmentation_profile_with_input_tokens(
         repo_root=tmp_path,
     )
 
@@ -959,7 +971,7 @@ def test_loads_prompt_text_and_estimates_prompt_tokens(tmp_path: Path) -> None:
     assert profile.prompt.node_id == "faq_claim_observations"
 
 
-def test_default_composition_config_uses_estimated_prompt_tokens(
+def test_default_composition_config_uses_input_tokens(
     tmp_path: Path,
 ) -> None:
     prompt_text = "alpha beta gamma delta"
@@ -987,6 +999,7 @@ async def test_explicit_segmentation_config_bypasses_prompt_file_loading(
         primary_model_profile_name="explicit_primary_model",
         max_request_input_tokens=500,
         segmentation_input_safety_gap_tokens=50,
+        char_to_token_multiplier=Decimal("3.3"),
     )
 
     runner = make_source_ingestion_first_phase(
