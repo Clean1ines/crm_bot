@@ -67,6 +67,9 @@ from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extra
     DispatchKnowledgeExtractionWorkflowCommand,
     DispatchKnowledgeExtractionWorkflowCommandHandler,
 )
+from src.contexts.knowledge_workbench.application.sagas.trigger_claim_builder_capacity_drain_if_enabled import (
+    TriggerClaimBuilderCapacityDrainIfEnabled,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
 )
@@ -191,6 +194,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
         capacity_admission_lane_target_resolver: (
             CapacityAdmissionLaneTargetResolverPort | None
         ) = None,
+        trigger_claim_builder_capacity_drain_if_enabled: (
+            TriggerClaimBuilderCapacityDrainIfEnabled | None
+        ) = None,
         draft_claim_embedding_read_repository: (
             DraftClaimEmbeddingReadRepositoryPort | None
         ) = None,
@@ -311,6 +317,9 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 capacity_admission_lane_target=capacity_admission_lane_target,
                 capacity_admission_lane_target_resolver=(
                     capacity_admission_lane_target_resolver
+                ),
+                trigger_claim_builder_capacity_drain_if_enabled=(
+                    trigger_claim_builder_capacity_drain_if_enabled
                 ),
                 draft_claim_embedding_read_repository=(
                     draft_claim_embedding_read_repository

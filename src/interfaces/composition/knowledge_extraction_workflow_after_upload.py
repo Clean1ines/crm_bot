@@ -6,6 +6,30 @@ from typing import Protocol, cast
 
 import asyncpg
 
+from src.contexts.capacity_admission_queue.application.run_capacity_window_drain import (
+    RunCapacityWindowDrain,
+)
+from src.contexts.capacity_admission_queue.application.select_capacity_admission_work_item import (
+    SelectCapacityAdmissionWorkItem,
+)
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_work_item_selector import (
+    PostgresCapacityAdmissionWorkItemSelector,
+)
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_lane_claim_repository import (
+    PostgresCapacityLaneClaimRepository,
+)
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_window_budget_repository import (
+    PostgresCapacityWindowBudgetRepository,
+)
+from src.contexts.knowledge_workbench.application.sagas.claim_builder_capacity_drain_bridge import (
+    ClaimBuilderCapacityDrainBridge,
+)
+from src.contexts.knowledge_workbench.application.sagas.run_claim_builder_capacity_queue_once import (
+    RunClaimBuilderCapacityQueueOnce,
+)
+from src.contexts.knowledge_workbench.application.sagas.trigger_claim_builder_capacity_drain_if_enabled import (
+    TriggerClaimBuilderCapacityDrainIfEnabled,
+)
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
     CapacityAdmissionLaneTarget,
 )
@@ -136,6 +160,45 @@ from src.interfaces.realtime.collecting_frontend_workflow_event_repository impor
 from src.interfaces.realtime.redis_frontend_workflow_event_bus import (
     publish_frontend_workflow_events,
 )
+
+
+class _NoopClaimBuilderDrainDispatchContextResolver:
+    async def resolve_dispatch_context(
+        self,
+        *,
+        work_item_id: str,
+    ):
+        del work_item_id
+        return None
+
+
+def _trigger_claim_builder_capacity_drain_for_transaction(
+    *,
+    connection: asyncpg.Connection,
+    workflow_run_id: str,
+    workflow_unit_of_work: PostgresWorkflowRuntimeUnitOfWork,
+    source_document_ref: str | None,
+) -> TriggerClaimBuilderCapacityDrainIfEnabled:
+    bridge = ClaimBuilderCapacityDrainBridge(
+        workflow_run_id=workflow_run_id,
+        workflow_unit_of_work=workflow_unit_of_work,
+        dispatch_context_resolver=_NoopClaimBuilderDrainDispatchContextResolver(),
+        source_document_ref=source_document_ref,
+    )
+    drain = RunCapacityWindowDrain(
+        lane_claim_repository=PostgresCapacityLaneClaimRepository(connection),
+        budget_repository=PostgresCapacityWindowBudgetRepository(connection),
+        capacity_selector=SelectCapacityAdmissionWorkItem(
+            PostgresCapacityAdmissionWorkItemSelector(connection),
+        ),
+        projection_lifecycle_synchronizer=(
+            PostgresCapacityAdmissionProjectionLifecycleSynchronizer(connection)
+        ),
+        strategy=bridge,
+    )
+    return TriggerClaimBuilderCapacityDrainIfEnabled(
+        RunClaimBuilderCapacityQueueOnce(capacity_window_drain=drain)
+    )
 
 
 LOGGER = logging.getLogger(__name__)
@@ -405,6 +468,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
             drain_result = await self._run_one_drain_transaction(
                 workflow_run_id=workflow_run_id,
                 max_commands=remaining_commands,
+                source_document_ref=source_document_ref,
             )
             inspected_count += drain_result.inspected_count
             dispatched_count += drain_result.dispatched_count
@@ -456,6 +520,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         *,
         workflow_run_id: str,
         max_commands: int,
+        source_document_ref: str | None,
     ) -> DrainKnowledgeExtractionWorkflowCommandsResult:
         connection = await self._pool.acquire()
         workflow_unit_of_work = PostgresWorkflowRuntimeUnitOfWork(
@@ -607,6 +672,14 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                     )
                 ),
                 frontend_event_projection_writer=frontend_event_projection_writer,
+                trigger_claim_builder_capacity_drain_if_enabled=(
+                    _trigger_claim_builder_capacity_drain_for_transaction(
+                        connection=asyncpg_connection,
+                        workflow_run_id=workflow_run_id,
+                        workflow_unit_of_work=workflow_unit_of_work,
+                        source_document_ref=source_document_ref,
+                    )
+                ),
             )
             await workflow_unit_of_work.commit()
             await publish_frontend_workflow_events(
