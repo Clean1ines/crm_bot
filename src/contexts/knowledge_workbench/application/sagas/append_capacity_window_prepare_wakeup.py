@@ -196,16 +196,24 @@ def _capacity_window_account_capacities(
 
         account_capacity = dict(item)
         account_capacity["remaining_minute_requests"] = (
-            capacity_observation.remaining_minute_requests
+            _capacity_observation_non_negative_int(
+                capacity_observation.remaining_minute_requests
+            )
         )
         account_capacity["remaining_minute_tokens"] = (
-            capacity_observation.remaining_minute_tokens
+            _capacity_observation_non_negative_int(
+                capacity_observation.remaining_minute_tokens
+            )
         )
         account_capacity["remaining_daily_requests"] = (
-            capacity_observation.remaining_daily_requests
+            _capacity_observation_non_negative_int(
+                capacity_observation.remaining_daily_requests
+            )
         )
         account_capacity["remaining_daily_tokens"] = (
-            capacity_observation.remaining_daily_tokens
+            _capacity_observation_non_negative_int(
+                capacity_observation.remaining_daily_tokens
+            )
         )
         matched.append(account_capacity)
 
@@ -215,6 +223,14 @@ def _capacity_window_account_capacities(
     return [_account_capacity_from_observation(capacity_observation)]
 
 
+def _capacity_observation_non_negative_int(value: int | None) -> int:
+    if isinstance(value, bool):
+        return 0
+    if not isinstance(value, int):
+        return 0
+    return max(0, value)
+
+
 def _account_capacity_from_observation(
     capacity_observation: LlmAttemptCapacityObservation,
 ) -> dict[str, object]:
@@ -222,10 +238,18 @@ def _account_capacity_from_observation(
         "provider": capacity_observation.provider,
         "account_ref": capacity_observation.account_ref,
         "model_ref": capacity_observation.model_ref,
-        "remaining_minute_requests": capacity_observation.remaining_minute_requests,
-        "remaining_minute_tokens": capacity_observation.remaining_minute_tokens,
-        "remaining_daily_requests": capacity_observation.remaining_daily_requests,
-        "remaining_daily_tokens": capacity_observation.remaining_daily_tokens,
+        "remaining_minute_requests": _capacity_observation_non_negative_int(
+            capacity_observation.remaining_minute_requests
+        ),
+        "remaining_minute_tokens": _capacity_observation_non_negative_int(
+            capacity_observation.remaining_minute_tokens
+        ),
+        "remaining_daily_requests": _capacity_observation_non_negative_int(
+            capacity_observation.remaining_daily_requests
+        ),
+        "remaining_daily_tokens": _capacity_observation_non_negative_int(
+            capacity_observation.remaining_daily_tokens
+        ),
     }
 
 
