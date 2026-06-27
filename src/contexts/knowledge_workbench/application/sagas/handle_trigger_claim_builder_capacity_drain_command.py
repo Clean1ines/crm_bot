@@ -95,7 +95,8 @@ class HandleTriggerClaimBuilderCapacityDrainCommandHandler:
             _payload_optional_text(payload, "worker_ref")
             or DEFAULT_CLAIM_BUILDER_CAPACITY_DRAIN_WORKER_REF
         )
-        max_items = _payload_optional_positive_int(payload, "max_items") or 1
+        _payload_optional_positive_int(payload, "max_items")
+        max_items = 1
 
         drained_count = 0
         execute_command_count = 0

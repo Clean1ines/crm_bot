@@ -49,6 +49,7 @@ class FakeTrigger:
             drained_count=1,
             execute_command_count=1,
             provider_call_count=0,
+            stop_reason="drained_items",
             work_item_ids=("work-item-1",),
             attempt_ids=("attempt-1",),
         )
@@ -119,8 +120,13 @@ async def test_handler_rejects_wrong_command_type() -> None:
 async def test_handler_rejects_missing_provider_model_or_account(
     missing_key: str,
 ) -> None:
-    payload = dict(_payload())
-    payload.pop(missing_key)
+    payload = _payload()
+    dispatch_preparation = dict(payload["llm_dispatch_preparation"])
+    dispatch_preparation.pop("active_model_ref", None)
+    account_capacities = [dict(dispatch_preparation["account_capacities"][0])]
+    account_capacities[0].pop(missing_key)
+    dispatch_preparation["account_capacities"] = account_capacities
+    payload["llm_dispatch_preparation"] = dispatch_preparation
 
     with pytest.raises(ValueError, match=missing_key):
         await HandleTriggerClaimBuilderCapacityDrainCommandHandler().execute(
@@ -156,6 +162,26 @@ async def test_handler_provider_call_count_remains_zero_for_bridge_path() -> Non
     assert result.provider_call_count == 0
 
 
+@pytest.mark.asyncio
+async def test_handler_ignores_payload_max_items_for_deferred_claim_builder_drain() -> (
+    None
+):
+    payload = dict(_payload())
+    payload["max_items"] = 30
+    trigger = FakeTrigger()
+
+    await HandleTriggerClaimBuilderCapacityDrainCommandHandler().execute(
+        HandleTriggerClaimBuilderCapacityDrainCommand(
+            workflow_command=_command(payload=payload),
+        ),
+        trigger_claim_builder_capacity_drain_if_enabled=trigger,
+        workflow_unit_of_work=FakeWorkflowUnitOfWork(),
+    )
+
+    assert len(trigger.calls) >= 1
+    assert trigger.calls[0].max_items == 1
+
+
 def _command(
     *,
     command_type: str = (
@@ -184,9 +210,21 @@ def _command(
 def _payload() -> dict[str, object]:
     return {
         "workflow_run_id": "workflow-1",
-        "provider": "groq",
-        "model_ref": "qwen/qwen3-32b",
-        "account_ref": "account-1",
         "worker_ref": "claim-builder-capacity-drain",
         "max_items": 1,
+        "llm_dispatch_preparation": {
+            "active_model_ref": "qwen/qwen3-32b",
+            "requested_items": 30,
+            "account_capacities": [
+                {
+                    "provider": "groq",
+                    "account_ref": "account-1",
+                    "model_ref": "qwen/qwen3-32b",
+                    "remaining_minute_requests": 60,
+                    "remaining_minute_tokens": 6000,
+                    "remaining_daily_requests": 1000,
+                    "remaining_daily_tokens": 500000,
+                },
+            ],
+        },
     }
