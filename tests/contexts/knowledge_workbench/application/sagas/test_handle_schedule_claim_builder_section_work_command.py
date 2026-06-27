@@ -24,7 +24,7 @@ from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_bu
     HandleScheduleClaimBuilderSectionWorkCommandHandler,
 )
 from src.contexts.knowledge_workbench.application.sagas import (
-    handle_schedule_claim_builder_section_work_command as schedule_module,
+    llm_dispatch_ownership,
 )
 from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
     FrontendWorkflowEvent,
@@ -568,7 +568,9 @@ async def test_appends_prepare_claim_builder_dispatch_batch_next_command() -> No
 async def test_legacy_mode_still_appends_prepare_claim_builder_dispatch_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(schedule_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", False)
+    monkeypatch.setattr(
+        llm_dispatch_ownership, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", False
+    )
 
     _, _, _, workflow_unit_of_work = await _execute()
 
@@ -586,9 +588,11 @@ async def test_legacy_mode_still_appends_prepare_claim_builder_dispatch_batch(
 async def test_ownership_mode_appends_trigger_claim_builder_capacity_drain(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(schedule_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True)
     monkeypatch.setattr(
-        schedule_module,
+        llm_dispatch_ownership, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True
+    )
+    monkeypatch.setattr(
+        llm_dispatch_ownership,
         "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED",
         True,
     )
@@ -621,9 +625,11 @@ async def test_ownership_mode_appends_trigger_claim_builder_capacity_drain(
 async def test_ownership_mode_timeline_reports_trigger_not_prepare(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(schedule_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True)
     monkeypatch.setattr(
-        schedule_module,
+        llm_dispatch_ownership, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True
+    )
+    monkeypatch.setattr(
+        llm_dispatch_ownership,
         "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED",
         True,
     )

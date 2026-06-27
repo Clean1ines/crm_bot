@@ -24,9 +24,8 @@ from src.contexts.knowledge_workbench.application.sagas.build_claim_builder_capa
     BuildClaimBuilderCapacityDrainTriggerCommand,
     build_claim_builder_capacity_drain_trigger_command,
 )
-from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership import (
-    CAPACITY_QUEUE_OWNS_LLM_DISPATCH,
-    CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED,
+from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership_policy import (
+    current_llm_dispatch_ownership_policy,
 )
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     CLAIM_BUILDER_SECTION_WORK_KIND,
@@ -291,15 +290,11 @@ def _next_command(
     retry_action_summary: WorkItemRetryActionSummary,
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
-    if (
-        CAPACITY_QUEUE_OWNS_LLM_DISPATCH
-        and CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED
-        and decision
-        in {
-            ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW,
-            ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER,
-        }
-    ):
+    policy = current_llm_dispatch_ownership_policy()
+    if policy.claim_builder_capacity_queue_owns_dispatch and decision in {
+        ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_NOW,
+        ClaimBuilderProgressReconcileDecision.PREPARE_NEXT_BATCH_LATER,
+    }:
         return _capacity_drain_trigger_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,

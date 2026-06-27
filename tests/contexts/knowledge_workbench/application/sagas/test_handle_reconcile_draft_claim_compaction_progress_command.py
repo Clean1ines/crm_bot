@@ -9,9 +9,7 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_draft_c
     HandleReconcileDraftClaimCompactionProgressCommand,
     HandleReconcileDraftClaimCompactionProgressCommandHandler,
 )
-from src.contexts.knowledge_workbench.application.sagas import (
-    handle_reconcile_draft_claim_compaction_progress_command as compaction_reconcile_module,
-)
+from src.contexts.knowledge_workbench.application.sagas import llm_dispatch_ownership
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -287,12 +285,12 @@ async def test_compaction_still_appends_prepare_when_ownership_true_but_bridge_d
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        compaction_reconcile_module,
+        llm_dispatch_ownership,
         "CAPACITY_QUEUE_OWNS_LLM_DISPATCH",
         True,
     )
     monkeypatch.setattr(
-        compaction_reconcile_module,
+        llm_dispatch_ownership,
         "DRAFT_CLAIM_COMPACTION_CAPACITY_DRAIN_BRIDGE_ENABLED",
         False,
     )
@@ -315,6 +313,11 @@ async def test_compaction_still_appends_prepare_when_ownership_true_but_bridge_d
     assert result.appended_next_command_count == 1
     assert workflow_uow.command_log.pending_commands[0].command_type == (
         KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert all(
+        command.command_type
+        != KnowledgeExtractionCanonicalCommandType.TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN.value
+        for command in workflow_uow.command_log.pending_commands
     )
 
 

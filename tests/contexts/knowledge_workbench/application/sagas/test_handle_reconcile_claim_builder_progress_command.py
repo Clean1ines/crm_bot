@@ -21,9 +21,7 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_claim_b
     HandleReconcileClaimBuilderProgressCommand,
     HandleReconcileClaimBuilderProgressCommandHandler,
 )
-from src.contexts.knowledge_workbench.application.sagas import (
-    handle_reconcile_claim_builder_progress_command as reconcile_module,
-)
+from src.contexts.knowledge_workbench.application.sagas import llm_dispatch_ownership
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -563,7 +561,9 @@ async def test_retryable_work_appends_prepare_dispatch_batch_now_even_with_legac
 async def test_legacy_mode_still_returns_prepare_dispatch_batch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(reconcile_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", False)
+    monkeypatch.setattr(
+        llm_dispatch_ownership, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", False
+    )
 
     _, _, _, workflow_unit_of_work = await _execute(
         summary=_summary(ready_count=1, completed_count=2),
@@ -578,9 +578,11 @@ async def test_legacy_mode_still_returns_prepare_dispatch_batch(
 async def test_ownership_mode_returns_trigger_for_prepare_next_batch_now(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(reconcile_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True)
     monkeypatch.setattr(
-        reconcile_module,
+        llm_dispatch_ownership, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True
+    )
+    monkeypatch.setattr(
+        llm_dispatch_ownership,
         "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED",
         True,
     )
@@ -605,9 +607,11 @@ async def test_ownership_mode_returns_trigger_for_prepare_next_batch_now(
 async def test_ownership_mode_returns_trigger_for_prepare_next_batch_later(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(reconcile_module, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True)
     monkeypatch.setattr(
-        reconcile_module,
+        llm_dispatch_ownership, "CAPACITY_QUEUE_OWNS_LLM_DISPATCH", True
+    )
+    monkeypatch.setattr(
+        llm_dispatch_ownership,
         "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED",
         True,
     )

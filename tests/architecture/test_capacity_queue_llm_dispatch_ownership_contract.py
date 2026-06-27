@@ -48,13 +48,15 @@ def test_no_prepare_guards_are_phase_specific() -> None:
     )
     compaction_reconcile_source = inspect.getsource(compaction_reconcile._next_command)
 
-    assert "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED" in (
+    assert "current_llm_dispatch_ownership_policy" in claim_builder_schedule_source
+    assert "claim_builder_capacity_queue_owns_dispatch" in (
         claim_builder_schedule_source
     )
-    assert "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED" in (
+    assert "current_llm_dispatch_ownership_policy" in claim_builder_reconcile_source
+    assert "claim_builder_capacity_queue_owns_dispatch" in (
         claim_builder_reconcile_source
     )
-    assert "DRAFT_CLAIM_COMPACTION_CAPACITY_DRAIN_BRIDGE_ENABLED" in (
+    assert "draft_claim_compaction_capacity_queue_owns_dispatch" in (
         compaction_reconcile_source
     )
     assert "_capacity_drain_trigger_command" in claim_builder_schedule_source
@@ -62,3 +64,15 @@ def test_no_prepare_guards_are_phase_specific() -> None:
     assert "build_claim_builder_capacity_drain_trigger_command" in (
         claim_builder_reconcile_trigger_source
     )
+
+
+def test_llm_dispatch_ownership_policy_exists() -> None:
+    from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership_policy import (
+        LlmDispatchOwnershipPolicy,
+        current_llm_dispatch_ownership_policy,
+    )
+
+    policy = current_llm_dispatch_ownership_policy()
+
+    assert isinstance(policy, LlmDispatchOwnershipPolicy)
+    assert policy.capacity_queue_owns_llm_dispatch is False

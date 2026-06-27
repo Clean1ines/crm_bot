@@ -21,10 +21,6 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
 )
-from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership import (
-    CAPACITY_QUEUE_OWNS_LLM_DISPATCH,
-    CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED,
-)
 from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
     CLAIM_BUILDER_DISPATCH_PROFILE_ID,
     ClaimBuilderDispatchPreparationBuilder,
@@ -32,6 +28,9 @@ from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_p
 from src.contexts.knowledge_workbench.application.sagas.build_claim_builder_capacity_drain_trigger_command import (
     BuildClaimBuilderCapacityDrainTriggerCommand,
     build_claim_builder_capacity_drain_trigger_command,
+)
+from src.contexts.knowledge_workbench.application.sagas.llm_dispatch_ownership_policy import (
+    current_llm_dispatch_ownership_policy,
 )
 from src.contexts.knowledge_workbench.application.sagas.schedule_claim_builder_section_work import (
     ClaimBuilderScheduledWorkItemSummary,
@@ -204,10 +203,8 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
 
         next_command: WorkflowCommand | None = None
         appended_next_command_count = 0
-        if (
-            CAPACITY_QUEUE_OWNS_LLM_DISPATCH
-            and CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED
-        ):
+        policy = current_llm_dispatch_ownership_policy()
+        if policy.claim_builder_capacity_queue_owns_dispatch:
             next_command = _capacity_drain_trigger_command(
                 workflow_run_id=workflow_run_id,
                 source_document_ref=source_document_ref,

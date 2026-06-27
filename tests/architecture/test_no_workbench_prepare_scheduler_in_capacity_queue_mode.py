@@ -42,8 +42,8 @@ def test_schedule_path_keeps_legacy_prepare_when_cutover_disabled() -> None:
         "handle_schedule_claim_builder_section_work_command.py"
     ).read_text(encoding="utf-8")
 
-    assert "CAPACITY_QUEUE_OWNS_LLM_DISPATCH" in source
-    assert "CLAIM_BUILDER_CAPACITY_DRAIN_BRIDGE_ENABLED" in source
+    assert "current_llm_dispatch_ownership_policy" in source
+    assert "claim_builder_capacity_queue_owns_dispatch" in source
     assert "TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN" in source
     assert "append_pending_command(\n                next_command," in source
 
@@ -56,8 +56,17 @@ def test_reconcile_paths_keep_legacy_prepare_functions_under_legacy_mode() -> No
         "handle_reconcile_draft_claim_compaction_progress_command.py",
     ):
         source = (ROOT / relative_path).read_text(encoding="utf-8")
-        assert "CAPACITY_QUEUE_OWNS_LLM_DISPATCH" in source
+        assert "current_llm_dispatch_ownership_policy" in source
         assert "return _prepare_dispatch_batch_command(" in source
+
+
+def test_compaction_ownership_path_is_gated_by_compaction_policy() -> None:
+    source = (
+        ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "handle_reconcile_draft_claim_compaction_progress_command.py"
+    ).read_text(encoding="utf-8")
+
+    assert "draft_claim_compaction_capacity_queue_owns_dispatch" in source
 
 
 def test_dispatcher_routes_trigger_claim_builder_capacity_drain() -> None:
@@ -68,6 +77,18 @@ def test_dispatcher_routes_trigger_claim_builder_capacity_drain() -> None:
 
     assert "TRIGGER_CLAIM_BUILDER_CAPACITY_DRAIN" in source
     assert "HandleTriggerClaimBuilderCapacityDrainCommandHandler" in source
+
+
+def test_dispatcher_still_routes_legacy_prepare_commands() -> None:
+    source = (
+        ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "dispatch_knowledge_extraction_workflow_command.py"
+    ).read_text(encoding="utf-8")
+
+    assert "PREPARE_CLAIM_BUILDER_DISPATCH_BATCH" in source
+    assert "HandlePrepareClaimBuilderDispatchBatchCommandHandler" in source
+    assert "PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH" in source
+    assert "HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler" in source
 
 
 def test_compaction_does_not_reference_claim_builder_capacity_drain_trigger() -> None:
@@ -87,3 +108,15 @@ def test_dispatcher_does_not_block_legacy_prepare_while_cutover_disabled() -> No
 
     assert "capacity_queue_owns_llm_dispatch_legacy_prepare_blocked" not in source
     assert "CAPACITY_QUEUE_OWNS_LLM_DISPATCH_BLOCKED_LEGACY_PREPARE" not in source
+
+
+def test_no_legacy_prepare_blocker_string_exists_in_src() -> None:
+    forbidden = (
+        "capacity_queue_owns_llm_dispatch_legacy_prepare_blocked",
+        "CAPACITY_QUEUE_OWNS_LLM_DISPATCH_BLOCKED_LEGACY_PREPARE",
+    )
+
+    for path in (ROOT / "src").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            assert marker not in source
