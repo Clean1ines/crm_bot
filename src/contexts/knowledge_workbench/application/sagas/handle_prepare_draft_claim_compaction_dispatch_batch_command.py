@@ -31,6 +31,7 @@ from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow
     DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
     DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
     capacity_window_leased_work_item_event,
+    capacity_window_scheduled_wakeup_event,
     compaction_context_from_schedule_payload,
 )
 from src.interfaces.composition.lease_llm_admitted_work_items import (
@@ -617,6 +618,54 @@ async def _save_progress_snapshot(
             updated_at=occurred_at,
             completed_at=existing.completed_at if existing is not None else None,
         )
+    )
+
+
+def _prepare_capacity_retry_scheduled_wakeup_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    capacity_retry_at: datetime,
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    reschedule_pending_command = WorkflowCommand(
+        command_id=WorkflowCommandId(
+            "workflow-command:"
+            "prepare-draft-claim-compaction-dispatch-batch:"
+            f"{workflow_run_id}:"
+            f"{capacity_retry_at.isoformat()}"
+        ),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+        ),
+        workflow_run_id=workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(
+            "prepare-draft-claim-compaction-dispatch-batch:"
+            f"{workflow_run_id}:"
+            f"{capacity_retry_at.isoformat()}"
+        ),
+        payload=dict(workflow_command.payload),
+        status=WorkflowCommandStatus.PENDING,
+        run_after=capacity_retry_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+    _ = reschedule_pending_command.command_id
+    account_capacity = _first_capacity_for_capacity_admission(workflow_command.payload)
+    return capacity_window_scheduled_wakeup_event(
+        workflow_run_id=workflow_run_id,
+        provider=_mapping_text(account_capacity, "provider"),
+        account_ref=_mapping_text(account_capacity, "account_ref"),
+        model_ref=_mapping_text(account_capacity, "model_ref"),
+        run_after=capacity_retry_at,
+        reset_at=capacity_retry_at,
+        prepare_command_type=workflow_command.command_type,
+        wakeup_command_id=workflow_command.command_id,
+        wakeup_reason="prepare_capacity_retry_at",
+        occurred_at=occurred_at,
+        causation_command_id=workflow_command.command_id,
+        operation_key=DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
+        canonical_phase=DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
     )
 
 
