@@ -31,6 +31,7 @@ from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow
     DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
     DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
     capacity_window_leased_work_item_event,
+    capacity_window_scheduled_wakeup_event,
     compaction_context_from_schedule_payload,
 )
 from src.interfaces.composition.lease_llm_admitted_work_items import (
@@ -467,48 +468,20 @@ def _profile_from_payload(
 
     return LlmTaskCapacityProfile(
         profile_id=_payload_text(profile_payload, "profile_id"),
-        estimated_prompt_tokens=(
-            _compaction_profile_positive_int_with_legacy_fallback(
-                profile_payload,
-                key="estimated_input_tokens",
-                legacy_key="estimated_prompt_tokens",
-            )
-        ),
-        estimated_completion_tokens=(
-            _compaction_profile_non_negative_int_with_legacy_fallback(
-                profile_payload,
-                key="estimated_output_tokens",
-                legacy_key="estimated_completion_tokens",
-            )
-        ),
-        estimated_requests=_payload_positive_int(
+        input_tokens=_payload_positive_int(
             profile_payload,
-            "estimated_requests",
+            "input_tokens",
+        ),
+        artifact_tokens=_payload_non_negative_int(
+            profile_payload,
+            "artifact_tokens",
+        ),
+        request_count=_payload_positive_int(
+            profile_payload,
+            "request_count",
             fallback=1,
         ),
     )
-
-
-def _compaction_profile_positive_int_with_legacy_fallback(
-    payload: Mapping[str, object],
-    *,
-    key: str,
-    legacy_key: str,
-) -> int:
-    if key in payload:
-        return _payload_positive_int(payload, key)
-    return _payload_positive_int(payload, legacy_key)
-
-
-def _compaction_profile_non_negative_int_with_legacy_fallback(
-    payload: Mapping[str, object],
-    *,
-    key: str,
-    legacy_key: str,
-) -> int:
-    if key in payload:
-        return _payload_non_negative_int(payload, key)
-    return _payload_non_negative_int(payload, legacy_key)
 
 
 def _dispatch_batch_prepared_event(
@@ -648,6 +621,54 @@ async def _save_progress_snapshot(
     )
 
 
+def _prepare_capacity_retry_scheduled_wakeup_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    capacity_retry_at: datetime,
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    reschedule_pending_command = WorkflowCommand(
+        command_id=WorkflowCommandId(
+            "workflow-command:"
+            "prepare-draft-claim-compaction-dispatch-batch:"
+            f"{workflow_run_id}:"
+            f"{capacity_retry_at.isoformat()}"
+        ),
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+        ),
+        workflow_run_id=workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(
+            "prepare-draft-claim-compaction-dispatch-batch:"
+            f"{workflow_run_id}:"
+            f"{capacity_retry_at.isoformat()}"
+        ),
+        payload=dict(workflow_command.payload),
+        status=WorkflowCommandStatus.PENDING,
+        run_after=capacity_retry_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
+    _ = reschedule_pending_command.command_id
+    account_capacity = _first_capacity_for_capacity_admission(workflow_command.payload)
+    return capacity_window_scheduled_wakeup_event(
+        workflow_run_id=workflow_run_id,
+        provider=_mapping_text(account_capacity, "provider"),
+        account_ref=_mapping_text(account_capacity, "account_ref"),
+        model_ref=_mapping_text(account_capacity, "model_ref"),
+        run_after=capacity_retry_at,
+        reset_at=capacity_retry_at,
+        prepare_command_type=workflow_command.command_type,
+        wakeup_command_id=workflow_command.command_id,
+        wakeup_reason="prepare_capacity_retry_at",
+        occurred_at=occurred_at,
+        causation_command_id=workflow_command.command_id,
+        operation_key=DRAFT_CLAIM_COMPACTION_PREPARE_OPERATION_KEY,
+        canonical_phase=DRAFT_CLAIM_COMPACTION_CANONICAL_PHASE,
+    )
+
+
 def _capacity_window_leased_work_item_event(
     *,
     workflow_command: WorkflowCommand,
@@ -670,11 +691,9 @@ def _capacity_window_leased_work_item_event(
         lease_expires_at=lease_expires_at,
         selection_kind=leased_item.selection_kind,
         occurred_at=occurred_at,
-        token_estimate=_optional_mapping_int(
-            schedule_payload, "estimated_prompt_tokens"
-        ),
-        reserved_tokens=_optional_mapping_int(
-            schedule_payload, "estimated_total_tokens"
+        input_tokens=_optional_mapping_int(schedule_payload, "input_tokens"),
+        required_window_tokens=_optional_mapping_int(
+            schedule_payload, "required_window_tokens"
         ),
         compaction_context=compaction_context_from_schedule_payload(
             schedule_payload,

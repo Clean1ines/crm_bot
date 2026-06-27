@@ -35,10 +35,9 @@ class CapacityAdmissionWorkItemProjectionCandidate:
     model_ref: str
     status: WorkItemStatus
     retry_plan: str | None
-    estimated_input_tokens: int
-    estimated_output_tokens: int
-    effective_output_cap_tokens: int
-    reserved_total_tokens: int
+    input_tokens: int
+    artifact_tokens: int
+    required_window_tokens: int
     source_ref: Mapping[str, object]
 
     def __post_init__(self) -> None:
@@ -59,30 +58,20 @@ class CapacityAdmissionWorkItemProjectionCandidate:
         if self.retry_plan is not None:
             _require_non_empty_text(self.retry_plan, field_name="retry_plan")
         _require_positive_int(
-            self.estimated_input_tokens,
-            field_name="estimated_input_tokens",
+            self.input_tokens,
+            field_name="input_tokens",
         )
         _require_non_negative_int(
-            self.estimated_output_tokens,
-            field_name="estimated_output_tokens",
-        )
-        _require_non_negative_int(
-            self.effective_output_cap_tokens,
-            field_name="effective_output_cap_tokens",
+            self.artifact_tokens,
+            field_name="artifact_tokens",
         )
         _require_positive_int(
-            self.reserved_total_tokens,
-            field_name="reserved_total_tokens",
+            self.required_window_tokens,
+            field_name="required_window_tokens",
         )
-        if self.effective_output_cap_tokens < self.estimated_output_tokens:
+        if self.required_window_tokens < (self.input_tokens + self.artifact_tokens):
             raise ValueError(
-                "effective_output_cap_tokens must be >= estimated_output_tokens",
-            )
-        if self.reserved_total_tokens < (
-            self.estimated_input_tokens + self.estimated_output_tokens
-        ):
-            raise ValueError(
-                "reserved_total_tokens must cover estimated input and output tokens",
+                "required_window_tokens must cover input and output tokens",
             )
 
 
@@ -105,30 +94,18 @@ class BuildCapacityAdmissionProjectionCandidates:
                 raise TypeError("plans must contain WorkItemSchedulePlan")
 
             capacity_estimate = _capacity_estimate_from_payload(plan.payload)
-            estimated_input_tokens = _positive_int_from_mapping(
+            input_tokens = _positive_int_from_mapping(
                 capacity_estimate,
-                "estimated_input_tokens",
+                "input_tokens",
             )
-            estimated_output_tokens = _non_negative_int_from_mapping(
+            artifact_tokens = _non_negative_int_from_mapping(
                 capacity_estimate,
-                "estimated_output_tokens",
+                "artifact_tokens",
             )
-            effective_output_cap_tokens = _optional_non_negative_int_from_mapping(
+            required_window_tokens = _positive_int_from_mapping(
                 capacity_estimate,
-                "effective_output_cap_tokens",
+                "required_window_tokens",
             )
-            if effective_output_cap_tokens is None:
-                effective_output_cap_tokens = estimated_output_tokens
-
-            reserved_total_tokens = _optional_positive_int_from_mapping(
-                capacity_estimate,
-                "reserved_total_tokens",
-            )
-            if reserved_total_tokens is None:
-                reserved_total_tokens = (
-                    estimated_input_tokens + effective_output_cap_tokens
-                )
-
             candidates.append(
                 CapacityAdmissionWorkItemProjectionCandidate(
                     work_item_id=plan.work_item_id,
@@ -143,10 +120,9 @@ class BuildCapacityAdmissionProjectionCandidates:
                     model_ref=self.lane_target.model_ref,
                     status=WorkItemStatus.READY,
                     retry_plan=None,
-                    estimated_input_tokens=estimated_input_tokens,
-                    estimated_output_tokens=estimated_output_tokens,
-                    effective_output_cap_tokens=effective_output_cap_tokens,
-                    reserved_total_tokens=reserved_total_tokens,
+                    input_tokens=input_tokens,
+                    artifact_tokens=artifact_tokens,
+                    required_window_tokens=required_window_tokens,
                     source_ref=_source_ref_from_payload(plan.payload),
                 )
             )

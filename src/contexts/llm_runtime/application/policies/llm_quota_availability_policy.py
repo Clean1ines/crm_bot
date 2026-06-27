@@ -14,17 +14,17 @@ from src.contexts.llm_runtime.domain.value_objects.llm_route import LlmRoute
 @dataclass(frozen=True, slots=True)
 class LlmEstimatedTokenNeed:
     input_tokens: int
-    estimated_output_tokens: int
+    completion_tokens: int
 
     def __post_init__(self) -> None:
         if self.input_tokens < 0:
             raise ValueError("input_tokens must be >= 0")
-        if self.estimated_output_tokens < 0:
-            raise ValueError("estimated_output_tokens must be >= 0")
+        if self.completion_tokens < 0:
+            raise ValueError("completion_tokens must be >= 0")
 
     @property
     def total_tokens(self) -> int:
-        return self.input_tokens + self.estimated_output_tokens
+        return self.input_tokens + self.completion_tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +135,7 @@ class LlmQuotaAvailabilityPolicy:
         if (
             snapshot.remaining_output_tokens_minute is not None
             and snapshot.remaining_output_tokens_minute
-            < estimated_need.estimated_output_tokens
+            < estimated_need.completion_tokens
         ):
             return False
 

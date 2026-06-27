@@ -93,9 +93,9 @@ def _workflow_command(
             "llm_dispatch_preparation": {
                 "profile": {
                     "profile_id": "faq_claim_observations",
-                    "estimated_prompt_tokens": 100,
-                    "estimated_completion_tokens": 10,
-                    "estimated_requests": 1,
+                    "input_tokens": 100,
+                    "artifact_tokens": 10,
+                    "request_count": 1,
                 },
                 "active_model_ref": "qwen/qwen3-32b",
             },
@@ -120,10 +120,9 @@ def _admitted_result() -> CapacityWindowAdmissionPassResult:
                 work_item_id="work-item-1",
                 lane=_lane(),
                 selection_kind="fresh",
-                estimated_input_tokens=100,
-                estimated_output_tokens=10,
-                effective_output_cap_tokens=50,
-                reserved_total_tokens=150,
+                input_tokens=100,
+                artifact_tokens=10,
+                required_window_tokens=150,
                 dispatch_context=CapacityAdmissionDispatchContextSummary(
                     source_ref="source-document-1",
                     source_unit_ref="source-unit-1",

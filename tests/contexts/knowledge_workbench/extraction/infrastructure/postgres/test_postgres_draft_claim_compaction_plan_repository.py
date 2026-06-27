@@ -54,7 +54,7 @@ class FakeConnection:
                     "group_ref": "group-1",
                     "prompt_variant": "draft_vs_draft",
                     "model_id": "openai/gpt-oss-120b",
-                    "estimated_input_tokens": 100,
+                    "artifact_tokens": 100,
                     "member_observation_refs": ["claim-a"],
                 }
             ]
@@ -105,7 +105,7 @@ def _group() -> DraftClaimCompactionGroupCandidate:
         member_observation_refs=("claim-a", "claim-b"),
         member_embedding_refs=("embedding-a", "embedding-b"),
         member_source_unit_refs=("unit-1", "unit-2"),
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         requires_split=False,
     )
 
@@ -117,7 +117,7 @@ def _batch() -> DraftClaimCompactionBatchCandidate:
         group_ref="group-1",
         prompt_variant="draft_vs_draft",
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         member_observation_refs=("claim-a", "claim-b"),
     )
 

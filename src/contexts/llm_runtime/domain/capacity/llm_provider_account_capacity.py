@@ -36,12 +36,12 @@ class LlmProviderAccountCapacity:
         if not isinstance(profile, LlmTaskCapacityProfile):
             raise TypeError("profile must be LlmTaskCapacityProfile")
 
-        estimated_total_tokens = profile.estimated_total_tokens
+        required_window_tokens = profile.required_window_tokens
         return min(
-            self.remaining_minute_requests // profile.estimated_requests,
-            self.remaining_minute_tokens // estimated_total_tokens,
-            self.remaining_daily_requests // profile.estimated_requests,
-            self.remaining_daily_tokens // estimated_total_tokens,
+            self.remaining_minute_requests // profile.request_count,
+            self.remaining_minute_tokens // required_window_tokens,
+            self.remaining_daily_requests // profile.request_count,
+            self.remaining_daily_tokens // required_window_tokens,
         )
 
 

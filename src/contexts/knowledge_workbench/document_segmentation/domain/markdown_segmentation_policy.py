@@ -9,7 +9,6 @@ from src.contexts.knowledge_workbench.document_segmentation.domain.document_segm
 from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
     DocumentSegmentationBudget,
     TokenEstimator,
-    estimate_tokens_roughly,
     required_segment_count,
     text_fits_segmentation_budget,
 )
@@ -49,13 +48,18 @@ class MarkdownSegmentationPolicy:
         self,
         command: MarkdownSegmentationCommand,
         *,
-        token_estimator: TokenEstimator = estimate_tokens_roughly,
+        token_estimator: TokenEstimator | None = None,
     ) -> tuple[DocumentSegment, ...]:
+        effective_token_estimator = (
+            command.budget.estimate_tokens
+            if token_estimator is None
+            else token_estimator
+        )
         candidates = _split_top_level_h1_candidates(command.markdown_text)
         drafts: list[_SegmentDraft] = []
 
         for candidate in candidates:
-            estimated_tokens = token_estimator(candidate.text)
+            estimated_tokens = effective_token_estimator(candidate.text)
             if estimated_tokens <= command.budget.max_source_segment_tokens:
                 drafts.append(
                     _SegmentDraft(
@@ -70,7 +74,7 @@ class MarkdownSegmentationPolicy:
                 _split_oversized_candidate(
                     candidate=candidate,
                     budget=command.budget,
-                    token_estimator=token_estimator,
+                    token_estimator=effective_token_estimator,
                 )
             )
 
@@ -79,7 +83,7 @@ class MarkdownSegmentationPolicy:
                 document_key=command.document_key,
                 draft=draft,
                 ordinal=ordinal,
-                token_estimator=token_estimator,
+                token_estimator=effective_token_estimator,
             )
             for ordinal, draft in enumerate(drafts)
         )

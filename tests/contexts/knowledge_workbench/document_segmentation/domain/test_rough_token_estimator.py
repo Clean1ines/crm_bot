@@ -1,38 +1,33 @@
-from __future__ import annotations
-
-from fractions import Fraction
+from typing import cast
 
 import pytest
+from fractions import Fraction
 
-from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR,
+from src.contexts.knowledge_workbench.document_segmentation.domain import (
     COMPACTION_ROUGH_TOKEN_ESTIMATOR,
     RoughTokenEstimator,
-    estimate_tokens_roughly,
 )
 
 
-def test_claim_builder_rough_estimator_uses_chars_per_token_3_3() -> None:
-    assert CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens("x" * 33) == 10
-    assert CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens("x" * 34) == 11
-
-
-def test_compaction_rough_estimator_uses_chars_per_token_3_7() -> None:
+def test_compaction_rough_token_estimator_uses_legacy_3_7_multiplier() -> None:
     assert COMPACTION_ROUGH_TOKEN_ESTIMATOR.estimate_tokens("x" * 37) == 10
     assert COMPACTION_ROUGH_TOKEN_ESTIMATOR.estimate_tokens("x" * 38) == 11
 
 
-def test_legacy_estimate_tokens_roughly_keeps_claim_builder_target() -> None:
-    assert estimate_tokens_roughly("x" * 33) == 10
-    assert estimate_tokens_roughly("x" * 34) == 11
+def test_custom_rough_token_estimator_rounds_up() -> None:
+    estimator = RoughTokenEstimator(multiplier=Fraction(5, 2))
+
+    assert estimator.estimate_tokens("x" * 5) == 2
+    assert estimator.estimate_tokens("x" * 6) == 3
 
 
-def test_rough_estimator_rejects_invalid_shapes() -> None:
-    with pytest.raises(TypeError, match="multiplier"):
-        RoughTokenEstimator(multiplier=3.3)
-
-    with pytest.raises(ValueError, match="multiplier"):
-        RoughTokenEstimator(multiplier=Fraction(0, 1))
+def test_rough_token_estimator_rejects_invalid_input() -> None:
+    estimator = RoughTokenEstimator(multiplier=Fraction(5, 2))
 
     with pytest.raises(TypeError, match="text"):
-        CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(123)
+        estimator.estimate_tokens(cast(str, 123))
+
+
+def test_rough_token_estimator_rejects_invalid_multiplier() -> None:
+    with pytest.raises(ValueError, match="multiplier"):
+        RoughTokenEstimator(multiplier=Fraction(0, 1))

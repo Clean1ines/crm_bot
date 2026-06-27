@@ -7,6 +7,11 @@ from typing import Protocol, cast
 
 import asyncpg
 
+from src.contexts.llm_runtime.domain.budget.token_budget import (
+    input_tokens as calculate_input_tokens,
+    required_window_tokens as calculate_required_window_tokens,
+)
+
 from src.contexts.knowledge_workbench.application.sagas.confirm_draft_claim_compaction_degraded_fallback import (
     ConfirmDraftClaimCompactionDegradedFallback,
     ConfirmDraftClaimCompactionDegradedFallbackCommand,
@@ -28,6 +33,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_s
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
     DraftClaimCompactionNextWorkItem,
     DraftClaimCompactionNextWorkItemType,
+)
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_budget_profile import (
+    draft_claim_compaction_request_safety_gap_tokens,
 )
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
     PostgresDraftClaimCompactionReductionStateRepository,
@@ -102,20 +110,36 @@ class _PostgresDegradedFallbackScheduler:
     ) -> None:
         if decision.group_ref is None or decision.resume_work_type is None:
             raise ValueError("graph fallback decision is incomplete")
-        if decision.estimated_prompt_tokens is None:
-            raise ValueError("estimated_prompt_tokens is required")
-        if decision.estimated_completion_tokens is None:
-            raise ValueError("estimated_completion_tokens is required")
+        if decision.input_tokens is None:
+            raise ValueError("input_tokens is required")
+        if decision.artifact_tokens is None:
+            raise ValueError("artifact_tokens is required")
 
         resume_work_type = DraftClaimCompactionNextWorkItemType(
             decision.resume_work_type
+        )
+        artifact_tokens = decision.artifact_tokens
+        prompt_tokens = max(
+            decision.input_tokens - artifact_tokens,
+            0,
+        )
+        input_tokens = calculate_input_tokens(
+            prompt_tokens=prompt_tokens,
+            artifact_tokens=artifact_tokens,
+        )
+        required_window_tokens = calculate_required_window_tokens(
+            input_tokens=input_tokens,
+            artifact_tokens=artifact_tokens,
+            safety_gap_tokens=draft_claim_compaction_request_safety_gap_tokens(),
         )
         next_work_item = DraftClaimCompactionNextWorkItem(
             work_type=resume_work_type,
             node_refs=decision.node_refs,
             primary_model_id=decision.degraded_model_ref,
-            estimated_prompt_tokens=decision.estimated_prompt_tokens,
-            estimated_completion_tokens=decision.estimated_completion_tokens,
+            prompt_tokens=prompt_tokens,
+            artifact_tokens=artifact_tokens,
+            input_tokens=input_tokens,
+            required_window_tokens=required_window_tokens,
         )
         state_repository = PostgresDraftClaimCompactionReductionStateRepository(
             self.connection
@@ -155,17 +179,18 @@ class _PostgresDegradedFallbackScheduler:
                             "model_id": decision.degraded_model_ref,
                             "node_refs": list(decision.node_refs),
                             "provider_messages": list(provider_messages),
+                            "prompt_tokens": prompt_tokens,
+                            "artifact_tokens": artifact_tokens,
+                            "input_tokens": input_tokens,
+                            "required_window_tokens": required_window_tokens,
                             "llm_capacity_estimate": {
-                                "estimated_input_tokens": (
-                                    decision.estimated_prompt_tokens
-                                ),
-                                "estimated_output_tokens": (
-                                    decision.estimated_completion_tokens
-                                ),
-                                "estimated_total_tokens": (
-                                    decision.estimated_prompt_tokens
-                                    + decision.estimated_completion_tokens
-                                ),
+                                "budget_contract_version": "v2",
+                                "model_ref": decision.degraded_model_ref,
+                                "prompt_variant": resume_work_type.value,
+                                "prompt_tokens": prompt_tokens,
+                                "artifact_tokens": artifact_tokens,
+                                "input_tokens": input_tokens,
+                                "required_window_tokens": required_window_tokens,
                             },
                         },
                     ),

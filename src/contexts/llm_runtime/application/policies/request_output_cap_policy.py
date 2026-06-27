@@ -5,45 +5,47 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ProviderOutputCapProfile:
-    provider_default_output_cap_tokens: int
-    request_safety_gap_tokens: int
+    provider_default_completion_tokens: int
+    completion_safety_gap_tokens: int
 
     def __post_init__(self) -> None:
         _require_positive_int(
-            self.provider_default_output_cap_tokens,
-            field_name="provider_default_output_cap_tokens",
+            self.provider_default_completion_tokens,
+            field_name="provider_default_completion_tokens",
         )
         _require_non_negative_int(
-            self.request_safety_gap_tokens,
-            field_name="request_safety_gap_tokens",
+            self.completion_safety_gap_tokens,
+            field_name="completion_safety_gap_tokens",
         )
 
 
 @dataclass(frozen=True, slots=True)
 class RequestOutputCapDecision:
-    effective_output_cap_tokens: int
-    request_output_cap_tokens: int | None
-    reserved_total_tokens: int
+    input_tokens: int
+    artifact_tokens: int
+    remaining_after_input_tokens: int
+    max_completion_tokens: int | None
+    required_window_tokens: int
 
     def __post_init__(self) -> None:
-        _require_positive_int(
-            self.effective_output_cap_tokens,
-            field_name="effective_output_cap_tokens",
+        _require_positive_int(self.input_tokens, field_name="input_tokens")
+        _require_non_negative_int(
+            self.artifact_tokens,
+            field_name="artifact_tokens",
         )
-        if self.request_output_cap_tokens is not None:
+        _require_int(
+            self.remaining_after_input_tokens,
+            field_name="remaining_after_input_tokens",
+        )
+        if self.max_completion_tokens is not None:
             _require_positive_int(
-                self.request_output_cap_tokens,
-                field_name="request_output_cap_tokens",
+                self.max_completion_tokens,
+                field_name="max_completion_tokens",
             )
-            if self.effective_output_cap_tokens != self.request_output_cap_tokens:
-                raise ValueError(
-                    "effective_output_cap_tokens must equal request_output_cap_tokens "
-                    "when an explicit request output cap is present"
-                )
-        if self.reserved_total_tokens <= self.effective_output_cap_tokens:
-            raise ValueError(
-                "reserved_total_tokens must include input plus effective output cap"
-            )
+        _require_positive_int(
+            self.required_window_tokens,
+            field_name="required_window_tokens",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,73 +59,67 @@ class RequestOutputCapPolicy:
     def decide(
         self,
         *,
-        estimated_input_tokens: int,
-        estimated_output_tokens: int,
+        input_tokens: int,
+        artifact_tokens: int,
         tokens_remaining: int,
-        hard_output_limit_tokens: int,
+        model_max_output_tokens: int,
     ) -> RequestOutputCapDecision:
-        _require_positive_int(
-            estimated_input_tokens,
-            field_name="estimated_input_tokens",
-        )
-        _require_non_negative_int(
-            estimated_output_tokens,
-            field_name="estimated_output_tokens",
-        )
+        _require_positive_int(input_tokens, field_name="input_tokens")
+        _require_non_negative_int(artifact_tokens, field_name="artifact_tokens")
         _require_non_negative_int(tokens_remaining, field_name="tokens_remaining")
         _require_positive_int(
-            hard_output_limit_tokens,
-            field_name="hard_output_limit_tokens",
+            model_max_output_tokens,
+            field_name="model_max_output_tokens",
         )
         if (
-            self.provider_profile.provider_default_output_cap_tokens
-            > hard_output_limit_tokens
+            self.provider_profile.provider_default_completion_tokens
+            > model_max_output_tokens
         ):
             raise ValueError(
-                "provider_default_output_cap_tokens must not exceed "
-                "hard_output_limit_tokens"
+                "provider_default_completion_tokens must not exceed "
+                "model_max_output_tokens"
             )
 
-        available_output_cap_tokens = (
+        remaining_after_input_tokens = (
             tokens_remaining
-            - estimated_input_tokens
-            - self.provider_profile.request_safety_gap_tokens
+            - input_tokens
+            - self.provider_profile.completion_safety_gap_tokens
         )
-        minimum_explicit_cap_tokens = max(
-            self.provider_profile.provider_default_output_cap_tokens,
-            estimated_output_tokens,
-        )
-
-        request_output_cap_tokens: int | None = None
-        if available_output_cap_tokens >= minimum_explicit_cap_tokens:
-            candidate_cap = min(
-                available_output_cap_tokens,
-                hard_output_limit_tokens,
+        max_completion_tokens: int | None = None
+        if (
+            remaining_after_input_tokens
+            > self.provider_profile.provider_default_completion_tokens
+        ):
+            max_completion_tokens = min(
+                remaining_after_input_tokens,
+                model_max_output_tokens,
             )
-            if candidate_cap >= minimum_explicit_cap_tokens:
-                request_output_cap_tokens = candidate_cap
 
-        effective_output_cap_tokens = (
-            request_output_cap_tokens
-            if request_output_cap_tokens is not None
-            else self.provider_profile.provider_default_output_cap_tokens
-        )
         return RequestOutputCapDecision(
-            effective_output_cap_tokens=effective_output_cap_tokens,
-            request_output_cap_tokens=request_output_cap_tokens,
-            reserved_total_tokens=estimated_input_tokens + effective_output_cap_tokens,
+            input_tokens=input_tokens,
+            artifact_tokens=artifact_tokens,
+            remaining_after_input_tokens=remaining_after_input_tokens,
+            max_completion_tokens=max_completion_tokens,
+            required_window_tokens=(
+                input_tokens
+                + artifact_tokens
+                + self.provider_profile.completion_safety_gap_tokens
+            ),
         )
 
 
 def _require_positive_int(value: int, *, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{field_name} must be int")
+    _require_int(value, field_name=field_name)
     if value <= 0:
         raise ValueError(f"{field_name} must be > 0")
 
 
 def _require_non_negative_int(value: int, *, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{field_name} must be int")
+    _require_int(value, field_name=field_name)
     if value < 0:
         raise ValueError(f"{field_name} must be >= 0")
+
+
+def _require_int(value: int, *, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")

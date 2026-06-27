@@ -1,4 +1,5 @@
 from pathlib import Path
+from decimal import Decimal
 
 import pytest
 
@@ -25,8 +26,9 @@ def _budget(*, max_source_tokens: int) -> DocumentSegmentationBudget:
         ),
         model=SegmentationModelBudgetProfile(
             profile_name="primary_model",
-            max_request_input_tokens=max_source_tokens,
+            max_request_input_tokens=max_source_tokens * 2,
             segmentation_input_safety_gap_tokens=0,
+            char_to_token_multiplier=Decimal("1"),
         ),
     )
 
@@ -171,11 +173,12 @@ def test_budget_uses_prompt_and_request_numbers_not_runtime_context_window() -> 
             profile_name="primary_model",
             max_request_input_tokens=20,
             segmentation_input_safety_gap_tokens=5,
+            char_to_token_multiplier=Decimal("1"),
         ),
     )
 
-    assert budget.max_source_segment_tokens == 5
-    assert required_segment_count(estimated_tokens=6, budget=budget) == 2
+    assert budget.max_source_segment_tokens == 2
+    assert required_segment_count(estimated_tokens=6, budget=budget) == 3
 
     source = Path(
         "src/contexts/knowledge_workbench/document_segmentation/domain/"
@@ -230,6 +233,7 @@ def test_invalid_budget_shapes_are_rejected() -> None:
             profile_name="primary_model",
             max_request_input_tokens=10,
             segmentation_input_safety_gap_tokens=10,
+            char_to_token_multiplier=Decimal("1"),
         )
 
 
@@ -261,7 +265,7 @@ def test_document_segmentation_source_guard() -> None:
         "max_source_segment_tokens",
         "required_segment_count",
         "split_marker_blocks_balanced",
-        "estimate_tokens_roughly",
+        "estimate_tokens",
     ]
     forbidden_markers = [
         "context_window_tokens",

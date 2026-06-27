@@ -64,6 +64,15 @@ def _budget() -> CapacityAdmissionWindowBudget:
     )
 
 
+def _lane(*, account_ref: str | None = "groq-account-1") -> CapacityAdmissionLaneKey:
+    return CapacityAdmissionLaneKey(
+        work_kind="knowledge_workbench.claim_builder.section_extraction",
+        provider="groq",
+        account_ref=account_ref,
+        model_ref="qwen/qwen3-32b",
+    )
+
+
 def _item(
     *, account_ref: str | None = "groq-account-1"
 ) -> CapacityAdmissionSelectableWorkItem:
@@ -76,10 +85,9 @@ def _item(
             model_ref="qwen/qwen3-32b",
         ),
         status="ready",
-        reserved_total_tokens=3_000,
-        estimated_input_tokens=2_500,
-        estimated_output_tokens=300,
-        effective_output_cap_tokens=500,
+        required_window_tokens=3_000,
+        input_tokens=2_500,
+        artifact_tokens=300,
     )
 
 
@@ -90,6 +98,8 @@ async def test_reserves_route_capacity_after_lock_and_active_totals() -> None:
 
     result = await reservation.reserve_capacity_for_selected_work_item(
         reservation_ref="work-item-1:attempt:1",
+        attempt_id="attempt-1",
+        execution_lane_key=_lane(),
         selected_work_item=_item(),
         budget=_budget(),
         now=_now(),
@@ -103,7 +113,7 @@ async def test_reserves_route_capacity_after_lock_and_active_totals() -> None:
     assert result.budget_after.remaining_requests == 4
     assert result.budget_after.remaining_tokens == 7_000
     assert repository.locked_routes == [("groq", "groq-account-1", "qwen/qwen3-32b")]
-    assert repository.reservations[0].attempt_id == "work-item-1:attempt:1"
+    assert repository.reservations[0].attempt_id == "attempt-1"
 
 
 @pytest.mark.asyncio
@@ -125,6 +135,8 @@ async def test_active_reservations_reduce_available_budget_before_new_reservatio
 
     result = await reservation.reserve_capacity_for_selected_work_item(
         reservation_ref="work-item-1:attempt:1",
+        attempt_id="attempt-1",
+        execution_lane_key=_lane(),
         selected_work_item=_item(),
         budget=_budget(),
         now=_now(),
@@ -145,6 +157,8 @@ async def test_missing_account_ref_is_rejected_as_route_configuration_error() ->
     with pytest.raises(ValueError, match="account_ref"):
         await reservation.reserve_capacity_for_selected_work_item(
             reservation_ref="work-item-1:attempt:1",
+            attempt_id="attempt-1",
+            execution_lane_key=_lane(account_ref=None),
             selected_work_item=_item(account_ref=None),
             budget=_budget(),
             now=_now(),

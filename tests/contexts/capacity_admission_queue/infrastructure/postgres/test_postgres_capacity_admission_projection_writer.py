@@ -36,7 +36,7 @@ def _candidate(
     provider: str = "groq",
     account_ref: str | None = "groq-account-1",
     model_ref: str = "llama-3.3-70b-versatile",
-    reserved_total_tokens: int = 130,
+    required_window_tokens: int = 130,
 ) -> CapacityAdmissionWorkItemProjectionCandidate:
     return CapacityAdmissionWorkItemProjectionCandidate(
         work_item_id=work_item_id,
@@ -48,10 +48,9 @@ def _candidate(
         model_ref=model_ref,
         status=WorkItemStatus.READY,
         retry_plan=None,
-        estimated_input_tokens=100,
-        estimated_output_tokens=30,
-        effective_output_cap_tokens=30,
-        reserved_total_tokens=reserved_total_tokens,
+        input_tokens=100,
+        artifact_tokens=30,
+        required_window_tokens=required_window_tokens,
         source_ref={
             "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
             "source_document_ref": "source-document-1",
@@ -99,9 +98,8 @@ async def test_persists_projection_dirty_lane_and_due_work_event() -> None:
     assert projection_call.args[7] == WorkItemStatus.READY.value
     assert projection_call.args[9] == 100
     assert projection_call.args[10] == 30
-    assert projection_call.args[11] == 30
-    assert projection_call.args[12] == 130
-    projection_source_ref_json = _string_arg(projection_call.args[13])
+    assert projection_call.args[11] == 130
+    projection_source_ref_json = _string_arg(projection_call.args[12])
     assert '"source_document_ref":"source-document-1"' in projection_source_ref_json
 
     assert "INSERT INTO capacity_admission_lane_dirty_flags" in dirty_call.query
@@ -116,7 +114,7 @@ async def test_persists_projection_dirty_lane_and_due_work_event() -> None:
     assert event_call.args[7] == "work-item-1"
     assert event_call.args[8] == "scheduled_projection_upserted"
     event_payload_json = _string_arg(event_call.args[9])
-    assert '"reserved_total_tokens":130' in event_payload_json
+    assert '"required_window_tokens":130' in event_payload_json
 
 
 @pytest.mark.asyncio

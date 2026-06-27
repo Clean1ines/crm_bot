@@ -75,8 +75,8 @@ def test_projects_work_item_reroute_requested() -> None:
                 "source_unit_ref": "source-unit-1",
                 "previous_model_ref": "qwen/qwen3-32b",
                 "next_model_ref": "openai/gpt-oss-120b",
-                "estimated_input_tokens": 9000,
-                "reserved_total_tokens": 12000,
+                "input_tokens": 9000,
+                "required_window_tokens": 12000,
             },
         )
     )
@@ -85,4 +85,5 @@ def test_projects_work_item_reroute_requested() -> None:
     assert projected.projection_type == "workflow_work_item_reroute_requested"
     assert projected.payload["work_item_id"] == "work-1"
     assert projected.payload["route_reason"] == "input_too_large"
-    assert projected.payload["reserved_total_tokens"] == 12000
+    assert projected.payload["input_tokens"] == 9000
+    assert projected.payload["required_window_tokens"] == 12000

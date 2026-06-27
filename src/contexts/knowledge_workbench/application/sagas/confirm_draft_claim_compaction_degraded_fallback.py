@@ -41,8 +41,8 @@ class DraftClaimCompactionDegradedFallbackDecision:
     group_ref: str | None = None
     node_refs: tuple[str, ...] = ()
     resume_work_type: str | None = None
-    estimated_prompt_tokens: int | None = None
-    estimated_completion_tokens: int | None = None
+    input_tokens: int | None = None
+    artifact_tokens: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.source_command_id, WorkflowCommandId):
@@ -53,16 +53,10 @@ class DraftClaimCompactionDegradedFallbackDecision:
             _require_non_empty_text(self.resume_work_type or "", "resume_work_type")
             if not self.node_refs:
                 raise ValueError("node_refs must be non-empty for graph fallback")
-            if (
-                self.estimated_prompt_tokens is None
-                or self.estimated_prompt_tokens <= 0
-            ):
-                raise ValueError("estimated_prompt_tokens must be positive")
-            if (
-                self.estimated_completion_tokens is None
-                or self.estimated_completion_tokens < 0
-            ):
-                raise ValueError("estimated_completion_tokens must be non-negative")
+            if self.input_tokens is None or self.input_tokens <= 0:
+                raise ValueError("input_tokens must be positive")
+            if self.artifact_tokens is None or self.artifact_tokens < 0:
+                raise ValueError("artifact_tokens must be non-negative")
 
     @property
     def requires_graph_work_item(self) -> bool:
@@ -206,10 +200,10 @@ def _graph_prepare_payload(
     command: ConfirmDraftClaimCompactionDegradedFallbackCommand,
     decision: DraftClaimCompactionDegradedFallbackDecision,
 ) -> JsonObject:
-    if decision.estimated_prompt_tokens is None:
-        raise ValueError("estimated_prompt_tokens is required")
-    if decision.estimated_completion_tokens is None:
-        raise ValueError("estimated_completion_tokens is required")
+    if decision.input_tokens is None:
+        raise ValueError("input_tokens is required")
+    if decision.artifact_tokens is None:
+        raise ValueError("artifact_tokens is required")
     return {
         "workflow_run_id": command.workflow_run_id,
         "work_kind": "knowledge_workbench.draft_claim_compaction",
@@ -221,11 +215,9 @@ def _graph_prepare_payload(
                 "profile_id": (
                     f"draft_claim_compaction:user_choice:{decision.source_command_id.value}"
                 ),
-                "estimated_input_tokens": decision.estimated_prompt_tokens,
-                "estimated_output_tokens": decision.estimated_completion_tokens,
-                "estimated_prompt_tokens": decision.estimated_prompt_tokens,
-                "estimated_completion_tokens": decision.estimated_completion_tokens,
-                "estimated_requests": 1,
+                "input_tokens": decision.input_tokens,
+                "artifact_tokens": decision.artifact_tokens,
+                "request_count": 1,
             },
             "active_model_ref": decision.degraded_model_ref,
             "requested_items": 1,

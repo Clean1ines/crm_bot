@@ -66,7 +66,10 @@ KNOWN_GROQ_FREE_FACT_VIOLATION_PATHS = {
     "src/agent/nodes/intent_extractor.py",
     "src/application/ai_playground/contracts.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_apply_draft_claim_compaction_result_command.py",
+    "src/contexts/knowledge_workbench/application/routing/knowledge_extraction_phase_route_policies.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_cluster_draft_claims_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/knowledge_workbench_llm_budget_catalog.py",
+    "src/contexts/knowledge_workbench/extraction/application/policies/draft_claim_compaction_budget_profile.py",
     "src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_prepare_claim_builder_dispatch_batch_command.py",
     "src/contexts/knowledge_workbench/application/sagas/handle_prepare_draft_claim_compaction_dispatch_batch_command.py",
@@ -103,9 +106,10 @@ KNOWN_PROVIDER_GROQ_VIOLATION_PATHS = {
 }
 
 RESERVED_OUTPUT_TOKEN_TARGET_TERMS = (
-    "estimated_output_tokens",
-    "request_output_cap_tokens",
-    "reserved_total_tokens",
+    "artifact_tokens",
+    "max_completion_tokens",
+    "required_window_tokens",
+    "completion_safety_gap_tokens",
     "segmentation_input_safety_gap_tokens",
 )
 
@@ -128,6 +132,11 @@ DEFAULT_GROQ_CATALOG_MARKERS = (
 )
 
 KNOWN_DEFAULT_GROQ_CATALOG_PATHS = {
+    "src/contexts/knowledge_workbench/application/sagas/claim_builder_source_ingestion_budget.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_prepare_claim_builder_dispatch_batch_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/handle_schedule_claim_builder_section_work_command.py",
+    "src/contexts/knowledge_workbench/application/sagas/knowledge_workbench_llm_budget_catalog.py",
+    "src/contexts/knowledge_workbench/extraction/application/policies/draft_claim_compaction_budget_profile.py",
     "src/contexts/knowledge_workbench/rag_eval/application/policies/workbench_rag_eval_question_generation_route_policy.py",
     "src/contexts/llm_runtime/domain/capacity/llm_model_route_catalog.py",
     "src/interfaces/composition/knowledge_extraction_after_upload_composition.py",
@@ -269,15 +278,16 @@ def test_reserved_output_tokens_remains_legacy_only() -> None:
         assert target_term in source
 
 
-def test_groq_free_effective_output_cap_boundary_marker() -> None:
+def test_groq_free_completion_budget_boundary_marker() -> None:
     source = _read(ARCH_DOC_PATH)
 
     required_markers = (
-        "provider_default_output_cap_tokens = 2048",
-        "effective_output_cap_tokens = request_output_cap_tokens or provider_default_output_cap_tokens",
-        "tokens_remaining >= estimated_input_tokens + effective_output_cap_tokens",
-        "missing explicit `max_completion_tokens` means provider default output cap, not unlimited output",
-        "executor consumes prepared request budget; executor does not own admission math",
+        "provider_default_completion_tokens = 2048",
+        "remaining_after_input_tokens = tokens_remaining - input_tokens - completion_safety_gap_tokens",
+        "max_completion_tokens = min(remaining_after_input_tokens, model.max_output_tokens)",
+        "required_window_tokens = input_tokens + artifact_tokens + completion_safety_gap_tokens",
+        "missing explicit `max_completion_tokens` means Groq provider default completion cap, not unlimited output",
+        "executor consumes prepared canonical request budget; executor does not own admission math",
         "groq_dispatch_executor._resolve_max_completion_tokens",
         "groq_chat_request_builder",
     )
@@ -371,10 +381,6 @@ def test_b1d2_rough_token_estimator_targets_are_not_reversed() -> None:
         REPO_ROOT / "src/contexts/knowledge_workbench/document_segmentation/domain/"
         "segmentation_budget.py",
     )
-    claim_builder_schedule = _read(
-        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
-        "map_claim_builder_section_plans_to_execution_schedule.py",
-    )
     compaction_batch = _read(
         REPO_ROOT / "src/contexts/knowledge_workbench/extraction/application/policies/"
         "draft_claim_compaction_batch_budget_policy.py",
@@ -389,19 +395,16 @@ def test_b1d2_rough_token_estimator_targets_are_not_reversed() -> None:
         "postgres_draft_claim_compaction_reduction_state_repository.py",
     )
 
-    assert "CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR" in source
-    assert "multiplier=Fraction(33, 10)" in source
     assert "COMPACTION_ROUGH_TOKEN_ESTIMATOR" in source
     assert "multiplier=Fraction(37, 10)" in source
-    assert "CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR" in claim_builder_schedule
-    assert "COMPACTION_ROUGH_TOKEN_ESTIMATOR" in compaction_batch
-    assert "COMPACTION_ROUGH_TOKEN_ESTIMATOR" in compaction_cluster
-    assert "COMPACTION_ROUGH_TOKEN_ESTIMATOR" in compaction_repository
+    assert "draft_claim_compaction_artifact_tokens" in compaction_batch
+    assert "draft_claim_compaction_artifact_tokens" in compaction_cluster
     assert "// 4 + 40" not in compaction_batch
     assert "len(claim.embedding_text) // 4" not in compaction_cluster
+    assert "// 4 + 40" not in compaction_repository
 
 
-def test_b1d3a_task_capacity_profile_exposes_target_accessors() -> None:
+def test_b1d3a_task_capacity_profile_exposes_canonical_token_fields() -> None:
     profile_source = _read(
         REPO_ROOT / "src/contexts/llm_runtime/domain/capacity/"
         "llm_task_capacity_profile.py",
@@ -411,17 +414,20 @@ def test_b1d3a_task_capacity_profile_exposes_target_accessors() -> None:
         "resolve_llm_dispatch_input_size_preflight.py",
     )
 
-    assert "def estimated_input_tokens" in profile_source
-    assert "def estimated_output_tokens" in profile_source
-    assert "return self.estimated_input_tokens + self.estimated_output_tokens" in (
-        profile_source
-    )
-    assert "command.profile.estimated_input_tokens" in preflight_source
+    assert "input_tokens: int" in profile_source
+    assert "artifact_tokens: int" in profile_source
+    assert "def required_window_tokens(self) -> int:" in profile_source
+    assert "return self.input_tokens + self.artifact_tokens" in profile_source
+    assert "request_count: int" in profile_source
+    assert "estimated_prompt_tokens" not in profile_source
+    assert "estimated_completion_tokens" not in profile_source
+    assert "command.profile.input_tokens" in preflight_source
+    assert "command.profile.estimated_input_tokens" not in preflight_source
     assert "estimated prompt tokens" not in preflight_source
     assert "_first_fallback_that_fits_prompt" not in preflight_source
 
 
-def test_b1d3b_claim_builder_profile_payload_dual_writes_and_dual_reads() -> None:
+def test_b1g3_claim_builder_profile_payload_uses_canonical_capacity_fields() -> None:
     producer = _read(
         REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
         "claim_builder_dispatch_preparation.py",
@@ -430,20 +436,23 @@ def test_b1d3b_claim_builder_profile_payload_dual_writes_and_dual_reads() -> Non
         REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
         "handle_prepare_claim_builder_dispatch_batch_command.py",
     )
+    doc = _read(ARCH_DOC_PATH)
 
-    assert '"estimated_input_tokens": self.profile.estimated_input_tokens' in producer
-    assert '"estimated_output_tokens": self.profile.estimated_output_tokens' in producer
-    assert '"estimated_prompt_tokens": self.profile.estimated_prompt_tokens' in producer
+    assert "B1g-3: claim-builder dispatch profile payload writes canonical" in doc
+    assert '"input_tokens": self.profile.input_tokens' in producer
+    assert '"artifact_tokens": self.profile.artifact_tokens' in producer
     assert (
-        '"estimated_completion_tokens": self.profile.estimated_completion_tokens'
-        in producer
+        '"required_window_tokens": self.profile.required_window_tokens' not in producer
     )
-    assert "_claim_builder_profile_positive_int_with_legacy_fallback" in reader
-    assert "_claim_builder_profile_non_negative_int_with_legacy_fallback" in reader
-    assert 'key="estimated_input_tokens"' in reader
-    assert 'legacy_key="estimated_prompt_tokens"' in reader
-    assert 'key="estimated_output_tokens"' in reader
-    assert 'legacy_key="estimated_completion_tokens"' in reader
+    assert '"request_count": self.profile.request_count' in producer
+    assert "estimated_prompt_tokens" not in producer
+    assert "estimated_completion_tokens" not in producer
+    assert "_claim_builder_profile_positive_int_with_legacy_fallback" not in reader
+    assert "_claim_builder_profile_non_negative_int_with_legacy_fallback" not in reader
+    assert '"input_tokens"' in reader
+    assert '"artifact_tokens"' in reader
+    assert '"request_count"' in reader
+    assert '"required_window_tokens"' not in reader
 
 
 def test_b1a_does_not_pretend_runtime_token_vocabulary_is_migrated() -> None:
@@ -491,25 +500,27 @@ def test_b1e_actual_token_usage_payload_compatibility() -> None:
     assert '"actual_completion_tokens": usage.output_tokens' in groq_executor
 
 
-def test_b1f1_groq_executor_uses_effective_output_cap_as_fallback_source() -> None:
+def test_b1g1_groq_executor_consumes_canonical_max_completion_tokens() -> None:
     doc = _read(ARCH_DOC_PATH)
     groq_executor = _read(
         REPO_ROOT / "src/contexts/llm_runtime/infrastructure/providers/groq/"
         "groq_dispatch_executor.py"
     )
 
-    assert "B1f-1: Groq executor reads `effective_output_cap_tokens`" in doc
-    assert "effective_output_cap_tokens: int" in groq_executor
-    assert "_parse_effective_output_cap_tokens" in groq_executor
-    assert 'estimate_payload.get("effective_output_cap_tokens")' in groq_executor
+    assert "B1g-1: Groq executor consumes canonical `max_completion_tokens`" in doc
+    assert "max_completion_tokens: int | None" in groq_executor
+    assert "_parse_max_completion_tokens" in groq_executor
+    assert 'estimate_payload.get("max_completion_tokens")' in groq_executor
+    assert 'estimate_payload.get("request_output_cap_tokens")' not in groq_executor
+    assert 'estimate_payload.get("effective_output_cap_tokens")' not in groq_executor
     assert 'estimate_payload.get("reserved_output_tokens")' not in groq_executor
-    assert "parsed.effective_output_cap_tokens" in groq_executor
-    assert "parsed.reserved_output_tokens" not in groq_executor
+    assert "parsed.max_completion_tokens" in groq_executor
+    assert "parsed.request_output_cap_tokens" not in groq_executor
+    assert "parsed.effective_output_cap_tokens" not in groq_executor
     assert "def _parse_reserved_output_tokens" not in groq_executor
 
 
-def test_b1f2_compaction_schedule_payload_uses_estimated_output_tokens() -> None:
-    doc = _read(ARCH_DOC_PATH)
+def test_compaction_schedule_payload_uses_canonical_capacity_fields() -> None:
     cluster = _read(
         REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
         "handle_cluster_draft_claims_command.py"
@@ -518,42 +529,38 @@ def test_b1f2_compaction_schedule_payload_uses_estimated_output_tokens() -> None
         REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
         "handle_apply_draft_claim_compaction_result_command.py"
     )
-    estimate = _read(
-        REPO_ROOT / "src/contexts/knowledge_workbench/application/sagas/"
-        "llm_provider_message_capacity_estimate.py"
-    )
-    degraded_confirmation = _read(
-        REPO_ROOT / "src/interfaces/composition/"
-        "knowledge_extraction_degraded_fallback_confirmation.py"
-    )
 
-    assert "B1f-2: compaction schedule payloads write `estimated_output_tokens`" in doc
-    assert '"estimated_output_tokens": estimated_output_tokens' in cluster
+    assert '"artifact_tokens": artifact_tokens' in cluster
+    assert '"input_tokens": input_tokens' in cluster
+    assert '"required_window_tokens": required_window_tokens' in cluster
+    assert '"estimated_output_tokens": estimated_output_tokens' not in cluster
     assert '"reserved_output_tokens": reserved_output_tokens' not in cluster
-    assert '"estimated_output_tokens": next_work_item.estimated_completion_tokens' in (
-        apply_result
+    assert '"artifact_tokens": next_work_item.artifact_tokens' in apply_result
+    assert '"input_tokens": next_work_item.input_tokens' in apply_result
+    assert (
+        '"required_window_tokens": next_work_item.required_window_tokens'
+        in apply_result
+    )
+    assert (
+        '"estimated_output_tokens": next_work_item.estimated_completion_tokens'
+        not in (apply_result)
     )
     assert (
         '"reserved_output_tokens": next_work_item.estimated_completion_tokens'
         not in apply_result
     )
-    assert "estimated_output_tokens: int" in estimate
-    assert "def reserved_output_tokens(self) -> int:" not in estimate
-    assert '"estimated_output_tokens": self.estimated_output_tokens' in estimate
-    assert '"reserved_output_tokens": self.reserved_output_tokens' not in estimate
-    assert '"estimated_output_tokens": (' in degraded_confirmation
-    assert '"reserved_output_tokens": (' not in degraded_confirmation
 
 
-def test_b1f3b_quota_estimated_token_need_uses_estimated_output_tokens() -> None:
+def test_b1g2_quota_estimated_token_need_uses_completion_tokens() -> None:
     doc = _read(ARCH_DOC_PATH)
     quota_policy = _read(
         REPO_ROOT / "src/contexts/llm_runtime/application/policies/"
         "llm_quota_availability_policy.py"
     )
 
-    assert "B1f-3b: quota availability token need uses `estimated_output_tokens`" in doc
-    assert "estimated_output_tokens: int" in quota_policy
-    assert "self.estimated_output_tokens" in quota_policy
-    assert "estimated_need.estimated_output_tokens" in quota_policy
+    assert "B1g-2: quota availability token need uses `completion_tokens`" in doc
+    assert "completion_tokens: int" in quota_policy
+    assert "self.completion_tokens" in quota_policy
+    assert "estimated_need.completion_tokens" in quota_policy
+    assert "estimated_output_tokens" not in quota_policy
     assert "reserved_output_tokens" not in quota_policy

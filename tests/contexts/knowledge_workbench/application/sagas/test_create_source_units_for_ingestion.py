@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import cast
 
@@ -162,8 +163,11 @@ def _budget(
         ),
         model=SegmentationModelBudgetProfile(
             profile_name=profile_name,
-            max_request_input_tokens=max_request_input_tokens,
+            max_request_input_tokens=(
+                max_request_input_tokens * 2 + segmentation_input_safety_gap_tokens
+            ),
             segmentation_input_safety_gap_tokens=segmentation_input_safety_gap_tokens,
+            char_to_token_multiplier=Decimal("4"),
         ),
     )
 
@@ -561,8 +565,8 @@ def test_create_source_units_for_ingestion_source_guard() -> None:
         "build_source_units_from_segments",
         "document_segmentation_v1",
         "max_source_segment_tokens",
-        "primary_model",
-        "claim_builder_section_extraction",
+        "CLAIM_BUILDER_SEGMENTATION_PROFILE_NAME",
+        "CLAIM_BUILDER_PROMPT_NAME",
         "CreateSourceUnitsForIngestion",
         "CreateSourceUnitsForIngestionCommand",
         "CreateSourceUnitsForIngestionResult",

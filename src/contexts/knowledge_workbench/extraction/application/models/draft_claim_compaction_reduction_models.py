@@ -46,14 +46,14 @@ class DraftClaimCompactionBudgetFitStatus(StrEnum):
 @dataclass(frozen=True, slots=True)
 class DraftClaimCompactionBudgetFit:
     status: DraftClaimCompactionBudgetFitStatus
-    estimated_input_tokens: int = 0
+    artifact_tokens: int = 0
     primary_model_id: str = PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID
     degraded_candidate_model_id: str = DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "status", _budget_fit_status(self.status))
-        if self.estimated_input_tokens < 0:
-            raise ValueError("estimated_input_tokens must be >= 0")
+        if self.artifact_tokens < 0:
+            raise ValueError("artifact_tokens must be >= 0")
         _text(self.primary_model_id, "primary_model_id")
         _text(self.degraded_candidate_model_id, "degraded_candidate_model_id")
 
@@ -76,7 +76,7 @@ class DraftClaimCompactionNode:
     sources: tuple[DraftClaimCompactionNodeSource, ...] = ()
     active: bool = True
     supersedes_node_refs: tuple[str, ...] = ()
-    estimated_input_tokens: int = 1
+    artifact_tokens: int = 1
     compacted_key: str | None = None
     compacted_claim: str | None = None
     compacted_triples: tuple[DraftClaimCompactionTriple, ...] = ()
@@ -97,8 +97,8 @@ class DraftClaimCompactionNode:
             "supersedes_node_refs",
             allow_empty=True,
         )
-        if self.estimated_input_tokens < 0:
-            raise ValueError("estimated_input_tokens must be >= 0")
+        if self.artifact_tokens < 0:
+            raise ValueError("artifact_tokens must be >= 0")
         if self.compacted_key is not None:
             _text(self.compacted_key, "compacted_key")
         if self.compacted_claim is not None:
@@ -123,7 +123,7 @@ class DraftClaimCompactionNodeReadModel:
     active: bool
     source_claim_refs: tuple[str, ...]
     supersedes_node_refs: tuple[str, ...]
-    estimated_input_tokens: int
+    artifact_tokens: int
     compacted_key: str | None
     compacted_claim: str | None
     compacted_claim_kind: str | None
@@ -146,7 +146,7 @@ class DraftClaimCompactionNodeReadModel:
             raise TypeError("active must be bool")
         _text_tuple(self.source_claim_refs, "source_claim_refs", allow_empty=False)
         _text_tuple(self.supersedes_node_refs, "supersedes_node_refs", allow_empty=True)
-        _non_negative_int(self.estimated_input_tokens, "estimated_input_tokens")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
         if self.compacted_key is not None:
             _text(self.compacted_key, "compacted_key")
         if self.compacted_claim is not None:
@@ -175,7 +175,7 @@ class DraftClaimCompactionFrontierNodeReadModel:
     source_claim_count: int
     supersedes_node_refs: tuple[str, ...]
     supersedes_node_count: int
-    estimated_input_tokens: int
+    artifact_tokens: int
     compacted_key: str | None
     compacted_claim: str | None
     compacted_claim_kind: str | None
@@ -205,7 +205,7 @@ class DraftClaimCompactionFrontierNodeReadModel:
         _non_negative_int(self.supersedes_node_count, "supersedes_node_count")
         if self.supersedes_node_count != len(self.supersedes_node_refs):
             raise ValueError("supersedes_node_count must match supersedes_node_refs")
-        _non_negative_int(self.estimated_input_tokens, "estimated_input_tokens")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
         if self.compacted_key is not None:
             _text(self.compacted_key, "compacted_key")
         if self.compacted_claim is not None:
@@ -550,9 +550,11 @@ class DraftClaimCompactionNextWorkItem:
     primary_model_id: str = PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID
     degraded_model_id: str | None = None
     user_choice_resume_work_type: DraftClaimCompactionNextWorkItemType | None = None
-    estimated_prompt_tokens: int = 0
-    estimated_completion_tokens: int = 4000
-    estimated_requests: int = 1
+    prompt_tokens: int = 0
+    artifact_tokens: int = 0
+    input_tokens: int = 0
+    required_window_tokens: int = 0
+    request_count: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "work_type", _next_work_item_type(self.work_type))
@@ -577,15 +579,20 @@ class DraftClaimCompactionNextWorkItem:
                 DraftClaimCompactionNextWorkItemType.DONE,
             }:
                 raise ValueError("user choice resume work type must be executable")
-        _non_negative_int(
-            self.estimated_prompt_tokens,
-            "estimated_prompt_tokens",
-        )
-        _non_negative_int(
-            self.estimated_completion_tokens,
-            "estimated_completion_tokens",
-        )
-        _positive_int(self.estimated_requests, "estimated_requests")
+        _non_negative_int(self.prompt_tokens, "prompt_tokens")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
+        _non_negative_int(self.input_tokens, "input_tokens")
+        _non_negative_int(self.required_window_tokens, "required_window_tokens")
+        _positive_int(self.request_count, "request_count")
+        if self.input_tokens and self.input_tokens != (
+            self.prompt_tokens + self.artifact_tokens
+        ):
+            raise ValueError("input_tokens must equal prompt_tokens + artifact_tokens")
+        if (
+            self.required_window_tokens
+            and self.required_window_tokens < self.input_tokens
+        ):
+            raise ValueError("required_window_tokens must be >= input_tokens")
 
 
 @dataclass(frozen=True, slots=True)

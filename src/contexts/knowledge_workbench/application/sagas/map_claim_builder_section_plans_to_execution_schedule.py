@@ -6,11 +6,9 @@ import os
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     WorkItemSchedulePlan,
 )
-from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR,
+from src.contexts.knowledge_workbench.application.sagas.knowledge_workbench_llm_budget_catalog import (
+    claim_builder_phase_token_budget_policy,
 )
-
-
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     ClaimBuilderSectionWorkPlan,
 )
@@ -22,8 +20,6 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 
 CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 1_953
 CLAIM_BUILDER_PROMPT_TOKENS_ENV = "CLAIM_BUILDER_PROMPT_TOKENS"
-CLAIM_BUILDER_MODEL_TPM_TOKENS = 6_000
-CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,24 +138,25 @@ def _claim_builder_token_estimate(
     plan: ClaimBuilderSectionWorkPlan,
     prompt_contract: ClaimBuilderSectionExtractionPromptContract,
 ) -> dict[str, object]:
-    del prompt_contract
     prompt_token_count = _claim_builder_prompt_tokens_from_env()
-    source_unit_token_count = CLAIM_BUILDER_ROUGH_TOKEN_ESTIMATOR.estimate_tokens(
-        plan.source_unit_text
+    budget_policy = claim_builder_phase_token_budget_policy(
+        prompt_id=prompt_contract.prompt_id,
+        prompt_version=prompt_contract.prompt_version,
+        prompt_tokens=prompt_token_count,
     )
-    estimated_input_tokens = prompt_token_count + source_unit_token_count
-    estimated_output_tokens = source_unit_token_count
+    budget = budget_policy.calculate_for_artifact_chars(len(plan.source_unit_text))
 
     return {
-        "estimator": (
-            f"measured_prompt_{prompt_token_count}_"
-            "source_char_div_3_3_conservative_section_output"
+        "budget_contract_version": "v2",
+        "model_ref": budget.model_ref,
+        "prompt_tokens": budget.prompt_tokens,
+        "artifact_tokens": budget.artifact_tokens,
+        "input_tokens": budget.input_tokens,
+        "required_window_tokens": (
+            budget.input_tokens
+            + budget.artifact_tokens
+            + budget.request_safety_gap_tokens
         ),
-        "prompt_message_tokens": (prompt_token_count,),
-        "source_unit_token_count": source_unit_token_count,
-        "estimated_input_tokens": estimated_input_tokens,
-        "estimated_output_tokens": estimated_output_tokens,
-        "estimated_total_tokens": estimated_input_tokens + estimated_output_tokens,
     }
 
 

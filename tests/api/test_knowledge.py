@@ -358,7 +358,7 @@ def _cluster_group_read_model() -> DraftClaimCompactionGroupReadModel:
         group_algorithm="hybrid_similarity",
         group_threshold=0.82,
         member_count=2,
-        estimated_input_tokens=1200,
+        artifact_tokens=1200,
         requires_split=False,
         created_at=datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc),
     )
@@ -371,7 +371,7 @@ def _cluster_batch_read_model() -> DraftClaimCompactionBatchReadModel:
         group_ref="draft-claim-cluster-group:1",
         prompt_variant="draft_vs_draft",
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=900,
+        artifact_tokens=900,
         batch_status="planned",
         member_count=2,
         created_at=datetime(2026, 6, 13, 12, 1, tzinfo=timezone.utc),
@@ -1342,7 +1342,7 @@ async def test_workflow_draft_claim_clusters_endpoint_returns_groups_and_batches
     assert isinstance(groups, list)
     assert groups[0]["group_ref"] == "draft-claim-cluster-group:1"
     assert groups[0]["member_count"] == 2
-    assert groups[0]["estimated_input_tokens"] == 1200
+    assert groups[0]["artifact_tokens"] == 1200
     assert groups[0]["requires_split"] is False
     batches = groups[0]["batches"]
     assert isinstance(batches, list)

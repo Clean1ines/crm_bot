@@ -6,13 +6,13 @@ CREATE TABLE IF NOT EXISTS draft_claim_compaction_nodes (
     active boolean NOT NULL,
     source_claim_refs jsonb NOT NULL,
     supersedes_node_refs jsonb NOT NULL,
-    estimated_input_tokens integer NOT NULL,
+    artifact_tokens integer NOT NULL,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT chk_draft_claim_compaction_nodes_kind
         CHECK (node_kind IN ('raw', 'compacted')),
-    CONSTRAINT chk_draft_claim_compaction_nodes_estimated_input_tokens
-        CHECK (estimated_input_tokens >= 0),
+    CONSTRAINT chk_draft_claim_compaction_nodes_artifact_tokens
+        CHECK (artifact_tokens >= 0),
     CONSTRAINT uq_draft_claim_compaction_nodes_workflow_group_node
         UNIQUE (workflow_run_id, group_ref, node_ref)
 );

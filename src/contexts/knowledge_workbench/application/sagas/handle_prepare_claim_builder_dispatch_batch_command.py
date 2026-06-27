@@ -33,6 +33,7 @@ from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow
     CLAIM_BUILDER_CANONICAL_PHASE,
     CLAIM_BUILDER_PREPARE_OPERATION_KEY,
     capacity_window_leased_work_item_event,
+    capacity_window_scheduled_wakeup_event,
     source_unit_ref_from_schedule_payload,
 )
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
@@ -445,28 +446,6 @@ def _active_model_ref_from_payload(payload: Mapping[str, object]) -> str:
     )
 
 
-def _claim_builder_profile_positive_int_with_legacy_fallback(
-    payload: Mapping[str, object],
-    *,
-    key: str,
-    legacy_key: str,
-) -> int:
-    if key in payload:
-        return _payload_positive_int(payload, key)
-    return _payload_positive_int(payload, legacy_key)
-
-
-def _claim_builder_profile_non_negative_int_with_legacy_fallback(
-    payload: Mapping[str, object],
-    *,
-    key: str,
-    legacy_key: str,
-) -> int:
-    if key in payload:
-        return _payload_non_negative_int(payload, key)
-    return _payload_non_negative_int(payload, legacy_key)
-
-
 def _profile_from_dispatch_preparation(
     payload: Mapping[str, object],
 ) -> LlmTaskCapacityProfile | None:
@@ -480,23 +459,17 @@ def _profile_from_dispatch_preparation(
     profile_payload = _payload_mapping(dispatch_preparation, "profile")
     return LlmTaskCapacityProfile(
         profile_id=_payload_text(profile_payload, "profile_id"),
-        estimated_prompt_tokens=(
-            _claim_builder_profile_positive_int_with_legacy_fallback(
-                profile_payload,
-                key="estimated_input_tokens",
-                legacy_key="estimated_prompt_tokens",
-            )
-        ),
-        estimated_completion_tokens=(
-            _claim_builder_profile_non_negative_int_with_legacy_fallback(
-                profile_payload,
-                key="estimated_output_tokens",
-                legacy_key="estimated_completion_tokens",
-            )
-        ),
-        estimated_requests=_payload_positive_int(
+        input_tokens=_payload_positive_int(
             profile_payload,
-            "estimated_requests",
+            "input_tokens",
+        ),
+        artifact_tokens=_payload_non_negative_int(
+            profile_payload,
+            "artifact_tokens",
+        ),
+        request_count=_payload_positive_int(
+            profile_payload,
+            "request_count",
         ),
     )
 
@@ -701,19 +674,9 @@ def _source_split_payload(
             workflow_command.payload,
             "scheduled_work_item_count",
         ),
-        "estimated_input_tokens": (
-            _claim_builder_profile_positive_int_with_legacy_fallback(
-                profile_payload,
-                key="estimated_input_tokens",
-                legacy_key="estimated_prompt_tokens",
-            )
-        ),
-        "estimated_prompt_tokens": (
-            _claim_builder_profile_positive_int_with_legacy_fallback(
-                profile_payload,
-                key="estimated_input_tokens",
-                legacy_key="estimated_prompt_tokens",
-            )
+        "input_tokens": _payload_positive_int(
+            profile_payload,
+            "input_tokens",
         ),
         "active_model_ref": _metadata_text(
             preflight_metadata,
@@ -957,6 +920,38 @@ def _claim_builder_dispatch_attempt_prepared_events(
             )
         )
     return tuple(events)
+
+
+def _prepare_capacity_retry_scheduled_wakeup_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    capacity_retry_at: datetime,
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    reschedule_pending_command = _next_prepare_claim_builder_dispatch_batch_command(
+        workflow_command=workflow_command,
+        workflow_run_id=workflow_run_id,
+        capacity_retry_at=capacity_retry_at,
+        occurred_at=occurred_at,
+    )
+    _ = reschedule_pending_command.command_id
+    account_capacity = _first_capacity_for_capacity_admission(workflow_command.payload)
+    return capacity_window_scheduled_wakeup_event(
+        workflow_run_id=workflow_run_id,
+        provider=account_capacity.provider,
+        account_ref=account_capacity.account_ref,
+        model_ref=account_capacity.model_ref,
+        run_after=capacity_retry_at,
+        reset_at=capacity_retry_at,
+        prepare_command_type=workflow_command.command_type,
+        wakeup_command_id=workflow_command.command_id,
+        wakeup_reason="prepare_capacity_retry_at",
+        occurred_at=occurred_at,
+        causation_command_id=workflow_command.command_id,
+        operation_key=CLAIM_BUILDER_PREPARE_OPERATION_KEY,
+        canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
+    )
 
 
 def _next_prepare_claim_builder_dispatch_batch_command(

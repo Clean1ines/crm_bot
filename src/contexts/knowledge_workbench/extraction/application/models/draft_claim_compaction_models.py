@@ -17,7 +17,7 @@ class DraftClaimCompactionGroupReadModel:
     group_algorithm: str
     group_threshold: float
     member_count: int
-    estimated_input_tokens: int
+    artifact_tokens: int
     requires_split: bool
     created_at: datetime
 
@@ -32,7 +32,7 @@ class DraftClaimCompactionGroupReadModel:
             _text(value, name)
         _score(self.group_threshold)
         _non_negative_int(self.member_count, "member_count")
-        _non_negative_int(self.estimated_input_tokens, "estimated_input_tokens")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
         _bool(self.requires_split, "requires_split")
         _datetime_value(self.created_at, "created_at")
 
@@ -44,7 +44,7 @@ class DraftClaimCompactionBatchReadModel:
     group_ref: str
     prompt_variant: str
     model_id: str
-    estimated_input_tokens: int
+    artifact_tokens: int
     batch_status: str
     member_count: int
     created_at: datetime
@@ -59,7 +59,7 @@ class DraftClaimCompactionBatchReadModel:
             ("batch_status", self.batch_status),
         ):
             _text(value, name)
-        _non_negative_int(self.estimated_input_tokens, "estimated_input_tokens")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
         _non_negative_int(self.member_count, "member_count")
         _datetime_value(self.created_at, "created_at")
 
@@ -171,7 +171,7 @@ class DraftClaimCompactionGroupCandidate:
     member_observation_refs: tuple[str, ...]
     member_embedding_refs: tuple[str, ...]
     member_source_unit_refs: tuple[str, ...]
-    estimated_input_tokens: int
+    artifact_tokens: int
     requires_split: bool
 
     @property
@@ -186,7 +186,7 @@ class DraftClaimCompactionBatchCandidate:
     group_ref: str
     prompt_variant: str
     model_id: str
-    estimated_input_tokens: int
+    artifact_tokens: int
     member_observation_refs: tuple[str, ...]
 
     @property
@@ -201,7 +201,7 @@ class DraftClaimCompactionBatchForDispatch:
     group_ref: str
     prompt_variant: str
     model_id: str
-    estimated_input_tokens: int
+    artifact_tokens: int
     member_observation_refs: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -210,8 +210,8 @@ class DraftClaimCompactionBatchForDispatch:
         _text(self.group_ref, "group_ref")
         _text(self.prompt_variant, "prompt_variant")
         _text(self.model_id, "model_id")
-        if self.estimated_input_tokens < 0:
-            raise ValueError("estimated_input_tokens must be >= 0")
+        if self.artifact_tokens < 0:
+            raise ValueError("artifact_tokens must be >= 0")
         _text_tuple(
             self.member_observation_refs,
             "member_observation_refs",

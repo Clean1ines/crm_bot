@@ -45,7 +45,7 @@ def _row(
     work_item_id: str = "work-item-1",
     status: str = "ready",
     account_ref: str | None = "groq-account-1",
-    reserved_total_tokens: int = 130,
+    required_window_tokens: int = 130,
 ) -> Mapping[str, object]:
     return {
         "work_item_id": work_item_id,
@@ -54,33 +54,33 @@ def _row(
         "account_ref": account_ref,
         "model_ref": "llama-3.3-70b-versatile",
         "status": status,
-        "reserved_total_tokens": reserved_total_tokens,
+        "required_window_tokens": required_window_tokens,
     }
 
 
 @pytest.mark.asyncio
 async def test_selects_first_retryable_failed_fit_with_skip_locked_query() -> None:
     connection = FakeConnection(
-        _row(status="retryable_failed", reserved_total_tokens=130)
+        _row(status="retryable_failed", required_window_tokens=130)
     )
 
     selected = await PostgresCapacityAdmissionWorkItemSelector(
         connection
     ).select_first_retryable_failed_fit(
         lane_key=_lane(),
-        max_reserved_total_tokens=4096,
+        max_required_window_tokens=4096,
     )
 
     assert selected is not None
     assert selected.work_item_id == "work-item-1"
     assert selected.status == "retryable_failed"
-    assert selected.reserved_total_tokens == 130
+    assert selected.required_window_tokens == 130
     assert selected.lane_key == _lane()
 
     call = connection.fetchrow_calls[0]
     assert "FROM capacity_admission_work_items" in call.query
     assert "status = $5" in call.query
-    assert "reserved_total_tokens <= $6" in call.query
+    assert "required_window_tokens <= $6" in call.query
     assert "ORDER BY updated_at ASC, work_item_id ASC" in call.query
     assert "LIMIT 1" in call.query
     assert "FOR UPDATE SKIP LOCKED" in call.query
@@ -96,18 +96,18 @@ async def test_selects_first_retryable_failed_fit_with_skip_locked_query() -> No
 
 @pytest.mark.asyncio
 async def test_selects_first_ready_fit_with_same_lane_filter() -> None:
-    connection = FakeConnection(_row(status="ready", reserved_total_tokens=1024))
+    connection = FakeConnection(_row(status="ready", required_window_tokens=1024))
 
     selected = await PostgresCapacityAdmissionWorkItemSelector(
         connection
     ).select_first_ready_fit(
         lane_key=_lane(),
-        max_reserved_total_tokens=2048,
+        max_required_window_tokens=2048,
     )
 
     assert selected is not None
     assert selected.status == "ready"
-    assert selected.reserved_total_tokens == 1024
+    assert selected.required_window_tokens == 1024
     call = connection.fetchrow_calls[0]
     assert call.args == (
         "knowledge.claim_builder",
@@ -127,7 +127,7 @@ async def test_uses_is_not_distinct_from_for_absent_account_ref() -> None:
         connection
     ).select_first_ready_fit(
         lane_key=_lane(account_ref=None),
-        max_reserved_total_tokens=2048,
+        max_required_window_tokens=2048,
     )
 
     assert selected is not None
@@ -145,7 +145,7 @@ async def test_returns_none_when_no_fitting_row_exists() -> None:
         connection
     ).select_first_ready_fit(
         lane_key=_lane(),
-        max_reserved_total_tokens=2048,
+        max_required_window_tokens=2048,
     )
 
     assert selected is None
@@ -154,12 +154,12 @@ async def test_returns_none_when_no_fitting_row_exists() -> None:
 
 @pytest.mark.asyncio
 async def test_rejects_non_positive_token_fit_limit() -> None:
-    with pytest.raises(ValueError, match="max_reserved_total_tokens"):
+    with pytest.raises(ValueError, match="max_required_window_tokens"):
         await PostgresCapacityAdmissionWorkItemSelector(
             FakeConnection()
         ).select_first_ready_fit(
             lane_key=_lane(),
-            max_reserved_total_tokens=0,
+            max_required_window_tokens=0,
         )
 
 
@@ -172,7 +172,7 @@ async def test_rejects_unexpected_projection_status_from_database() -> None:
             connection
         ).select_first_ready_fit(
             lane_key=_lane(),
-            max_reserved_total_tokens=2048,
+            max_required_window_tokens=2048,
         )
 
 
@@ -191,5 +191,5 @@ async def test_rejects_malformed_database_row() -> None:
             connection
         ).select_first_ready_fit(
             lane_key=_lane(),
-            max_reserved_total_tokens=2048,
+            max_required_window_tokens=2048,
         )

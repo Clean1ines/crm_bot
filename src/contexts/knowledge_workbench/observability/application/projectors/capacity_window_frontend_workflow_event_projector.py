@@ -181,8 +181,8 @@ def _leased_work_item_projection_payload(
     }
     for optional_key in (
         "source_unit_ref",
-        "token_estimate",
-        "reserved_tokens",
+        "input_tokens",
+        "required_window_tokens",
         "causation_command_id",
     ):
         value = payload.get(optional_key)

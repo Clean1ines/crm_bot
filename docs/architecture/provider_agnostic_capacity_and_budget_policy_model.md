@@ -355,3 +355,32 @@ Do not rewrite compaction before B1a/B1b/B1c.
 Do not move route catalog before boundary guard markers exist.
 
 B0 only freezes boundaries and known leaks so that B1 can start safely. It does not claim that Groq Free leakage is fixed.
+
+## 9. B1g runtime completion budget vocabulary cleanup
+
+B1g records the runtime cleanup after the earlier compatibility slices. Runtime
+request budget vocabulary is now canonical in LLM Runtime dispatch and route
+activation surfaces.
+
+B1g current runtime markers:
+
+* runtime completion budget vocabulary is now migrated.
+* `ProviderOutputCapProfile` uses `provider_default_completion_tokens = 2048`.
+* `RequestOutputCapPolicy` returns `input_tokens`, `artifact_tokens`,
+  `remaining_after_input_tokens`, `max_completion_tokens`, and
+  `required_window_tokens`.
+* `remaining_after_input_tokens = tokens_remaining - input_tokens - completion_safety_gap_tokens`.
+* `max_completion_tokens = min(remaining_after_input_tokens, model.max_output_tokens)`
+  only when `remaining_after_input_tokens` is above the provider default.
+* `required_window_tokens = input_tokens + artifact_tokens + completion_safety_gap_tokens`.
+* missing explicit `max_completion_tokens` means Groq provider default completion cap, not unlimited output.
+* executor consumes prepared canonical request budget; executor does not own admission math.
+* `groq_dispatch_executor._resolve_max_completion_tokens` consumes canonical
+  `max_completion_tokens`.
+* `groq_chat_request_builder` remains the provider request assembly boundary.
+* route activation frontend payload uses `input_tokens` and `required_window_tokens`.
+* B1g-1: Groq executor consumes canonical `max_completion_tokens`.
+* B1g-2: quota availability token need uses `completion_tokens`.
+* B1g-3: claim-builder dispatch profile payload writes canonical
+  `input_tokens`, `artifact_tokens`, and `request_count`
+  without legacy estimated prompt/completion aliases.

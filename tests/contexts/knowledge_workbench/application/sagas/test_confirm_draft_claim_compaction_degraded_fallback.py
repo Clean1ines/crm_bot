@@ -157,8 +157,8 @@ async def test_graph_confirmation_schedules_degraded_work_before_prepare() -> No
         group_ref="group-1",
         node_refs=("compacted-a", "compacted-b"),
         resume_work_type="compacted_vs_compacted",
-        estimated_prompt_tokens=5250,
-        estimated_completion_tokens=3200,
+        input_tokens=5250,
+        artifact_tokens=3200,
     )
 
     result = await ConfirmDraftClaimCompactionDegradedFallback(

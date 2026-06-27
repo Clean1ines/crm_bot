@@ -166,9 +166,9 @@ def _dispatch_preparation() -> dict[str, object]:
     return {
         "profile": {
             "profile_id": "faq_claim_observations",
-            "estimated_prompt_tokens": 3000,
-            "estimated_completion_tokens": 500,
-            "estimated_requests": 1,
+            "input_tokens": 3000,
+            "artifact_tokens": 500,
+            "request_count": 1,
         },
         "account_capacities": (
             {
@@ -783,9 +783,9 @@ def _draft_claim_compaction_dispatch_payload() -> dict[str, object]:
         "llm_dispatch_preparation": {
             "profile": {
                 "profile_id": "draft_claim_compaction",
-                "estimated_prompt_tokens": 90000,
-                "estimated_completion_tokens": 4000,
-                "estimated_requests": 1,
+                "input_tokens": 90000,
+                "artifact_tokens": 4000,
+                "request_count": 1,
             },
             "account_capacities": (
                 {
@@ -1147,10 +1147,9 @@ def _claim_builder_admission_result() -> CapacityWindowAdmissionPassResult:
                 work_item_id="work-1",
                 lane=lane,
                 selection_kind="fresh",
-                estimated_input_tokens=100,
-                estimated_output_tokens=10,
-                effective_output_cap_tokens=50,
-                reserved_total_tokens=150,
+                input_tokens=100,
+                artifact_tokens=10,
+                required_window_tokens=150,
                 dispatch_context=CapacityAdmissionDispatchContextSummary(
                     source_ref=_document_ref().value,
                     source_unit_ref="source-unit:project-1:abc:1",
@@ -1218,10 +1217,9 @@ def _draft_claim_compaction_admission_result() -> CapacityWindowAdmissionPassRes
                 work_item_id="work-1",
                 lane=lane,
                 selection_kind="fresh",
-                estimated_input_tokens=100,
-                estimated_output_tokens=10,
-                effective_output_cap_tokens=50,
-                reserved_total_tokens=150,
+                input_tokens=100,
+                artifact_tokens=10,
+                required_window_tokens=150,
                 dispatch_context=dispatch_context,
             ),
         ),

@@ -6,6 +6,10 @@ from decimal import Decimal
 from src.contexts.llm_runtime.application.policies.request_output_cap_policy import (
     ProviderOutputCapProfile,
 )
+from src.contexts.llm_runtime.domain.budget.provider_budget_profile import (
+    ProviderBudgetProfile,
+    ProviderBudgetProfileCatalog,
+)
 from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.llm_runtime.domain.entities.provider_account import ProviderAccount
 from src.contexts.llm_runtime.domain.value_objects.model_id import ModelId
@@ -27,27 +31,39 @@ from src.contexts.llm_runtime.domain.value_objects.token_price import TokenPrice
 
 
 GROQ_PROVIDER_ID = ProviderId("groq")
-GROQ_FREE_PROVIDER_DEFAULT_OUTPUT_CAP_TOKENS = 2048
+GROQ_FREE_PROVIDER_DEFAULT_COMPLETION_TOKENS = 2048
 GROQ_FREE_REQUEST_SAFETY_GAP_TOKENS = 300
+GROQ_FREE_OUTPUT_SAFETY_GAP_TOKENS = 300
 
 
 def groq_free_combined_tpm_output_cap_profile() -> ProviderOutputCapProfile:
     return ProviderOutputCapProfile(
-        provider_default_output_cap_tokens=(
-            GROQ_FREE_PROVIDER_DEFAULT_OUTPUT_CAP_TOKENS
+        provider_default_completion_tokens=(
+            GROQ_FREE_PROVIDER_DEFAULT_COMPLETION_TOKENS
+        ),
+        completion_safety_gap_tokens=GROQ_FREE_OUTPUT_SAFETY_GAP_TOKENS,
+    )
+
+
+def groq_free_provider_budget_profile() -> ProviderBudgetProfile:
+    return ProviderBudgetProfile(
+        provider_id=GROQ_PROVIDER_ID.value,
+        provider_default_completion_tokens=(
+            GROQ_FREE_PROVIDER_DEFAULT_COMPLETION_TOKENS
         ),
         request_safety_gap_tokens=GROQ_FREE_REQUEST_SAFETY_GAP_TOKENS,
+        output_safety_gap_tokens=GROQ_FREE_OUTPUT_SAFETY_GAP_TOKENS,
+    )
+
+
+def default_groq_provider_budget_profile_catalog() -> ProviderBudgetProfileCatalog:
+    return ProviderBudgetProfileCatalog(
+        profiles=(groq_free_provider_budget_profile(),),
     )
 
 
 @dataclass(frozen=True, slots=True)
 class GroqAccountSeed:
-    """Static account seed for one Groq organization/capacity slot.
-
-    The account_ref must point to a local non-secret configuration key name,
-    not to a raw API key value.
-    """
-
     account_ref: str
     account_rank: int
 
@@ -59,12 +75,6 @@ class GroqAccountSeed:
 
 
 def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
-    """Return provider-specific static seed for Groq free-plan text models.
-
-    These values are intentionally infrastructure seed data. Generic LLM Runtime
-    domain and application policies must not hard-code Groq model IDs or limits.
-    """
-
     return (
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,
@@ -92,6 +102,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             ),
             supports_json_object=True,
             supports_json_schema=False,
+            model_char_to_token_multiplier=Decimal("3.3"),
         ),
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,
@@ -113,6 +124,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             reasoning_profile=ReasoningProfile.unsupported(),
             supports_json_object=True,
             supports_json_schema=False,
+            model_char_to_token_multiplier=Decimal("3.7"),
         ),
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,
@@ -134,6 +146,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             reasoning_profile=ReasoningProfile.unsupported(),
             supports_json_object=True,
             supports_json_schema=False,
+            model_char_to_token_multiplier=Decimal("3.7"),
         ),
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,
@@ -155,6 +168,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             reasoning_profile=ReasoningProfile.unsupported(),
             supports_json_object=True,
             supports_json_schema=False,
+            model_char_to_token_multiplier=Decimal("3.7"),
         ),
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,
@@ -183,6 +197,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             ),
             supports_json_object=True,
             supports_json_schema=False,
+            model_char_to_token_multiplier=Decimal("3.7"),
         ),
     )
 

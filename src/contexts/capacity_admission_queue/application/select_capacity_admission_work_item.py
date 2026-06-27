@@ -48,7 +48,7 @@ class CapacityAdmissionWindowBudget:
         )
 
     @property
-    def max_reserved_total_tokens(self) -> int:
+    def max_required_window_tokens(self) -> int:
         return min(self.remaining_tokens, self.remaining_daily_tokens)
 
 
@@ -57,25 +57,19 @@ class CapacityAdmissionSelectableWorkItem:
     work_item_id: str
     lane_key: CapacityAdmissionLaneKey
     status: CapacityAdmissionProjectionStatus
-    reserved_total_tokens: int
-    estimated_input_tokens: int | None = None
-    estimated_output_tokens: int | None = None
-    effective_output_cap_tokens: int | None = None
+    required_window_tokens: int
+    input_tokens: int | None = None
+    artifact_tokens: int | None = None
 
     def __post_init__(self) -> None:
         _require_non_empty(self.work_item_id, "work_item_id")
-        _require_positive(self.reserved_total_tokens, "reserved_total_tokens")
-        if self.estimated_input_tokens is not None:
-            _require_positive(self.estimated_input_tokens, "estimated_input_tokens")
-        if self.estimated_output_tokens is not None:
+        _require_positive(self.required_window_tokens, "required_window_tokens")
+        if self.input_tokens is not None:
+            _require_positive(self.input_tokens, "input_tokens")
+        if self.artifact_tokens is not None:
             _require_non_negative(
-                self.estimated_output_tokens,
-                "estimated_output_tokens",
-            )
-        if self.effective_output_cap_tokens is not None:
-            _require_non_negative(
-                self.effective_output_cap_tokens,
-                "effective_output_cap_tokens",
+                self.artifact_tokens,
+                "artifact_tokens",
             )
 
 
@@ -100,7 +94,7 @@ class CapacityAdmissionWorkItemSelectorPort(Protocol):
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         """Return the first fitting retryable failed item inside one lane."""
 
@@ -108,7 +102,7 @@ class CapacityAdmissionWorkItemSelectorPort(Protocol):
         self,
         *,
         lane_key: CapacityAdmissionLaneKey,
-        max_reserved_total_tokens: int,
+        max_required_window_tokens: int,
     ) -> CapacityAdmissionSelectableWorkItem | None:
         """Return the first fitting ready item inside one lane."""
 
@@ -127,11 +121,11 @@ class SelectCapacityAdmissionWorkItem:
                 skipped_reason="capacity_exhausted",
             )
 
-        max_reserved_total_tokens = command.budget.max_reserved_total_tokens
+        max_required_window_tokens = command.budget.max_required_window_tokens
 
         retryable_failed = await self.selector.select_first_retryable_failed_fit(
             lane_key=command.lane_key,
-            max_reserved_total_tokens=max_reserved_total_tokens,
+            max_required_window_tokens=max_required_window_tokens,
         )
         if retryable_failed is not None:
             return SelectCapacityAdmissionWorkItemResult(
@@ -140,7 +134,7 @@ class SelectCapacityAdmissionWorkItem:
 
         ready = await self.selector.select_first_ready_fit(
             lane_key=command.lane_key,
-            max_reserved_total_tokens=max_reserved_total_tokens,
+            max_required_window_tokens=max_required_window_tokens,
         )
         if ready is not None:
             return SelectCapacityAdmissionWorkItemResult(

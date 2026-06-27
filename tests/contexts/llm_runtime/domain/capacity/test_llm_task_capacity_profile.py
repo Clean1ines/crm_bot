@@ -5,62 +5,51 @@ from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
 )
 
 
-def test_total_tokens_is_input_plus_output() -> None:
+def test_required_window_tokens_is_input_plus_artifact() -> None:
     profile = LlmTaskCapacityProfile(
         profile_id="prompt-a",
-        estimated_prompt_tokens=3000,
-        estimated_completion_tokens=500,
+        input_tokens=3000,
+        artifact_tokens=500,
     )
 
-    assert profile.estimated_input_tokens == 3000
-    assert profile.estimated_output_tokens == 500
-    assert profile.estimated_total_tokens == 3500
-    assert profile.estimated_requests == 1
-
-
-def test_legacy_constructor_fields_remain_compatible() -> None:
-    profile = LlmTaskCapacityProfile(
-        profile_id="prompt-a",
-        estimated_prompt_tokens=3000,
-        estimated_completion_tokens=500,
-    )
-
-    assert profile.estimated_prompt_tokens == profile.estimated_input_tokens
-    assert profile.estimated_completion_tokens == profile.estimated_output_tokens
+    assert profile.input_tokens == 3000
+    assert profile.artifact_tokens == 500
+    assert profile.required_window_tokens == 3500
+    assert profile.request_count == 1
 
 
 def test_rejects_empty_profile_id() -> None:
     with pytest.raises(ValueError, match="profile_id must be non-empty"):
         LlmTaskCapacityProfile(
             profile_id=" ",
-            estimated_prompt_tokens=1,
-            estimated_completion_tokens=0,
+            input_tokens=1,
+            artifact_tokens=0,
         )
 
 
-def test_rejects_non_positive_prompt_tokens() -> None:
-    with pytest.raises(ValueError, match="estimated_prompt_tokens must be > 0"):
+def test_rejects_non_positive_input_tokens() -> None:
+    with pytest.raises(ValueError, match="input_tokens must be > 0"):
         LlmTaskCapacityProfile(
             profile_id="prompt-a",
-            estimated_prompt_tokens=0,
-            estimated_completion_tokens=0,
+            input_tokens=0,
+            artifact_tokens=0,
         )
 
 
-def test_rejects_negative_completion_tokens() -> None:
-    with pytest.raises(ValueError, match="estimated_completion_tokens must be >= 0"):
+def test_rejects_negative_artifact_tokens() -> None:
+    with pytest.raises(ValueError, match="artifact_tokens must be >= 0"):
         LlmTaskCapacityProfile(
             profile_id="prompt-a",
-            estimated_prompt_tokens=1,
-            estimated_completion_tokens=-1,
+            input_tokens=1,
+            artifact_tokens=-1,
         )
 
 
-def test_rejects_non_positive_estimated_requests() -> None:
-    with pytest.raises(ValueError, match="estimated_requests must be > 0"):
+def test_rejects_non_positive_request_count() -> None:
+    with pytest.raises(ValueError, match="request_count must be > 0"):
         LlmTaskCapacityProfile(
             profile_id="prompt-a",
-            estimated_prompt_tokens=1,
-            estimated_completion_tokens=0,
-            estimated_requests=0,
+            input_tokens=1,
+            artifact_tokens=0,
+            request_count=0,
         )
