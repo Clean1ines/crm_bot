@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -184,3 +185,59 @@ async def test_maps_claim_builder_skipped_results(
     assert plan.progress_summary is not None
     assert plan.progress_summary.skipped_reason == skipped_reason.value
     assert len(plan.frontend_events) == 1
+
+
+def _admitted_result_for(
+    *,
+    work_item_id: str,
+    attempt_id: str,
+) -> CapacityWindowAdmissionPassResult:
+    result = _admitted_result()
+    admitted_item = replace(result.admitted_items[0], work_item_id=work_item_id)
+    projection_lease = replace(result.projection_leases[0], work_item_id=work_item_id)
+    started_attempt = replace(
+        result.started_attempts[0],
+        work_item_id=work_item_id,
+        attempt_id=attempt_id,
+    )
+    frontend_event_summary = replace(
+        result.frontend_event_summary,
+        work_item_ids=(work_item_id,),
+        attempt_ids=(attempt_id,),
+    )
+    return replace(
+        result,
+        admitted_items=(admitted_item,),
+        projection_leases=(projection_lease,),
+        started_attempts=(started_attempt,),
+        frontend_event_summary=frontend_event_summary,
+    )
+
+
+@pytest.mark.asyncio
+async def test_admission_workflow_event_id_includes_admitted_attempt_identity() -> None:
+    first_plan = await ClaimBuilderCapacityAdmissionPhaseMapper().map_admission_result(
+        admission_result=_admitted_result_for(
+            work_item_id="work-item-1",
+            attempt_id="attempt-1",
+        ),
+        occurred_at=_now(),
+    )
+    second_plan = await ClaimBuilderCapacityAdmissionPhaseMapper().map_admission_result(
+        admission_result=_admitted_result_for(
+            work_item_id="work-item-2",
+            attempt_id="attempt-2",
+        ),
+        occurred_at=_now(),
+    )
+
+    assert (
+        first_plan.workflow_events[0].event_type
+        == second_plan.workflow_events[0].event_type
+    )
+    assert (
+        first_plan.workflow_events[0].event_id
+        != second_plan.workflow_events[0].event_id
+    )
+    assert first_plan.workflow_events[0].work_item_ids == ("work-item-1",)
+    assert second_plan.workflow_events[0].work_item_ids == ("work-item-2",)

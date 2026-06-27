@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -111,6 +112,13 @@ def _workflow_events_for_decision(
     decision: CapacityAdmissionPhaseMappingDecision,
 ) -> tuple[CapacityAdmissionPhaseWorkflowEventSummary, ...]:
     event_type = _event_type_for_decision(decision)
+    work_item_ids = tuple(item.work_item_id for item in admission_result.admitted_items)
+    attempt_ids = tuple(
+        attempt.attempt_id for attempt in admission_result.started_attempts
+    )
+    projection_event_ids = tuple(
+        projection.event_id for projection in admission_result.projection_leases
+    )
     return (
         CapacityAdmissionPhaseWorkflowEventSummary(
             event_type=event_type,
@@ -118,17 +126,21 @@ def _workflow_events_for_decision(
                 workflow_run_id=admission_result.workflow_run_id,
                 event_type=event_type,
                 decision=decision,
+                work_item_ids=work_item_ids,
+                attempt_ids=attempt_ids,
+                projection_event_ids=tuple(
+                    str(value) for value in projection_event_ids
+                ),
+                skipped_reason=(
+                    admission_result.skipped_reason.value
+                    if admission_result.skipped_reason is not None
+                    else None
+                ),
             ),
             workflow_run_id=admission_result.workflow_run_id,
-            work_item_ids=tuple(
-                item.work_item_id for item in admission_result.admitted_items
-            ),
-            attempt_ids=tuple(
-                attempt.attempt_id for attempt in admission_result.started_attempts
-            ),
-            projection_event_ids=tuple(
-                projection.event_id for projection in admission_result.projection_leases
-            ),
+            work_item_ids=work_item_ids,
+            attempt_ids=attempt_ids,
+            projection_event_ids=projection_event_ids,
         ),
     )
 
@@ -199,8 +211,42 @@ def _workflow_event_id(
     workflow_run_id: str,
     event_type: str,
     decision: CapacityAdmissionPhaseMappingDecision,
+    work_item_ids: tuple[str, ...],
+    attempt_ids: tuple[str, ...],
+    projection_event_ids: tuple[str, ...],
+    skipped_reason: str | None,
 ) -> str:
-    return f"workflow-event:{workflow_run_id}:{event_type}:{decision.value}"
+    fingerprint = _workflow_event_fingerprint(
+        work_item_ids=work_item_ids,
+        attempt_ids=attempt_ids,
+        projection_event_ids=projection_event_ids,
+        skipped_reason=skipped_reason,
+    )
+    return (
+        f"workflow-event:{workflow_run_id}:{event_type}:{decision.value}:{fingerprint}"
+    )
+
+
+def _workflow_event_fingerprint(
+    *,
+    work_item_ids: tuple[str, ...],
+    attempt_ids: tuple[str, ...],
+    projection_event_ids: tuple[str, ...],
+    skipped_reason: str | None,
+) -> str:
+    raw = "|".join(
+        (
+            "work_items",
+            *work_item_ids,
+            "attempts",
+            *attempt_ids,
+            "projection_events",
+            *projection_event_ids,
+            "skipped_reason",
+            skipped_reason or "",
+        )
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _execute_command_ref(
