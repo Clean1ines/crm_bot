@@ -103,6 +103,136 @@ interface Document {
   card_view?: WorkbenchDocumentCardView | null;
 }
 
+type UploadKnowledgeVariables = {
+  file: File;
+  optimisticDocumentId: string;
+  optimisticWorkflowRunId: string;
+};
+
+const fileSha256Hex = async (file: File): Promise<string> => {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+};
+
+const optimisticSourceDocumentRef = (
+  projectId: string,
+  fileHash: string,
+): string => `source-document:${projectId}:${fileHash}`;
+
+const optimisticWorkflowRunId = (
+  sourceDocumentRef: string,
+): string => `knowledge-extraction:${sourceDocumentRef}`;
+
+const optimisticUploadDocument = ({
+  projectId,
+  file,
+  preprocessingMode,
+  documentId,
+  workflowRunId,
+}: {
+  projectId: string;
+  file: File;
+  preprocessingMode: KnowledgePreprocessingMode | string;
+  documentId: string;
+  workflowRunId: string;
+}): Document => {
+  const now = new Date().toISOString();
+  return {
+    id: documentId,
+    file_name: file.name || "Загружаемый документ",
+    file_size: file.size,
+    status: "processing",
+    created_at: now,
+    updated_at: now,
+    preprocessing_mode: preprocessingMode,
+    current_processing_run_id: workflowRunId,
+    card_view: {
+      document_id: documentId,
+      project_id: projectId,
+      file_name: file.name || "Загружаемый документ",
+      source_type: "source_ingestion",
+      lifecycle_state: "processing",
+      retention_state: "retained",
+      transient_purged: false,
+      resume_available: false,
+      status_i18n_key: "knowledge.workbench.status.processing",
+      default_status_label: "Загружаем и режем документ",
+      status_description_i18n_key: "knowledge.workbench.description.sourceIngestion",
+      default_status_description:
+        "Документ принят на фронте. Строки разделов появятся по событиям обработки.",
+      timer: {
+        mode: "running",
+        active_elapsed_seconds: 0,
+        wall_elapsed_seconds: 0,
+        current_active_started_at: now,
+        i18n_key: "knowledge.workbench.timer.running",
+        default_label: "идёт обработка",
+      },
+      usage: {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        llm_call_count: 0,
+      },
+      sections: {
+        total: 0,
+        processed: 0,
+        failed: 0,
+        pending: 0,
+      },
+      registry: {
+        entry_count: 0,
+        final_snapshot_id: null,
+        retained: true,
+      },
+      surfaces: {
+        draft_count: 0,
+        ready_count: 0,
+        published_count: 0,
+        rejected_count: 0,
+      },
+      runtime: {
+        publication_id: null,
+        runtime_entry_count: 0,
+      },
+      recovery: {
+        mode: "none",
+        scheduled_at: null,
+        can_cancel_scheduled_resume: false,
+        reason_code: "none",
+        i18n_key: "knowledge.workbench.recovery.none",
+        default_message: "Автовосстановление не требуется",
+      },
+      actions: [
+        {
+          action_id: "cancel_processing",
+          visible: true,
+          enabled: true,
+          tone: "warning",
+          i18n_key: "knowledge.actions.stop",
+          default_label: "Остановить",
+        },
+      ],
+      messages: [
+        {
+          code: "upload_started",
+          severity: "info",
+          i18n_key: "knowledge.upload.started",
+          default_message: "Документ загружается. Карточка обновляется событиями.",
+        },
+      ],
+      error: null,
+      metadata: {
+        optimistic_upload: true,
+      },
+    },
+  };
+};
+
+
 const formatSize = (bytes: number) => {
   if (bytes === 0) return "0 Bytes";
   const k = 1024;
@@ -587,6 +717,9 @@ export const KnowledgePage: React.FC = () => {
   const [expandedSourceUnitIdsByDocument, setExpandedSourceUnitIdsByDocument] =
     useState<Record<string, string[]>>({});
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const [optimisticUploadDocuments, setOptimisticUploadDocuments] = useState<
+    Record<string, Document>
+  >({});
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -633,9 +766,34 @@ export const KnowledgePage: React.FC = () => {
   const baseDocuments = Array.isArray(documentsQuery.data)
     ? documentsQuery.data
     : [];
+  const optimisticDocuments = Object.values(optimisticUploadDocuments);
+  const baseDocumentIdKey = baseDocuments
+    .map((doc) => doc.id)
+    .sort()
+    .join(",");
+  const baseDocumentIds = new Set(baseDocuments.map((doc) => doc.id));
+  const documents = [
+    ...optimisticDocuments.filter((doc) => !baseDocumentIds.has(doc.id)),
+    ...baseDocuments,
+  ];
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
-  const documents = baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
+  useEffect(() => {
+    if (baseDocuments.length === 0) return;
+
+    setOptimisticUploadDocuments((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const documentId of Object.keys(next)) {
+        if (baseDocumentIds.has(documentId)) {
+          delete next[documentId];
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [baseDocuments, baseDocumentIdKey]);
+
   const workflowProjectionTargets = documents
     .filter(
       (doc) =>
@@ -1206,8 +1364,8 @@ export const KnowledgePage: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [hasProcessingDocuments]);
 
-  const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
+  const uploadMutation = useMutation<unknown, unknown, UploadKnowledgeVariables>({
+    mutationFn: async ({ file }: UploadKnowledgeVariables) => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
 
       const response = await knowledgeApi.upload(
@@ -1228,8 +1386,18 @@ export const KnowledgePage: React.FC = () => {
 
       return await response.json();
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
       toast.success(t("knowledge.feedback.documentQueued"));
+      setOptimisticUploadDocuments((current) => {
+        if (!current[variables.optimisticDocumentId]) return current;
+        return {
+          ...current,
+          [variables.optimisticDocumentId]: {
+            ...current[variables.optimisticDocumentId],
+            updated_at: new Date().toISOString(),
+          },
+        };
+      });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
       });
@@ -1240,7 +1408,20 @@ export const KnowledgePage: React.FC = () => {
         queryKey: ["knowledge-processing-reports", projectId],
       });
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, variables) => {
+      setOptimisticUploadDocuments((current) => {
+        const document = current[variables.optimisticDocumentId];
+        if (!document) return current;
+        return {
+          ...current,
+          [variables.optimisticDocumentId]: {
+            ...document,
+            status: "error",
+            error: getErrorMessage(err, t("knowledge.feedback.uploadError")),
+            updated_at: new Date().toISOString(),
+          },
+        };
+      });
       toast.error(getErrorMessage(err, t("knowledge.feedback.uploadError")));
     },
   });
@@ -1493,10 +1674,55 @@ export const KnowledgePage: React.FC = () => {
     });
   };
 
+  const startUpload = async (file: File): Promise<void> => {
+    if (!projectId) {
+      toast.error(t("knowledge.errors.projectIdMissing"));
+      return;
+    }
+
+    try {
+      const hash = await fileSha256Hex(file);
+      const documentId = optimisticSourceDocumentRef(projectId, hash);
+      const workflowRunId = optimisticWorkflowRunId(documentId);
+      const optimisticDocument = optimisticUploadDocument({
+        projectId,
+        file,
+        preprocessingMode,
+        documentId,
+        workflowRunId,
+      });
+
+      setOptimisticUploadDocuments((current) => ({
+        ...current,
+        [documentId]: optimisticDocument,
+      }));
+
+      setWorkflowLiveStates((current) => ({
+        ...current,
+        [documentId]: createInitialWorkflowLiveStateResponse({
+          documentId,
+          projectId,
+          fileName: file.name || "Загружаемый документ",
+          documentStatus: "processing",
+          workflowRunId,
+        }),
+      }));
+
+      uploadMutation.mutate({
+        file,
+        optimisticDocumentId: documentId,
+        optimisticWorkflowRunId: workflowRunId,
+      });
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось подготовить документ к загрузке"));
+    }
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      uploadMutation.mutate(file);
+      void startUpload(file);
+      e.target.value = "";
     }
   };
 
@@ -1525,7 +1751,7 @@ export const KnowledgePage: React.FC = () => {
 
     const file = event.dataTransfer.files?.[0];
     if (file) {
-      uploadMutation.mutate(file);
+      void startUpload(file);
     }
   };
 
