@@ -594,14 +594,6 @@ class DraftClaimCompactionNextWorkItem:
         ):
             raise ValueError("required_window_tokens must be >= input_tokens")
 
-    @property
-    def estimated_prompt_tokens(self) -> int:
-        return self.input_tokens
-
-    @property
-    def estimated_completion_tokens(self) -> int:
-        return self.artifact_tokens
-
 
 @dataclass(frozen=True, slots=True)
 class DraftClaimCompactionPlannerDecision:

@@ -127,8 +127,6 @@ def test_next_work_item_carries_prompt_estimate_from_node_refs() -> None:
     assert decision.next_work_item.prompt_tokens == 2150
     assert decision.next_work_item.artifact_tokens == 2600
     assert decision.next_work_item.input_tokens == 4750
-    assert decision.next_work_item.estimated_prompt_tokens == 4750
-    assert decision.next_work_item.estimated_completion_tokens == 2600
 
 
 def test_compacted_pair_uses_enriched_prompt_for_tpm_boundary() -> None:
@@ -151,8 +149,6 @@ def test_compacted_pair_uses_enriched_prompt_for_tpm_boundary() -> None:
     assert decision.next_work_item.prompt_tokens == 2150
     assert decision.next_work_item.artifact_tokens == 2950
     assert decision.next_work_item.input_tokens == 5100
-    assert decision.next_work_item.estimated_prompt_tokens == 5100
-    assert decision.next_work_item.estimated_completion_tokens == 2950
 
 
 def test_known_different_compacted_pair_blocks_raw_bridge_to_other_side() -> None:
