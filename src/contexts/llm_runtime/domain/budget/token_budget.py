@@ -60,28 +60,31 @@ def required_window_tokens(
     return input_tokens + artifact_tokens + safety_gap_tokens
 
 
-def request_output_cap_tokens(
+def max_completion_tokens(
     *,
-    remaining_window_tokens: int,
-    input_tokens: int,
+    remaining_after_input_tokens: int,
     provider_profile: ProviderBudgetProfile,
+    model_profile: ModelProfile,
 ) -> int | None:
-    _require_non_negative_int(
-        remaining_window_tokens,
-        field_name="remaining_window_tokens",
+    _require_int(
+        remaining_after_input_tokens,
+        field_name="remaining_after_input_tokens",
     )
-    _require_positive_int(input_tokens, field_name="input_tokens")
     if not isinstance(provider_profile, ProviderBudgetProfile):
         raise TypeError("provider_profile must be ProviderBudgetProfile")
+    if not isinstance(model_profile, ModelProfile):
+        raise TypeError("model_profile must be ModelProfile")
 
-    candidate = (
-        remaining_window_tokens
-        - input_tokens
-        - provider_profile.request_safety_gap_tokens
+    if (
+        remaining_after_input_tokens
+        <= provider_profile.provider_default_completion_tokens
+    ):
+        return None
+
+    return min(
+        remaining_after_input_tokens,
+        _required_model_max_output_tokens(model_profile),
     )
-    if candidate > provider_profile.provider_default_completion_tokens:
-        return candidate
-    return None
 
 
 def _required_model_tpm(model_profile: ModelProfile) -> int:
@@ -94,15 +97,24 @@ def _required_model_tpm(model_profile: ModelProfile) -> int:
     return value
 
 
+def _required_model_max_output_tokens(model_profile: ModelProfile) -> int:
+    value = model_profile.max_output_tokens
+    _require_positive_int(value, field_name="max_output_tokens")
+    return value
+
+
 def _require_positive_int(value: int, *, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{field_name} must be int")
+    _require_int(value, field_name=field_name)
     if value <= 0:
         raise ValueError(f"{field_name} must be > 0")
 
 
 def _require_non_negative_int(value: int, *, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{field_name} must be int")
+    _require_int(value, field_name=field_name)
     if value < 0:
         raise ValueError(f"{field_name} must be >= 0")
+
+
+def _require_int(value: int, *, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")

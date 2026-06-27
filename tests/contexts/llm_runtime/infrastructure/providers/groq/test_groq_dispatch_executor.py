@@ -145,7 +145,7 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
 
 
 @pytest.mark.asyncio
-async def test_prepared_request_output_cap_becomes_max_completion_tokens() -> None:
+async def test_prepared_max_completion_tokens_is_sent_to_groq() -> None:
     schedule_payload = {
         "provider_messages": [
             {
@@ -155,7 +155,7 @@ async def test_prepared_request_output_cap_becomes_max_completion_tokens() -> No
         ],
         "llm_capacity_estimate": {
             "input_tokens": 1000,
-            "request_output_cap_tokens": 1234,
+            "max_completion_tokens": 1234,
         },
     }
     transport = FakeGroqTransport(response=_success_response())
@@ -171,9 +171,7 @@ async def test_prepared_request_output_cap_becomes_max_completion_tokens() -> No
 
 
 @pytest.mark.asyncio
-async def test_missing_prepared_request_output_cap_does_not_send_max_completion_tokens() -> (
-    None
-):
+async def test_missing_prepared_max_completion_tokens_does_not_send_cap() -> None:
     schedule_payload = {
         "provider_messages": [
             {

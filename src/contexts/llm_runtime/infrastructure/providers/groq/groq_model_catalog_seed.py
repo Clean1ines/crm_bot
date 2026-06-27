@@ -31,7 +31,6 @@ from src.contexts.llm_runtime.domain.value_objects.token_price import TokenPrice
 
 
 GROQ_PROVIDER_ID = ProviderId("groq")
-GROQ_FREE_PROVIDER_DEFAULT_OUTPUT_CAP_TOKENS = 2048
 GROQ_FREE_PROVIDER_DEFAULT_COMPLETION_TOKENS = 2048
 GROQ_FREE_REQUEST_SAFETY_GAP_TOKENS = 300
 GROQ_FREE_OUTPUT_SAFETY_GAP_TOKENS = 300
@@ -39,10 +38,10 @@ GROQ_FREE_OUTPUT_SAFETY_GAP_TOKENS = 300
 
 def groq_free_combined_tpm_output_cap_profile() -> ProviderOutputCapProfile:
     return ProviderOutputCapProfile(
-        provider_default_output_cap_tokens=(
-            GROQ_FREE_PROVIDER_DEFAULT_OUTPUT_CAP_TOKENS
+        provider_default_completion_tokens=(
+            GROQ_FREE_PROVIDER_DEFAULT_COMPLETION_TOKENS
         ),
-        request_safety_gap_tokens=GROQ_FREE_REQUEST_SAFETY_GAP_TOKENS,
+        completion_safety_gap_tokens=GROQ_FREE_OUTPUT_SAFETY_GAP_TOKENS,
     )
 
 

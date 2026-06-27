@@ -13,54 +13,54 @@ from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 @dataclass(frozen=True, slots=True)
 class LlmBatchBudgetDecision:
     prompt_tokens: int
-    batch_input_estimated_tokens: int
-    batch_input_max_tokens: int
-    request_input_estimated_tokens: int
-    planned_output_reserve_tokens: int
-    request_total_estimated_tokens: int
+    artifact_tokens: int
+    artifact_max_tokens: int
+    input_tokens: int
     request_safety_gap_tokens: int
-    output_safety_gap_tokens: int
-    request_output_cap_tokens: int | None
+    completion_safety_gap_tokens: int
+    remaining_after_input_tokens: int
+    max_completion_tokens: int | None
+    required_window_tokens: int
 
     def __post_init__(self) -> None:
         _require_positive_int(self.prompt_tokens, field_name="prompt_tokens")
         _require_non_negative_int(
-            self.batch_input_estimated_tokens,
-            field_name="batch_input_estimated_tokens",
+            self.artifact_tokens,
+            field_name="artifact_tokens",
         )
         _require_positive_int(
-            self.batch_input_max_tokens,
-            field_name="batch_input_max_tokens",
+            self.artifact_max_tokens,
+            field_name="artifact_max_tokens",
         )
         _require_positive_int(
-            self.request_input_estimated_tokens,
-            field_name="request_input_estimated_tokens",
-        )
-        _require_non_negative_int(
-            self.planned_output_reserve_tokens,
-            field_name="planned_output_reserve_tokens",
-        )
-        _require_positive_int(
-            self.request_total_estimated_tokens,
-            field_name="request_total_estimated_tokens",
+            self.input_tokens,
+            field_name="input_tokens",
         )
         _require_non_negative_int(
             self.request_safety_gap_tokens,
             field_name="request_safety_gap_tokens",
         )
         _require_non_negative_int(
-            self.output_safety_gap_tokens,
-            field_name="output_safety_gap_tokens",
+            self.completion_safety_gap_tokens,
+            field_name="completion_safety_gap_tokens",
         )
-        if self.request_output_cap_tokens is not None:
+        _require_int(
+            self.remaining_after_input_tokens,
+            field_name="remaining_after_input_tokens",
+        )
+        if self.max_completion_tokens is not None:
             _require_positive_int(
-                self.request_output_cap_tokens,
-                field_name="request_output_cap_tokens",
+                self.max_completion_tokens,
+                field_name="max_completion_tokens",
             )
+        _require_positive_int(
+            self.required_window_tokens,
+            field_name="required_window_tokens",
+        )
 
     @property
     def batch_input_fits(self) -> bool:
-        return self.batch_input_estimated_tokens <= self.batch_input_max_tokens
+        return self.artifact_tokens <= self.artifact_max_tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,7 +99,7 @@ class LlmBatchBudgetPolicy:
                 field_name="observed_batch_input_tokens",
             )
 
-        batch_input_estimated_tokens = (
+        artifact_tokens = (
             observed_batch_input_tokens
             if observed_batch_input_tokens is not None
             else _estimate_batch_input_tokens(
@@ -112,34 +112,34 @@ class LlmBatchBudgetPolicy:
         prompt_tokens = self.prompt_profile.prompt_tokens
         model_tpm_limit = _model_tpm_limit(self.model_profile)
         request_safety_gap_tokens = self.provider_profile.request_safety_gap_tokens
-        output_safety_gap_tokens = self.provider_profile.output_safety_gap_tokens
+        completion_safety_gap_tokens = self.provider_profile.output_safety_gap_tokens
         available_tokens = model_tpm_limit - prompt_tokens - request_safety_gap_tokens
         if available_tokens <= 1:
             raise ValueError("model TPM budget is too small for prompt and safety gap")
 
-        batch_input_max_tokens = available_tokens // 2
-        planned_output_reserve_tokens = available_tokens - batch_input_max_tokens
-        request_input_estimated_tokens = prompt_tokens + batch_input_estimated_tokens
-        request_total_estimated_tokens = (
-            request_input_estimated_tokens + planned_output_reserve_tokens
+        artifact_max_tokens = available_tokens // 2
+        input_tokens = prompt_tokens + artifact_tokens
+        remaining_after_input_tokens = (
+            model_tpm_limit - input_tokens - completion_safety_gap_tokens
         )
-        request_output_cap_tokens = _request_output_cap_tokens(
+        max_completion_tokens = _max_completion_tokens(
             provider_profile=self.provider_profile,
             model_profile=self.model_profile,
-            model_tpm_limit=model_tpm_limit,
-            request_input_estimated_tokens=request_input_estimated_tokens,
+            remaining_after_input_tokens=remaining_after_input_tokens,
         )
 
         return LlmBatchBudgetDecision(
             prompt_tokens=prompt_tokens,
-            batch_input_estimated_tokens=batch_input_estimated_tokens,
-            batch_input_max_tokens=batch_input_max_tokens,
-            request_input_estimated_tokens=request_input_estimated_tokens,
-            planned_output_reserve_tokens=planned_output_reserve_tokens,
-            request_total_estimated_tokens=request_total_estimated_tokens,
+            artifact_tokens=artifact_tokens,
+            artifact_max_tokens=artifact_max_tokens,
+            input_tokens=input_tokens,
             request_safety_gap_tokens=request_safety_gap_tokens,
-            output_safety_gap_tokens=output_safety_gap_tokens,
-            request_output_cap_tokens=request_output_cap_tokens,
+            completion_safety_gap_tokens=completion_safety_gap_tokens,
+            remaining_after_input_tokens=remaining_after_input_tokens,
+            max_completion_tokens=max_completion_tokens,
+            required_window_tokens=(
+                input_tokens + artifact_tokens + completion_safety_gap_tokens
+            ),
         )
 
 
@@ -167,35 +167,32 @@ def _model_tpm_limit(model_profile: ModelProfile) -> int:
     return tokens_per_minute
 
 
-def _request_output_cap_tokens(
+def _max_completion_tokens(
     *,
     provider_profile: ProviderBudgetProfile,
     model_profile: ModelProfile,
-    model_tpm_limit: int,
-    request_input_estimated_tokens: int,
+    remaining_after_input_tokens: int,
 ) -> int | None:
-    completion_remaining_tokens = (
-        model_tpm_limit
-        - request_input_estimated_tokens
-        - provider_profile.output_safety_gap_tokens
-    )
     if (
-        completion_remaining_tokens
+        remaining_after_input_tokens
         <= provider_profile.provider_default_completion_tokens
     ):
         return None
-    return min(completion_remaining_tokens, model_profile.max_output_tokens)
+    return min(remaining_after_input_tokens, model_profile.max_output_tokens)
 
 
 def _require_positive_int(value: int, *, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{field_name} must be int")
+    _require_int(value, field_name=field_name)
     if value <= 0:
         raise ValueError(f"{field_name} must be > 0")
 
 
 def _require_non_negative_int(value: int, *, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise TypeError(f"{field_name} must be int")
+    _require_int(value, field_name=field_name)
     if value < 0:
         raise ValueError(f"{field_name} must be >= 0")
+
+
+def _require_int(value: int, *, field_name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{field_name} must be int")

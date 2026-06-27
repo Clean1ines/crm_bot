@@ -2,7 +2,7 @@ from src.contexts.llm_runtime.domain.budget.token_budget import (
     artifact_tokens,
     input_tokens,
     max_artifact_tokens,
-    request_output_cap_tokens,
+    max_completion_tokens,
     required_window_tokens,
 )
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
@@ -55,22 +55,37 @@ def test_required_window_tokens_adds_input_artifact_and_safety_gap() -> None:
     )
 
 
-def test_request_output_cap_tokens_is_only_sent_when_above_provider_default() -> None:
+def test_max_completion_tokens_is_only_sent_when_above_provider_default() -> None:
     provider = _provider()
+    model = _model("qwen/qwen3-32b")
 
     assert (
-        request_output_cap_tokens(
-            remaining_window_tokens=6000,
-            input_tokens=2257,
+        max_completion_tokens(
+            remaining_after_input_tokens=3443,
             provider_profile=provider,
+            model_profile=model,
         )
         == 3443
     )
     assert (
-        request_output_cap_tokens(
-            remaining_window_tokens=4605,
-            input_tokens=2257,
+        max_completion_tokens(
+            remaining_after_input_tokens=2048,
             provider_profile=provider,
+            model_profile=model,
         )
         is None
+    )
+
+
+def test_max_completion_tokens_is_clamped_by_model_max_output_tokens() -> None:
+    provider = _provider()
+    model = _model("qwen/qwen3-32b")
+
+    assert (
+        max_completion_tokens(
+            remaining_after_input_tokens=100_000,
+            provider_profile=provider,
+            model_profile=model,
+        )
+        == model.max_output_tokens
     )

@@ -42,12 +42,13 @@ def test_qwen_batch_budget_uses_model_multiplier_and_adr_split_formula() -> None
 
     assert model.model_char_to_token_multiplier == Decimal("3.3")
     assert decision.prompt_tokens == 1953
-    assert decision.batch_input_estimated_tokens == 1000
-    assert decision.batch_input_max_tokens == 1873
-    assert decision.planned_output_reserve_tokens == 1874
-    assert decision.request_input_estimated_tokens == 2953
-    assert decision.request_total_estimated_tokens == 4827
-    assert decision.request_output_cap_tokens == 2747
+    assert decision.artifact_tokens == 1000
+    assert decision.artifact_max_tokens == 1873
+    assert decision.input_tokens == 2953
+    assert decision.completion_safety_gap_tokens == 300
+    assert decision.remaining_after_input_tokens == 2747
+    assert decision.max_completion_tokens == 2747
+    assert decision.required_window_tokens == 4253
     assert decision.batch_input_fits is True
 
 
@@ -61,8 +62,8 @@ def test_observed_batch_tokens_override_rough_char_estimate() -> None:
         observed_batch_input_tokens=1200,
     )
 
-    assert decision.batch_input_estimated_tokens == 1200
-    assert decision.request_input_estimated_tokens == 3153
+    assert decision.artifact_tokens == 1200
+    assert decision.input_tokens == 3153
 
 
 def test_large_batch_marks_fit_false_and_omits_explicit_output_cap() -> None:
@@ -76,7 +77,8 @@ def test_large_batch_marks_fit_false_and_omits_explicit_output_cap() -> None:
     )
 
     assert decision.batch_input_fits is False
-    assert decision.request_output_cap_tokens is None
+    assert decision.remaining_after_input_tokens == 147
+    assert decision.max_completion_tokens is None
 
 
 def test_gpt_oss_batch_budget_uses_its_model_tpm_and_multiplier() -> None:
@@ -89,8 +91,8 @@ def test_gpt_oss_batch_budget_uses_its_model_tpm_and_multiplier() -> None:
     ).decide(batch_input_char_count=3700)
 
     assert model.model_char_to_token_multiplier == Decimal("3.7")
-    assert decision.batch_input_estimated_tokens == 1000
-    assert decision.batch_input_max_tokens == 2825
-    assert decision.planned_output_reserve_tokens == 2825
-    assert decision.request_input_estimated_tokens == 3050
-    assert decision.request_output_cap_tokens == 4650
+    assert decision.artifact_tokens == 1000
+    assert decision.artifact_max_tokens == 2825
+    assert decision.input_tokens == 3050
+    assert decision.max_completion_tokens == 4650
+    assert decision.required_window_tokens == 4350

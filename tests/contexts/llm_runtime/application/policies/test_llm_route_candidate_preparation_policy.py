@@ -102,7 +102,7 @@ def test_preparation_builds_candidates_with_quota_availability_applied() -> None
             ),
             estimated_need=LlmEstimatedTokenNeed(
                 input_tokens=1_000,
-                estimated_output_tokens=2_000,
+                completion_tokens=2_000,
             ),
             quota_snapshots_by_route={
                 limited_route: LlmQuotaSnapshot(
@@ -133,7 +133,7 @@ def test_preparation_marks_daily_capacity_unavailable_from_snapshot() -> None:
             accounts=(_account(account="account-1", account_rank=0),),
             estimated_need=LlmEstimatedTokenNeed(
                 input_tokens=1_000,
-                estimated_output_tokens=2_000,
+                completion_tokens=2_000,
             ),
             quota_snapshots_by_route={
                 daily_limited_route: LlmQuotaSnapshot(
@@ -162,7 +162,7 @@ def test_preparation_preserves_candidate_order_from_builder() -> None:
             ),
             estimated_need=LlmEstimatedTokenNeed(
                 input_tokens=1,
-                estimated_output_tokens=1,
+                completion_tokens=1,
             ),
             quota_snapshots_by_route={},
         ),
