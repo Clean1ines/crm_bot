@@ -37,6 +37,25 @@ type KnowledgeDocumentCardProps = {
   knowledgeProcessingModeLabel: (value: string) => string;
 };
 
+type CapacityWindowDebugRow = {
+  windowKey: string;
+  provider: string;
+  accountRef: string;
+  modelRef: string;
+  status: string;
+  remainingMinuteRequests: number | null;
+  remainingMinuteTokens: number | null;
+  minuteResetAt: string | null;
+  remainingDailyRequests: number | null;
+  remainingDailyTokens: number | null;
+  dailyResetAt: string | null;
+  lastAttemptId: string | null;
+  lastErrorKind: string | null;
+  lastTotalTokens: number;
+  lastObservedAtMs: number;
+};
+
+
 const formatNumber = (value: number): string =>
   new Intl.NumberFormat('ru-RU').format(Math.max(0, Math.floor(value || 0)));
 
@@ -61,6 +80,27 @@ const formatMilliseconds = (value: number | null | undefined): string => {
   }
   return `${(value / 1000).toFixed(1)} сек.`;
 };
+
+const formatNullableNumber = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return formatNumber(value);
+};
+
+const formatResetCountdown = (
+  resetAt: string | null | undefined,
+  nowMs: number,
+): string => {
+  if (!resetAt) return 'reset unknown';
+
+  const resetAtMs = Date.parse(resetAt);
+  if (!Number.isFinite(resetAtMs)) return 'reset invalid';
+
+  const secondsUntilReset = Math.ceil((resetAtMs - nowMs) / 1000);
+  if (secondsUntilReset <= 0) return 'reset due';
+
+  return `reset через ${formatDuration(secondsUntilReset)}`;
+};
+
 
 const normalize = (value: string | null | undefined): string =>
   (value || '').trim().toLowerCase();
@@ -552,7 +592,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    if (!isLiveTimer) return undefined;
+    if (!workflow) return undefined;
 
     setNowMs(Date.now());
     const intervalId = window.setInterval(() => {
@@ -560,13 +600,75 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     }, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [isLiveTimer, timerStartedAt, workflow?.workflow_run_id]);
+  }, [workflow, timerStartedAt, workflow?.workflow_run_id]);
 
   const workflowStatus = workflow?.workflow_status ?? null;
   const currentPhase = workflow?.current_phase ?? null;
   const stages = workflow?.stages ?? [];
   const lanes = workflow?.section_lanes ?? [];
   const attempts = workflow?.llm_attempts ?? [];
+  const capacityWindowRows = useMemo((): CapacityWindowDebugRow[] => {
+    const rows = new Map<string, CapacityWindowDebugRow>();
+
+    for (const attempt of attempts) {
+      const provider = attempt.model_provider?.trim() || 'unknown-provider';
+      const accountRef = attempt.account_ref?.trim() || 'unknown-account';
+      const modelRef = attempt.model_name?.trim() || 'unknown-model';
+
+      if (
+        provider === 'unknown-provider' &&
+        accountRef === 'unknown-account' &&
+        modelRef === 'unknown-model'
+      ) {
+        continue;
+      }
+
+      const windowKey = `${provider}:${accountRef}:${modelRef}`;
+      const observedAtMs = Date.parse(
+        attempt.completed_at || attempt.started_at || '',
+      );
+      const safeObservedAtMs = Number.isFinite(observedAtMs) ? observedAtMs : 0;
+      const previous = rows.get(windowKey);
+
+      if (previous && previous.lastObservedAtMs > safeObservedAtMs) {
+        continue;
+      }
+
+      rows.set(windowKey, {
+        windowKey,
+        provider,
+        accountRef,
+        modelRef,
+        status: attempt.status || 'unknown',
+        remainingMinuteRequests:
+          typeof attempt.remaining_minute_requests === 'number'
+            ? attempt.remaining_minute_requests
+            : previous?.remainingMinuteRequests ?? null,
+        remainingMinuteTokens:
+          typeof attempt.remaining_minute_tokens === 'number'
+            ? attempt.remaining_minute_tokens
+            : previous?.remainingMinuteTokens ?? null,
+        minuteResetAt: attempt.minute_reset_at ?? previous?.minuteResetAt ?? null,
+        remainingDailyRequests:
+          typeof attempt.remaining_daily_requests === 'number'
+            ? attempt.remaining_daily_requests
+            : previous?.remainingDailyRequests ?? null,
+        remainingDailyTokens:
+          typeof attempt.remaining_daily_tokens === 'number'
+            ? attempt.remaining_daily_tokens
+            : previous?.remainingDailyTokens ?? null,
+        dailyResetAt: attempt.daily_reset_at ?? previous?.dailyResetAt ?? null,
+        lastAttemptId: (attempt.node_run_id || previous?.lastAttemptId) ?? null,
+        lastErrorKind: attempt.error_kind ?? previous?.lastErrorKind ?? null,
+        lastTotalTokens: Math.max(0, attempt.total_tokens || 0),
+        lastObservedAtMs: safeObservedAtMs,
+      });
+    }
+
+    return Array.from(rows.values()).sort((left, right) =>
+      left.windowKey.localeCompare(right.windowKey),
+    );
+  }, [attempts]);
   const actions = workflow?.actions ?? [];
   const hasClaimClusters = Array.isArray(workflow?.claim_clusters);
   const claimClusters = workflow?.claim_clusters ?? [];
@@ -1132,6 +1234,88 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                   ? ` · выполняется ${formatNumber(compactionRunningAttempts)}`
                   : ''}
                 {compactionTokens > 0 ? ` · ${formatNumber(compactionTokens)} токенов` : ''}
+              </div>
+            </div>
+          ) : null}
+
+          {capacityWindowRows.length > 0 ? (
+            <div className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium text-[var(--text-primary)]">
+                    Capacity windows
+                  </div>
+                  <div className="text-[11px] text-[var(--text-muted)]">
+                    Provider/account/model · остаток окна · таймер reset
+                  </div>
+                </div>
+                <div className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
+                  {formatNumber(capacityWindowRows.length)} окон
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                {capacityWindowRows.map((row) => (
+                  <div
+                    key={row.windowKey}
+                    className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="break-all font-mono text-[11px] text-[var(--text-primary)]">
+                          {row.windowKey}
+                        </div>
+                        <div className="mt-1 text-[11px] text-[var(--text-muted)]">
+                          status: {attemptStatusLabel(row.status)}
+                          {row.lastErrorKind ? ` · error: ${row.lastErrorKind}` : ''}
+                          {row.lastAttemptId ? ` · attempt: ${row.lastAttemptId}` : ''}
+                        </div>
+                      </div>
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${statusPillTone(row.status)}`}>
+                        {row.status}
+                      </span>
+                    </div>
+
+                    <div className="mt-2 grid gap-1.5 text-[11px] [grid-template-columns:repeat(auto-fit,minmax(145px,1fr))]">
+                      <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
+                        TPM left:{' '}
+                        <span className="font-semibold text-[var(--text-primary)]">
+                          {formatNullableNumber(row.remainingMinuteTokens)}
+                        </span>
+                      </div>
+                      <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
+                        RPM left:{' '}
+                        <span className="font-semibold text-[var(--text-primary)]">
+                          {formatNullableNumber(row.remainingMinuteRequests)}
+                        </span>
+                      </div>
+                      <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
+                        minute:{' '}
+                        <span className="font-semibold text-[var(--text-primary)]">
+                          {formatResetCountdown(row.minuteResetAt, nowMs)}
+                        </span>
+                      </div>
+                      <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
+                        daily tokens:{' '}
+                        <span className="font-semibold text-[var(--text-primary)]">
+                          {formatNullableNumber(row.remainingDailyTokens)}
+                        </span>
+                      </div>
+                      <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
+                        daily req:{' '}
+                        <span className="font-semibold text-[var(--text-primary)]">
+                          {formatNullableNumber(row.remainingDailyRequests)}
+                        </span>
+                      </div>
+                      <div className="rounded-md bg-[var(--control-bg)] px-2 py-1">
+                        last total:{' '}
+                        <span className="font-semibold text-[var(--text-primary)]">
+                          {formatNullableNumber(row.lastTotalTokens)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ) : null}
