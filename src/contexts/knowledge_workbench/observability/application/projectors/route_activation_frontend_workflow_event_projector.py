@@ -146,7 +146,7 @@ def _work_item_reroute_payload(payload: Mapping[str, object]) -> Mapping[str, ob
         "causation_command_id",
     ):
         _copy_optional_text(payload, patch, key)
-    for key in ("estimated_input_tokens", "reserved_total_tokens"):
+    for key in ("input_tokens", "required_window_tokens"):
         value = payload.get(key)
         if isinstance(value, int) and not isinstance(value, bool):
             patch[key] = value
