@@ -19,6 +19,11 @@ from src.contexts.execution_runtime.domain.value_objects.worker_ref import Worke
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservation,
 )
+from src.contexts.capacity_admission_queue.application.ports.capacity_window_budget_repository_port import (
+    CapacityReservation,
+    CapacityWindowBudgetRepositoryPort,
+    CapacityWindowBudgetSnapshot,
+)
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
     CapacityWindowAdmissionPassCommand,
 )
@@ -207,6 +212,9 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         capacity_observation_read_repository: (
             CapacityObservationReadRepositoryPort | None
         ) = None,
+        capacity_window_budget_repository: (
+            CapacityWindowBudgetRepositoryPort | None
+        ) = None,
         route_catalog: LlmModelRouteCatalog | None = None,
     ) -> HandlePrepareClaimBuilderDispatchBatchResult:
         del capacity_window_admission_pass
@@ -239,6 +247,7 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             attempt_dispatch_repository=attempt_dispatch_repository,
             capacity_reservation_repository=capacity_reservation_repository,
             capacity_observation_read_repository=capacity_observation_read_repository,
+            capacity_window_budget_repository=capacity_window_budget_repository,
             route_catalog=route_catalog or default_groq_llm_model_route_catalog(),
         )
 
@@ -324,6 +333,7 @@ async def _execute_direct_execution_queue_prepare(
     attempt_dispatch_repository: WorkItemAttemptDispatchRepositoryPort,
     capacity_reservation_repository: CapacityReservationRepositoryPort,
     capacity_observation_read_repository: CapacityObservationReadRepositoryPort | None,
+    capacity_window_budget_repository: CapacityWindowBudgetRepositoryPort | None,
     route_catalog: LlmModelRouteCatalog,
 ) -> HandlePrepareClaimBuilderDispatchBatchResult:
     scheduled_work_item_count = _payload_positive_int(
@@ -334,6 +344,22 @@ async def _execute_direct_execution_queue_prepare(
     if profile is None:
         raise ValueError("llm_dispatch_preparation profile is required")
     active_model_ref = _active_model_ref_from_payload(workflow_command.payload)
+    if capacity_window_budget_repository is not None:
+        return await _execute_budget_state_execution_queue_prepare(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            occurred_at=occurred_at,
+            workflow_unit_of_work=workflow_unit_of_work,
+            frontend_event_projection_writer=frontend_event_projection_writer,
+            work_item_lease_repository=work_item_lease_repository,
+            attempt_dispatch_repository=attempt_dispatch_repository,
+            capacity_window_budget_repository=capacity_window_budget_repository,
+            route_catalog=route_catalog,
+            scheduled_work_item_count=scheduled_work_item_count,
+            profile=profile,
+            active_model_ref=active_model_ref,
+        )
+
     lease_expires_at = occurred_at + timedelta(seconds=90)
     worker = WorkerRef("knowledge-workbench-claim-builder-dispatch")
     preflight_metadata = _direct_prepare_preflight_metadata(
@@ -529,6 +555,288 @@ async def _execute_direct_execution_queue_prepare(
         appended_event_count=appended_event_count,
         appended_next_command_count=appended_next_command_count,
         completed_command_id=workflow_command.command_id,
+    )
+
+
+async def _execute_budget_state_execution_queue_prepare(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    occurred_at: datetime,
+    workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None,
+    work_item_lease_repository: WorkItemLeaseRepositoryPort,
+    attempt_dispatch_repository: WorkItemAttemptDispatchRepositoryPort,
+    capacity_window_budget_repository: CapacityWindowBudgetRepositoryPort,
+    route_catalog: LlmModelRouteCatalog,
+    scheduled_work_item_count: int,
+    profile: LlmTaskCapacityProfile,
+    active_model_ref: str,
+) -> HandlePrepareClaimBuilderDispatchBatchResult:
+    lease_expires_at = occurred_at + timedelta(seconds=90)
+    worker = WorkerRef("knowledge-workbench-claim-builder-dispatch")
+    preflight_metadata = _direct_prepare_preflight_metadata(
+        active_model_ref=active_model_ref,
+    )
+    account_capacities = _capacities_for_direct_prepare(
+        workflow_command.payload,
+        active_model_ref=active_model_ref,
+    )
+    due_records = await work_item_lease_repository.peek_due_work_items(
+        work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+        requested_items=scheduled_work_item_count,
+        now=occurred_at,
+    )
+
+    leased_items: list[LlmAdmittedLeasedWorkItem] = []
+    started_attempts: list[StartedLlmAdmittedAttempt] = []
+
+    for due_record in due_records:
+        if len(started_attempts) >= scheduled_work_item_count:
+            break
+
+        required_window_tokens = _required_window_tokens_for_due_record(
+            due_record,
+            fallback_profile=profile,
+        )
+
+        reserved_capacity: LlmProviderAccountCapacity | None = None
+        reservation: CapacityReservation | None = None
+        for account_capacity in account_capacities:
+            await _ensure_budget_window_for_account_capacity(
+                capacity_window_budget_repository=capacity_window_budget_repository,
+                account_capacity=account_capacity,
+                now=occurred_at,
+            )
+            reservation = await capacity_window_budget_repository.try_reserve(
+                provider=account_capacity.provider,
+                account_ref=account_capacity.account_ref,
+                model_ref=account_capacity.model_ref,
+                request_count=1,
+                token_count=required_window_tokens,
+                now=occurred_at,
+            )
+            if reservation is not None:
+                reserved_capacity = account_capacity
+                break
+
+        if reservation is None or reserved_capacity is None:
+            # Keep scanning due records. Retryable items are ordered first by the
+            # lease repository; if a retryable item does not fit this minute,
+            # a smaller ready item may still fit the same budget window.
+            continue
+
+        lease_token = LeaseToken(
+            "claim-builder-dispatch:"
+            f"{workflow_run_id}:"
+            f"{len(started_attempts)}:"
+            f"{due_record.work_item.work_item_id}"
+        )
+        leased = await work_item_lease_repository.lease_due_work_item_by_id(
+            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+            work_item_id=due_record.work_item.work_item_id,
+            worker=worker,
+            lease_token=lease_token,
+            lease_expires_at=lease_expires_at,
+            now=occurred_at,
+        )
+        if leased is None:
+            await capacity_window_budget_repository.release_reservation(
+                reservation=reservation,
+                now=occurred_at,
+            )
+            continue
+
+        admitted_item = llm_admitted_leased_work_item_from_pre_lease_status(
+            leased=leased,
+            allocation=LlmCapacityAllocationSlot(
+                provider=reserved_capacity.provider,
+                account_ref=reserved_capacity.account_ref,
+                model_ref=reserved_capacity.model_ref,
+                slot_index=len(started_attempts),
+            ),
+            execution_settings=route_catalog.execution_settings_for_model_ref(
+                reserved_capacity.model_ref,
+            ),
+            pre_lease_status=due_record.work_item.status,
+        )
+
+        try:
+            start_result = await StartLlmAdmittedWorkItemAttempts(
+                repository=attempt_dispatch_repository,
+            ).execute(
+                StartLlmAdmittedWorkItemAttemptsCommand(
+                    leased_items=(admitted_item,),
+                    started_at=occurred_at,
+                )
+            )
+        except Exception:
+            await capacity_window_budget_repository.release_reservation(
+                reservation=reservation,
+                now=occurred_at,
+            )
+            raise
+
+        if len(start_result.started_attempts) != 1:
+            await capacity_window_budget_repository.release_reservation(
+                reservation=reservation,
+                now=occurred_at,
+            )
+            raise RuntimeError("claim-builder prepare must start one attempt per item")
+
+        leased_items.append(admitted_item)
+        started_attempts.append(start_result.started_attempts[0])
+
+    appended_event_count = 0
+    appended_next_command_count = 0
+
+    if started_attempts:
+        batch_event = await workflow_unit_of_work.outbox.append_event(
+            _claim_builder_dispatch_batch_prepared_event(
+                workflow_run_id=workflow_run_id,
+                started_attempts=tuple(started_attempts),
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+        )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(batch_event)
+        appended_event_count += 1
+
+        for leased_item, started_attempt in zip(
+            leased_items,
+            started_attempts,
+            strict=True,
+        ):
+            event = await workflow_unit_of_work.outbox.append_event(
+                _capacity_window_leased_work_item_event(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    leased_item=leased_item,
+                    started_attempt=started_attempt,
+                    lease_expires_at=lease_expires_at,
+                    occurred_at=occurred_at,
+                )
+            )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(event)
+            appended_event_count += 1
+
+        for event in _claim_builder_dispatch_attempt_prepared_events(
+            workflow_run_id=workflow_run_id,
+            started_attempts=tuple(started_attempts),
+            lease_expires_at=lease_expires_at,
+            occurred_at=occurred_at,
+        ):
+            persisted_event = await workflow_unit_of_work.outbox.append_event(event)
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_event)
+            appended_event_count += 1
+
+        for execute_command in _execute_claim_builder_section_commands(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            started_attempts=tuple(started_attempts),
+            occurred_at=occurred_at,
+        ):
+            await workflow_unit_of_work.command_log.append_pending_command(
+                execute_command,
+            )
+            appended_next_command_count += 1
+
+        for timeline_entry in _timeline_entries(
+            workflow_command=workflow_command,
+            prepared_event=batch_event,
+            started_attempts=tuple(started_attempts),
+            occurred_at=occurred_at,
+        ):
+            await workflow_unit_of_work.timeline.append_entry(timeline_entry)
+
+    await _save_progress_snapshot(
+        workflow_unit_of_work=workflow_unit_of_work,
+        workflow_run_id=workflow_run_id,
+        prepared_dispatch_count=len(started_attempts),
+        preflight_metadata=preflight_metadata,
+        occurred_at=occurred_at,
+    )
+    await workflow_unit_of_work.command_log.mark_command_completed(
+        command_id=workflow_command.command_id,
+        completed_at=occurred_at,
+    )
+
+    return HandlePrepareClaimBuilderDispatchBatchResult(
+        workflow_run_id=workflow_run_id,
+        prepared_dispatch_count=len(started_attempts),
+        appended_event_count=appended_event_count,
+        appended_next_command_count=appended_next_command_count,
+        completed_command_id=workflow_command.command_id,
+    )
+
+
+async def _ensure_budget_window_for_account_capacity(
+    *,
+    capacity_window_budget_repository: CapacityWindowBudgetRepositoryPort,
+    account_capacity: LlmProviderAccountCapacity,
+    now: datetime,
+) -> CapacityWindowBudgetSnapshot:
+    try:
+        snapshot = await capacity_window_budget_repository.get_window(
+            provider=account_capacity.provider,
+            account_ref=account_capacity.account_ref,
+            model_ref=account_capacity.model_ref,
+        )
+    except RuntimeError as exc:
+        if "not initialized" not in str(exc):
+            raise
+        return await capacity_window_budget_repository.apply_capacity_observation(
+            provider=account_capacity.provider,
+            account_ref=account_capacity.account_ref,
+            model_ref=account_capacity.model_ref,
+            remaining_minute_requests=account_capacity.remaining_minute_requests,
+            remaining_minute_tokens=account_capacity.remaining_minute_tokens,
+            remaining_daily_requests=account_capacity.remaining_daily_requests,
+            remaining_daily_tokens=account_capacity.remaining_daily_tokens,
+            minute_reset_at=None,
+            daily_reset_at=None,
+            observed_at=now,
+        )
+
+    minute_has_reset = (
+        snapshot.minute_reset_at is not None and snapshot.minute_reset_at <= now
+    )
+    daily_has_reset = (
+        snapshot.daily_reset_at is not None and snapshot.daily_reset_at <= now
+    )
+    if not minute_has_reset and not daily_has_reset:
+        return snapshot
+
+    return await capacity_window_budget_repository.apply_capacity_observation(
+        provider=account_capacity.provider,
+        account_ref=account_capacity.account_ref,
+        model_ref=account_capacity.model_ref,
+        remaining_minute_requests=(
+            account_capacity.remaining_minute_requests
+            if minute_has_reset
+            else snapshot.remaining_minute_requests
+        ),
+        remaining_minute_tokens=(
+            account_capacity.remaining_minute_tokens
+            if minute_has_reset
+            else snapshot.remaining_minute_tokens
+        ),
+        remaining_daily_requests=(
+            account_capacity.remaining_daily_requests
+            if daily_has_reset
+            else snapshot.remaining_daily_requests
+        ),
+        remaining_daily_tokens=(
+            account_capacity.remaining_daily_tokens
+            if daily_has_reset
+            else snapshot.remaining_daily_tokens
+        ),
+        minute_reset_at=None if minute_has_reset else snapshot.minute_reset_at,
+        daily_reset_at=None if daily_has_reset else snapshot.daily_reset_at,
+        observed_at=now,
     )
 
 
