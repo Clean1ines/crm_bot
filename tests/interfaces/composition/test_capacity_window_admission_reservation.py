@@ -13,6 +13,9 @@ from src.contexts.capacity_admission_queue.application.select_capacity_admission
     CapacityAdmissionSelectableWorkItem,
     CapacityAdmissionWindowBudget,
 )
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservation,
+)
 from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
     LlmRouteCapacityReservation,
     LlmRouteCapacityReservationTotal,
@@ -53,6 +56,50 @@ class FakeReservationRepository:
 
     async def reserve(self, reservation: LlmRouteCapacityReservation) -> None:
         self.reservations.append(reservation)
+
+
+@dataclass(slots=True)
+class FakeCapacityObservationRepository:
+    observations: tuple[LlmAttemptCapacityObservation, ...] = ()
+
+    async def latest_observations_for_accounts(
+        self,
+        *,
+        provider: str,
+        account_refs: tuple[str, ...],
+        model_ref: str,
+    ) -> tuple[LlmAttemptCapacityObservation, ...]:
+        return tuple(
+            observation
+            for observation in self.observations
+            if observation.provider == provider
+            and observation.account_ref in account_refs
+            and observation.model_ref == model_ref
+        )
+
+
+def _observation(
+    *,
+    remaining_minute_tokens: int | None,
+    minute_reset_at: datetime | None,
+    remaining_daily_tokens: int | None = None,
+) -> LlmAttemptCapacityObservation:
+    return LlmAttemptCapacityObservation(
+        provider="groq",
+        account_ref="groq-account-1",
+        model_ref="qwen/qwen3-32b",
+        remaining_minute_requests=None,
+        remaining_minute_tokens=remaining_minute_tokens,
+        remaining_daily_requests=None,
+        remaining_daily_tokens=remaining_daily_tokens,
+        minute_reset_at=minute_reset_at,
+        daily_reset_at=None,
+        actual_prompt_tokens=None,
+        actual_completion_tokens=None,
+        actual_total_tokens=None,
+        outcome_class="rate_limit_observed",
+        observed_at=_now(),
+    )
 
 
 def _budget() -> CapacityAdmissionWindowBudget:
@@ -164,3 +211,100 @@ async def test_missing_account_ref_is_rejected_as_route_configuration_error() ->
             now=_now(),
             expires_at=_now() + timedelta(minutes=2),
         )
+
+
+@pytest.mark.asyncio
+async def test_latest_observation_clamps_stale_payload_budget_before_reservation() -> (
+    None
+):
+    repository = FakeReservationRepository()
+    observation_repository = FakeCapacityObservationRepository(
+        observations=(
+            _observation(
+                remaining_minute_tokens=2_500,
+                minute_reset_at=_now() + timedelta(seconds=30),
+            ),
+        )
+    )
+    reservation = ReserveLlmRouteCapacityForAdmission(
+        repository,
+        capacity_observation_repository=observation_repository,
+    )
+
+    result = await reservation.reserve_capacity_for_selected_work_item(
+        reservation_ref="work-item-1:attempt:1",
+        attempt_id="attempt-1",
+        execution_lane_key=_lane(),
+        selected_work_item=_item(),
+        budget=_budget(),
+        now=_now(),
+        expires_at=_now() + timedelta(minutes=2),
+    )
+
+    assert result.reserved is False
+    assert (
+        result.skipped_reason is CapacityWindowAdmissionSkippedReason.CAPACITY_EXHAUSTED
+    )
+    assert repository.reservations == []
+
+
+@pytest.mark.asyncio
+async def test_expired_observation_reset_does_not_keep_window_clamped() -> None:
+    repository = FakeReservationRepository()
+    observation_repository = FakeCapacityObservationRepository(
+        observations=(
+            _observation(
+                remaining_minute_tokens=2_500,
+                minute_reset_at=_now() - timedelta(seconds=1),
+            ),
+        )
+    )
+    reservation = ReserveLlmRouteCapacityForAdmission(
+        repository,
+        capacity_observation_repository=observation_repository,
+    )
+
+    result = await reservation.reserve_capacity_for_selected_work_item(
+        reservation_ref="work-item-1:attempt:1",
+        attempt_id="attempt-1",
+        execution_lane_key=_lane(),
+        selected_work_item=_item(),
+        budget=_budget(),
+        now=_now(),
+        expires_at=_now() + timedelta(minutes=2),
+    )
+
+    assert result.reserved is True
+    assert repository.reservations[0].reserved_tokens == 3_000
+
+
+@pytest.mark.asyncio
+async def test_unknown_daily_observation_does_not_clamp_payload_daily_budget_to_zero() -> (
+    None
+):
+    repository = FakeReservationRepository()
+    observation_repository = FakeCapacityObservationRepository(
+        observations=(
+            _observation(
+                remaining_minute_tokens=10_000,
+                minute_reset_at=_now() + timedelta(seconds=30),
+                remaining_daily_tokens=None,
+            ),
+        )
+    )
+    reservation = ReserveLlmRouteCapacityForAdmission(
+        repository,
+        capacity_observation_repository=observation_repository,
+    )
+
+    result = await reservation.reserve_capacity_for_selected_work_item(
+        reservation_ref="work-item-1:attempt:1",
+        attempt_id="attempt-1",
+        execution_lane_key=_lane(),
+        selected_work_item=_item(),
+        budget=_budget(),
+        now=_now(),
+        expires_at=_now() + timedelta(minutes=2),
+    )
+
+    assert result.reserved is True

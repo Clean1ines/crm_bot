@@ -195,25 +195,25 @@ def _capacity_window_account_capacities(
             continue
 
         account_capacity = dict(item)
-        account_capacity["remaining_minute_requests"] = (
-            _capacity_observation_non_negative_int(
-                capacity_observation.remaining_minute_requests
-            )
+        _overwrite_if_observed(
+            account_capacity,
+            "remaining_minute_requests",
+            capacity_observation.remaining_minute_requests,
         )
-        account_capacity["remaining_minute_tokens"] = (
-            _capacity_observation_non_negative_int(
-                capacity_observation.remaining_minute_tokens
-            )
+        _overwrite_if_observed(
+            account_capacity,
+            "remaining_minute_tokens",
+            capacity_observation.remaining_minute_tokens,
         )
-        account_capacity["remaining_daily_requests"] = (
-            _capacity_observation_non_negative_int(
-                capacity_observation.remaining_daily_requests
-            )
+        _overwrite_if_observed(
+            account_capacity,
+            "remaining_daily_requests",
+            capacity_observation.remaining_daily_requests,
         )
-        account_capacity["remaining_daily_tokens"] = (
-            _capacity_observation_non_negative_int(
-                capacity_observation.remaining_daily_tokens
-            )
+        _overwrite_if_observed(
+            account_capacity,
+            "remaining_daily_tokens",
+            capacity_observation.remaining_daily_tokens,
         )
         matched.append(account_capacity)
 
@@ -221,6 +221,16 @@ def _capacity_window_account_capacities(
         return matched
 
     return [_account_capacity_from_observation(capacity_observation)]
+
+
+def _overwrite_if_observed(
+    payload: dict[str, object],
+    key: str,
+    value: int | None,
+) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return
+    payload[key] = max(0, value)
 
 
 def _capacity_observation_non_negative_int(value: int | None) -> int:

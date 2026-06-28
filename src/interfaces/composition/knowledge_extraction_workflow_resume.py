@@ -905,6 +905,9 @@ def _capacity_window_admission_pass_for_transaction(
             reservation_repository=PostgresLlmRouteCapacityReservationRepository(
                 connection,
             ),
+            capacity_observation_repository=(
+                PostgresLlmAttemptCapacityObservationRepository(connection)
+            ),
         ),
         execution_boundary=StartAttemptCapacityWindowAdmissionExecutionBoundary(
             attempt_dispatch_repository=PostgresWorkItemAttemptDispatchRepository(

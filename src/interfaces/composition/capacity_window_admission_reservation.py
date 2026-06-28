@@ -17,6 +17,9 @@ from src.contexts.capacity_admission_queue.application.select_capacity_admission
     CapacityAdmissionSelectableWorkItem,
     CapacityAdmissionWindowBudget,
 )
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservation,
+)
 from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
     LlmRouteCapacityReservation,
     LlmRouteCapacityReservationTotal,
@@ -44,9 +47,22 @@ class LlmRouteCapacityReservationRepositoryPort(Protocol):
     async def reserve(self, reservation: LlmRouteCapacityReservation) -> None: ...
 
 
+class LlmAttemptCapacityObservationReadRepositoryPort(Protocol):
+    async def latest_observations_for_accounts(
+        self,
+        *,
+        provider: str,
+        account_refs: tuple[str, ...],
+        model_ref: str,
+    ) -> tuple[LlmAttemptCapacityObservation, ...]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ReserveLlmRouteCapacityForAdmission:
     reservation_repository: LlmRouteCapacityReservationRepositoryPort
+    capacity_observation_repository: (
+        LlmAttemptCapacityObservationReadRepositoryPort | None
+    ) = None
 
     async def reserve_capacity_for_selected_work_item(
         self,
@@ -79,6 +95,15 @@ class ReserveLlmRouteCapacityForAdmission:
             account_ref=lane_key.account_ref,
             model_ref=lane_key.model_ref,
         )
+        live_budget = await _budget_after_latest_capacity_observation(
+            budget,
+            observation_repository=self.capacity_observation_repository,
+            provider=lane_key.provider,
+            account_ref=lane_key.account_ref,
+            model_ref=lane_key.model_ref,
+            now=now,
+        )
+
         active_totals = await self.reservation_repository.active_totals(
             provider=lane_key.provider,
             account_refs=(lane_key.account_ref,),
@@ -91,7 +116,7 @@ class ReserveLlmRouteCapacityForAdmission:
         active_reserved_tokens = sum(total.reserved_tokens for total in active_totals)
 
         available_budget = _available_budget_after_active_reservations(
-            budget,
+            live_budget,
             active_reserved_requests=active_reserved_requests,
             active_reserved_tokens=active_reserved_tokens,
         )
@@ -146,6 +171,95 @@ class ReserveLlmRouteCapacityForAdmission:
                 expires_at=expires_at,
             ),
         )
+
+
+async def _budget_after_latest_capacity_observation(
+    budget: CapacityAdmissionWindowBudget,
+    *,
+    observation_repository: LlmAttemptCapacityObservationReadRepositoryPort | None,
+    provider: str,
+    account_ref: str,
+    model_ref: str,
+    now: datetime,
+) -> CapacityAdmissionWindowBudget:
+    if observation_repository is None:
+        return budget
+
+    observations = await observation_repository.latest_observations_for_accounts(
+        provider=provider,
+        account_refs=(account_ref,),
+        model_ref=model_ref,
+    )
+    if not observations:
+        return budget
+
+    return _budget_clamped_by_observation(
+        budget,
+        observation=observations[0],
+        now=now,
+    )
+
+
+def _budget_clamped_by_observation(
+    budget: CapacityAdmissionWindowBudget,
+    *,
+    observation: LlmAttemptCapacityObservation,
+    now: datetime,
+) -> CapacityAdmissionWindowBudget:
+    _require_timezone_aware(now, "now")
+
+    minute_window_has_reset = (
+        observation.minute_reset_at is not None and now >= observation.minute_reset_at
+    )
+    daily_window_has_reset = (
+        observation.daily_reset_at is not None and now >= observation.daily_reset_at
+    )
+
+    if minute_window_has_reset:
+        remaining_requests = budget.remaining_requests
+        remaining_tokens = budget.remaining_tokens
+    else:
+        remaining_requests = _min_if_observed(
+            budget.remaining_requests,
+            observation.remaining_minute_requests,
+        )
+        remaining_tokens = _min_if_observed(
+            budget.remaining_tokens,
+            observation.remaining_minute_tokens,
+        )
+
+    if daily_window_has_reset:
+        remaining_daily_requests = budget.remaining_daily_requests
+        remaining_daily_tokens = budget.remaining_daily_tokens
+    else:
+        remaining_daily_requests = _min_if_observed(
+            budget.remaining_daily_requests,
+            observation.remaining_daily_requests,
+        )
+        remaining_daily_tokens = _min_if_observed(
+            budget.remaining_daily_tokens,
+            observation.remaining_daily_tokens,
+        )
+
+    return CapacityAdmissionWindowBudget(
+        remaining_requests=remaining_requests,
+        remaining_tokens=remaining_tokens,
+        remaining_daily_requests=remaining_daily_requests,
+        remaining_daily_tokens=remaining_daily_tokens,
+    )
+
+
+def _min_if_observed(
+    configured_or_payload_value: int, observed_value: int | None
+) -> int:
+    _require_non_negative_int(
+        configured_or_payload_value,
+        "configured_or_payload_value",
+    )
+    if observed_value is None:
+        return configured_or_payload_value
+    _require_non_negative_int(observed_value, "observed_value")
+    return min(configured_or_payload_value, observed_value)
 
 
 def _available_budget_after_active_reservations(
