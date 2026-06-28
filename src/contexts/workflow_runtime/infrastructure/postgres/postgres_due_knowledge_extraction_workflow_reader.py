@@ -36,7 +36,7 @@ class PostgresDueKnowledgeExtractionWorkflowReader:
             FROM workflow_runtime_command_log AS command
             JOIN knowledge_extraction_workflow_runs AS run
               ON run.workflow_run_id = command.workflow_run_id
-            WHERE command.status = 'pending'
+            WHERE lower(command.status::text) = 'pending'
               AND command.run_after <= NOW()
             GROUP BY run.project_id, command.workflow_run_id
             ORDER BY MIN(command.run_after), command.workflow_run_id
