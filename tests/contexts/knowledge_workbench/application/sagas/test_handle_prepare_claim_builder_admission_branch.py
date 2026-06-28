@@ -22,6 +22,9 @@ from src.contexts.capacity_admission_queue.application.capacity_window_admission
 from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_repository_port import (
     WorkItemAttemptDispatchRecord,
 )
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservation,
+)
 from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
     DueWorkItemRecord,
     LeasedWorkItemRecord,
@@ -86,7 +89,18 @@ def _workflow_run_id() -> str:
     return "workflow-1"
 
 
-def _workflow_command() -> WorkflowCommand:
+def _workflow_command(
+    *,
+    scheduled_work_item_count: int = 1,
+    input_tokens: int = 100,
+    artifact_tokens: int = 10,
+    remaining_minute_requests: int = 2,
+    remaining_minute_tokens: int = 7000,
+    remaining_daily_requests: int = 100,
+    remaining_daily_tokens: int = 50000,
+    run_after: datetime | None = None,
+) -> WorkflowCommand:
+    occurred_at = run_after or _now()
     return WorkflowCommand(
         command_id=WorkflowCommandId(
             "workflow-command:prepare-claim-builder-dispatch-batch:workflow-1"
@@ -101,12 +115,12 @@ def _workflow_command() -> WorkflowCommand:
         payload={
             "workflow_run_id": _workflow_run_id(),
             "source_document_ref": "source-document-1",
-            "scheduled_work_item_count": 1,
+            "scheduled_work_item_count": scheduled_work_item_count,
             "llm_dispatch_preparation": {
                 "profile": {
                     "profile_id": "faq_claim_observations",
-                    "input_tokens": 100,
-                    "artifact_tokens": 10,
+                    "input_tokens": input_tokens,
+                    "artifact_tokens": artifact_tokens,
                     "request_count": 1,
                 },
                 "account_capacities": (
@@ -114,19 +128,19 @@ def _workflow_command() -> WorkflowCommand:
                         "provider": "groq",
                         "account_ref": "groq-account-1",
                         "model_ref": "qwen/qwen3-32b",
-                        "remaining_minute_requests": 2,
-                        "remaining_minute_tokens": 7000,
-                        "remaining_daily_requests": 100,
-                        "remaining_daily_tokens": 50000,
+                        "remaining_minute_requests": remaining_minute_requests,
+                        "remaining_minute_tokens": remaining_minute_tokens,
+                        "remaining_daily_requests": remaining_daily_requests,
+                        "remaining_daily_tokens": remaining_daily_tokens,
                     },
                 ),
                 "active_model_ref": "qwen/qwen3-32b",
             },
         },
         status=WorkflowCommandStatus.PENDING,
-        run_after=_now(),
-        created_at=_now(),
-        updated_at=_now(),
+        run_after=occurred_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
     )
 
 
@@ -367,15 +381,22 @@ class FakeReservationRepository:
 
 @dataclass(slots=True)
 class FakeCapacityObservationReadRepository:
+    observations: tuple[LlmAttemptCapacityObservation, ...] = ()
+
     async def latest_observations_for_accounts(
         self,
         *,
         provider: str,
         account_refs: tuple[str, ...],
         model_ref: str,
-    ) -> tuple[object, ...]:
-        del provider, account_refs, model_ref
-        return ()
+    ) -> tuple[LlmAttemptCapacityObservation, ...]:
+        return tuple(
+            observation
+            for observation in self.observations
+            if observation.provider == provider
+            and observation.account_ref in account_refs
+            and observation.model_ref == model_ref
+        )
 
 
 @dataclass(slots=True)
@@ -529,6 +550,8 @@ async def _execute_direct_prepare(
     reservation_repository: FakeReservationRepository | None = None,
     workflow_unit_of_work: FakeWorkflowRuntimeUnitOfWork | None = None,
     workflow_command: WorkflowCommand | None = None,
+    capacity_observation_read_repository: FakeCapacityObservationReadRepository
+    | None = None,
 ) -> tuple[
     object,
     FakeWorkflowRuntimeUnitOfWork,
@@ -547,7 +570,10 @@ async def _execute_direct_prepare(
         work_item_lease_repository=lease_repository,
         attempt_dispatch_repository=attempt_repository,
         capacity_reservation_repository=reservation_repository,
-        capacity_observation_read_repository=FakeCapacityObservationReadRepository(),
+        capacity_observation_read_repository=(
+            capacity_observation_read_repository
+            or FakeCapacityObservationReadRepository()
+        ),
         route_catalog=default_groq_llm_model_route_catalog(),
     )
 
@@ -710,3 +736,213 @@ async def test_prepare_claim_builder_dispatches_next_item_after_first_completes(
     assert [
         record.work_item.work_item_id for record in lease_repository.due_records
     ] == ["work-item-3"]
+
+
+def _ready_due_records(count: int) -> list[DueWorkItemRecord]:
+    return _due_records(
+        *((f"work-item-{index}", WorkItemStatus.READY) for index in range(1, count + 1))
+    )
+
+
+def _minute_limit_observation(*, reset_at: datetime) -> LlmAttemptCapacityObservation:
+    return LlmAttemptCapacityObservation(
+        provider="groq",
+        account_ref="groq-account-1",
+        model_ref="qwen/qwen3-32b",
+        remaining_minute_requests=None,
+        remaining_minute_tokens=None,
+        remaining_daily_requests=100,
+        remaining_daily_tokens=50_000,
+        minute_reset_at=reset_at,
+        daily_reset_at=None,
+        actual_prompt_tokens=None,
+        actual_completion_tokens=None,
+        actual_total_tokens=None,
+        outcome_class="retryable_failed",
+        observed_at=_now(),
+    )
+
+
+def _execute_work_item_ids(
+    workflow_unit_of_work: FakeWorkflowRuntimeUnitOfWork,
+) -> list[str]:
+    return [
+        str(command.payload["work_item_id"])
+        for command in workflow_unit_of_work.command_log.pending_commands
+        if command.command_type
+        == KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value
+    ]
+
+
+@pytest.mark.asyncio
+async def test_prepare_dispatches_at_most_remaining_minute_requests() -> None:
+    lease_repository = FakeWorkItemLeaseRepository(due_records=_ready_due_records(10))
+
+    (
+        result,
+        workflow_unit_of_work,
+        attempt_repository,
+        reservation_repository,
+    ) = await _execute_direct_prepare(
+        lease_repository=lease_repository,
+        workflow_command=_workflow_command(
+            scheduled_work_item_count=10,
+            remaining_minute_requests=1,
+            remaining_minute_tokens=100_000,
+        ),
+    )
+
+    assert result.prepared_dispatch_count == 1
+    assert len(lease_repository.leased_records) == 1
+    assert len(attempt_repository.records) == 1
+    assert len(reservation_repository.reservations) == 1
+    assert len(_execute_work_item_ids(workflow_unit_of_work)) == 1
+    assert len(lease_repository.due_records) == 9
+
+
+@pytest.mark.asyncio
+async def test_prepare_decrements_local_capacity_budget_across_batch() -> None:
+    lease_repository = FakeWorkItemLeaseRepository(due_records=_ready_due_records(10))
+
+    result, workflow_unit_of_work, _, _ = await _execute_direct_prepare(
+        lease_repository=lease_repository,
+        workflow_command=_workflow_command(
+            scheduled_work_item_count=10,
+            remaining_minute_requests=3,
+            remaining_minute_tokens=100_000,
+        ),
+    )
+
+    assert result.prepared_dispatch_count == 3
+    assert len(_execute_work_item_ids(workflow_unit_of_work)) == 3
+    assert len(lease_repository.due_records) == 7
+
+
+@pytest.mark.asyncio
+async def test_prepare_stops_when_minute_tokens_exhausted() -> None:
+    lease_repository = FakeWorkItemLeaseRepository(due_records=_ready_due_records(3))
+
+    result, workflow_unit_of_work, _, _ = await _execute_direct_prepare(
+        lease_repository=lease_repository,
+        workflow_command=_workflow_command(
+            scheduled_work_item_count=3,
+            input_tokens=5_000,
+            artifact_tokens=0,
+            remaining_minute_requests=10,
+            remaining_minute_tokens=6_000,
+        ),
+    )
+
+    assert result.prepared_dispatch_count == 1
+    assert len(_execute_work_item_ids(workflow_unit_of_work)) == 1
+    assert len(lease_repository.due_records) == 2
+
+
+@pytest.mark.asyncio
+async def test_prepare_dispatches_zero_when_latest_minute_limit_reset_in_future() -> (
+    None
+):
+    lease_repository = FakeWorkItemLeaseRepository(due_records=_ready_due_records(5))
+    reset_at = _now() + timedelta(minutes=1)
+
+    (
+        result,
+        workflow_unit_of_work,
+        attempt_repository,
+        reservation_repository,
+    ) = await _execute_direct_prepare(
+        lease_repository=lease_repository,
+        workflow_command=_workflow_command(
+            scheduled_work_item_count=5,
+            remaining_minute_requests=5,
+            remaining_minute_tokens=100_000,
+        ),
+        capacity_observation_read_repository=FakeCapacityObservationReadRepository(
+            observations=(_minute_limit_observation(reset_at=reset_at),)
+        ),
+    )
+
+    assert result.prepared_dispatch_count == 0
+    assert lease_repository.leased_records == []
+    assert attempt_repository.records == []
+    assert reservation_repository.reservations == []
+    assert _execute_work_item_ids(workflow_unit_of_work) == []
+    assert len(lease_repository.due_records) == 5
+
+
+@pytest.mark.asyncio
+async def test_prepare_after_reset_dispatches_again_but_only_within_capacity() -> None:
+    lease_repository = FakeWorkItemLeaseRepository(due_records=_ready_due_records(5))
+    reset_at = _now() + timedelta(minutes=1)
+
+    result, workflow_unit_of_work, _, _ = await _execute_direct_prepare(
+        lease_repository=lease_repository,
+        workflow_command=_workflow_command(
+            scheduled_work_item_count=5,
+            remaining_minute_requests=1,
+            remaining_minute_tokens=100_000,
+            run_after=reset_at,
+        ),
+        capacity_observation_read_repository=FakeCapacityObservationReadRepository(
+            observations=(_minute_limit_observation(reset_at=reset_at),)
+        ),
+    )
+
+    assert result.prepared_dispatch_count == 1
+    assert len(_execute_work_item_ids(workflow_unit_of_work)) == 1
+    assert len(lease_repository.due_records) == 4
+
+
+@pytest.mark.asyncio
+async def test_retryable_priority_respects_capacity() -> None:
+    lease_repository = FakeWorkItemLeaseRepository(
+        due_records=_due_records(
+            ("work-item-ready-1", WorkItemStatus.READY),
+            ("work-item-ready-2", WorkItemStatus.READY),
+            ("work-item-ready-3", WorkItemStatus.READY),
+            ("work-item-ready-4", WorkItemStatus.READY),
+            ("work-item-ready-5", WorkItemStatus.READY),
+            ("work-item-retry-1", WorkItemStatus.RETRYABLE_FAILED),
+            ("work-item-retry-2", WorkItemStatus.RETRYABLE_FAILED),
+        )
+    )
+
+    result, workflow_unit_of_work, _, _ = await _execute_direct_prepare(
+        lease_repository=lease_repository,
+        workflow_command=_workflow_command(
+            scheduled_work_item_count=7,
+            remaining_minute_requests=1,
+            remaining_minute_tokens=100_000,
+        ),
+    )
+
+    assert result.prepared_dispatch_count == 1
+    assert _execute_work_item_ids(workflow_unit_of_work) == ["work-item-retry-1"]
+    assert {
+        record.work_item.work_item_id for record in lease_repository.due_records
+    } >= {
+        "work-item-ready-1",
+        "work-item-ready-2",
+        "work-item-ready-3",
+        "work-item-ready-4",
+        "work-item-ready-5",
+        "work-item-retry-2",
+    }
+
+
+@pytest.mark.asyncio
+async def test_scheduled_work_item_count_is_not_capacity() -> None:
+    lease_repository = FakeWorkItemLeaseRepository(due_records=_ready_due_records(20))
+
+    result, workflow_unit_of_work, _, _ = await _execute_direct_prepare(
+        lease_repository=lease_repository,
+        workflow_command=_workflow_command(
+            scheduled_work_item_count=20,
+            remaining_minute_requests=2,
+            remaining_minute_tokens=100_000,
+        ),
+    )
+
+    assert result.prepared_dispatch_count == 2
+    assert len(_execute_work_item_ids(workflow_unit_of_work)) == 2
+    assert len(lease_repository.due_records) == 18
