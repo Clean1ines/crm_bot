@@ -112,10 +112,19 @@ async def run_knowledge_extraction_workflow_runtime_loop(
             )
 
         if due_workflows:
-            await KnowledgeExtractionWorkflowRuntimePump(
-                due_workflow_reader=_StaticDueWorkflowReader(due_workflows),
-                workflow_runner=workflow_runner,
-            ).run_once(limit=len(due_workflows))
+            try:
+                await KnowledgeExtractionWorkflowRuntimePump(
+                    due_workflow_reader=_StaticDueWorkflowReader(due_workflows),
+                    workflow_runner=workflow_runner,
+                ).run_once(limit=len(due_workflows))
+            except Exception:
+                LOGGER.exception(
+                    "knowledge_extraction_workflow_runtime_pump_failed",
+                    due_workflow_count=len(due_workflows),
+                    workflow_run_ids=[
+                        workflow.workflow_run_id for workflow in due_workflows
+                    ],
+                )
 
         try:
             await asyncio.wait_for(
