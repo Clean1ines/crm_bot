@@ -160,9 +160,13 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
 
 
 def _execution_occurred_at(workflow_command: WorkflowCommand) -> datetime:
-    occurred_at = workflow_command.updated_at
+    # For scheduled capacity wakeups, updated_at is the time the wakeup command
+    # was created, while run_after is the provider reset time when the command
+    # becomes due. Capacity admission must evaluate the window at run_after,
+    # otherwise a due wakeup is processed using stale pre-reset time.
+    occurred_at = workflow_command.run_after
     if not isinstance(occurred_at, datetime):
-        raise ValueError("workflow_command updated_at must be datetime")
+        raise ValueError("workflow_command run_after must be datetime")
     return occurred_at
 
 
