@@ -763,6 +763,28 @@ def _minute_limit_observation(*, reset_at: datetime) -> LlmAttemptCapacityObserv
     )
 
 
+def _successful_observation_without_minute_request_count(
+    *,
+    reset_at: datetime,
+) -> LlmAttemptCapacityObservation:
+    return LlmAttemptCapacityObservation(
+        provider="groq",
+        account_ref="groq-account-1",
+        model_ref="qwen/qwen3-32b",
+        remaining_minute_requests=None,
+        remaining_minute_tokens=100_000,
+        remaining_daily_requests=100,
+        remaining_daily_tokens=50_000,
+        minute_reset_at=reset_at,
+        daily_reset_at=None,
+        actual_prompt_tokens=100,
+        actual_completion_tokens=10,
+        actual_total_tokens=110,
+        outcome_class="succeeded",
+        observed_at=_now(),
+    )
+
+
 def _execute_work_item_ids(
     workflow_unit_of_work: FakeWorkflowRuntimeUnitOfWork,
 ) -> list[str]:
@@ -863,11 +885,48 @@ async def test_prepare_dispatches_zero_when_latest_minute_limit_reset_in_future(
     )
 
     assert result.prepared_dispatch_count == 0
+    assert result.appended_next_command_count == 1
     assert lease_repository.leased_records == []
     assert attempt_repository.records == []
     assert reservation_repository.reservations == []
     assert _execute_work_item_ids(workflow_unit_of_work) == []
+    assert len(workflow_unit_of_work.command_log.pending_commands) == 1
+    wakeup_command = workflow_unit_of_work.command_log.pending_commands[0]
+    assert (
+        wakeup_command.command_type
+        == KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+    )
+    assert wakeup_command.run_after == reset_at
     assert len(lease_repository.due_records) == 5
+
+
+@pytest.mark.asyncio
+async def test_prepare_success_observation_without_minute_request_count_dispatches() -> (
+    None
+):
+    lease_repository = FakeWorkItemLeaseRepository(due_records=_ready_due_records(5))
+    reset_at = _now() + timedelta(minutes=1)
+
+    result, workflow_unit_of_work, _, _ = await _execute_direct_prepare(
+        lease_repository=lease_repository,
+        workflow_command=_workflow_command(
+            scheduled_work_item_count=5,
+            remaining_minute_requests=2,
+            remaining_minute_tokens=100_000,
+        ),
+        capacity_observation_read_repository=FakeCapacityObservationReadRepository(
+            observations=(
+                _successful_observation_without_minute_request_count(
+                    reset_at=reset_at,
+                ),
+            )
+        ),
+    )
+
+    assert result.prepared_dispatch_count == 2
+    assert result.appended_next_command_count == 2
+    assert len(_execute_work_item_ids(workflow_unit_of_work)) == 2
+    assert len(lease_repository.due_records) == 3
 
 
 @pytest.mark.asyncio

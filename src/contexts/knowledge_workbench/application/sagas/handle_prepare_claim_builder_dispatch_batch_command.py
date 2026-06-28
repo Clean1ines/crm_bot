@@ -46,6 +46,9 @@ from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow
     capacity_window_scheduled_wakeup_event,
     source_unit_ref_from_schedule_payload,
 )
+from src.contexts.knowledge_workbench.application.sagas.append_capacity_window_prepare_wakeup import (
+    append_capacity_window_prepare_wakeup,
+)
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -271,6 +274,7 @@ class _DirectCapacityWindow:
     remaining_daily_requests: int
     remaining_daily_tokens: int
     unavailable_until: datetime | None = None
+    capacity_observation: LlmAttemptCapacityObservation | None = None
 
     @property
     def max_required_window_tokens(self) -> int:
@@ -300,6 +304,7 @@ class _DirectCapacityWindow:
                 self.remaining_daily_tokens - required_window_tokens,
             ),
             unavailable_until=self.unavailable_until,
+            capacity_observation=self.capacity_observation,
         )
 
     def _available_now(self, now: datetime) -> bool:
@@ -425,6 +430,25 @@ async def _execute_direct_execution_queue_prepare(
 
     appended_event_count = 0
     appended_next_command_count = 0
+    if due_records and not started_attempts:
+        capacity_wait_observation = _first_unavailable_capacity_observation(
+            capacity_windows,
+            now=occurred_at,
+        )
+        if capacity_wait_observation is not None:
+            wakeup = await append_capacity_window_prepare_wakeup(
+                workflow_unit_of_work=workflow_unit_of_work,
+                source_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                prepare_command_type=(
+                    KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+                ),
+                capacity_observation=capacity_wait_observation,
+                occurred_at=occurred_at,
+            )
+            if wakeup is not None:
+                appended_next_command_count += 1
+
     if started_attempts:
         batch_event = await workflow_unit_of_work.outbox.append_event(
             _claim_builder_dispatch_batch_prepared_event(
@@ -564,6 +588,7 @@ async def _direct_capacity_windows(
                     observed_capacity.remaining_daily_tokens - active_reserved_tokens,
                 ),
                 unavailable_until=observed_state.unavailable_until,
+                capacity_observation=observed_state.capacity_observation,
             )
         )
     return windows
@@ -600,6 +625,7 @@ def _capacities_for_direct_prepare(
 class _ObservedCapacityState:
     capacity: LlmProviderAccountCapacity
     unavailable_until: datetime | None = None
+    capacity_observation: LlmAttemptCapacityObservation | None = None
 
 
 async def _capacity_after_latest_observation(
@@ -629,25 +655,37 @@ async def _capacity_after_latest_observation(
         observation.daily_reset_at,
         now=occurred_at,
     )
+    minute_fail_closed_until_reset = _observation_requires_fail_closed_until_reset(
+        observation=observation,
+        reset_in_future=minute_reset_in_future,
+        remaining_requests=observation.remaining_minute_requests,
+        remaining_tokens=observation.remaining_minute_tokens,
+    )
+    daily_fail_closed_until_reset = _observation_requires_fail_closed_until_reset(
+        observation=observation,
+        reset_in_future=daily_reset_in_future,
+        remaining_requests=observation.remaining_daily_requests,
+        remaining_tokens=observation.remaining_daily_tokens,
+    )
     remaining_minute_requests = _observed_int_or_fail_closed_until_reset(
         current=account_capacity.remaining_minute_requests,
         observed=observation.remaining_minute_requests,
-        reset_in_future=minute_reset_in_future,
+        fail_closed_until_reset=minute_fail_closed_until_reset,
     )
     remaining_minute_tokens = _observed_int_or_fail_closed_until_reset(
         current=account_capacity.remaining_minute_tokens,
         observed=observation.remaining_minute_tokens,
-        reset_in_future=minute_reset_in_future,
+        fail_closed_until_reset=minute_fail_closed_until_reset,
     )
     remaining_daily_requests = _observed_int_or_fail_closed_until_reset(
         current=account_capacity.remaining_daily_requests,
         observed=observation.remaining_daily_requests,
-        reset_in_future=daily_reset_in_future,
+        fail_closed_until_reset=daily_fail_closed_until_reset,
     )
     remaining_daily_tokens = _observed_int_or_fail_closed_until_reset(
         current=account_capacity.remaining_daily_tokens,
         observed=observation.remaining_daily_tokens,
-        reset_in_future=daily_reset_in_future,
+        fail_closed_until_reset=daily_fail_closed_until_reset,
     )
     return _ObservedCapacityState(
         capacity=LlmProviderAccountCapacity(
@@ -663,6 +701,7 @@ async def _capacity_after_latest_observation(
             observation=observation,
             occurred_at=occurred_at,
         ),
+        capacity_observation=observation,
     )
 
 
@@ -676,10 +715,10 @@ def _observed_int_or_fail_closed_until_reset(
     *,
     current: int,
     observed: int | None,
-    reset_in_future: datetime | None,
+    fail_closed_until_reset: bool,
 ) -> int:
     if observed is None:
-        if reset_in_future is not None:
+        if fail_closed_until_reset:
             return 0
         return current
     return min(current, observed)
@@ -695,11 +734,14 @@ def _window_unavailable_until(
         observation.minute_reset_at,
         now=occurred_at,
     )
-    if minute_reset_in_future is not None and (
-        observation.remaining_minute_requests is None
-        or observation.remaining_minute_requests <= 0
-        or observation.remaining_minute_tokens is None
-        or observation.remaining_minute_tokens <= 0
+    if (
+        minute_reset_in_future is not None
+        and _observation_requires_fail_closed_until_reset(
+            observation=observation,
+            reset_in_future=minute_reset_in_future,
+            remaining_requests=observation.remaining_minute_requests,
+            remaining_tokens=observation.remaining_minute_tokens,
+        )
     ):
         candidates.append(minute_reset_in_future)
 
@@ -707,17 +749,48 @@ def _window_unavailable_until(
         observation.daily_reset_at,
         now=occurred_at,
     )
-    if daily_reset_in_future is not None and (
-        observation.remaining_daily_requests is None
-        or observation.remaining_daily_requests <= 0
-        or observation.remaining_daily_tokens is None
-        or observation.remaining_daily_tokens <= 0
+    if (
+        daily_reset_in_future is not None
+        and _observation_requires_fail_closed_until_reset(
+            observation=observation,
+            reset_in_future=daily_reset_in_future,
+            remaining_requests=observation.remaining_daily_requests,
+            remaining_tokens=observation.remaining_daily_tokens,
+        )
     ):
         candidates.append(daily_reset_in_future)
 
     if not candidates:
         return None
     return min(candidates)
+
+
+def _observation_requires_fail_closed_until_reset(
+    *,
+    observation: LlmAttemptCapacityObservation,
+    reset_in_future: datetime | None,
+    remaining_requests: int | None,
+    remaining_tokens: int | None,
+) -> bool:
+    if reset_in_future is None:
+        return False
+    if _observed_capacity_value_exhausted(remaining_requests):
+        return True
+    if _observed_capacity_value_exhausted(remaining_tokens):
+        return True
+    if not _is_failure_capacity_observation(observation):
+        return False
+    return remaining_requests is None or remaining_tokens is None
+
+
+def _observed_capacity_value_exhausted(value: int | None) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value <= 0
+
+
+def _is_failure_capacity_observation(
+    observation: LlmAttemptCapacityObservation,
+) -> bool:
+    return observation.outcome_class != "succeeded"
 
 
 def _first_capacity_window_index_that_fits(
@@ -730,6 +803,23 @@ def _first_capacity_window_index_that_fits(
         if window.fits(required_window_tokens=required_window_tokens, now=now):
             return index
     return None
+
+
+def _first_unavailable_capacity_observation(
+    capacity_windows: Sequence[_DirectCapacityWindow],
+    *,
+    now: datetime,
+) -> LlmAttemptCapacityObservation | None:
+    candidates: list[tuple[datetime, LlmAttemptCapacityObservation]] = []
+    for window in capacity_windows:
+        if window.unavailable_until is None or window.unavailable_until <= now:
+            continue
+        if window.capacity_observation is None:
+            continue
+        candidates.append((window.unavailable_until, window.capacity_observation))
+    if not candidates:
+        return None
+    return min(candidates, key=lambda item: item[0])[1]
 
 
 def _required_window_tokens_for_due_record(
