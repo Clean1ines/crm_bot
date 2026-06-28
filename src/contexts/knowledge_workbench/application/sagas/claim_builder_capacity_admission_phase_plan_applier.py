@@ -95,17 +95,24 @@ class ClaimBuilderCapacityAdmissionPhasePlanApplier:
         appended_next_command_count = 0
 
         for workflow_event_summary in mapping_plan.workflow_events:
-            persisted_event = await workflow_unit_of_work.outbox.append_event(
-                _workflow_event_from_summary(
-                    workflow_command=workflow_command,
-                    mapping_plan=mapping_plan,
-                    workflow_event_summary=workflow_event_summary,
-                    occurred_at=occurred_at,
+            try:
+                persisted_event = await workflow_unit_of_work.outbox.append_event(
+                    _workflow_event_from_summary(
+                        workflow_command=workflow_command,
+                        mapping_plan=mapping_plan,
+                        workflow_event_summary=workflow_event_summary,
+                        occurred_at=occurred_at,
+                    )
                 )
-            )
-            if frontend_event_projection_writer is not None:
-                await frontend_event_projection_writer.execute(persisted_event)
-            appended_event_count += 1
+            except ValueError as exc:
+                if "event_id conflict has different payload" not in str(exc):
+                    raise
+                persisted_event = None
+
+            if persisted_event is not None:
+                if frontend_event_projection_writer is not None:
+                    await frontend_event_projection_writer.execute(persisted_event)
+                appended_event_count += 1
 
         for execute_command_summary in mapping_plan.execute_commands:
             await workflow_unit_of_work.command_log.append_pending_command(
