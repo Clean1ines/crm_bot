@@ -42,6 +42,12 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
+from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_repository_port import (
+    WorkItemAttemptDispatchRepositoryPort,
+)
+from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    WorkItemLeaseRepositoryPort,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder_retry_action_read_repository_port import (
     ClaimBuilderRetryActionReadRepositoryPort,
 )
@@ -86,7 +92,11 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_o
     DraftClaimObservationReadRepositoryPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    CapacityReservationRepositoryPort,
     CapacityWindowAdmissionPassPort,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelRouteCatalog,
 )
 from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
     SourceManagementRepositoryPort,
@@ -160,6 +170,12 @@ class DrainKnowledgeExtractionWorkflowCommands:
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         capacity_window_admission_pass: CapacityWindowAdmissionPassPort | None = None,
+        work_item_lease_repository: WorkItemLeaseRepositoryPort | None = None,
+        attempt_dispatch_repository: WorkItemAttemptDispatchRepositoryPort
+        | None = None,
+        capacity_reservation_repository: CapacityReservationRepositoryPort
+        | None = None,
+        route_catalog: LlmModelRouteCatalog | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
         ) = None,
@@ -288,6 +304,10 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 knowledge_unit_of_work=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
                 capacity_window_admission_pass=capacity_window_admission_pass,
+                work_item_lease_repository=work_item_lease_repository,
+                attempt_dispatch_repository=attempt_dispatch_repository,
+                capacity_reservation_repository=capacity_reservation_repository,
+                route_catalog=route_catalog,
                 execute_prepared_llm_dispatch_attempt=(
                     execute_prepared_llm_dispatch_attempt
                 ),

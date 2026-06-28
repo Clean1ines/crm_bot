@@ -54,6 +54,12 @@ from src.contexts.execution_runtime.application.ports.work_item_progress_read_re
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_progress_read_repository import (
     PostgresWorkItemProgressReadRepository,
 )
+from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_attempt_dispatch_repository import (
+    PostgresWorkItemAttemptDispatchRepository,
+)
+from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_lease_repository import (
+    PostgresWorkItemLeaseRepository,
+)
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
     PostgresWorkItemSchedulingRepository,
 )
@@ -140,6 +146,9 @@ from src.contexts.workflow_runtime.infrastructure.postgres.postgres_workflow_run
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelRouteCatalog,
+)
+from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
+    PostgresLlmRouteCapacityReservationRepository,
 )
 from src.interfaces.composition.knowledge_extraction_workflow_resume import (
     _capacity_admission_projection_writer_for_transaction,
@@ -604,6 +613,18 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
                 capacity_window_admission_pass=capacity_window_admission_pass,
+                work_item_lease_repository=PostgresWorkItemLeaseRepository(
+                    asyncpg_connection,
+                ),
+                attempt_dispatch_repository=PostgresWorkItemAttemptDispatchRepository(
+                    asyncpg_connection,
+                ),
+                capacity_reservation_repository=(
+                    PostgresLlmRouteCapacityReservationRepository(
+                        asyncpg_connection,
+                    )
+                ),
+                route_catalog=self._capacity_window_admission_route_catalog,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt_for_transaction(
                         asyncpg_connection,

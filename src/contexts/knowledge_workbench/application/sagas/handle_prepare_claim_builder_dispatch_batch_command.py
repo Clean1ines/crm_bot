@@ -3,12 +3,22 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Any, Protocol
 
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
+from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_repository_port import (
+    WorkItemAttemptDispatchRepositoryPort,
+)
+from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    WorkItemLeaseRepositoryPort,
+)
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
+    LlmAttemptCapacityObservation,
+)
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
     CapacityWindowAdmissionPassCommand,
 )
@@ -51,6 +61,7 @@ from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparat
     ResolveLlmDispatchPreparationStrategyCommand,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelRouteCatalog,
     default_groq_llm_model_route_catalog,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
@@ -58,6 +69,9 @@ from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity impo
 )
 from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
     LlmTaskCapacityProfile,
+)
+from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
+    LlmCapacityAllocationSlot,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -85,6 +99,12 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 )
 from src.interfaces.composition.lease_llm_admitted_work_items import (
     LlmAdmittedLeasedWorkItem,
+    llm_admitted_leased_work_item_from_pre_lease_status,
+)
+from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
+    StartLlmAdmittedWorkItemAttempts,
+    StartLlmAdmittedWorkItemAttemptsCommand,
+    StartedLlmAdmittedAttempt,
 )
 
 
@@ -93,6 +113,49 @@ CLAIM_BUILDER_ACTIVE_MODEL_REF = "qwen/qwen3-32b"
 
 class CapacityWindowAdmissionPassPort(Protocol):
     async def execute(self, command: CapacityWindowAdmissionPassCommand) -> object: ...
+
+
+class CapacityObservationReadRepositoryPort(Protocol):
+    async def latest_observations_for_accounts(
+        self,
+        *,
+        provider: str,
+        account_refs: tuple[str, ...],
+        model_ref: str,
+    ) -> tuple[LlmAttemptCapacityObservation, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCapacityReservation:
+    attempt_id: str
+    provider: str
+    account_ref: str
+    model_ref: str
+    reserved_requests: int
+    reserved_tokens: int
+    expires_at: datetime
+    created_at: datetime
+
+
+class CapacityReservationRepositoryPort(Protocol):
+    async def lock_route(
+        self,
+        *,
+        provider: str,
+        account_ref: str,
+        model_ref: str,
+    ) -> None: ...
+
+    async def active_totals(
+        self,
+        *,
+        provider: str,
+        account_refs: tuple[str, ...],
+        model_ref: str,
+        now: datetime,
+    ) -> tuple[Any, ...]: ...
+
+    async def reserve(self, reservation: Any) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,7 +196,17 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
         capacity_window_admission_pass: CapacityWindowAdmissionPassPort | None = None,
+        work_item_lease_repository: WorkItemLeaseRepositoryPort | None = None,
+        attempt_dispatch_repository: WorkItemAttemptDispatchRepositoryPort
+        | None = None,
+        capacity_reservation_repository: CapacityReservationRepositoryPort
+        | None = None,
+        capacity_observation_read_repository: (
+            CapacityObservationReadRepositoryPort | None
+        ) = None,
+        route_catalog: LlmModelRouteCatalog | None = None,
     ) -> HandlePrepareClaimBuilderDispatchBatchResult:
+        del capacity_window_admission_pass
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
 
@@ -146,17 +219,25 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             raise ValueError("payload workflow_run_id must match workflow command")
 
         occurred_at = _execution_occurred_at(workflow_command)
-        if capacity_window_admission_pass is not None:
-            return await _execute_capacity_window_admission_branch(
-                workflow_command=workflow_command,
-                workflow_run_id=workflow_run_id,
-                occurred_at=occurred_at,
-                capacity_window_admission_pass=capacity_window_admission_pass,
-                workflow_unit_of_work=workflow_unit_of_work,
-                frontend_event_projection_writer=frontend_event_projection_writer,
-            )
+        if work_item_lease_repository is None:
+            raise ValueError("work_item_lease_repository is required")
+        if attempt_dispatch_repository is None:
+            raise ValueError("attempt_dispatch_repository is required")
+        if capacity_reservation_repository is None:
+            raise ValueError("capacity_reservation_repository is required")
 
-        raise ValueError("capacity_window_admission_pass is required")
+        return await _execute_direct_execution_queue_prepare(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            occurred_at=occurred_at,
+            workflow_unit_of_work=workflow_unit_of_work,
+            frontend_event_projection_writer=frontend_event_projection_writer,
+            work_item_lease_repository=work_item_lease_repository,
+            attempt_dispatch_repository=attempt_dispatch_repository,
+            capacity_reservation_repository=capacity_reservation_repository,
+            capacity_observation_read_repository=capacity_observation_read_repository,
+            route_catalog=route_catalog or default_groq_llm_model_route_catalog(),
+        )
 
 
 def _execution_occurred_at(workflow_command: WorkflowCommand) -> datetime:
@@ -180,6 +261,430 @@ def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
         )
     if workflow_command.status is not WorkflowCommandStatus.PENDING:
         raise ValueError("workflow_command status must be PENDING")
+
+
+@dataclass(frozen=True, slots=True)
+class _DirectCapacityWindow:
+    capacity: LlmProviderAccountCapacity
+    remaining_requests: int
+    remaining_tokens: int
+    remaining_daily_requests: int
+    remaining_daily_tokens: int
+
+    @property
+    def max_required_window_tokens(self) -> int:
+        return min(self.remaining_tokens, self.remaining_daily_tokens)
+
+    def fits(self, *, required_window_tokens: int) -> bool:
+        return (
+            self.remaining_requests > 0
+            and self.remaining_daily_requests > 0
+            and required_window_tokens <= self.max_required_window_tokens
+        )
+
+    def reserve_locally(
+        self, *, required_window_tokens: int
+    ) -> "_DirectCapacityWindow":
+        return _DirectCapacityWindow(
+            capacity=self.capacity,
+            remaining_requests=max(0, self.remaining_requests - 1),
+            remaining_tokens=max(0, self.remaining_tokens - required_window_tokens),
+            remaining_daily_requests=max(0, self.remaining_daily_requests - 1),
+            remaining_daily_tokens=max(
+                0,
+                self.remaining_daily_tokens - required_window_tokens,
+            ),
+        )
+
+
+async def _execute_direct_execution_queue_prepare(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    occurred_at: datetime,
+    workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None,
+    work_item_lease_repository: WorkItemLeaseRepositoryPort,
+    attempt_dispatch_repository: WorkItemAttemptDispatchRepositoryPort,
+    capacity_reservation_repository: CapacityReservationRepositoryPort,
+    capacity_observation_read_repository: CapacityObservationReadRepositoryPort | None,
+    route_catalog: LlmModelRouteCatalog,
+) -> HandlePrepareClaimBuilderDispatchBatchResult:
+    scheduled_work_item_count = _payload_positive_int(
+        workflow_command.payload,
+        "scheduled_work_item_count",
+    )
+    profile = _profile_from_dispatch_preparation(workflow_command.payload)
+    if profile is None:
+        raise ValueError("llm_dispatch_preparation profile is required")
+    active_model_ref = _active_model_ref_from_payload(workflow_command.payload)
+    lease_expires_at = occurred_at + timedelta(seconds=90)
+    worker = WorkerRef("knowledge-workbench-claim-builder-dispatch")
+    preflight_metadata = _direct_prepare_preflight_metadata(
+        active_model_ref=active_model_ref,
+    )
+
+    capacity_windows = await _direct_capacity_windows(
+        workflow_command=workflow_command,
+        active_model_ref=active_model_ref,
+        occurred_at=occurred_at,
+        capacity_reservation_repository=capacity_reservation_repository,
+        capacity_observation_read_repository=capacity_observation_read_repository,
+    )
+    due_records = await work_item_lease_repository.peek_due_work_items(
+        work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+        requested_items=scheduled_work_item_count,
+        now=occurred_at,
+    )
+
+    leased_items: list[LlmAdmittedLeasedWorkItem] = []
+    started_attempts: list[StartedLlmAdmittedAttempt] = []
+
+    for due_record in due_records:
+        if len(started_attempts) >= scheduled_work_item_count:
+            break
+        selected_index = _first_capacity_window_index_that_fits(
+            capacity_windows,
+            required_window_tokens=profile.required_window_tokens,
+        )
+        if selected_index is None:
+            break
+
+        selected_window = capacity_windows[selected_index]
+        lease_token = LeaseToken(
+            "claim-builder-dispatch:"
+            f"{workflow_run_id}:"
+            f"{len(started_attempts)}:"
+            f"{due_record.work_item.work_item_id}"
+        )
+        leased = await work_item_lease_repository.lease_due_work_item_by_id(
+            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+            work_item_id=due_record.work_item.work_item_id,
+            worker=worker,
+            lease_token=lease_token,
+            lease_expires_at=lease_expires_at,
+            now=occurred_at,
+        )
+        if leased is None:
+            continue
+
+        admitted_item = llm_admitted_leased_work_item_from_pre_lease_status(
+            leased=leased,
+            allocation=LlmCapacityAllocationSlot(
+                provider=selected_window.capacity.provider,
+                account_ref=selected_window.capacity.account_ref,
+                model_ref=selected_window.capacity.model_ref,
+                slot_index=len(started_attempts),
+            ),
+            execution_settings=route_catalog.execution_settings_for_model_ref(
+                selected_window.capacity.model_ref,
+            ),
+            pre_lease_status=due_record.work_item.status,
+        )
+        start_result = await StartLlmAdmittedWorkItemAttempts(
+            repository=attempt_dispatch_repository,
+        ).execute(
+            StartLlmAdmittedWorkItemAttemptsCommand(
+                leased_items=(admitted_item,),
+                started_at=occurred_at,
+            )
+        )
+        if len(start_result.started_attempts) != 1:
+            raise RuntimeError("claim-builder prepare must start one attempt per item")
+        started_attempt = start_result.started_attempts[0]
+
+        await _reserve_direct_capacity(
+            capacity_reservation_repository=capacity_reservation_repository,
+            capacity=selected_window.capacity,
+            attempt_id=started_attempt.attempt_id,
+            required_window_tokens=profile.required_window_tokens,
+            lease_expires_at=lease_expires_at,
+            occurred_at=occurred_at,
+        )
+        capacity_windows[selected_index] = selected_window.reserve_locally(
+            required_window_tokens=profile.required_window_tokens,
+        )
+        leased_items.append(admitted_item)
+        started_attempts.append(started_attempt)
+
+    appended_event_count = 0
+    appended_next_command_count = 0
+    if started_attempts:
+        batch_event = await workflow_unit_of_work.outbox.append_event(
+            _claim_builder_dispatch_batch_prepared_event(
+                workflow_run_id=workflow_run_id,
+                started_attempts=tuple(started_attempts),
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+        )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(batch_event)
+        appended_event_count += 1
+
+        for leased_item, started_attempt in zip(
+            leased_items,
+            started_attempts,
+            strict=True,
+        ):
+            event = await workflow_unit_of_work.outbox.append_event(
+                _capacity_window_leased_work_item_event(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    leased_item=leased_item,
+                    started_attempt=started_attempt,
+                    lease_expires_at=lease_expires_at,
+                    occurred_at=occurred_at,
+                )
+            )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(event)
+            appended_event_count += 1
+
+        for event in _claim_builder_dispatch_attempt_prepared_events(
+            workflow_run_id=workflow_run_id,
+            started_attempts=tuple(started_attempts),
+            lease_expires_at=lease_expires_at,
+            occurred_at=occurred_at,
+        ):
+            persisted_event = await workflow_unit_of_work.outbox.append_event(event)
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_event)
+            appended_event_count += 1
+
+        for execute_command in _execute_claim_builder_section_commands(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            started_attempts=tuple(started_attempts),
+            occurred_at=occurred_at,
+        ):
+            await workflow_unit_of_work.command_log.append_pending_command(
+                execute_command,
+            )
+            appended_next_command_count += 1
+
+        for timeline_entry in _timeline_entries(
+            workflow_command=workflow_command,
+            prepared_event=batch_event,
+            started_attempts=tuple(started_attempts),
+            occurred_at=occurred_at,
+        ):
+            await workflow_unit_of_work.timeline.append_entry(timeline_entry)
+
+    await _save_progress_snapshot(
+        workflow_unit_of_work=workflow_unit_of_work,
+        workflow_run_id=workflow_run_id,
+        prepared_dispatch_count=len(started_attempts),
+        preflight_metadata=preflight_metadata,
+        occurred_at=occurred_at,
+    )
+    await workflow_unit_of_work.command_log.mark_command_completed(
+        command_id=workflow_command.command_id,
+        completed_at=occurred_at,
+    )
+
+    return HandlePrepareClaimBuilderDispatchBatchResult(
+        workflow_run_id=workflow_run_id,
+        prepared_dispatch_count=len(started_attempts),
+        appended_event_count=appended_event_count,
+        appended_next_command_count=appended_next_command_count,
+        completed_command_id=workflow_command.command_id,
+    )
+
+
+async def _direct_capacity_windows(
+    *,
+    workflow_command: WorkflowCommand,
+    active_model_ref: str,
+    occurred_at: datetime,
+    capacity_reservation_repository: CapacityReservationRepositoryPort,
+    capacity_observation_read_repository: CapacityObservationReadRepositoryPort | None,
+) -> list[_DirectCapacityWindow]:
+    windows: list[_DirectCapacityWindow] = []
+    for account_capacity in _capacities_for_direct_prepare(
+        workflow_command.payload,
+        active_model_ref=active_model_ref,
+    ):
+        await capacity_reservation_repository.lock_route(
+            provider=account_capacity.provider,
+            account_ref=account_capacity.account_ref,
+            model_ref=account_capacity.model_ref,
+        )
+        observed_capacity = await _capacity_after_latest_observation(
+            account_capacity,
+            capacity_observation_read_repository=capacity_observation_read_repository,
+            occurred_at=occurred_at,
+        )
+        active_totals = await capacity_reservation_repository.active_totals(
+            provider=observed_capacity.provider,
+            account_refs=(observed_capacity.account_ref,),
+            model_ref=observed_capacity.model_ref,
+            now=occurred_at,
+        )
+        active_reserved_requests = sum(
+            total.reserved_requests for total in active_totals
+        )
+        active_reserved_tokens = sum(total.reserved_tokens for total in active_totals)
+        windows.append(
+            _DirectCapacityWindow(
+                capacity=observed_capacity,
+                remaining_requests=max(
+                    0,
+                    observed_capacity.remaining_minute_requests
+                    - active_reserved_requests,
+                ),
+                remaining_tokens=max(
+                    0,
+                    observed_capacity.remaining_minute_tokens - active_reserved_tokens,
+                ),
+                remaining_daily_requests=max(
+                    0,
+                    observed_capacity.remaining_daily_requests
+                    - active_reserved_requests,
+                ),
+                remaining_daily_tokens=max(
+                    0,
+                    observed_capacity.remaining_daily_tokens - active_reserved_tokens,
+                ),
+            )
+        )
+    return windows
+
+
+def _capacities_for_direct_prepare(
+    payload: Mapping[str, object],
+    *,
+    active_model_ref: str,
+) -> tuple[LlmProviderAccountCapacity, ...]:
+    account_capacities = _account_capacities_from_dispatch_preparation(payload)
+    if not account_capacities:
+        raise ValueError(
+            "claim-builder direct prepare requires llm_dispatch_preparation "
+            "account_capacities"
+        )
+
+    provider_account_refs = set(_provider_account_refs_from_payload(payload))
+    active_model_capacities = tuple(
+        account_capacity
+        for account_capacity in account_capacities
+        if account_capacity.model_ref == active_model_ref
+        and (
+            not provider_account_refs
+            or account_capacity.account_ref in provider_account_refs
+        )
+    )
+    if active_model_capacities:
+        return active_model_capacities
+    return (account_capacities[0],)
+
+
+async def _capacity_after_latest_observation(
+    account_capacity: LlmProviderAccountCapacity,
+    *,
+    capacity_observation_read_repository: CapacityObservationReadRepositoryPort | None,
+    occurred_at: datetime,
+) -> LlmProviderAccountCapacity:
+    if capacity_observation_read_repository is None:
+        return account_capacity
+    observations = (
+        await capacity_observation_read_repository.latest_observations_for_accounts(
+            provider=account_capacity.provider,
+            account_refs=(account_capacity.account_ref,),
+            model_ref=account_capacity.model_ref,
+        )
+    )
+    if not observations:
+        return account_capacity
+
+    observation = observations[0]
+    minute_has_reset = (
+        observation.minute_reset_at is not None
+        and occurred_at >= observation.minute_reset_at
+    )
+    daily_has_reset = (
+        observation.daily_reset_at is not None
+        and occurred_at >= observation.daily_reset_at
+    )
+    remaining_minute_requests = account_capacity.remaining_minute_requests
+    remaining_minute_tokens = account_capacity.remaining_minute_tokens
+    remaining_daily_requests = account_capacity.remaining_daily_requests
+    remaining_daily_tokens = account_capacity.remaining_daily_tokens
+    if not minute_has_reset:
+        remaining_minute_requests = _min_if_observed_int(
+            remaining_minute_requests,
+            observation.remaining_minute_requests,
+        )
+        remaining_minute_tokens = _min_if_observed_int(
+            remaining_minute_tokens,
+            observation.remaining_minute_tokens,
+        )
+    if not daily_has_reset:
+        remaining_daily_requests = _min_if_observed_int(
+            remaining_daily_requests,
+            observation.remaining_daily_requests,
+        )
+        remaining_daily_tokens = _min_if_observed_int(
+            remaining_daily_tokens,
+            observation.remaining_daily_tokens,
+        )
+    return LlmProviderAccountCapacity(
+        provider=account_capacity.provider,
+        account_ref=account_capacity.account_ref,
+        model_ref=account_capacity.model_ref,
+        remaining_minute_requests=remaining_minute_requests,
+        remaining_minute_tokens=remaining_minute_tokens,
+        remaining_daily_requests=remaining_daily_requests,
+        remaining_daily_tokens=remaining_daily_tokens,
+    )
+
+
+def _min_if_observed_int(current: int, observed: int | None) -> int:
+    if observed is None:
+        return current
+    return min(current, observed)
+
+
+def _first_capacity_window_index_that_fits(
+    capacity_windows: Sequence[_DirectCapacityWindow],
+    *,
+    required_window_tokens: int,
+) -> int | None:
+    for index, window in enumerate(capacity_windows):
+        if window.fits(required_window_tokens=required_window_tokens):
+            return index
+    return None
+
+
+async def _reserve_direct_capacity(
+    *,
+    capacity_reservation_repository: CapacityReservationRepositoryPort,
+    capacity: LlmProviderAccountCapacity,
+    attempt_id: str,
+    required_window_tokens: int,
+    lease_expires_at: datetime,
+    occurred_at: datetime,
+) -> None:
+    await capacity_reservation_repository.reserve(
+        PreparedCapacityReservation(
+            attempt_id=attempt_id,
+            provider=capacity.provider,
+            account_ref=capacity.account_ref,
+            model_ref=capacity.model_ref,
+            reserved_requests=1,
+            reserved_tokens=required_window_tokens,
+            expires_at=lease_expires_at,
+            created_at=occurred_at,
+        )
+    )
+
+
+def _direct_prepare_preflight_metadata(*, active_model_ref: str) -> dict[str, object]:
+    return {
+        "input_size_preflight_decision": "DIRECT_EXECUTION_QUEUE",
+        "input_size_preflight_reason": "claim_builder_prepare_uses_execution_queue",
+        "input_size_preflight_active_model_ref": active_model_ref,
+        "source_split_required": False,
+    }
 
 
 async def _execute_capacity_window_admission_branch(

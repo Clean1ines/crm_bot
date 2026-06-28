@@ -568,6 +568,18 @@ class RunKnowledgeExtractionWorkflowResume:
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
                 capacity_window_admission_pass=capacity_window_admission_pass,
+                work_item_lease_repository=PostgresWorkItemLeaseRepository(
+                    asyncpg_connection,
+                ),
+                attempt_dispatch_repository=PostgresWorkItemAttemptDispatchRepository(
+                    asyncpg_connection,
+                ),
+                capacity_reservation_repository=(
+                    PostgresLlmRouteCapacityReservationRepository(
+                        asyncpg_connection,
+                    )
+                ),
+                route_catalog=self._capacity_window_admission_route_catalog,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt_for_transaction(
                         asyncpg_connection,

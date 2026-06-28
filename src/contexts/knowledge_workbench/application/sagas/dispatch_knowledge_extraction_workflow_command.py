@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
 from src.contexts.capacity_admission_queue.application.build_capacity_admission_projection_candidates import (
     CapacityAdmissionLaneTarget,
@@ -68,6 +69,12 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
+from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_repository_port import (
+    WorkItemAttemptDispatchRepositoryPort,
+)
+from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    WorkItemLeaseRepositoryPort,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.claim_builder_retry_action_read_repository_port import (
     ClaimBuilderRetryActionReadRepositoryPort,
 )
@@ -100,6 +107,8 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_draft_c
     HandleReconcileDraftClaimCompactionProgressCommandHandler,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    CapacityObservationReadRepositoryPort,
+    CapacityReservationRepositoryPort,
     CapacityWindowAdmissionPassPort,
     HandlePrepareClaimBuilderDispatchBatchCommand,
     HandlePrepareClaimBuilderDispatchBatchCommandHandler,
@@ -119,6 +128,9 @@ from src.contexts.knowledge_workbench.application.sagas.handle_trigger_claim_bui
 from src.contexts.knowledge_workbench.application.sagas.handle_schedule_claim_builder_section_work_command import (
     HandleScheduleClaimBuilderSectionWorkCommand,
     HandleScheduleClaimBuilderSectionWorkCommandHandler,
+)
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelRouteCatalog,
 )
 from src.contexts.knowledge_workbench.application.sagas.trigger_claim_builder_capacity_drain_if_enabled import (
     TriggerClaimBuilderCapacityDrainIfEnabled,
@@ -193,6 +205,12 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         capacity_window_admission_pass: CapacityWindowAdmissionPassPort | None = None,
+        work_item_lease_repository: WorkItemLeaseRepositoryPort | None = None,
+        attempt_dispatch_repository: WorkItemAttemptDispatchRepositoryPort
+        | None = None,
+        capacity_reservation_repository: CapacityReservationRepositoryPort
+        | None = None,
+        route_catalog: LlmModelRouteCatalog | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
         ) = None,
@@ -309,7 +327,11 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             command_type
             is KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
         ):
-            if capacity_window_admission_pass is None:
+            if (
+                work_item_lease_repository is None
+                or attempt_dispatch_repository is None
+                or capacity_reservation_repository is None
+            ):
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
                     command_type=command_type.value,
@@ -326,6 +348,14 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 workflow_unit_of_work=workflow_unit_of_work,
                 frontend_event_projection_writer=frontend_event_projection_writer,
                 capacity_window_admission_pass=capacity_window_admission_pass,
+                work_item_lease_repository=work_item_lease_repository,
+                attempt_dispatch_repository=attempt_dispatch_repository,
+                capacity_reservation_repository=capacity_reservation_repository,
+                capacity_observation_read_repository=cast(
+                    CapacityObservationReadRepositoryPort | None,
+                    capacity_observation_repository,
+                ),
+                route_catalog=route_catalog,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

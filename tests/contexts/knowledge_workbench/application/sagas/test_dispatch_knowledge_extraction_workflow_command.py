@@ -7,6 +7,22 @@ from uuid import UUID
 import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.contexts.execution_runtime.application.ports.work_item_attempt_dispatch_repository_port import (
+    WorkItemAttemptDispatchRecord,
+)
+from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
+    DueWorkItemRecord,
+    LeasedWorkItemRecord,
+)
+from src.contexts.execution_runtime.domain.state_machines.work_item_state_machine import (
+    WorkItemStateMachine,
+)
+from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
+from src.contexts.execution_runtime.domain.value_objects.work_item_status import (
+    WorkItemStatus,
+)
+from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
     CapacityWindowAdmissionPassCommand,
 )
@@ -32,6 +48,9 @@ from src.contexts.knowledge_workbench.application.sagas.dispatch_knowledge_extra
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     operation_by_command_type,
+)
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    CLAIM_BUILDER_SECTION_WORK_KIND,
 )
 from src.contexts.knowledge_workbench.application.sagas.trigger_claim_builder_capacity_drain_if_enabled import (
     TriggerClaimBuilderCapacityDrainIfEnabledCommand,
@@ -174,6 +193,7 @@ def _default_payload_for_command(
             "account_ref": "groq_org_primary",
             "worker_ref": "claim-builder-capacity-drain",
             "max_items": 1,
+            "llm_dispatch_preparation": _dispatch_preparation(),
         }
 
     return {"workflow_run_id": _workflow_run_id()}
@@ -1146,6 +1166,117 @@ class FakeCapacityWindowAdmissionPass:
 
 
 @dataclass(slots=True)
+class FakeWorkItemLeaseRepository:
+    due_records: list[DueWorkItemRecord] = field(default_factory=list)
+    lease_by_id_calls: list[str] = field(default_factory=list)
+
+    async def peek_due_work_items(
+        self,
+        *,
+        work_kind: WorkKind,
+        requested_items: int,
+        now: datetime,
+    ) -> tuple[DueWorkItemRecord, ...]:
+        del now
+        assert work_kind == CLAIM_BUILDER_SECTION_WORK_KIND
+        return tuple(self.due_records[:requested_items])
+
+    async def lease_due_work_item(
+        self,
+        *,
+        work_kind: WorkKind,
+        worker: WorkerRef,
+        lease_token: LeaseToken,
+        lease_expires_at: datetime,
+        now: datetime,
+    ) -> LeasedWorkItemRecord | None:
+        del work_kind, worker, lease_token, lease_expires_at, now
+        raise AssertionError("claim-builder prepare should lease by selected id")
+
+    async def lease_due_work_item_by_id(
+        self,
+        *,
+        work_kind: WorkKind,
+        work_item_id: str,
+        worker: WorkerRef,
+        lease_token: LeaseToken,
+        lease_expires_at: datetime,
+        now: datetime,
+    ) -> LeasedWorkItemRecord | None:
+        assert work_kind == CLAIM_BUILDER_SECTION_WORK_KIND
+        self.lease_by_id_calls.append(work_item_id)
+        for index, record in enumerate(self.due_records):
+            if record.work_item.work_item_id != work_item_id:
+                continue
+            self.due_records.pop(index)
+            return LeasedWorkItemRecord(
+                work_item=WorkItemStateMachine.lease_ready(
+                    record.work_item,
+                    worker=worker,
+                    lease_token=lease_token,
+                    lease_expires_at=lease_expires_at,
+                    now=now,
+                ),
+                schedule_payload=record.schedule_payload,
+            )
+        return None
+
+
+@dataclass(slots=True)
+class FakeAttemptDispatchRepository:
+    records: list[WorkItemAttemptDispatchRecord] = field(default_factory=list)
+
+    async def save_started_dispatch_attempt(
+        self,
+        record: WorkItemAttemptDispatchRecord,
+    ) -> None:
+        self.records.append(record)
+
+
+@dataclass(slots=True)
+class FakeCapacityReservationRepository:
+    reservations: list[object] = field(default_factory=list)
+
+    async def lock_route(
+        self,
+        *,
+        provider: str,
+        account_ref: str,
+        model_ref: str,
+    ) -> None:
+        del provider, account_ref, model_ref
+
+    async def active_totals(
+        self,
+        *,
+        provider: str,
+        account_refs: tuple[str, ...],
+        model_ref: str,
+        now: datetime,
+    ) -> tuple[object, ...]:
+        del provider, account_refs, model_ref, now
+        return ()
+
+    async def reserve(self, reservation: object) -> None:
+        self.reservations.append(reservation)
+
+
+def _due_claim_builder_work_item(work_item_id: str = "work-1") -> DueWorkItemRecord:
+    return DueWorkItemRecord(
+        work_item=WorkItem(
+            work_item_id=work_item_id,
+            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+            status=WorkItemStatus.READY,
+        ),
+        schedule_payload={
+            "workflow_run_id": _workflow_run_id(),
+            "source_document_ref": _document_ref().value,
+            "source_unit_ref": "source-unit:project-1:abc:1",
+        },
+    )
+
+
+@dataclass(slots=True)
 class FakeTriggerClaimBuilderCapacityDrain:
     calls: list[TriggerClaimBuilderCapacityDrainIfEnabledCommand] = field(
         default_factory=list
@@ -1164,6 +1295,7 @@ class FakeTriggerClaimBuilderCapacityDrain:
             provider_call_count=0,
             work_item_ids=("work-1",),
             attempt_ids=("attempt-1",),
+            stop_reason="drained",
         )
 
 
@@ -1347,12 +1479,17 @@ async def test_dispatch_trigger_claim_builder_capacity_drain_missing_dependency_
 
 
 @pytest.mark.asyncio
-async def test_dispatch_prepare_claim_builder_uses_capacity_admission_when_provided() -> (
+async def test_dispatch_prepare_claim_builder_uses_direct_execution_queue_without_admission_pass() -> (
     None
 ):
     admission_pass = FakeCapacityWindowAdmissionPass(
         result=_claim_builder_admission_result()
     )
+    lease_repository = FakeWorkItemLeaseRepository(
+        due_records=[_due_claim_builder_work_item()],
+    )
+    attempt_repository = FakeAttemptDispatchRepository()
+    reservation_repository = FakeCapacityReservationRepository()
     workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
 
     result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
@@ -1365,15 +1502,24 @@ async def test_dispatch_prepare_claim_builder_uses_capacity_admission_when_provi
         knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
         workflow_unit_of_work=workflow_unit_of_work,
         capacity_window_admission_pass=admission_pass,
+        work_item_lease_repository=lease_repository,
+        attempt_dispatch_repository=attempt_repository,
+        capacity_reservation_repository=reservation_repository,
     )
 
     assert result.dispatched is True
     assert result.blocked_reason is None
-    assert len(admission_pass.calls) == 1
+    assert admission_pass.calls == []
+    assert lease_repository.lease_by_id_calls == ["work-1"]
+    assert attempt_repository.records[0].work_item_id == "work-1"
+    assert len(reservation_repository.reservations) == 1
     assert (
         workflow_unit_of_work.command_log.pending_commands[0].command_type
         == KnowledgeExtractionCanonicalCommandType.EXECUTE_CLAIM_BUILDER_SECTION.value
     )
+    assert workflow_unit_of_work.command_log.pending_commands[0].payload[
+        "work_item_id"
+    ] == ("work-1")
 
 
 @pytest.mark.asyncio
