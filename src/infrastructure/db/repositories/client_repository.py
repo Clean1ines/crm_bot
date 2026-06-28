@@ -102,7 +102,7 @@ def _client_list_query() -> str:
         GROUP BY c.id, c.user_id, c.username, c.full_name, c.email,
                  c.company, c.phone, c.metadata, c.chat_id, c.source, c.created_at
         ORDER BY COALESCE(MAX(t.updated_at), c.created_at) DESC
-        LIMIT $3 OFFSET $4
+        LIMIT $3::int OFFSET $4
     """
 
 

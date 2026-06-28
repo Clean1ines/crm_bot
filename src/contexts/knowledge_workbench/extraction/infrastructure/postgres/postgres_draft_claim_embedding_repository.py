@@ -110,7 +110,7 @@ class PostgresDraftClaimEmbeddingRepository(
                 p.claim_index ASC NULLS LAST,
                 dco.created_at ASC,
                 dco.observation_ref ASC
-            LIMIT $3
+            LIMIT $3::int
             """,
             workflow_run_id,
             embedding_model_id,

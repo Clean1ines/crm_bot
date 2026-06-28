@@ -49,7 +49,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             FROM draft_claim_compaction_groups
             WHERE workflow_run_id = $1
             ORDER BY created_at ASC, group_ref ASC
-            LIMIT $2 OFFSET $3
+            LIMIT $2::int OFFSET $3
             """,
             workflow_run_id,
             limit,
@@ -96,7 +96,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             WHERE g.workflow_run_id = $1
               AND gm.group_ref = $2
             ORDER BY gm.member_rank ASC, gm.observation_ref ASC
-            LIMIT $3 OFFSET $4
+            LIMIT $3::int OFFSET $4
             """,
             workflow_run_id,
             group_ref,

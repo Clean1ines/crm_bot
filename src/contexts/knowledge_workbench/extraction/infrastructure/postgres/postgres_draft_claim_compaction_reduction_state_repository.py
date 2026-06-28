@@ -339,7 +339,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
               AND ($3::text IS NULL OR node_ref = $3)
               AND ($4::boolean = false OR active = true)
             ORDER BY group_ref ASC, active DESC, updated_at DESC, node_ref ASC
-            LIMIT $5 OFFSET $6
+            LIMIT $5::int OFFSET $6
             """,
             workflow_run_id,
             group_ref,
@@ -522,7 +522,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
               )
               AND ($2::text IS NULL OR ws.payload->>'group_ref' = $2)
             ORDER BY wi.created_at ASC, wi.work_item_id ASC
-            LIMIT $3 OFFSET $4
+            LIMIT $3::int OFFSET $4
             """,
             f"claim-compaction:{workflow_run_id}:%",
             group_ref,

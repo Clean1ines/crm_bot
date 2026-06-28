@@ -119,7 +119,7 @@ class PostgresOutboxRepository(OutboxRepositoryPort):
             FROM workflow_runtime_outbox_events
             WHERE sequence_number > $1
             ORDER BY sequence_number ASC
-            LIMIT $2
+            LIMIT $2::int
             """,
             after_sequence_number,
             limit,

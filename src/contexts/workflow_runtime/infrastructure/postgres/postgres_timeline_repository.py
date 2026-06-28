@@ -97,7 +97,7 @@ class PostgresTimelineRepository(TimelineRepositoryPort):
             FROM workflow_runtime_timeline_entries
             WHERE workflow_run_id = $1
             ORDER BY occurred_at DESC
-            LIMIT $2
+            LIMIT $2::int
             """,
             workflow_run_id,
             limit,

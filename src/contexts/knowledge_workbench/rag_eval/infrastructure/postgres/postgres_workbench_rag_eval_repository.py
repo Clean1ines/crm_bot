@@ -68,7 +68,7 @@ WHERE entry.project_id = $1::uuid
       ))
   AND ($3::text IS NULL OR entry.source_refs->>'source_document_ref' = $3)
 ORDER BY entry.created_at, entry.runtime_entry_id
-LIMIT $4
+LIMIT $4::int
 """
 
 

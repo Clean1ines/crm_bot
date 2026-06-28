@@ -48,7 +48,7 @@ WHERE entry.project_id = $1::uuid
   AND emb.embedding_model_id = $2
   AND emb.dimensions = $3
 ORDER BY emb.embedding <=> $4::vector
-LIMIT $5
+LIMIT $5::int
 """
 
 

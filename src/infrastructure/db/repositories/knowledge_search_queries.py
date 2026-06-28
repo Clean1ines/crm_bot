@@ -67,7 +67,7 @@ SELECT
   AND emb.embedding_model_id = $5
   AND emb.dimensions = $6
 ORDER BY emb.embedding <=> $1::vector
-LIMIT $3
+LIMIT $3::int
 """
 
 
@@ -95,7 +95,7 @@ vector_candidates AS (
         row_number() OVER (ORDER BY base.embedding <=> q.query_embedding) AS vector_rank
     FROM base, q
     ORDER BY base.embedding <=> q.query_embedding
-    LIMIT $4
+    LIMIT $4::int
 ),
 lexical_candidates AS (
     SELECT
@@ -113,7 +113,7 @@ lexical_candidates AS (
     FROM base, q
     WHERE to_tsvector('russian', COALESCE(base.search_text, '')) @@ q.query_ts
     ORDER BY lexical_score DESC
-    LIMIT $4
+    LIMIT $4::int
 ),
 candidates AS (
     SELECT
@@ -211,7 +211,7 @@ ORDER BY (
         ELSE 0.0
       END
 ) DESC
-LIMIT $5
+LIMIT $5::int
 """
 
 
@@ -310,5 +310,5 @@ FROM scored
 WHERE lexical_score > 0.0
    OR token_overlap > 0.0
 ORDER BY score DESC
-LIMIT $3
+LIMIT $3::int
 """

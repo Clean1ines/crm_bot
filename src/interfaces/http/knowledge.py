@@ -644,7 +644,7 @@ async def _list_workbench_documents_fallback(
             WHERE project_id = $1
               AND deleted_at IS NULL
             ORDER BY created_at DESC, document_id DESC
-            LIMIT $2 OFFSET $3
+            LIMIT $2::int OFFSET $3
             """,
             project_id,
             limit,

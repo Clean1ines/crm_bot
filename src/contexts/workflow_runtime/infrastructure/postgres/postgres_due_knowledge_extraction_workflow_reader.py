@@ -40,7 +40,7 @@ class PostgresDueKnowledgeExtractionWorkflowReader:
               AND command.run_after <= NOW()
             GROUP BY run.project_id, command.workflow_run_id
             ORDER BY MIN(command.run_after), command.workflow_run_id
-            LIMIT $1
+            LIMIT $1::int
             """,
             limit,
         )

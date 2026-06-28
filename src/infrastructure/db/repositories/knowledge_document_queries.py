@@ -140,7 +140,7 @@ async def list_project_documents(
             ) AS mu ON mu.document_id = d.id
             WHERE d.project_id = $1
             ORDER BY d.created_at DESC
-            LIMIT $2 OFFSET $3
+            LIMIT $2::int OFFSET $3
         )
         SELECT
             documents.*,

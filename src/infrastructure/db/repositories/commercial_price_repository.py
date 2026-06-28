@@ -575,7 +575,7 @@ class CommercialPriceRepository(CommercialPriceKnowledgePort):
                     CASE WHEN lower(item_name) = lower($2) THEN 0 ELSE 1 END,
                     updated_at DESC,
                     id
-                LIMIT $3
+                LIMIT $3::int
                 """,
                 ensure_uuid(query.project_id),
                 query.item_name,
@@ -635,7 +635,7 @@ class CommercialPriceRepository(CommercialPriceKnowledgePort):
                   AND status = 'published'
                   AND ($2::text IS NULL OR item_name ILIKE $2)
                 ORDER BY item_name
-                LIMIT $3
+                LIMIT $3::int
                 """,
                 ensure_uuid(project_id),
                 search_pattern,

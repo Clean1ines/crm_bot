@@ -160,7 +160,7 @@ class PostgresFrontendWorkflowEventRepository(FrontendWorkflowEventRepositoryPor
                     projection_type ASC,
                     projection_version ASC,
                     projection_event_id ASC
-                LIMIT $3
+                LIMIT $3::int
                 """,
                 workflow_run_id,
                 after_cursor.source_sequence_number,
@@ -204,7 +204,7 @@ class PostgresFrontendWorkflowEventRepository(FrontendWorkflowEventRepositoryPor
                     projection_type ASC,
                     projection_version ASC,
                     projection_event_id ASC
-                LIMIT $6
+                LIMIT $6::int
                 """,
                 workflow_run_id,
                 after_cursor.source_sequence_number,

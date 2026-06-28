@@ -220,7 +220,7 @@ class ThreadReadRepository:
               )
               AND ($4::uuid IS NULL OR c.id = $4)
             ORDER BY t.updated_at DESC
-            LIMIT $5 OFFSET $6
+            LIMIT $5::int OFFSET $6
         """
 
     def _manager_dialogs_query(self) -> str:
@@ -289,7 +289,7 @@ class ThreadReadRepository:
                 t.updated_at
             ) DESC,
             t.updated_at DESC
-            LIMIT $4 OFFSET $5
+            LIMIT $4::int OFFSET $5
         """
 
     async def find_by_status(self, status: str) -> list[ThreadStatusSummaryView]:

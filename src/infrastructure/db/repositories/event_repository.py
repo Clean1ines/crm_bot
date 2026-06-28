@@ -82,7 +82,7 @@ class EventRepository:
                 FROM events
                 WHERE stream_id = $1 AND id > $2
                 ORDER BY created_at ASC
-                LIMIT $3
+                LIMIT $3::int
                 """,
                 stream_id,
                 after_id,
@@ -95,7 +95,7 @@ class EventRepository:
                 FROM events
                 WHERE stream_id = $1
                 ORDER BY created_at ASC
-                LIMIT $2
+                LIMIT $2::int
                 """,
                 stream_id,
                 limit,
@@ -139,7 +139,7 @@ class EventRepository:
             FROM events
             WHERE project_id = $1 AND event_type = $2
             ORDER BY created_at DESC
-            LIMIT $3
+            LIMIT $3::int
             """,
             project_id,
             event_type,
@@ -184,7 +184,7 @@ class EventRepository:
                 FROM events
                 WHERE stream_id = $1
                 ORDER BY created_at DESC
-                LIMIT $2 OFFSET $3
+                LIMIT $2::int OFFSET $3
                 """,
                 thread_uuid,
                 limit,
@@ -241,7 +241,7 @@ class EventRepository:
               AND event_type = 'manager_replied'
               AND payload->>'manager_user_id' = $2
             ORDER BY created_at DESC
-            LIMIT $3 OFFSET $4
+            LIMIT $3::int OFFSET $4
             """,
             project_id,
             manager_user_id,
