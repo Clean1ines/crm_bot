@@ -37,6 +37,9 @@ from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capa
 from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_admission_work_item_selector import (
     PostgresCapacityAdmissionWorkItemSelector,
 )
+from src.contexts.capacity_admission_queue.infrastructure.postgres.postgres_capacity_window_budget_repository import (
+    PostgresCapacityWindowBudgetRepository,
+)
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
@@ -578,6 +581,9 @@ class RunKnowledgeExtractionWorkflowResume:
                     PostgresLlmRouteCapacityReservationRepository(
                         asyncpg_connection,
                     )
+                ),
+                capacity_window_budget_repository=(
+                    PostgresCapacityWindowBudgetRepository(asyncpg_connection)
                 ),
                 route_catalog=self._capacity_window_admission_route_catalog,
                 execute_prepared_llm_dispatch_attempt=(

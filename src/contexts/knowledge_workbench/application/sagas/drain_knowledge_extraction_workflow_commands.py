@@ -39,6 +39,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_e
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservationRepositoryPort,
 )
+from src.contexts.capacity_admission_queue.application.ports.capacity_window_budget_repository_port import (
+    CapacityWindowBudgetRepositoryPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
@@ -175,6 +178,8 @@ class DrainKnowledgeExtractionWorkflowCommands:
         | None = None,
         capacity_reservation_repository: CapacityReservationRepositoryPort
         | None = None,
+        capacity_window_budget_repository: CapacityWindowBudgetRepositoryPort
+        | None = None,
         route_catalog: LlmModelRouteCatalog | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
@@ -307,6 +312,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 work_item_lease_repository=work_item_lease_repository,
                 attempt_dispatch_repository=attempt_dispatch_repository,
                 capacity_reservation_repository=capacity_reservation_repository,
+                capacity_window_budget_repository=capacity_window_budget_repository,
                 route_catalog=route_catalog,
                 execute_prepared_llm_dispatch_attempt=(
                     execute_prepared_llm_dispatch_attempt
