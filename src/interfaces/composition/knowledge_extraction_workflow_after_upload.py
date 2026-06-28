@@ -624,6 +624,9 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                         asyncpg_connection,
                     )
                 ),
+                capacity_window_budget_repository=(
+                    PostgresCapacityWindowBudgetRepository(asyncpg_connection)
+                ),
                 route_catalog=self._capacity_window_admission_route_catalog,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt_for_transaction(
