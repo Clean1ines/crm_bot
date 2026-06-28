@@ -20,7 +20,6 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
     LlmAttemptCapacityObservation,
 )
 from src.contexts.capacity_admission_queue.application.ports.capacity_window_budget_repository_port import (
-    CapacityReservation,
     CapacityWindowBudgetRepositoryPort,
     CapacityWindowBudgetSnapshot,
 )
@@ -600,30 +599,22 @@ async def _execute_budget_state_execution_queue_prepare(
             fallback_profile=profile,
         )
 
-        reserved_capacity: LlmProviderAccountCapacity | None = None
-        reservation: CapacityReservation | None = None
+        selected_capacity: LlmProviderAccountCapacity | None = None
         for account_capacity in account_capacities:
-            await _ensure_budget_window_for_account_capacity(
+            snapshot = await _ensure_budget_window_for_account_capacity(
                 capacity_window_budget_repository=capacity_window_budget_repository,
                 account_capacity=account_capacity,
                 now=occurred_at,
             )
-            reservation = await capacity_window_budget_repository.try_reserve(
-                provider=account_capacity.provider,
-                account_ref=account_capacity.account_ref,
-                model_ref=account_capacity.model_ref,
-                request_count=1,
-                token_count=required_window_tokens,
-                now=occurred_at,
-            )
-            if reservation is not None:
-                reserved_capacity = account_capacity
+            if _budget_snapshot_fits(
+                snapshot,
+                required_window_tokens=required_window_tokens,
+            ):
+                selected_capacity = account_capacity
                 break
 
-        if reservation is None or reserved_capacity is None:
-            # Keep scanning due records. Retryable items are ordered first by the
-            # lease repository; if a retryable item does not fit this minute,
-            # a smaller ready item may still fit the same budget window.
+        if selected_capacity is None:
+            # No mutation has happened yet. Try a later/smaller work item.
             continue
 
         lease_token = LeaseToken(
@@ -641,48 +632,48 @@ async def _execute_budget_state_execution_queue_prepare(
             now=occurred_at,
         )
         if leased is None:
-            await capacity_window_budget_repository.release_reservation(
-                reservation=reservation,
-                now=occurred_at,
-            )
+            # Another transaction took/locked the item. Budget was not mutated.
             continue
 
         admitted_item = llm_admitted_leased_work_item_from_pre_lease_status(
             leased=leased,
             allocation=LlmCapacityAllocationSlot(
-                provider=reserved_capacity.provider,
-                account_ref=reserved_capacity.account_ref,
-                model_ref=reserved_capacity.model_ref,
+                provider=selected_capacity.provider,
+                account_ref=selected_capacity.account_ref,
+                model_ref=selected_capacity.model_ref,
                 slot_index=len(started_attempts),
             ),
             execution_settings=route_catalog.execution_settings_for_model_ref(
-                reserved_capacity.model_ref,
+                selected_capacity.model_ref,
             ),
             pre_lease_status=due_record.work_item.status,
         )
 
-        try:
-            start_result = await StartLlmAdmittedWorkItemAttempts(
-                repository=attempt_dispatch_repository,
-            ).execute(
-                StartLlmAdmittedWorkItemAttemptsCommand(
-                    leased_items=(admitted_item,),
-                    started_at=occurred_at,
-                )
+        start_result = await StartLlmAdmittedWorkItemAttempts(
+            repository=attempt_dispatch_repository,
+        ).execute(
+            StartLlmAdmittedWorkItemAttemptsCommand(
+                leased_items=(admitted_item,),
+                started_at=occurred_at,
             )
-        except Exception:
-            await capacity_window_budget_repository.release_reservation(
-                reservation=reservation,
-                now=occurred_at,
-            )
-            raise
-
+        )
         if len(start_result.started_attempts) != 1:
-            await capacity_window_budget_repository.release_reservation(
-                reservation=reservation,
-                now=occurred_at,
-            )
             raise RuntimeError("claim-builder prepare must start one attempt per item")
+
+        reservation = await capacity_window_budget_repository.try_reserve(
+            provider=selected_capacity.provider,
+            account_ref=selected_capacity.account_ref,
+            model_ref=selected_capacity.model_ref,
+            request_count=1,
+            token_count=required_window_tokens,
+            now=occurred_at,
+        )
+        if reservation is None:
+            # This is a race after preflight snapshot. Do not leave a leased item
+            # without capacity. Raising rolls back lease + attempt in this transaction.
+            raise RuntimeError(
+                "claim-builder budget reservation failed after work item lease"
+            )
 
         leased_items.append(admitted_item)
         started_attempts.append(start_result.started_attempts[0])
@@ -771,6 +762,46 @@ async def _execute_budget_state_execution_queue_prepare(
         appended_next_command_count=appended_next_command_count,
         completed_command_id=workflow_command.command_id,
     )
+
+
+def _budget_snapshot_fits(
+    snapshot: CapacityWindowBudgetSnapshot,
+    *,
+    required_window_tokens: int,
+) -> bool:
+    return (
+        _remaining_capacity_value_fits(
+            remaining=snapshot.remaining_minute_requests,
+            reserved=snapshot.reserved_minute_requests,
+            required=1,
+        )
+        and _remaining_capacity_value_fits(
+            remaining=snapshot.remaining_minute_tokens,
+            reserved=snapshot.reserved_minute_tokens,
+            required=required_window_tokens,
+        )
+        and _remaining_capacity_value_fits(
+            remaining=snapshot.remaining_daily_requests,
+            reserved=snapshot.reserved_daily_requests,
+            required=1,
+        )
+        and _remaining_capacity_value_fits(
+            remaining=snapshot.remaining_daily_tokens,
+            reserved=snapshot.reserved_daily_tokens,
+            required=required_window_tokens,
+        )
+    )
+
+
+def _remaining_capacity_value_fits(
+    *,
+    remaining: int | None,
+    reserved: int,
+    required: int,
+) -> bool:
+    if remaining is None:
+        return True
+    return remaining - reserved >= required
 
 
 async def _ensure_budget_window_for_account_capacity(
