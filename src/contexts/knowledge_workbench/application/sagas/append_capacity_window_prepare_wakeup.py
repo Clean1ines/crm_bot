@@ -195,15 +195,14 @@ def _capacity_window_account_capacities(
             continue
 
         account_capacity = dict(item)
-        _overwrite_if_observed(
-            account_capacity,
-            "remaining_minute_requests",
-            capacity_observation.remaining_minute_requests,
+        account_capacity["remaining_minute_requests"] = (
+            _minute_request_capacity_for_wakeup(
+                capacity_observation.remaining_minute_requests
+            )
         )
-        _overwrite_if_observed(
-            account_capacity,
-            "remaining_minute_tokens",
+        account_capacity["remaining_minute_tokens"] = _minute_token_capacity_for_wakeup(
             capacity_observation.remaining_minute_tokens,
+            model_ref=capacity_observation.model_ref,
         )
         _overwrite_if_observed(
             account_capacity,
@@ -233,6 +232,33 @@ def _overwrite_if_observed(
     payload[key] = max(0, value)
 
 
+def _minute_request_capacity_for_wakeup(value: int | None) -> int:
+    if isinstance(value, bool):
+        return 1
+    if not isinstance(value, int):
+        return 1
+    return max(1, value)
+
+
+def _minute_token_capacity_for_wakeup(
+    value: int | None,
+    *,
+    model_ref: str,
+) -> int:
+    if isinstance(value, bool):
+        return _fallback_minute_token_limit_for_model(model_ref)
+    if not isinstance(value, int):
+        return _fallback_minute_token_limit_for_model(model_ref)
+    return max(1, value)
+
+
+def _fallback_minute_token_limit_for_model(model_ref: str) -> int:
+    configured_limits = {
+        "qwen/qwen3-32b": 6_000,
+    }
+    return configured_limits.get(model_ref, 1)
+
+
 def _capacity_observation_non_negative_int(value: int | None) -> int:
     if isinstance(value, bool):
         return 0
@@ -248,11 +274,12 @@ def _account_capacity_from_observation(
         "provider": capacity_observation.provider,
         "account_ref": capacity_observation.account_ref,
         "model_ref": capacity_observation.model_ref,
-        "remaining_minute_requests": _capacity_observation_non_negative_int(
+        "remaining_minute_requests": _minute_request_capacity_for_wakeup(
             capacity_observation.remaining_minute_requests
         ),
-        "remaining_minute_tokens": _capacity_observation_non_negative_int(
-            capacity_observation.remaining_minute_tokens
+        "remaining_minute_tokens": _minute_token_capacity_for_wakeup(
+            capacity_observation.remaining_minute_tokens,
+            model_ref=capacity_observation.model_ref,
         ),
         "remaining_daily_requests": _capacity_observation_non_negative_int(
             capacity_observation.remaining_daily_requests
