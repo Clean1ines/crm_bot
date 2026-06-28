@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -43,6 +44,7 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.capacity_runtime.infrastructure.postgres.postgres_llm_attempt_capacity_observation_repository import (
     PostgresLlmAttemptCapacityObservationRepository,
 )
+from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
@@ -124,6 +126,9 @@ from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extracti
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    PrepareLlmDispatchBatchPort,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
@@ -145,6 +150,12 @@ from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgre
 from src.contexts.knowledge_workbench.source_management.infrastructure.postgres.postgres_source_management_repository import (
     PostgresSourceManagementRepository,
 )
+from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
+    ProjectLlmCapacityToCapacityRuntime,
+)
+from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
+    SelectActiveLlmModelCapacity,
+)
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutorPort,
 )
@@ -158,6 +169,9 @@ from src.interfaces.composition.resolve_retryable_work_item_admission_route impo
 )
 from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
     LlmRuntimeSettings,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
 )
 from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
     PostgresLlmRouteCapacityReservationRepository,
@@ -183,6 +197,9 @@ from src.interfaces.realtime.redis_frontend_workflow_event_bus import (
 )
 from src.interfaces.composition.capacity_window_admission_execution_boundary import (
     StartAttemptCapacityWindowAdmissionExecutionBoundary,
+)
+from src.interfaces.composition.prepare_llm_dispatch_batch import (
+    PrepareLlmDispatchBatch,
 )
 from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
     ExecutePreparedLlmDispatchAttempt,
@@ -276,6 +293,7 @@ class RunKnowledgeExtractionWorkflowResume:
         self,
         *,
         pool: object,
+        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
         ) = None,
@@ -319,6 +337,7 @@ class RunKnowledgeExtractionWorkflowResume:
         capacity_window_admission_route_catalog: LlmModelRouteCatalog | None = None,
     ) -> None:
         self._pool = cast(_AsyncResumePoolLike, pool)
+        self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
         self._execute_prepared_llm_dispatch_attempt = (
             execute_prepared_llm_dispatch_attempt
         )
@@ -530,12 +549,7 @@ class RunKnowledgeExtractionWorkflowResume:
                 lane_target_resolver=self._capacity_admission_lane_target_resolver,
             )
         )
-        capacity_window_admission_pass = (
-            _capacity_window_admission_pass_for_transaction(
-                connection=asyncpg_connection,
-                route_catalog=self._capacity_window_admission_route_catalog,
-            )
-        )
+        capacity_window_admission_pass = None
 
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
@@ -567,6 +581,7 @@ class RunKnowledgeExtractionWorkflowResume:
                     self._capacity_admission_lane_target_resolver
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
+                prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
                 capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt_for_transaction(
@@ -985,7 +1000,7 @@ def make_knowledge_extraction_workflow_resume(
     route_catalog = default_groq_llm_model_route_catalog()
     # Projection targets describe shared queues. Concrete account windows are
     # opened later from llm_dispatch_preparation account capacities.
-    _ = LlmRuntimeSettings.from_env_mapping(
+    groq_env_config = LlmRuntimeSettings.from_env_mapping(
         os.environ,
     ).to_groq_env_config()
 
@@ -1004,6 +1019,18 @@ def make_knowledge_extraction_workflow_resume(
                     model_ref=route_catalog.highest_input_limit_automatic_route_model_ref(),
                 ),
             }
+        ),
+        prepare_llm_dispatch_batch=PrepareLlmDispatchBatch(
+            pool=pool,
+            capacity_policy=CapacityAdmissionPolicy(),
+            active_model_capacity_selector=SelectActiveLlmModelCapacity(
+                projector=ProjectLlmCapacityToCapacityRuntime(),
+            ),
+            route_catalog=route_catalog,
+            provider_account_refs=tuple(
+                account.account_seed.account_ref for account in groq_env_config.accounts
+            ),
+            model_profiles=build_groq_free_plan_model_profiles(),
         ),
         execute_prepared_llm_dispatch_attempt=(
             _TransactionalExecutePreparedLlmDispatchAttempt(

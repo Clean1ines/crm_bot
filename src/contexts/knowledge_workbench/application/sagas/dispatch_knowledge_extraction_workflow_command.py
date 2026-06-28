@@ -100,11 +100,12 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_draft_c
     HandleReconcileDraftClaimCompactionProgressCommandHandler,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
-    CapacityWindowAdmissionPassPort,
     HandlePrepareClaimBuilderDispatchBatchCommand,
     HandlePrepareClaimBuilderDispatchBatchCommandHandler,
+    PrepareLlmDispatchBatchPort,
 )
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_draft_claim_compaction_dispatch_batch_command import (
+    CapacityWindowAdmissionPassPort,
     HandlePrepareDraftClaimCompactionDispatchBatchCommand,
     HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler,
 )
@@ -185,6 +186,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         source_unit_repository: SourceManagementRepositoryPort,
         knowledge_unit_of_work: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
         capacity_window_admission_pass: CapacityWindowAdmissionPassPort | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
@@ -299,7 +301,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             command_type
             is KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
         ):
-            if capacity_window_admission_pass is None:
+            if prepare_llm_dispatch_batch is None:
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
                     command_type=command_type.value,
@@ -313,9 +315,9 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 HandlePrepareClaimBuilderDispatchBatchCommand(
                     workflow_command=workflow_command,
                 ),
+                prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
                 workflow_unit_of_work=workflow_unit_of_work,
                 frontend_event_projection_writer=frontend_event_projection_writer,
-                capacity_window_admission_pass=capacity_window_admission_pass,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

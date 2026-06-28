@@ -2,36 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Protocol
+from datetime import datetime, timedelta, timezone
+from typing import Protocol, cast
 
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
-from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
-    CapacityWindowAdmissionPassCommand,
-)
-from src.contexts.capacity_admission_queue.application.capacity_window_admission_result import (
-    CapacityWindowAdmissionPassResult,
-)
-from src.contexts.capacity_admission_queue.application.select_capacity_admission_work_item import (
-    CapacityAdmissionLaneKey,
-    CapacityAdmissionWindowBudget,
-)
-from src.contexts.knowledge_workbench.application.sagas.capacity_admission_phase_mapping import (
-    CLAIM_BUILDER_ADMISSION_PHASE_PROFILE,
-)
-from src.contexts.knowledge_workbench.application.sagas.claim_builder_capacity_admission_phase_mapper import (
-    ClaimBuilderCapacityAdmissionPhaseMapper,
-)
-from src.contexts.knowledge_workbench.application.sagas.claim_builder_capacity_admission_phase_plan_applier import (
-    ApplyClaimBuilderCapacityAdmissionPhasePlanCommand,
-    ClaimBuilderCapacityAdmissionPhasePlanApplier,
-)
 from src.contexts.knowledge_workbench.application.sagas.capacity_window_workflow_events import (
     CLAIM_BUILDER_CANONICAL_PHASE,
     CLAIM_BUILDER_PREPARE_OPERATION_KEY,
+    capacity_window_exhausted_event,
     capacity_window_leased_work_item_event,
     capacity_window_scheduled_wakeup_event,
     source_unit_ref_from_schedule_payload,
@@ -45,13 +26,6 @@ from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_secti
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
-)
-from src.contexts.llm_runtime.application.capacity.resolve_llm_dispatch_preparation_strategy import (
-    ResolveLlmDispatchPreparationStrategy,
-    ResolveLlmDispatchPreparationStrategyCommand,
-)
-from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
-    default_groq_llm_model_route_catalog,
 )
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
@@ -86,13 +60,17 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 from src.interfaces.composition.lease_llm_admitted_work_items import (
     LlmAdmittedLeasedWorkItem,
 )
+from src.interfaces.composition.prepare_llm_dispatch_batch import (
+    PrepareLlmDispatchBatchCommand,
+    PrepareLlmDispatchBatchResult,
+)
 
 
 CLAIM_BUILDER_ACTIVE_MODEL_REF = "qwen/qwen3-32b"
 
 
-class CapacityWindowAdmissionPassPort(Protocol):
-    async def execute(self, command: CapacityWindowAdmissionPassCommand) -> object: ...
+class PrepareLlmDispatchBatchPort(Protocol):
+    async def execute(self, command: PrepareLlmDispatchBatchCommand) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,9 +108,9 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
         self,
         command: HandlePrepareClaimBuilderDispatchBatchCommand,
         *,
+        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
-        capacity_window_admission_pass: CapacityWindowAdmissionPassPort | None = None,
     ) -> HandlePrepareClaimBuilderDispatchBatchResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -146,24 +124,300 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             raise ValueError("payload workflow_run_id must match workflow command")
 
         occurred_at = _execution_occurred_at(workflow_command)
-        if capacity_window_admission_pass is not None:
-            return await _execute_capacity_window_admission_branch(
+        prepare_command = _prepare_llm_dispatch_batch_command(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+            occurred_at=occurred_at,
+        )
+        prepare_result = await prepare_llm_dispatch_batch.execute(
+            prepare_command,
+        )
+        typed_prepare_result = cast(
+            PrepareLlmDispatchBatchResult,
+            prepare_result,
+        )
+        started_attempts = typed_prepare_result.attempt_result.started_attempts
+        prepared_dispatch_count = len(started_attempts)
+        preflight_metadata = _preflight_metadata_from_prepare_result(
+            typed_prepare_result,
+        )
+
+        appended_event_count = 0
+        appended_next_command_count = 0
+
+        if _source_split_required(preflight_metadata):
+            split_required_event = _claim_builder_source_unit_split_required_event(
                 workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
+                preflight_metadata=preflight_metadata,
                 occurred_at=occurred_at,
-                capacity_window_admission_pass=capacity_window_admission_pass,
-                workflow_unit_of_work=workflow_unit_of_work,
-                frontend_event_projection_writer=frontend_event_projection_writer,
+            )
+            await workflow_unit_of_work.outbox.append_event(split_required_event)
+            appended_event_count = 1
+
+            split_command = _split_claim_builder_source_unit_command(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.command_log.append_pending_command(
+                split_command,
+            )
+            appended_next_command_count = 1
+
+            await workflow_unit_of_work.timeline.append_entry(
+                _source_split_required_timeline_entry(
+                    workflow_command=workflow_command,
+                    split_required_event=split_required_event,
+                    split_command=split_command,
+                    occurred_at=occurred_at,
+                )
             )
 
-        raise ValueError("capacity_window_admission_pass is required")
+        elif prepared_dispatch_count > 0:
+            prepared_event = _claim_builder_dispatch_batch_prepared_event(
+                workflow_run_id=workflow_run_id,
+                started_attempts=started_attempts,
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            persisted_prepared_event = await workflow_unit_of_work.outbox.append_event(
+                prepared_event
+            )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_prepared_event)
+            appended_event_count = 1
+            for attempt_event in _claim_builder_dispatch_attempt_prepared_events(
+                workflow_run_id=workflow_run_id,
+                started_attempts=started_attempts,
+                lease_expires_at=prepare_command.lease_expires_at,
+                occurred_at=occurred_at,
+            ):
+                persisted_attempt_event = (
+                    await workflow_unit_of_work.outbox.append_event(attempt_event)
+                )
+                if frontend_event_projection_writer is not None:
+                    await frontend_event_projection_writer.execute(
+                        persisted_attempt_event
+                    )
+                appended_event_count += 1
+
+            leased_items = typed_prepare_result.lease_result.leased
+            for leased_item, started_attempt in zip(
+                leased_items,
+                started_attempts,
+                strict=True,
+            ):
+                leased_event = _capacity_window_leased_work_item_event(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    leased_item=leased_item,
+                    started_attempt=started_attempt,
+                    lease_expires_at=prepare_command.lease_expires_at,
+                    occurred_at=occurred_at,
+                )
+                persisted_leased_event = (
+                    await workflow_unit_of_work.outbox.append_event(
+                        leased_event,
+                    )
+                )
+                if frontend_event_projection_writer is not None:
+                    await frontend_event_projection_writer.execute(
+                        persisted_leased_event,
+                    )
+                appended_event_count += 1
+
+            next_commands = _execute_claim_builder_section_commands(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                started_attempts=started_attempts,
+                occurred_at=occurred_at,
+            )
+            for next_command in next_commands:
+                await workflow_unit_of_work.command_log.append_pending_command(
+                    next_command,
+                )
+            appended_next_command_count = len(next_commands)
+
+            for timeline_entry in _timeline_entries(
+                workflow_command=workflow_command,
+                prepared_event=prepared_event,
+                started_attempts=started_attempts,
+                occurred_at=occurred_at,
+            ):
+                await workflow_unit_of_work.timeline.append_entry(timeline_entry)
+
+        scheduled_work_item_count = _payload_positive_int(
+            workflow_command.payload,
+            "scheduled_work_item_count",
+        )
+        if (
+            prepared_dispatch_count == 0
+            and scheduled_work_item_count > 0
+            and not _source_split_required(preflight_metadata)
+        ):
+            capacity_retry_at = _future_capacity_retry_at(
+                _capacity_retry_at_from_prepare_result(typed_prepare_result),
+                occurred_at=occurred_at,
+            )
+            if capacity_retry_at is not None:
+                capacity_window_exhaustion = (
+                    typed_prepare_result.capacity_window_exhaustion
+                )
+                if capacity_window_exhaustion is not None:
+                    exhausted_event = capacity_window_exhausted_event(
+                        workflow_run_id=workflow_run_id,
+                        exhaustion=capacity_window_exhaustion,
+                        operation_key=CLAIM_BUILDER_PREPARE_OPERATION_KEY,
+                        canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
+                        occurred_at=occurred_at,
+                        causation_command_id=workflow_command.command_id,
+                        correlation_id=(
+                            f"{capacity_window_exhaustion.provider}:"
+                            f"{capacity_window_exhaustion.account_ref}:"
+                            f"{capacity_window_exhaustion.model_ref}:"
+                            f"{capacity_retry_at.isoformat()}"
+                        ),
+                    )
+                    persisted_exhausted_event = (
+                        await workflow_unit_of_work.outbox.append_event(
+                            exhausted_event,
+                        )
+                    )
+                    if frontend_event_projection_writer is not None:
+                        await frontend_event_projection_writer.execute(
+                            persisted_exhausted_event,
+                        )
+                    appended_event_count += 1
+
+                    scheduled_wakeup_event = capacity_window_scheduled_wakeup_event(
+                        workflow_run_id=workflow_run_id,
+                        provider=capacity_window_exhaustion.provider,
+                        account_ref=capacity_window_exhaustion.account_ref,
+                        model_ref=capacity_window_exhaustion.model_ref,
+                        run_after=capacity_retry_at,
+                        reset_at=capacity_window_exhaustion.reset_at,
+                        wakeup_command_id=workflow_command.command_id,
+                        prepare_command_type=workflow_command.command_type,
+                        wakeup_reason="prepare_capacity_retry_at",
+                        operation_key=CLAIM_BUILDER_PREPARE_OPERATION_KEY,
+                        canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
+                        occurred_at=occurred_at,
+                        causation_command_id=workflow_command.command_id,
+                    )
+                    persisted_wakeup_event = (
+                        await workflow_unit_of_work.outbox.append_event(
+                            scheduled_wakeup_event,
+                        )
+                    )
+                    if frontend_event_projection_writer is not None:
+                        await frontend_event_projection_writer.execute(
+                            persisted_wakeup_event,
+                        )
+                    appended_event_count += 1
+
+                await workflow_unit_of_work.timeline.append_entry(
+                    _capacity_throttled_timeline_entry(
+                        workflow_command=workflow_command,
+                        workflow_run_id=workflow_run_id,
+                        scheduled_work_item_count=scheduled_work_item_count,
+                        capacity_retry_at=capacity_retry_at,
+                        preflight_metadata=preflight_metadata,
+                        occurred_at=occurred_at,
+                    )
+                )
+                await _save_progress_snapshot(
+                    workflow_unit_of_work=workflow_unit_of_work,
+                    workflow_run_id=workflow_run_id,
+                    prepared_dispatch_count=prepared_dispatch_count,
+                    preflight_metadata=preflight_metadata,
+                    occurred_at=occurred_at,
+                )
+                await workflow_unit_of_work.command_log.reschedule_pending_command(
+                    command_id=workflow_command.command_id,
+                    run_after=capacity_retry_at,
+                    rescheduled_at=occurred_at,
+                )
+                return HandlePrepareClaimBuilderDispatchBatchResult(
+                    workflow_run_id=workflow_run_id,
+                    prepared_dispatch_count=prepared_dispatch_count,
+                    appended_event_count=appended_event_count,
+                    appended_next_command_count=appended_next_command_count,
+                    completed_command_id=workflow_command.command_id,
+                )
+
+            await workflow_unit_of_work.timeline.append_entry(
+                _zero_dispatch_after_scheduling_timeline_entry(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    scheduled_work_item_count=scheduled_work_item_count,
+                    preflight_metadata=preflight_metadata,
+                    occurred_at=occurred_at,
+                )
+            )
+            await _save_progress_snapshot(
+                workflow_unit_of_work=workflow_unit_of_work,
+                workflow_run_id=workflow_run_id,
+                prepared_dispatch_count=prepared_dispatch_count,
+                preflight_metadata=preflight_metadata,
+                occurred_at=occurred_at,
+            )
+            await workflow_unit_of_work.command_log.mark_command_completed(
+                command_id=workflow_command.command_id,
+                completed_at=occurred_at,
+            )
+            return HandlePrepareClaimBuilderDispatchBatchResult(
+                workflow_run_id=workflow_run_id,
+                prepared_dispatch_count=prepared_dispatch_count,
+                appended_event_count=appended_event_count,
+                appended_next_command_count=appended_next_command_count,
+                completed_command_id=workflow_command.command_id,
+            )
+
+        await _save_progress_snapshot(
+            workflow_unit_of_work=workflow_unit_of_work,
+            workflow_run_id=workflow_run_id,
+            prepared_dispatch_count=prepared_dispatch_count,
+            preflight_metadata=preflight_metadata,
+            occurred_at=occurred_at,
+        )
+
+        await workflow_unit_of_work.command_log.mark_command_completed(
+            command_id=workflow_command.command_id,
+            completed_at=occurred_at,
+        )
+
+        return HandlePrepareClaimBuilderDispatchBatchResult(
+            workflow_run_id=workflow_run_id,
+            prepared_dispatch_count=prepared_dispatch_count,
+            appended_event_count=appended_event_count,
+            appended_next_command_count=appended_next_command_count,
+            completed_command_id=workflow_command.command_id,
+        )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _execution_occurred_at(workflow_command: WorkflowCommand) -> datetime:
-    occurred_at = workflow_command.updated_at
-    if not isinstance(occurred_at, datetime):
-        raise ValueError("workflow_command updated_at must be datetime")
-    return occurred_at
+    execution_now = _utc_now()
+    if workflow_command.updated_at > execution_now:
+        return workflow_command.updated_at
+    return execution_now
+
+
+def _future_capacity_retry_at(
+    capacity_retry_at: datetime | None,
+    *,
+    occurred_at: datetime,
+) -> datetime | None:
+    if capacity_retry_at is None:
+        return None
+    if capacity_retry_at > occurred_at:
+        return capacity_retry_at
+    return occurred_at + timedelta(seconds=60)
 
 
 def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
@@ -178,213 +432,38 @@ def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
         raise ValueError("workflow_command status must be PENDING")
 
 
-async def _execute_capacity_window_admission_branch(
+def _prepare_llm_dispatch_batch_command(
     *,
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
     occurred_at: datetime,
-    capacity_window_admission_pass: CapacityWindowAdmissionPassPort,
-    workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
-    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None,
-) -> HandlePrepareClaimBuilderDispatchBatchResult:
-    admission_result = await _execute_first_admitted_capacity_window(
-        workflow_command=workflow_command,
-        workflow_run_id=workflow_run_id,
-        occurred_at=occurred_at,
-        capacity_window_admission_pass=capacity_window_admission_pass,
-    )
-
-    mapping_plan = (
-        await ClaimBuilderCapacityAdmissionPhaseMapper().map_admission_result(
-            admission_result=admission_result,
-            occurred_at=occurred_at,
-        )
-    )
-    apply_result = await ClaimBuilderCapacityAdmissionPhasePlanApplier().execute(
-        ApplyClaimBuilderCapacityAdmissionPhasePlanCommand(
-            workflow_command=workflow_command,
-            mapping_plan=mapping_plan,
-        ),
-        workflow_unit_of_work=workflow_unit_of_work,
-        frontend_event_projection_writer=frontend_event_projection_writer,
-    )
-    return HandlePrepareClaimBuilderDispatchBatchResult(
-        workflow_run_id=workflow_run_id,
-        prepared_dispatch_count=mapping_plan.prepared_dispatch_count,
-        appended_event_count=apply_result.appended_event_count,
-        appended_next_command_count=apply_result.appended_next_command_count,
-        completed_command_id=apply_result.completed_command_id,
-    )
-
-
-async def _execute_first_admitted_capacity_window(
-    *,
-    workflow_command: WorkflowCommand,
-    workflow_run_id: str,
-    occurred_at: datetime,
-    capacity_window_admission_pass: CapacityWindowAdmissionPassPort,
-) -> CapacityWindowAdmissionPassResult:
-    skipped_results: list[CapacityWindowAdmissionPassResult] = []
-    for admission_command in _capacity_window_admission_pass_commands(
-        workflow_command=workflow_command,
-        workflow_run_id=workflow_run_id,
-        occurred_at=occurred_at,
-    ):
-        admission_result = await capacity_window_admission_pass.execute(
-            admission_command
-        )
-        if not isinstance(admission_result, CapacityWindowAdmissionPassResult):
-            raise TypeError(
-                "capacity_window_admission_pass must return "
-                "CapacityWindowAdmissionPassResult"
-            )
-        if not admission_result.skipped:
-            return admission_result
-        skipped_results.append(admission_result)
-
-    if skipped_results:
-        return skipped_results[-1]
-    raise ValueError("capacity_window_admission_pass has no capacity windows to try")
-
-
-def _capacity_window_admission_pass_commands(
-    *,
-    workflow_command: WorkflowCommand,
-    workflow_run_id: str,
-    occurred_at: datetime,
-) -> tuple[CapacityWindowAdmissionPassCommand, ...]:
-    account_capacities = _capacities_for_capacity_admission(
+) -> PrepareLlmDispatchBatchCommand:
+    requested_items = _payload_positive_int(
         workflow_command.payload,
-    )
-    return tuple(
-        _capacity_window_admission_pass_command_for_capacity(
-            workflow_command=workflow_command,
-            workflow_run_id=workflow_run_id,
-            occurred_at=occurred_at,
-            account_capacity=account_capacity,
-        )
-        for account_capacity in account_capacities
+        "scheduled_work_item_count",
     )
 
-
-def _capacity_window_admission_pass_command_for_capacity(
-    *,
-    workflow_command: WorkflowCommand,
-    workflow_run_id: str,
-    occurred_at: datetime,
-    account_capacity: LlmProviderAccountCapacity,
-) -> CapacityWindowAdmissionPassCommand:
-    return CapacityWindowAdmissionPassCommand(
-        workflow_run_id=workflow_run_id,
-        phase=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.phase,
-        operation_key=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.operation_key,
-        lane_key=CapacityAdmissionLaneKey(
-            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
-            provider=account_capacity.provider,
-            account_ref=None,
-            model_ref=account_capacity.model_ref,
-        ),
-        execution_lane_key=CapacityAdmissionLaneKey(
-            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
-            provider=account_capacity.provider,
-            account_ref=account_capacity.account_ref,
-            model_ref=account_capacity.model_ref,
-        ),
-        budget=CapacityAdmissionWindowBudget(
-            remaining_requests=account_capacity.remaining_minute_requests,
-            remaining_tokens=account_capacity.remaining_minute_tokens,
-            remaining_daily_requests=account_capacity.remaining_daily_requests,
-            remaining_daily_tokens=account_capacity.remaining_daily_tokens,
-        ),
+    return PrepareLlmDispatchBatchCommand(
+        work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+        active_model_ref=_active_model_ref_from_payload(workflow_command.payload),
+        requested_items=requested_items,
         worker=WorkerRef("knowledge-workbench-claim-builder-dispatch"),
         lease_token_prefix=f"claim-builder-dispatch:{workflow_run_id}",
         lease_expires_at=occurred_at + timedelta(seconds=90),
         now=occurred_at,
-        max_admitted_items=_payload_positive_int(
+        started_at=occurred_at,
+        profile=_profile_from_dispatch_preparation(workflow_command.payload),
+        account_capacities=_account_capacities_from_dispatch_preparation(
             workflow_command.payload,
-            "scheduled_work_item_count",
         ),
-    )
-
-
-def _capacity_window_admission_pass_command(
-    *,
-    workflow_command: WorkflowCommand,
-    workflow_run_id: str,
-    occurred_at: datetime,
-) -> CapacityWindowAdmissionPassCommand:
-    account_capacity = _first_capacity_for_capacity_admission(
-        workflow_command.payload,
-    )
-    return CapacityWindowAdmissionPassCommand(
-        workflow_run_id=workflow_run_id,
-        phase=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.phase,
-        operation_key=CLAIM_BUILDER_ADMISSION_PHASE_PROFILE.operation_key,
-        lane_key=CapacityAdmissionLaneKey(
-            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
-            provider=account_capacity.provider,
-            account_ref=None,
-            model_ref=account_capacity.model_ref,
-        ),
-        execution_lane_key=CapacityAdmissionLaneKey(
-            work_kind=CLAIM_BUILDER_SECTION_WORK_KIND.value,
-            provider=account_capacity.provider,
-            account_ref=account_capacity.account_ref,
-            model_ref=account_capacity.model_ref,
-        ),
-        budget=CapacityAdmissionWindowBudget(
-            remaining_requests=account_capacity.remaining_minute_requests,
-            remaining_tokens=account_capacity.remaining_minute_tokens,
-            remaining_daily_requests=account_capacity.remaining_daily_requests,
-            remaining_daily_tokens=account_capacity.remaining_daily_tokens,
-        ),
-        worker=WorkerRef("knowledge-workbench-claim-builder-dispatch"),
-        lease_token_prefix=f"claim-builder-dispatch:{workflow_run_id}",
-        lease_expires_at=occurred_at + timedelta(seconds=90),
-        now=occurred_at,
-        max_admitted_items=_payload_positive_int(
+        dispatch_preparation_strategy=_legacy_dispatch_preparation_strategy_from_payload(
             workflow_command.payload,
-            "scheduled_work_item_count",
+        ),
+        retry_plan=_retry_plan_from_payload(workflow_command.payload),
+        provider_account_refs=_provider_account_refs_from_payload(
+            workflow_command.payload,
         ),
     )
-
-
-def _capacities_for_capacity_admission(
-    payload: Mapping[str, object],
-) -> tuple[LlmProviderAccountCapacity, ...]:
-    account_capacities = _account_capacities_from_dispatch_preparation(payload)
-    if not account_capacities:
-        raise ValueError(
-            "capacity_window_admission_pass requires llm_dispatch_preparation "
-            "account_capacities"
-        )
-
-    active_model_ref = _active_model_ref_from_payload(payload)
-    active_model_capacities = tuple(
-        account_capacity
-        for account_capacity in account_capacities
-        if account_capacity.model_ref == active_model_ref
-    )
-    if active_model_capacities:
-        return active_model_capacities
-    return (account_capacities[0],)
-
-
-def _first_capacity_for_capacity_admission(
-    payload: Mapping[str, object],
-) -> LlmProviderAccountCapacity:
-    account_capacities = _account_capacities_from_dispatch_preparation(payload)
-    if not account_capacities:
-        raise ValueError(
-            "capacity_window_admission_pass requires llm_dispatch_preparation "
-            "account_capacities"
-        )
-
-    active_model_ref = _active_model_ref_from_payload(payload)
-    for account_capacity in account_capacities:
-        if account_capacity.model_ref == active_model_ref:
-            return account_capacity
-    return account_capacities[0]
 
 
 def _provider_account_refs_from_payload(
@@ -415,35 +494,38 @@ def _active_model_ref_from_payload(payload: Mapping[str, object]) -> str:
         "llm_dispatch_preparation",
     )
     if dispatch_preparation is not None:
-        base_active_model_ref = _payload_text(
+        return _payload_text(
             dispatch_preparation,
             "active_model_ref",
             fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
         )
-    else:
-        base_active_model_ref = _payload_text(
-            payload,
-            "active_model_ref",
-            fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
-        )
-
-    retry_plan = _retry_plan_from_payload(payload)
-    legacy_strategy = _legacy_dispatch_preparation_strategy_from_payload(payload)
-    if retry_plan is None and legacy_strategy is None:
-        return base_active_model_ref
-
-    return (
-        ResolveLlmDispatchPreparationStrategy()
-        .execute(
-            ResolveLlmDispatchPreparationStrategyCommand(
-                current_active_model_ref=base_active_model_ref,
-                route_catalog=default_groq_llm_model_route_catalog(),
-                retry_plan=retry_plan,
-                strategy=legacy_strategy,
-            )
-        )
-        .active_model_ref
+    return _payload_text(
+        payload,
+        "active_model_ref",
+        fallback=CLAIM_BUILDER_ACTIVE_MODEL_REF,
     )
+
+
+def _claim_builder_profile_positive_int_with_legacy_fallback(
+    payload: Mapping[str, object],
+    *,
+    key: str,
+    legacy_key: str,
+) -> int:
+    if key in payload:
+        return _payload_positive_int(payload, key)
+    return _payload_positive_int(payload, legacy_key)
+
+
+def _claim_builder_profile_non_negative_int_with_legacy_fallback(
+    payload: Mapping[str, object],
+    *,
+    key: str,
+    legacy_key: str,
+) -> int:
+    if key in payload:
+        return _payload_non_negative_int(payload, key)
+    return _payload_non_negative_int(payload, legacy_key)
 
 
 def _profile_from_dispatch_preparation(
@@ -459,13 +541,19 @@ def _profile_from_dispatch_preparation(
     profile_payload = _payload_mapping(dispatch_preparation, "profile")
     return LlmTaskCapacityProfile(
         profile_id=_payload_text(profile_payload, "profile_id"),
-        input_tokens=_payload_positive_int(
-            profile_payload,
-            "input_tokens",
+        input_tokens=(
+            _claim_builder_profile_positive_int_with_legacy_fallback(
+                profile_payload,
+                key="input_tokens",
+                legacy_key="input_tokens",
+            )
         ),
-        artifact_tokens=_payload_non_negative_int(
-            profile_payload,
-            "artifact_tokens",
+        artifact_tokens=(
+            _claim_builder_profile_non_negative_int_with_legacy_fallback(
+                profile_payload,
+                key="artifact_tokens",
+                legacy_key="artifact_tokens",
+            )
         ),
         request_count=_payload_positive_int(
             profile_payload,
@@ -563,8 +651,32 @@ def _legacy_dispatch_preparation_strategy_from_payload(
     return None
 
 
+def _preflight_metadata_from_prepare_result(
+    prepare_result: PrepareLlmDispatchBatchResult,
+) -> dict[str, object]:
+    active_model_ref = prepare_result.input_size_preflight_active_model_ref
+    if active_model_ref is None:
+        active_model_ref = ""
+
+    metadata: dict[str, object] = {
+        "input_size_preflight_decision": (prepare_result.input_size_preflight_decision),
+        "input_size_preflight_reason": prepare_result.input_size_preflight_reason,
+        "input_size_preflight_active_model_ref": active_model_ref,
+        "source_split_required": prepare_result.source_split_required,
+        "affected_work_item_refs": prepare_result.affected_work_item_refs,
+        "source_unit_refs": prepare_result.source_unit_refs,
+    }
+    return metadata
+
+
 def _source_split_required(metadata: Mapping[str, object]) -> bool:
     return metadata.get("source_split_required") is True
+
+
+def _capacity_retry_at_from_prepare_result(
+    prepare_result: PrepareLlmDispatchBatchResult,
+) -> datetime | None:
+    return prepare_result.capacity_retry_at
 
 
 def _claim_builder_source_unit_split_required_event(
@@ -674,9 +786,25 @@ def _source_split_payload(
             workflow_command.payload,
             "scheduled_work_item_count",
         ),
-        "input_tokens": _payload_positive_int(
+        "input_tokens": _claim_builder_profile_positive_int_with_legacy_fallback(
             profile_payload,
-            "input_tokens",
+            key="input_tokens",
+            legacy_key="prompt_tokens",
+        ),
+        "artifact_tokens": _claim_builder_profile_non_negative_int_with_legacy_fallback(
+            profile_payload,
+            key="artifact_tokens",
+            legacy_key="completion_tokens",
+        ),
+        "required_window_tokens": _claim_builder_profile_positive_int_with_legacy_fallback(
+            profile_payload,
+            key="required_window_tokens",
+            legacy_key="total_tokens",
+        ),
+        "request_count": _claim_builder_profile_positive_int_with_legacy_fallback(
+            profile_payload,
+            key="request_count",
+            legacy_key="requests",
         ),
         "active_model_ref": _metadata_text(
             preflight_metadata,
@@ -920,38 +1048,6 @@ def _claim_builder_dispatch_attempt_prepared_events(
             )
         )
     return tuple(events)
-
-
-def _prepare_capacity_retry_scheduled_wakeup_event(
-    *,
-    workflow_command: WorkflowCommand,
-    workflow_run_id: str,
-    capacity_retry_at: datetime,
-    occurred_at: datetime,
-) -> WorkflowEvent:
-    reschedule_pending_command = _next_prepare_claim_builder_dispatch_batch_command(
-        workflow_command=workflow_command,
-        workflow_run_id=workflow_run_id,
-        capacity_retry_at=capacity_retry_at,
-        occurred_at=occurred_at,
-    )
-    _ = reschedule_pending_command.command_id
-    account_capacity = _first_capacity_for_capacity_admission(workflow_command.payload)
-    return capacity_window_scheduled_wakeup_event(
-        workflow_run_id=workflow_run_id,
-        provider=account_capacity.provider,
-        account_ref=account_capacity.account_ref,
-        model_ref=account_capacity.model_ref,
-        run_after=capacity_retry_at,
-        reset_at=capacity_retry_at,
-        prepare_command_type=workflow_command.command_type,
-        wakeup_command_id=workflow_command.command_id,
-        wakeup_reason="prepare_capacity_retry_at",
-        occurred_at=occurred_at,
-        causation_command_id=workflow_command.command_id,
-        operation_key=CLAIM_BUILDER_PREPARE_OPERATION_KEY,
-        canonical_phase=CLAIM_BUILDER_CANONICAL_PHASE,
-    )
 
 
 def _next_prepare_claim_builder_dispatch_batch_command(

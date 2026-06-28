@@ -13,6 +13,7 @@ from src.contexts.capacity_admission_queue.application.build_capacity_admission_
 from src.contexts.capacity_admission_queue.application.capacity_admission_lane_target_resolver import (
     CapacityAdmissionLaneTargetRegistry,
 )
+from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.execution_runtime.application.use_cases.record_work_item_attempt_outcome import (
     RecordWorkItemAttemptOutcome,
 )
@@ -38,6 +39,12 @@ from src.contexts.knowledge_workbench.extraction.application.policies.draft_clai
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
 )
+from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
+    ProjectLlmCapacityToCapacityRuntime,
+)
+from src.contexts.llm_runtime.application.capacity.select_active_llm_model_capacity import (
+    SelectActiveLlmModelCapacity,
+)
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutorPort,
 )
@@ -46,6 +53,9 @@ from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
 )
 from src.contexts.llm_runtime.infrastructure.config.llm_runtime_settings import (
     LlmRuntimeSettings,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
 )
 from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
     PostgresLlmRouteCapacityReservationRepository,
@@ -62,6 +72,9 @@ from src.interfaces.composition.knowledge_extraction_workflow_after_upload impor
 )
 from src.interfaces.composition.knowledge_extraction_workflow_resume import (
     _sync_capacity_admission_projection_lifecycle,
+)
+from src.interfaces.composition.prepare_llm_dispatch_batch import (
+    PrepareLlmDispatchBatch,
 )
 from src.interfaces.composition.source_ingestion_first_phase import (
     make_source_ingestion_first_phase,
@@ -266,13 +279,25 @@ def make_knowledge_extraction_workflow_after_upload(
         )
 
     route_catalog = default_groq_llm_model_route_catalog()
-    _ = LlmRuntimeSettings.from_env_mapping(
+    groq_env_config = LlmRuntimeSettings.from_env_mapping(
         os.environ,
     ).to_groq_env_config()
 
     return RunKnowledgeExtractionWorkflowAfterUpload(
         source_ingestion_runner=source_ingestion_runner,
         pool=pool,
+        prepare_llm_dispatch_batch=PrepareLlmDispatchBatch(
+            pool=pool,
+            capacity_policy=CapacityAdmissionPolicy(),
+            active_model_capacity_selector=SelectActiveLlmModelCapacity(
+                projector=ProjectLlmCapacityToCapacityRuntime(),
+            ),
+            route_catalog=route_catalog,
+            provider_account_refs=tuple(
+                account.account_seed.account_ref for account in groq_env_config.accounts
+            ),
+            model_profiles=build_groq_free_plan_model_profiles(),
+        ),
         capacity_admission_lane_target_resolver=CapacityAdmissionLaneTargetRegistry(
             targets_by_work_kind={
                 "knowledge_workbench.claim_builder.section_extraction": CapacityAdmissionLaneTarget(

@@ -84,6 +84,9 @@ from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extracti
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
+    PrepareLlmDispatchBatchPort,
+)
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_output_validation_policy import (
     ClaimBuilderOutputValidationPolicy,
 )
@@ -119,7 +122,6 @@ from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
 )
 from src.interfaces.composition.knowledge_extraction_workflow_resume import (
     _capacity_admission_projection_writer_for_transaction,
-    _capacity_window_admission_pass_for_transaction,
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.knowledge_extraction_frontend_workflow_event_projector import (
     KnowledgeExtractionFrontendWorkflowEventProjector,
@@ -234,6 +236,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
         *,
         source_ingestion_runner: SourceIngestionFirstPhaseRunnerPort,
         pool: object,
+        prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort | None = None,
         execute_prepared_llm_dispatch_attempt: (
             ExecutePreparedLlmDispatchAttemptPort | None
         ) = None,
@@ -278,6 +281,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
     ) -> None:
         self._source_ingestion_runner = source_ingestion_runner
         self._pool = cast(_AsyncDrainPoolLike, pool)
+        self._prepare_llm_dispatch_batch = prepare_llm_dispatch_batch
         self._execute_prepared_llm_dispatch_attempt = (
             execute_prepared_llm_dispatch_attempt
         )
@@ -501,12 +505,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                 lane_target_resolver=self._capacity_admission_lane_target_resolver,
             )
         )
-        capacity_window_admission_pass = (
-            _capacity_window_admission_pass_for_transaction(
-                connection=asyncpg_connection,
-                route_catalog=self._capacity_window_admission_route_catalog,
-            )
-        )
+        capacity_window_admission_pass = None
 
         try:
             result = await DrainKnowledgeExtractionWorkflowCommands().execute(
@@ -538,6 +537,7 @@ class RunKnowledgeExtractionWorkflowAfterUpload:
                     self._capacity_admission_lane_target_resolver
                 ),
                 workflow_unit_of_work=workflow_unit_of_work,
+                prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
                 capacity_window_admission_pass=capacity_window_admission_pass,
                 execute_prepared_llm_dispatch_attempt=(
                     self._execute_prepared_llm_dispatch_attempt_for_transaction(
