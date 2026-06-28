@@ -187,7 +187,7 @@ async def _execute_capacity_window_admission_branch(
     workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
     frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None,
 ) -> HandlePrepareClaimBuilderDispatchBatchResult:
-    admission_result = await _execute_first_admitted_capacity_window(
+    admission_result = await _execute_all_admitted_capacity_windows(
         workflow_command=workflow_command,
         workflow_run_id=workflow_run_id,
         occurred_at=occurred_at,
@@ -217,7 +217,7 @@ async def _execute_capacity_window_admission_branch(
     )
 
 
-async def _execute_first_admitted_capacity_window(
+async def _execute_all_admitted_capacity_windows(
     *,
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
@@ -225,6 +225,8 @@ async def _execute_first_admitted_capacity_window(
     capacity_window_admission_pass: CapacityWindowAdmissionPassPort,
 ) -> CapacityWindowAdmissionPassResult:
     skipped_results: list[CapacityWindowAdmissionPassResult] = []
+    admitted_results: list[CapacityWindowAdmissionPassResult] = []
+
     for admission_command in _capacity_window_admission_pass_commands(
         workflow_command=workflow_command,
         workflow_run_id=workflow_run_id,
@@ -238,13 +240,53 @@ async def _execute_first_admitted_capacity_window(
                 "capacity_window_admission_pass must return "
                 "CapacityWindowAdmissionPassResult"
             )
-        if not admission_result.skipped:
-            return admission_result
-        skipped_results.append(admission_result)
+        if admission_result.skipped:
+            skipped_results.append(admission_result)
+            continue
+        admitted_results.append(admission_result)
+
+    if admitted_results:
+        return _merge_capacity_window_admission_results(admitted_results)
 
     if skipped_results:
         return skipped_results[-1]
     raise ValueError("capacity_window_admission_pass has no capacity windows to try")
+
+
+def _merge_capacity_window_admission_results(
+    results: list[CapacityWindowAdmissionPassResult],
+) -> CapacityWindowAdmissionPassResult:
+    first = results[0]
+    return CapacityWindowAdmissionPassResult(
+        workflow_run_id=first.workflow_run_id,
+        phase=first.phase,
+        operation_key=first.operation_key,
+        work_kind=first.work_kind,
+        lane=first.lane,
+        admitted_items=tuple(
+            item for result in results for item in result.admitted_items
+        ),
+        projection_leases=tuple(
+            lease for result in results for lease in result.projection_leases
+        ),
+        capacity_reservations=tuple(
+            reservation
+            for result in results
+            for reservation in result.capacity_reservations
+        ),
+        started_attempts=tuple(
+            attempt for result in results for attempt in result.started_attempts
+        ),
+        appended_execute_command_refs=tuple(
+            command_ref
+            for result in results
+            for command_ref in result.appended_execute_command_refs
+        ),
+        skipped_reason=None,
+        safe_preflight_summary=None,
+        frontend_event_summary=None,
+        log_event=first.log_event,
+    )
 
 
 def _capacity_window_admission_pass_commands(

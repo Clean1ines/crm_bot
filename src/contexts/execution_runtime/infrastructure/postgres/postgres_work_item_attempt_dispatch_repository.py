@@ -32,6 +32,7 @@ class PostgresWorkItemAttemptDispatchRepository(WorkItemAttemptDispatchRepositor
                 attempt_number,
                 started_at
             ) VALUES ($1, $2, $3, $4)
+            ON CONFLICT (attempt_id) DO NOTHING
             """,
             record.attempt_id,
             record.work_item_id,
