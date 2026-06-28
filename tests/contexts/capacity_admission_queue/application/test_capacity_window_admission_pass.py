@@ -11,6 +11,7 @@ from src.contexts.capacity_admission_queue.application.admit_capacity_admission_
     CapacityAdmissionProjectionLeaseResult,
 )
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
+    CapacityWindowAdmissionCapacityPreviewResult,
     CapacityWindowAdmissionExecutionReference,
     CapacityWindowAdmissionPass,
     CapacityWindowAdmissionPassCommand,
@@ -158,6 +159,20 @@ class FakeCapacityReservation:
     def __init__(self, *, deny_after_count: int | None = None) -> None:
         self.deny_after_count = deny_after_count
         self.calls = 0
+
+    async def preview_capacity_for_selected_work_item(
+        self,
+        *,
+        selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
+        budget: CapacityAdmissionWindowBudget,
+        now: datetime,
+    ) -> CapacityWindowAdmissionCapacityPreviewResult:
+        del selected_work_item, execution_lane_key, now
+        return CapacityWindowAdmissionCapacityPreviewResult(
+            capacity_available=True,
+            budget_after_active_reservations=budget,
+        )
 
     async def reserve_capacity_for_selected_work_item(
         self,

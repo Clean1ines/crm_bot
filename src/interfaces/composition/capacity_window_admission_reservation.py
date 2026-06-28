@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Protocol
 
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_pass import (
+    CapacityWindowAdmissionCapacityPreviewResult,
     CapacityWindowAdmissionReservationResult,
 )
 from src.contexts.capacity_admission_queue.application.capacity_window_admission_result import (
@@ -63,6 +64,78 @@ class ReserveLlmRouteCapacityForAdmission:
     capacity_observation_repository: (
         LlmAttemptCapacityObservationReadRepositoryPort | None
     ) = None
+
+    async def preview_capacity_for_selected_work_item(
+        self,
+        *,
+        selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
+        budget: CapacityAdmissionWindowBudget,
+        now: datetime,
+    ) -> CapacityWindowAdmissionCapacityPreviewResult:
+        _require_timezone_aware(now, "now")
+
+        lane_key = execution_lane_key
+        if lane_key.account_ref is None:
+            raise ValueError("capacity admission preview requires account_ref")
+        if selected_work_item.lane_key.work_kind != lane_key.work_kind:
+            raise ValueError("execution lane work_kind must match selected work item")
+        if selected_work_item.lane_key.provider != lane_key.provider:
+            raise ValueError("execution lane provider must match selected work item")
+        if selected_work_item.lane_key.model_ref != lane_key.model_ref:
+            raise ValueError("execution lane model_ref must match selected work item")
+
+        await self.reservation_repository.lock_route(
+            provider=lane_key.provider,
+            account_ref=lane_key.account_ref,
+            model_ref=lane_key.model_ref,
+        )
+        live_budget = await _budget_after_latest_capacity_observation(
+            budget,
+            observation_repository=self.capacity_observation_repository,
+            provider=lane_key.provider,
+            account_ref=lane_key.account_ref,
+            model_ref=lane_key.model_ref,
+            now=now,
+        )
+
+        active_totals = await self.reservation_repository.active_totals(
+            provider=lane_key.provider,
+            account_refs=(lane_key.account_ref,),
+            model_ref=lane_key.model_ref,
+            now=now,
+        )
+        active_reserved_requests = sum(
+            total.reserved_requests for total in active_totals
+        )
+        active_reserved_tokens = sum(total.reserved_tokens for total in active_totals)
+
+        available_budget = _available_budget_after_active_reservations(
+            live_budget,
+            active_reserved_requests=active_reserved_requests,
+            active_reserved_tokens=active_reserved_tokens,
+        )
+        if not available_budget.admits_any_work:
+            return CapacityWindowAdmissionCapacityPreviewResult(
+                capacity_available=False,
+                budget_after_active_reservations=available_budget,
+                skipped_reason=CapacityWindowAdmissionSkippedReason.CAPACITY_EXHAUSTED,
+            )
+
+        if (
+            selected_work_item.required_window_tokens
+            > available_budget.max_required_window_tokens
+        ):
+            return CapacityWindowAdmissionCapacityPreviewResult(
+                capacity_available=False,
+                budget_after_active_reservations=available_budget,
+                skipped_reason=CapacityWindowAdmissionSkippedReason.CAPACITY_EXHAUSTED,
+            )
+
+        return CapacityWindowAdmissionCapacityPreviewResult(
+            capacity_available=True,
+            budget_after_active_reservations=available_budget,
+        )
 
     async def reserve_capacity_for_selected_work_item(
         self,

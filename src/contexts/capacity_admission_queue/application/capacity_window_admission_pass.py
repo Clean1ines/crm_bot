@@ -77,7 +77,46 @@ class CapacityWindowAdmissionReservationResult:
             raise ValueError("not reserved result must not include reservation_summary")
 
 
+@dataclass(frozen=True, slots=True)
+class CapacityWindowAdmissionCapacityPreviewResult:
+    capacity_available: bool
+    budget_after_active_reservations: CapacityAdmissionWindowBudget
+    skipped_reason: CapacityWindowAdmissionSkippedReason | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.capacity_available, bool):
+            raise TypeError("capacity_available must be bool")
+        if not isinstance(
+            self.budget_after_active_reservations,
+            CapacityAdmissionWindowBudget,
+        ):
+            raise TypeError(
+                "budget_after_active_reservations must be CapacityAdmissionWindowBudget"
+            )
+        if self.skipped_reason is not None and not isinstance(
+            self.skipped_reason,
+            CapacityWindowAdmissionSkippedReason,
+        ):
+            raise TypeError(
+                "skipped_reason must be CapacityWindowAdmissionSkippedReason"
+            )
+        if self.capacity_available and self.skipped_reason is not None:
+            raise ValueError("available preview must not include skipped_reason")
+        if not self.capacity_available and self.skipped_reason is None:
+            raise ValueError("unavailable preview must include skipped_reason")
+
+
 class CapacityWindowAdmissionReservationPort(Protocol):
+    async def preview_capacity_for_selected_work_item(
+        self,
+        *,
+        selected_work_item: CapacityAdmissionSelectableWorkItem,
+        execution_lane_key: CapacityAdmissionLaneKey,
+        budget: CapacityAdmissionWindowBudget,
+        now: datetime,
+    ) -> CapacityWindowAdmissionCapacityPreviewResult:
+        """Preview route capacity for a selected work item without DB reservation."""
+
     async def reserve_capacity_for_selected_work_item(
         self,
         *,
@@ -247,25 +286,18 @@ class CapacityWindowAdmissionPass:
                 admission_index=admission_index,
                 work_item_id=selected_work_item.work_item_id,
             )
-            planned_lease_token = _lease_token(
-                prefix=command.lease_token_prefix,
-                admission_index=admission_index,
-                work_item_id=selected_work_item.work_item_id,
-            )
-            reservation = (
-                await self.capacity_reservation.reserve_capacity_for_selected_work_item(
-                    attempt_id=planned_lease_token.value,
-                    reservation_ref=reservation_ref,
+
+            capacity_preview = (
+                await self.capacity_reservation.preview_capacity_for_selected_work_item(
                     selected_work_item=selected_work_item,
                     execution_lane_key=command.execution_lane_key,
                     budget=budget,
                     now=command.now,
-                    expires_at=command.lease_expires_at,
                 )
             )
-            if not reservation.reserved:
+            if not capacity_preview.capacity_available:
                 skipped_reason = (
-                    reservation.skipped_reason
+                    capacity_preview.skipped_reason
                     or CapacityWindowAdmissionSkippedReason.CAPACITY_EXHAUSTED
                 )
                 if admitted_items:
@@ -279,10 +311,6 @@ class CapacityWindowAdmissionPass:
                     )
                 return self._skipped_result(command, skipped_reason)
 
-            if reservation.reservation_summary is None:
-                raise RuntimeError("reserved result must include reservation_summary")
-            reservation_summary = reservation.reservation_summary
-
             lease_result = await LeaseSelectedCapacityAdmissionWorkItem(
                 execution_lease_repository=self.execution_lease_repository,
                 projection_admitter=self.projection_admitter,
@@ -290,7 +318,11 @@ class CapacityWindowAdmissionPass:
                 LeaseSelectedCapacityAdmissionWorkItemCommand(
                     selected_work_item=selected_work_item,
                     worker=command.worker,
-                    lease_token=planned_lease_token,
+                    lease_token=_lease_token(
+                        prefix=command.lease_token_prefix,
+                        admission_index=admission_index,
+                        work_item_id=selected_work_item.work_item_id,
+                    ),
                     lease_expires_at=command.lease_expires_at,
                     now=command.now,
                 )
@@ -349,6 +381,37 @@ class CapacityWindowAdmissionPass:
                 )
                 execute_command_refs.append(execution_reference.execute_command_ref)
                 continue
+
+            reservation = (
+                await self.capacity_reservation.reserve_capacity_for_selected_work_item(
+                    attempt_id=execution_reference.attempt_id,
+                    reservation_ref=reservation_ref,
+                    selected_work_item=selected_work_item,
+                    execution_lane_key=command.execution_lane_key,
+                    budget=budget,
+                    now=command.now,
+                    expires_at=command.lease_expires_at,
+                )
+            )
+            if not reservation.reserved:
+                skipped_reason = (
+                    reservation.skipped_reason
+                    or CapacityWindowAdmissionSkippedReason.CAPACITY_EXHAUSTED
+                )
+                if admitted_items:
+                    return self._admitted_result(
+                        command=command,
+                        admitted_items=tuple(admitted_items),
+                        projection_leases=tuple(projection_leases),
+                        capacity_reservations=tuple(capacity_reservations),
+                        started_attempts=tuple(started_attempts),
+                        execute_command_refs=tuple(execute_command_refs),
+                    )
+                return self._skipped_result(command, skipped_reason)
+
+            if reservation.reservation_summary is None:
+                raise RuntimeError("reserved result must include reservation_summary")
+            reservation_summary = reservation.reservation_summary
 
             admitted_items.append(
                 _admitted_item_summary(
