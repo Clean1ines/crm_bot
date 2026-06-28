@@ -541,14 +541,7 @@ class RunKnowledgeExtractionWorkflowResume:
             repository=frontend_event_repository,
         )
         asyncpg_connection = cast(asyncpg.Connection, connection)
-        capacity_admission_projection_writer = (
-            _capacity_admission_projection_writer_for_transaction(
-                connection=asyncpg_connection,
-                configured_writer=self._capacity_admission_projection_writer,
-                lane_target=self._capacity_admission_lane_target,
-                lane_target_resolver=self._capacity_admission_lane_target_resolver,
-            )
-        )
+        capacity_admission_projection_writer = None
         capacity_window_admission_pass = None
 
         try:
@@ -568,18 +561,9 @@ class RunKnowledgeExtractionWorkflowResume:
                         cast(asyncpg.Connection, connection),
                     )
                 ),
-                capacity_admission_projection_lifecycle_synchronizer=(
-                    PostgresCapacityAdmissionProjectionLifecycleSynchronizer(
-                        cast(asyncpg.Connection, connection),
-                    )
-                ),
-                capacity_admission_projection_writer=(
-                    capacity_admission_projection_writer
-                ),
-                capacity_admission_lane_target=self._capacity_admission_lane_target,
-                capacity_admission_lane_target_resolver=(
-                    self._capacity_admission_lane_target_resolver
-                ),
+                capacity_admission_projection_lifecycle_synchronizer=None,
+                capacity_admission_projection_writer=None,
+                capacity_admission_lane_target=None,
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=self._prepare_llm_dispatch_batch,
                 capacity_window_admission_pass=capacity_window_admission_pass,
@@ -1006,20 +990,7 @@ def make_knowledge_extraction_workflow_resume(
 
     return RunKnowledgeExtractionWorkflowResume(
         pool=pool,
-        capacity_admission_lane_target_resolver=CapacityAdmissionLaneTargetRegistry(
-            targets_by_work_kind={
-                "knowledge_workbench.claim_builder.section_extraction": CapacityAdmissionLaneTarget(
-                    provider="groq",
-                    account_ref=None,
-                    model_ref=route_catalog.primary_model_ref(),
-                ),
-                "knowledge_workbench.draft_claim_compaction": CapacityAdmissionLaneTarget(
-                    provider="groq",
-                    account_ref=None,
-                    model_ref=route_catalog.highest_input_limit_automatic_route_model_ref(),
-                ),
-            }
-        ),
+        capacity_admission_lane_target_resolver=None,
         prepare_llm_dispatch_batch=PrepareLlmDispatchBatch(
             pool=pool,
             capacity_policy=CapacityAdmissionPolicy(),
