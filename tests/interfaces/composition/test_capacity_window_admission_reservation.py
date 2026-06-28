@@ -308,3 +308,41 @@ async def test_unknown_daily_observation_does_not_clamp_payload_daily_budget_to_
     )
 
     assert result.reserved is True
+
+
+@pytest.mark.asyncio
+async def test_expired_minute_reset_restores_budget_over_stale_wakeup_payload() -> None:
+    repository = FakeReservationRepository()
+    observation_repository = FakeCapacityObservationRepository(
+        observations=(
+            _observation(
+                remaining_minute_tokens=2_500,
+                minute_reset_at=_now() - timedelta(seconds=1),
+                remaining_daily_tokens=None,
+            ),
+        )
+    )
+    reservation = ReserveLlmRouteCapacityForAdmission(
+        repository,
+        capacity_observation_repository=observation_repository,
+    )
+
+    stale_wakeup_budget = CapacityAdmissionWindowBudget(
+        remaining_requests=0,
+        remaining_tokens=2_500,
+        remaining_daily_requests=0,
+        remaining_daily_tokens=0,
+    )
+
+    result = await reservation.reserve_capacity_for_selected_work_item(
+        reservation_ref="work-item-1:attempt:1",
+        attempt_id="attempt-1",
+        execution_lane_key=_lane(),
+        selected_work_item=_item(),
+        budget=stale_wakeup_budget,
+        now=_now(),
+        expires_at=_now() + timedelta(minutes=2),
+    )
+
+    assert result.reserved is True
+    assert repository.reservations[0].reserved_tokens == 3_000

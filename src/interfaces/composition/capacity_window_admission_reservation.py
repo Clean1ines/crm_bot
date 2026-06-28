@@ -216,8 +216,14 @@ def _budget_clamped_by_observation(
     )
 
     if minute_window_has_reset:
-        remaining_requests = budget.remaining_requests
-        remaining_tokens = budget.remaining_tokens
+        remaining_requests = max(budget.remaining_requests, 1)
+        remaining_tokens = max(
+            budget.remaining_tokens,
+            _restored_minute_token_limit_for_model(
+                observation.model_ref,
+                fallback=budget.remaining_tokens,
+            ),
+        )
     else:
         remaining_requests = _min_if_observed(
             budget.remaining_requests,
@@ -228,9 +234,21 @@ def _budget_clamped_by_observation(
             observation.remaining_minute_tokens,
         )
 
-    if daily_window_has_reset:
-        remaining_daily_requests = budget.remaining_daily_requests
-        remaining_daily_tokens = budget.remaining_daily_tokens
+    daily_observation_unknown = (
+        observation.remaining_daily_requests is None
+        and observation.remaining_daily_tokens is None
+        and observation.daily_reset_at is None
+    )
+
+    if daily_window_has_reset or daily_observation_unknown:
+        remaining_daily_requests = max(
+            budget.remaining_daily_requests,
+            remaining_requests,
+        )
+        remaining_daily_tokens = max(
+            budget.remaining_daily_tokens,
+            remaining_tokens,
+        )
     else:
         remaining_daily_requests = _min_if_observed(
             budget.remaining_daily_requests,
@@ -247,6 +265,16 @@ def _budget_clamped_by_observation(
         remaining_daily_requests=remaining_daily_requests,
         remaining_daily_tokens=remaining_daily_tokens,
     )
+
+
+def _restored_minute_token_limit_for_model(model_ref: str, *, fallback: int) -> int:
+    _require_non_empty_text(model_ref, "model_ref")
+    _require_non_negative_int(fallback, "fallback")
+
+    configured_minute_token_limits = {
+        "qwen/qwen3-32b": 6_000,
+    }
+    return configured_minute_token_limits.get(model_ref, fallback)
 
 
 def _min_if_observed(
