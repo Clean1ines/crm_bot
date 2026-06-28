@@ -50,7 +50,7 @@ class PostgresExpiredLeaseRecoveryRepository:
                   AND wi.lease_expires_at <= $1
                 ORDER BY wi.lease_expires_at, wi.work_item_id
                 FOR UPDATE SKIP LOCKED
-                LIMIT $2
+                LIMIT $2::int
             ),
             closed_attempts AS (
                 UPDATE execution_work_item_attempts AS attempt

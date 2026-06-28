@@ -74,7 +74,7 @@ class PostgresWorkItemLeaseRepository(WorkItemLeaseRepositoryPort):
               END,
               wi.updated_at,
               wi.work_item_id
-            LIMIT $3
+            LIMIT $3::int
             """,
             work_kind.value,
             requested_items,
