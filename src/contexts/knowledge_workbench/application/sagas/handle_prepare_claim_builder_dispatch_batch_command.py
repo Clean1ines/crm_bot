@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
@@ -680,6 +680,22 @@ async def _execute_budget_state_execution_queue_prepare(
 
     appended_event_count = 0
     appended_next_command_count = 0
+
+    if due_records and not started_attempts:
+        retry_command = replace(
+            workflow_command,
+            command_id=WorkflowCommandId(
+                f"{workflow_command.command_id.value}:retry-zero-dispatch"
+            ),
+            status=WorkflowCommandStatus.PENDING,
+            run_after=occurred_at + timedelta(seconds=5),
+            created_at=occurred_at,
+            updated_at=occurred_at,
+        )
+        await workflow_unit_of_work.command_log.append_pending_command(
+            retry_command,
+        )
+        appended_next_command_count += 1
 
     if started_attempts:
         batch_event = await workflow_unit_of_work.outbox.append_event(
