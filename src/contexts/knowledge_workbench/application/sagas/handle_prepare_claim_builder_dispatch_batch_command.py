@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+import structlog
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
@@ -113,6 +114,9 @@ from src.interfaces.composition.start_llm_admitted_work_item_attempts import (
     StartLlmAdmittedWorkItemAttemptsCommand,
     StartedLlmAdmittedAttempt,
 )
+
+
+LOGGER = structlog.get_logger(__name__)
 
 
 CLAIM_BUILDER_ACTIVE_MODEL_REF = "qwen/qwen3-32b"
@@ -361,10 +365,42 @@ async def _execute_direct_execution_queue_prepare(
         capacity_observation_read_repository=capacity_observation_read_repository,
         capacity_window_budget_repository=capacity_window_budget_repository,
     )
+    LOGGER.info(
+        "knowledge_claim_builder_prepare_capacity_windows_loaded",
+        workflow_run_id=workflow_run_id,
+        command_id=workflow_command.command_id.value,
+        capacity_window_count=len(capacity_windows),
+        capacity_windows=[
+            {
+                "provider": window.capacity.provider,
+                "account_ref": window.capacity.account_ref,
+                "model_ref": window.capacity.model_ref,
+                "remaining_minute_requests": window.remaining_minute_requests,
+                "remaining_minute_tokens": window.remaining_minute_tokens,
+                "remaining_daily_requests": window.remaining_daily_requests,
+                "remaining_daily_tokens": window.remaining_daily_tokens,
+                "unavailable_until": (
+                    window.unavailable_until.isoformat()
+                    if window.unavailable_until is not None
+                    else None
+                ),
+            }
+            for window in capacity_windows
+        ],
+    )
     due_records = await work_item_lease_repository.peek_due_work_items(
         work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
         requested_items=scheduled_work_item_count,
         now=occurred_at,
+    )
+
+    LOGGER.info(
+        "knowledge_claim_builder_prepare_due_records_loaded",
+        workflow_run_id=workflow_run_id,
+        command_id=workflow_command.command_id.value,
+        scheduled_work_item_count=scheduled_work_item_count,
+        due_record_count=len(due_records),
+        capacity_window_budget_enabled=capacity_window_budget_repository is not None,
     )
 
     leased_items: list[LlmAdmittedLeasedWorkItem] = []
@@ -383,6 +419,14 @@ async def _execute_direct_execution_queue_prepare(
             now=occurred_at,
         )
         if selected_index is None:
+            LOGGER.info(
+                "knowledge_claim_builder_prepare_no_capacity_window_fits",
+                workflow_run_id=workflow_run_id,
+                command_id=workflow_command.command_id.value,
+                work_item_id=due_record.work_item.work_item_id,
+                required_window_tokens=required_window_tokens,
+                capacity_window_count=len(capacity_windows),
+            )
             break
 
         selected_window = capacity_windows[selected_index]
@@ -401,6 +445,13 @@ async def _execute_direct_execution_queue_prepare(
             now=occurred_at,
         )
         if leased is None:
+            LOGGER.info(
+                "knowledge_claim_builder_prepare_lease_skipped",
+                workflow_run_id=workflow_run_id,
+                command_id=workflow_command.command_id.value,
+                work_item_id=due_record.work_item.work_item_id,
+                reason="lease_due_work_item_by_id_returned_none",
+            )
             continue
 
         admitted_item = llm_admitted_leased_work_item_from_pre_lease_status(
@@ -552,6 +603,34 @@ async def _execute_direct_execution_queue_prepare(
             occurred_at=occurred_at,
         ):
             await workflow_unit_of_work.timeline.append_entry(timeline_entry)
+
+    if (
+        capacity_window_budget_repository is not None
+        and due_records
+        and capacity_windows
+        and not started_attempts
+    ):
+        LOGGER.error(
+            "knowledge_claim_builder_prepare_zero_dispatch_invariant_failed",
+            workflow_run_id=workflow_run_id,
+            command_id=workflow_command.command_id.value,
+            due_record_count=len(due_records),
+            capacity_window_count=len(capacity_windows),
+            scheduled_work_item_count=scheduled_work_item_count,
+        )
+        raise RuntimeError(
+            "claim-builder budget prepare found due work items and capacity windows "
+            "but started zero attempts"
+        )
+
+    LOGGER.info(
+        "knowledge_claim_builder_prepare_completed_before_snapshot",
+        workflow_run_id=workflow_run_id,
+        command_id=workflow_command.command_id.value,
+        due_record_count=len(due_records),
+        started_attempt_count=len(started_attempts),
+        appended_next_command_count=appended_next_command_count,
+    )
 
     await _save_progress_snapshot(
         workflow_unit_of_work=workflow_unit_of_work,
