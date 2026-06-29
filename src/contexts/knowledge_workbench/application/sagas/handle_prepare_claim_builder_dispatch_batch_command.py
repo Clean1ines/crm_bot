@@ -1097,60 +1097,29 @@ async def _capacity_after_latest_observation(
         return _ObservedCapacityState(capacity=account_capacity)
 
     observation = observations[0]
-    minute_reset_in_future = _future_timestamp(
-        observation.minute_reset_at,
-        now=occurred_at,
-    )
-    daily_reset_in_future = _future_timestamp(
-        observation.daily_reset_at,
-        now=occurred_at,
-    )
-    minute_fail_closed_until_reset = _observation_requires_fail_closed_until_reset(
-        observation=observation,
-        reset_in_future=minute_reset_in_future,
-        remaining_requests=observation.remaining_minute_requests,
-        remaining_tokens=observation.remaining_minute_tokens,
-    )
-    daily_fail_closed_until_reset = _observation_requires_fail_closed_until_reset(
-        observation=observation,
-        reset_in_future=daily_reset_in_future,
-        remaining_requests=observation.remaining_daily_requests,
-        remaining_tokens=observation.remaining_daily_tokens,
-    )
-    remaining_minute_requests = _observed_int_or_fail_closed_until_reset(
-        current=account_capacity.remaining_minute_requests,
-        observed=observation.remaining_minute_requests,
-        fail_closed_until_reset=minute_fail_closed_until_reset,
-    )
-    remaining_minute_tokens = _observed_int_or_fail_closed_until_reset(
-        current=account_capacity.remaining_minute_tokens,
-        observed=observation.remaining_minute_tokens,
-        fail_closed_until_reset=minute_fail_closed_until_reset,
-    )
-    remaining_daily_requests = _observed_int_or_fail_closed_until_reset(
-        current=account_capacity.remaining_daily_requests,
-        observed=observation.remaining_daily_requests,
-        fail_closed_until_reset=daily_fail_closed_until_reset,
-    )
-    remaining_daily_tokens = _observed_int_or_fail_closed_until_reset(
-        current=account_capacity.remaining_daily_tokens,
-        observed=observation.remaining_daily_tokens,
-        fail_closed_until_reset=daily_fail_closed_until_reset,
-    )
-    return _ObservedCapacityState(
-        capacity=LlmProviderAccountCapacity(
-            provider=account_capacity.provider,
-            account_ref=account_capacity.account_ref,
-            model_ref=account_capacity.model_ref,
-            remaining_minute_requests=remaining_minute_requests,
-            remaining_minute_tokens=remaining_minute_tokens,
-            remaining_daily_requests=remaining_daily_requests,
-            remaining_daily_tokens=remaining_daily_tokens,
-        ),
-        unavailable_until=_window_unavailable_until(
+
+    # Observations are telemetry/accounting for token usage and provider feedback.
+    # They must not shrink Prepare admission capacity for normal scheduling.
+    #
+    # The previous behavior used min(account_capacity, observed_remaining), which
+    # made every successful/partial observation with low remaining tokens poison
+    # the next Prepare and prevent work items from ever being leased.
+    #
+    # Keep only fail-closed wakeup semantics for actual failure observations with
+    # provider reset timestamps; do not use observed remaining token counters as
+    # the dispatch gate.
+    unavailable_until = (
+        _window_unavailable_until(
             observation=observation,
             occurred_at=occurred_at,
-        ),
+        )
+        if _is_failure_capacity_observation(observation)
+        else None
+    )
+
+    return _ObservedCapacityState(
+        capacity=account_capacity,
+        unavailable_until=unavailable_until,
         capacity_observation=observation,
     )
 
