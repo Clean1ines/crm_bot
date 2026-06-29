@@ -36,6 +36,10 @@ import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
 import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
 import { DraftClaimCurationWorkspaceModal } from "./components/DraftClaimCurationWorkspaceModal";
 import { AiPlaygroundPanel } from "./components/AiPlaygroundPanel";
+import {
+  createInitialWorkflowLiveStateResponse,
+  reduceWorkflowFrontendProjectionEvent,
+} from "./shadow/workflowFrontendProjectionReducer";
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -354,7 +358,7 @@ const processingProgressPercent = (doc: Document): number | null => {
   return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
 };
 
-const shouldFetchWorkflowLiveStateForDocument = (doc: Document): boolean => {
+const shouldUseWorkflowProjectionForDocument = (doc: Document): boolean => {
   if (doc.current_processing_run_id) return true;
   if (doc.status === "pending" || doc.status === "processing" || doc.status === "error") {
     return true;
@@ -632,95 +636,101 @@ export const KnowledgePage: React.FC = () => {
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
   const documents = baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
-  const workflowLiveStateDocumentIds = documents
-    .slice(0, 6)
-    .map((doc) => doc.id)
-    .sort();
+  const workflowProjectionTargets = documents
+    .filter(
+      (doc) =>
+        Boolean(doc.current_processing_run_id) &&
+        shouldUseWorkflowProjectionForDocument(doc),
+    )
+    .map((doc) => ({
+      documentId: doc.id,
+      workflowRunId: doc.current_processing_run_id || "",
+      fileName: doc.file_name,
+      documentStatus: doc.status,
+    }))
+    .filter((item) => item.workflowRunId.trim().length > 0)
+    .sort((left, right) => left.documentId.localeCompare(right.documentId));
 
-  const workflowLiveStateQuery = useQuery({
-    queryKey: [
-      "knowledge-workflow-live-state",
-      projectId,
-      workflowLiveStateDocumentIds.join(","),
-    ],
-    queryFn: async () => {
-      if (!projectId || workflowLiveStateDocumentIds.length === 0) return {};
+  const workflowProjectionDocumentIds = workflowProjectionTargets.map(
+    (item) => item.documentId,
+  );
+  const workflowProjectionSubscriptionKey = workflowProjectionTargets
+    .map((item) => `${item.documentId}:${item.workflowRunId}`)
+    .join(",");
 
-      const states = await Promise.all(
-        workflowLiveStateDocumentIds.map(async (documentId) => {
-          try {
-            const { data } = await knowledgeApi.workflowLiveState(
-              projectId,
-              documentId,
-            );
-            return [documentId, data] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-
-      return states.reduce<KnowledgeWorkflowLiveStateByDocument>((acc, item) => {
-        if (item !== null) {
-          acc[item[0]] = item[1];
-        }
-        return acc;
-      }, {});
-    },
-    enabled: !!projectId && workflowLiveStateDocumentIds.length > 0,
-    retry: false,
-    refetchInterval: false,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    staleTime: 30_000,
-  });
-  const workflowLiveStates = workflowLiveStateQuery.data || {};
-  const workflowLiveStateSubscriptionKey = workflowLiveStateDocumentIds.join(",");
+  const [workflowLiveStates, setWorkflowLiveStates] =
+    useState<KnowledgeWorkflowLiveStateByDocument>({});
+  const [workflowProjectionErrors, setWorkflowProjectionErrors] = useState<
+    Record<string, string | null>
+  >({});
 
   useEffect(() => {
-    if (!projectId || workflowLiveStateDocumentIds.length === 0) return undefined;
+    if (!projectId || workflowProjectionTargets.length === 0) return undefined;
 
-    const queryKey = [
-      "knowledge-workflow-live-state",
-      projectId,
-      workflowLiveStateSubscriptionKey,
-    ];
+    const stops = workflowProjectionTargets.map((target) => {
+      setWorkflowLiveStates((previous) => {
+        if (previous[target.documentId]) return previous;
 
-    const stops = workflowLiveStateDocumentIds.map((documentId) =>
-      knowledgeApi.streamWorkflowLiveState(
+        return {
+          ...previous,
+          [target.documentId]: createInitialWorkflowLiveStateResponse({
+            documentId: target.documentId,
+            projectId,
+            fileName: target.fileName,
+            documentStatus: target.documentStatus,
+            workflowRunId: target.workflowRunId,
+          }),
+        };
+      });
+
+      return knowledgeApi.streamFrontendWorkflowEvents(
         projectId,
-        documentId,
-        (payload) => {
-          queryClient.setQueryData<KnowledgeWorkflowLiveStateByDocument>(
-            queryKey,
-            (previous) => ({
-              ...(previous || {}),
-              [documentId]: payload,
-            }),
-          );
+        target.documentId,
+        target.workflowRunId,
+        undefined,
+        (event) => {
+          setWorkflowProjectionErrors((previous) => ({
+            ...previous,
+            [target.documentId]: null,
+          }));
 
-          queryClient.setQueryData<Document[]>(
-            ["knowledge-documents", projectId],
-            (previous) => {
-              if (!Array.isArray(previous)) return previous;
-
-              return previous.map((doc) => {
-                if (doc.id !== documentId) return doc;
-
-                return {
-                  ...doc,
-                  status: payload.document_status || doc.status,
-                  current_processing_run_id:
-                    payload.current_processing_run_id ??
-                    doc.current_processing_run_id,
-                };
+          setWorkflowLiveStates((previous) => {
+            const current =
+              previous[target.documentId] ??
+              createInitialWorkflowLiveStateResponse({
+                documentId: target.documentId,
+                projectId,
+                fileName: target.fileName,
+                documentStatus: target.documentStatus,
+                workflowRunId: target.workflowRunId,
               });
-            },
-          );
+
+            return {
+              ...previous,
+              [target.documentId]: reduceWorkflowFrontendProjectionEvent(
+                current,
+                event,
+              ),
+            };
+          });
+
+          if (event.projection_type === "workflow_source_units_created") {
+            void queryClient.invalidateQueries({
+              queryKey: ["knowledge-source-units", projectId],
+            });
+          }
         },
-      ),
-    );
+        (error) => {
+          setWorkflowProjectionErrors((previous) => ({
+            ...previous,
+            [target.documentId]: getErrorMessage(
+              error,
+              "Не удалось получить события обработки документа",
+            ),
+          }));
+        },
+      );
+    });
 
     return () => {
       stops.forEach((stop) => stop());
@@ -728,13 +738,13 @@ export const KnowledgePage: React.FC = () => {
   }, [
     projectId,
     queryClient,
-    workflowLiveStateSubscriptionKey,
+    workflowProjectionSubscriptionKey,
   ]);
 
 
   const reportableDocuments = documents.filter(
     (doc) =>
-      !shouldFetchWorkflowLiveStateForDocument(doc) &&
+      !shouldUseWorkflowProjectionForDocument(doc) &&
       (isDocumentProcessing(doc) ||
         isDocumentFailed(doc) ||
         isDocumentCancelled(doc) ||
@@ -818,7 +828,7 @@ export const KnowledgePage: React.FC = () => {
   const draftPreviewDocumentIds = Array.from(
     new Set([
       ...(draftsDocumentId ? [draftsDocumentId] : []),
-      ...workflowLiveStateDocumentIds,
+      ...workflowProjectionDocumentIds,
       ...Object.values(processingReports)
         .filter((report) => {
           const document = documents.find(
@@ -877,7 +887,7 @@ export const KnowledgePage: React.FC = () => {
   const sourceUnitDocumentIds = Array.from(
     new Set([
       ...(sourceUnitsDocumentId ? [sourceUnitsDocumentId] : []),
-      ...workflowLiveStateDocumentIds,
+      ...workflowProjectionDocumentIds,
       ...Object.values(processingReports)
         .filter((report) => {
           const document = documents.find(
@@ -1175,9 +1185,6 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-workflow-live-state", projectId],
-      });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t("knowledge.feedback.uploadError")));
@@ -1218,9 +1225,6 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-workflow-live-state", projectId],
-      });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t("knowledge.feedback.clearFailed")));
@@ -1246,9 +1250,6 @@ export const KnowledgePage: React.FC = () => {
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-workflow-live-state", projectId],
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-import-quality-reports", projectId],
@@ -1290,9 +1291,6 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-workflow-live-state", projectId],
-      });
     },
     onError: (err: unknown) => {
       toast.error(getErrorMessage(err, t("knowledge.feedback.stopFailed")));
@@ -1315,9 +1313,6 @@ export const KnowledgePage: React.FC = () => {
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-workflow-live-state", projectId],
-      });
     },
     onError: (err: unknown) => {
       toast.error(
@@ -1333,9 +1328,6 @@ export const KnowledgePage: React.FC = () => {
     },
     onSuccess: async () => {
       toast.success("Обработка продолжена на подтверждённой fallback-модели");
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-workflow-live-state", projectId],
-      });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
       });
@@ -1362,9 +1354,6 @@ export const KnowledgePage: React.FC = () => {
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-workflow-live-state", projectId],
       });
     },
     onError: (err: unknown) => {
@@ -1912,19 +1901,10 @@ export const KnowledgePage: React.FC = () => {
                   }}
                   workflowLiveState={workflowLiveStates[doc.id] ?? null}
                   workflowLiveStateLoading={
-                    workflowLiveStateDocumentIds.includes(doc.id) &&
-                    (workflowLiveStateQuery.isLoading ||
-                      (workflowLiveStateQuery.isFetching &&
-                        !(workflowLiveStates[doc.id] ?? null)))
+                    workflowProjectionDocumentIds.includes(doc.id) &&
+                    !(workflowLiveStates[doc.id] ?? null)
                   }
-                  workflowLiveStateError={
-                    workflowLiveStateQuery.error
-                      ? getErrorMessage(
-                          workflowLiveStateQuery.error,
-                          "Не удалось загрузить состояние обработки",
-                        )
-                      : null
-                  }
+                  workflowLiveStateError={workflowProjectionErrors[doc.id] ?? null}
                   sourceUnitsResponse={sourceUnits[doc.id] ?? null}
                   answerDraftsResponse={answerDrafts[doc.id] ?? null}
                   onCardAction={(actionId) => {

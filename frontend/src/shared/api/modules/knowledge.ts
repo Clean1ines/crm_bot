@@ -442,6 +442,38 @@ export type WorkbenchWorkflowLiveState = {
   actions: WorkbenchWorkflowActionLiveState[];
 };
 
+export type FrontendWorkflowEventEnvelope = {
+  projection_event_id: string;
+  source_event_id: string;
+  source_sequence_number: number;
+  projection_version: number;
+  projection_type: string;
+  event_type: string;
+  operation_key: string | null;
+  canonical_phase: string | null;
+  workflow_run_id: string;
+  project_id: string;
+  document_id: string;
+  payload: Record<string, unknown>;
+  occurred_at: string;
+  causation_command_id: string | null;
+  correlation_id: string | null;
+};
+
+export type FrontendWorkflowEventsResponse = {
+  workflow_run_id: string;
+  after_source_sequence: number | null;
+  after_cursor: string | null;
+  next_cursor: string | null;
+  events: FrontendWorkflowEventEnvelope[];
+};
+
+export type FrontendWorkflowEventsQuery = {
+  after_cursor?: string | null;
+  after_source_sequence?: number | null;
+  limit?: number;
+};
+
 export type WorkbenchWorkflowLiveStateResponse = {
   document_id: string;
   project_id: string;
@@ -450,6 +482,14 @@ export type WorkbenchWorkflowLiveStateResponse = {
   current_processing_run_id?: string | null;
   workflow: WorkbenchWorkflowLiveState;
 };
+
+export type FrontendWorkflowEventStreamStop = () => void;
+
+export type FrontendWorkflowEventStreamMessageHandler = (
+  payload: FrontendWorkflowEventEnvelope,
+) => void;
+
+export type FrontendWorkflowEventStreamErrorHandler = (error: unknown) => void;
 
 export type WorkflowLiveStateStreamStop = () => void;
 
@@ -473,6 +513,75 @@ const parseSsePayloads = (buffer: string): { payloads: string[]; rest: string } 
     .filter((payload) => payload.trim() !== "");
 
   return { payloads, rest };
+};
+
+const frontendWorkflowEventsQueryString = (
+  query: FrontendWorkflowEventsQuery = {},
+): string => {
+  const params = new URLSearchParams();
+  if (query.after_cursor && query.after_cursor.trim()) {
+    params.set('after_cursor', query.after_cursor.trim());
+  }
+  if (typeof query.after_source_sequence === 'number') {
+    params.set('after_source_sequence', String(query.after_source_sequence));
+  }
+  if (typeof query.limit === 'number') {
+    params.set('limit', String(query.limit));
+  }
+  const queryString = params.toString();
+  return queryString ? `?${queryString}` : '';
+};
+
+const streamFrontendWorkflowEvents = (
+  projectId: string,
+  documentId: string,
+  workflowRunId: string,
+  query: FrontendWorkflowEventsQuery | undefined,
+  onMessage: FrontendWorkflowEventStreamMessageHandler,
+  onError?: FrontendWorkflowEventStreamErrorHandler,
+): FrontendWorkflowEventStreamStop => {
+  const controller = new AbortController();
+  const queryString = frontendWorkflowEventsQueryString(query);
+
+  void (async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/projects/${projectId}/knowledge/source-documents/${encodeURIComponent(documentId)}/workflows/${encodeURIComponent(workflowRunId)}/frontend-events/stream${queryString}`,
+        {
+          method: 'GET',
+          headers: createAuthHeaders(null),
+          signal: controller.signal,
+        },
+      );
+
+      if (!response.ok || !response.body) {
+        throw new Error(`Frontend workflow event stream failed: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parsed = parseSsePayloads(buffer);
+        buffer = parsed.rest;
+
+        for (const payload of parsed.payloads) {
+          onMessage(JSON.parse(payload) as FrontendWorkflowEventEnvelope);
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        onError?.(error);
+      }
+    }
+  })();
+
+  return () => controller.abort();
 };
 
 const streamWorkflowLiveState = (
@@ -1036,6 +1145,185 @@ export type SurfaceCurationMutationResponse = {
 };
 
 
+export type DraftClaimClusterBatchSummary = {
+  batch_ref: string;
+  group_ref: string;
+  workflow_run_id: string;
+  prompt_variant: string;
+  model_id: string;
+  estimated_input_tokens: number;
+  batch_status: string;
+  member_count: number;
+  derived_work_item_id: string;
+  created_at: string;
+};
+
+export type DraftClaimClusterGroupSummary = {
+  group_ref: string;
+  workflow_run_id: string;
+  source_document_ref: string;
+  embedding_model_id: string;
+  group_algorithm: string;
+  group_threshold: number;
+  member_count: number;
+  estimated_input_tokens: number;
+  requires_split: boolean;
+  created_at: string;
+  batches: DraftClaimClusterBatchSummary[];
+};
+
+export type DraftClaimCompactionNodeSummary = {
+  node_ref: string;
+  workflow_run_id: string;
+  group_ref: string;
+  node_kind: string;
+  active: boolean;
+  source_claim_refs: string[];
+  supersedes_node_refs: string[];
+  source_claim_count?: number;
+  supersedes_node_count?: number;
+  estimated_input_tokens: number;
+  compacted_key: string | null;
+  compacted_claim: string | null;
+  compacted_claim_kind: string | null;
+  compacted_granularity: string | null;
+  compacted_merge_decision: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+
+export type DraftClaimCompactionFrontierNodeSummary = DraftClaimCompactionNodeSummary & {
+  frontier_state: string;
+  source_claim_count: number;
+  supersedes_node_count: number;
+};
+
+export type DraftClaimCompactionFrontierSummary = {
+  workflow_run_id: string;
+  group_ref: string | null;
+  group_count: number;
+  active_raw_count: number;
+  active_compacted_count: number;
+  inactive_node_count: number;
+  superseded_node_count: number;
+  total_node_count: number;
+  group_done_count: number;
+  all_groups_compacted: boolean;
+};
+
+export type DraftClaimCompactionSeparationSummary = {
+  edge_count: number;
+  origin_count: number;
+  affected_active_node_count: number;
+  sample_origin_pairs: string[][];
+};
+
+export type DraftClaimCompactionPendingWorkSummary = {
+  pending_work_item_count: number;
+  leased_or_running_count: number;
+  waiting_for_capacity_count: number;
+  next_work_scheduled_count: number;
+};
+
+export type DraftClaimCompactionPendingReductionWorkSummary = {
+  workflow_run_id: string;
+  group_ref: string;
+  batch_ref: string | null;
+  work_item_id: string;
+  input_node_refs: string[];
+  input_claim_refs: string[];
+  work_item_status: string;
+  dispatch_attempt_id: string | null;
+  capacity_window_key: string | null;
+  capacity_waiting: boolean;
+  provider: string | null;
+  account_ref: string | null;
+  model_id: string | null;
+  waiting_reason: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type WorkflowDraftClaimCompactionFrontierQuery = {
+  group_ref?: string;
+  include_inactive?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type WorkflowDraftClaimCompactionFrontierResponse = {
+  workflow_run_id: string;
+  group_ref: string | null;
+  include_inactive: boolean;
+  count: number;
+  limit: number;
+  offset: number;
+  summary: DraftClaimCompactionFrontierSummary;
+  separation_summary: DraftClaimCompactionSeparationSummary;
+  pending_work_summary: DraftClaimCompactionPendingWorkSummary;
+  pending_work_items: DraftClaimCompactionPendingReductionWorkSummary[];
+  rows: DraftClaimCompactionFrontierNodeSummary[];
+};
+
+export type WorkflowDraftClaimCompactionNodesQuery = {
+  group_ref?: string;
+  node_ref?: string;
+  active_only?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type WorkflowDraftClaimCompactionNodesResponse = {
+  workflow_run_id: string;
+  group_ref: string | null;
+  node_ref: string | null;
+  active_only: boolean;
+  count: number;
+  limit: number;
+  offset: number;
+  items: DraftClaimCompactionNodeSummary[];
+};
+
+export type WorkflowDraftClaimClustersQuery = {
+  include_batches?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type WorkflowDraftClaimClustersResponse = {
+  workflow_run_id: string;
+  count: number;
+  limit: number;
+  offset: number;
+  include_batches: boolean;
+  groups: DraftClaimClusterGroupSummary[];
+};
+
+export type DraftClaimClusterGroupMemberSummary = {
+  group_ref: string;
+  observation_ref: string;
+  embedding_ref: string;
+  source_unit_ref: string;
+  member_rank: number;
+  member_kind: string;
+  created_at: string;
+};
+
+export type DraftClaimClusterGroupMembersQuery = {
+  limit?: number;
+  offset?: number;
+};
+
+export type DraftClaimClusterGroupMembersResponse = {
+  workflow_run_id: string;
+  group_ref: string;
+  count: number;
+  limit: number;
+  offset: number;
+  items: DraftClaimClusterGroupMemberSummary[];
+};
+
 export const knowledgeApi = {
   list: (projectId: string) =>
     authedJsonRequest<{ documents?: Array<Record<string, unknown>>; items?: Array<Record<string, unknown>> }>(`/api/projects/${projectId}/knowledge`, {
@@ -1139,6 +1427,128 @@ export const knowledgeApi = {
     );
   },
 
+
+  getDraftClaimCompactionFrontierByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    query: WorkflowDraftClaimCompactionFrontierQuery = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof query.group_ref === 'string' && query.group_ref.length > 0) {
+      params.set('group_ref', query.group_ref);
+    }
+    if (typeof query.include_inactive === 'boolean') {
+      params.set('include_inactive', String(query.include_inactive));
+    }
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<WorkflowDraftClaimCompactionFrontierResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claim-compaction-frontier${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
+
+  getDraftClaimCompactionPendingWorkByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    query: Pick<WorkflowDraftClaimCompactionFrontierQuery, 'group_ref' | 'limit' | 'offset'> = {},
+  ) =>
+    knowledgeApi.getDraftClaimCompactionFrontierByWorkflow(projectId, workflowRunId, {
+      ...query,
+      include_inactive: true,
+    }),
+
+  getDraftClaimCompactionNodesByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    query: WorkflowDraftClaimCompactionNodesQuery = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof query.group_ref === 'string' && query.group_ref.length > 0) {
+      params.set('group_ref', query.group_ref);
+    }
+    if (typeof query.node_ref === 'string' && query.node_ref.length > 0) {
+      params.set('node_ref', query.node_ref);
+    }
+    if (typeof query.active_only === 'boolean') {
+      params.set('active_only', String(query.active_only));
+    }
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<WorkflowDraftClaimCompactionNodesResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claim-compaction-nodes${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
+
+  getDraftClaimClustersByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    query: WorkflowDraftClaimClustersQuery = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof query.include_batches === 'boolean') {
+      params.set('include_batches', String(query.include_batches));
+    }
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<WorkflowDraftClaimClustersResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claim-clusters${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
+
+  getDraftClaimClusterMembersByWorkflow: (
+    projectId: string,
+    workflowRunId: string,
+    groupRef: string,
+    query: DraftClaimClusterGroupMembersQuery = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (typeof query.limit === 'number') {
+      params.set('limit', String(query.limit));
+    }
+    if (typeof query.offset === 'number') {
+      params.set('offset', String(query.offset));
+    }
+    const queryString = params.toString();
+    return authedJsonRequest<DraftClaimClusterGroupMembersResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/draft-claim-clusters/${encodeURIComponent(groupRef)}/members${
+        queryString ? `?${queryString}` : ''
+      }`,
+      {
+        method: 'GET',
+      },
+    );
+  },
+
   updateCurationItem: (
     projectId: string,
     workflowRunId: string,
@@ -1174,6 +1584,21 @@ export const knowledgeApi = {
         method: 'POST',
       },
     ),
+
+  getFrontendWorkflowEvents: (
+    projectId: string,
+    documentId: string,
+    workflowRunId: string,
+    query: FrontendWorkflowEventsQuery = {},
+  ) =>
+    authedJsonRequest<FrontendWorkflowEventsResponse>(
+      `/api/projects/${projectId}/knowledge/source-documents/${encodeURIComponent(documentId)}/workflows/${encodeURIComponent(workflowRunId)}/frontend-events${frontendWorkflowEventsQueryString(query)}`,
+      {
+        method: 'GET',
+      },
+    ),
+
+  streamFrontendWorkflowEvents,
 
   workflowLiveState: (projectId: string, documentId: string) =>
     authedJsonRequest<WorkbenchWorkflowLiveStateResponse>(
