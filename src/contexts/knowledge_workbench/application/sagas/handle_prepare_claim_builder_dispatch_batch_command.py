@@ -388,6 +388,47 @@ async def _execute_direct_execution_queue_prepare(
             for window in capacity_windows
         ],
     )
+    closed_window_wakeup_at = _first_closed_capacity_window_wakeup_at(
+        capacity_windows,
+        now=occurred_at,
+    )
+    if closed_window_wakeup_at is not None and not any(
+        window._available_now(occurred_at) for window in capacity_windows
+    ):
+        await workflow_unit_of_work.command_log.append_pending_command(
+            _rescheduled_prepare_dispatch_batch_command(
+                workflow_command=workflow_command,
+                run_after=closed_window_wakeup_at,
+                occurred_at=occurred_at,
+                reason="capacity_window_unavailable",
+            )
+        )
+        await _save_progress_snapshot(
+            workflow_unit_of_work=workflow_unit_of_work,
+            workflow_run_id=workflow_run_id,
+            prepared_dispatch_count=0,
+            preflight_metadata=preflight_metadata,
+            occurred_at=occurred_at,
+        )
+        await workflow_unit_of_work.command_log.mark_command_completed(
+            command_id=workflow_command.command_id,
+            completed_at=occurred_at,
+        )
+        LOGGER.info(
+            "knowledge_claim_builder_prepare_waits_for_capacity_window",
+            workflow_run_id=workflow_run_id,
+            command_id=workflow_command.command_id.value,
+            run_after=closed_window_wakeup_at.isoformat(),
+            capacity_window_count=len(capacity_windows),
+        )
+        return HandlePrepareClaimBuilderDispatchBatchResult(
+            workflow_run_id=workflow_run_id,
+            prepared_dispatch_count=0,
+            appended_event_count=0,
+            appended_next_command_count=1,
+            completed_command_id=workflow_command.command_id,
+        )
+
     due_records = await work_item_lease_repository.peek_due_work_items(
         work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
         requested_items=scheduled_work_item_count,
@@ -1287,6 +1328,23 @@ def _budget_value_exhausted(
     reserved: int,
 ) -> bool:
     return remaining is not None and remaining - reserved <= 0
+
+
+
+def _first_closed_capacity_window_wakeup_at(
+    capacity_windows: Sequence[_DirectCapacityWindow],
+    *,
+    now: datetime,
+) -> datetime | None:
+    candidates = [
+        window.unavailable_until
+        for window in capacity_windows
+        if window.unavailable_until is not None and window.unavailable_until > now
+    ]
+    if not candidates:
+        return None
+    return min(candidates)
+
 
 
 def _first_budget_window_wakeup_at(
