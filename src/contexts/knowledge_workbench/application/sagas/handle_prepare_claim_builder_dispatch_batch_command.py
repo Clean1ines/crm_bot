@@ -343,21 +343,9 @@ async def _execute_direct_execution_queue_prepare(
     if profile is None:
         raise ValueError("llm_dispatch_preparation profile is required")
     active_model_ref = _active_model_ref_from_payload(workflow_command.payload)
-    if capacity_window_budget_repository is not None:
-        return await _execute_budget_state_execution_queue_prepare(
-            workflow_command=workflow_command,
-            workflow_run_id=workflow_run_id,
-            occurred_at=occurred_at,
-            workflow_unit_of_work=workflow_unit_of_work,
-            frontend_event_projection_writer=frontend_event_projection_writer,
-            work_item_lease_repository=work_item_lease_repository,
-            attempt_dispatch_repository=attempt_dispatch_repository,
-            capacity_window_budget_repository=capacity_window_budget_repository,
-            route_catalog=route_catalog,
-            scheduled_work_item_count=scheduled_work_item_count,
-            profile=profile,
-            active_model_ref=active_model_ref,
-        )
+    # capacity_window_budget_repository is budget/window state for the canonical
+    # direct execution queue Prepare. It must not replace Prepare with a separate
+    # capacity-window executor branch.
 
     lease_expires_at = occurred_at + timedelta(seconds=90)
     worker = WorkerRef("knowledge-workbench-claim-builder-dispatch")
@@ -371,6 +359,7 @@ async def _execute_direct_execution_queue_prepare(
         occurred_at=occurred_at,
         capacity_reservation_repository=capacity_reservation_repository,
         capacity_observation_read_repository=capacity_observation_read_repository,
+        capacity_window_budget_repository=capacity_window_budget_repository,
     )
     due_records = await work_item_lease_repository.peek_due_work_items(
         work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
@@ -447,6 +436,19 @@ async def _execute_direct_execution_queue_prepare(
             lease_expires_at=lease_expires_at,
             occurred_at=occurred_at,
         )
+        if capacity_window_budget_repository is not None:
+            budget_reservation = await capacity_window_budget_repository.try_reserve(
+                provider=selected_window.capacity.provider,
+                account_ref=selected_window.capacity.account_ref,
+                model_ref=selected_window.capacity.model_ref,
+                request_count=1,
+                token_count=required_window_tokens,
+                now=occurred_at,
+            )
+            if budget_reservation is None:
+                raise RuntimeError(
+                    "claim-builder budget reservation failed after direct lease"
+                )
         capacity_windows[selected_index] = selected_window.reserve_locally(
             required_window_tokens=required_window_tokens,
         )
@@ -456,23 +458,38 @@ async def _execute_direct_execution_queue_prepare(
     appended_event_count = 0
     appended_next_command_count = 0
     if due_records and not started_attempts:
-        capacity_wait_observation = _first_unavailable_capacity_observation(
+        budget_wakeup_at = _first_budget_window_wakeup_at(
             capacity_windows,
             now=occurred_at,
         )
-        if capacity_wait_observation is not None:
-            wakeup = await append_capacity_window_prepare_wakeup(
-                workflow_unit_of_work=workflow_unit_of_work,
-                source_command=workflow_command,
-                workflow_run_id=workflow_run_id,
-                prepare_command_type=(
-                    KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
-                ),
-                capacity_observation=capacity_wait_observation,
-                occurred_at=occurred_at,
+        if budget_wakeup_at is not None:
+            await workflow_unit_of_work.command_log.append_pending_command(
+                _rescheduled_prepare_dispatch_batch_command(
+                    workflow_command=workflow_command,
+                    run_after=budget_wakeup_at,
+                    occurred_at=occurred_at,
+                    reason="capacity_window_budget_reset",
+                )
             )
-            if wakeup is not None:
-                appended_next_command_count += 1
+            appended_next_command_count += 1
+        else:
+            capacity_wait_observation = _first_unavailable_capacity_observation(
+                capacity_windows,
+                now=occurred_at,
+            )
+            if capacity_wait_observation is not None:
+                wakeup = await append_capacity_window_prepare_wakeup(
+                    workflow_unit_of_work=workflow_unit_of_work,
+                    source_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    prepare_command_type=(
+                        KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+                    ),
+                    capacity_observation=capacity_wait_observation,
+                    occurred_at=occurred_at,
+                )
+                if wakeup is not None:
+                    appended_next_command_count += 1
 
     if started_attempts:
         batch_event = await workflow_unit_of_work.outbox.append_event(
@@ -894,6 +911,7 @@ async def _direct_capacity_windows(
     occurred_at: datetime,
     capacity_reservation_repository: CapacityReservationRepositoryPort,
     capacity_observation_read_repository: CapacityObservationReadRepositoryPort | None,
+    capacity_window_budget_repository: CapacityWindowBudgetRepositoryPort | None,
 ) -> list[_DirectCapacityWindow]:
     windows: list[_DirectCapacityWindow] = []
     for account_capacity in _capacities_for_direct_prepare(
@@ -905,6 +923,70 @@ async def _direct_capacity_windows(
             account_ref=account_capacity.account_ref,
             model_ref=account_capacity.model_ref,
         )
+        if capacity_window_budget_repository is not None:
+            snapshot = await _ensure_budget_window_for_account_capacity(
+                capacity_window_budget_repository=capacity_window_budget_repository,
+                account_capacity=account_capacity,
+                now=occurred_at,
+            )
+            remaining_minute_requests = max(
+                0,
+                (
+                    snapshot.remaining_minute_requests
+                    if snapshot.remaining_minute_requests is not None
+                    else account_capacity.remaining_minute_requests
+                )
+                - snapshot.reserved_minute_requests,
+            )
+            remaining_minute_tokens = max(
+                0,
+                (
+                    snapshot.remaining_minute_tokens
+                    if snapshot.remaining_minute_tokens is not None
+                    else account_capacity.remaining_minute_tokens
+                )
+                - snapshot.reserved_minute_tokens,
+            )
+            remaining_daily_requests = max(
+                0,
+                (
+                    snapshot.remaining_daily_requests
+                    if snapshot.remaining_daily_requests is not None
+                    else account_capacity.remaining_daily_requests
+                )
+                - snapshot.reserved_daily_requests,
+            )
+            remaining_daily_tokens = max(
+                0,
+                (
+                    snapshot.remaining_daily_tokens
+                    if snapshot.remaining_daily_tokens is not None
+                    else account_capacity.remaining_daily_tokens
+                )
+                - snapshot.reserved_daily_tokens,
+            )
+            budget_capacity = LlmProviderAccountCapacity(
+                provider=account_capacity.provider,
+                account_ref=account_capacity.account_ref,
+                model_ref=account_capacity.model_ref,
+                remaining_minute_requests=remaining_minute_requests,
+                remaining_minute_tokens=remaining_minute_tokens,
+                remaining_daily_requests=remaining_daily_requests,
+                remaining_daily_tokens=remaining_daily_tokens,
+            )
+            windows.append(
+                _DirectCapacityWindow(
+                    capacity=budget_capacity,
+                    remaining_minute_requests=remaining_minute_requests,
+                    remaining_minute_tokens=remaining_minute_tokens,
+                    remaining_daily_requests=remaining_daily_requests,
+                    remaining_daily_tokens=remaining_daily_tokens,
+                    unavailable_until=_budget_snapshot_unavailable_until(snapshot),
+                    capacity_observation=None,
+                )
+            )
+            continue
+
         observed_state = await _capacity_after_latest_observation(
             account_capacity,
             capacity_observation_read_repository=capacity_observation_read_repository,
@@ -1146,6 +1228,100 @@ def _is_failure_capacity_observation(
     observation: LlmAttemptCapacityObservation,
 ) -> bool:
     return observation.outcome_class != "succeeded"
+
+
+
+def _budget_snapshot_unavailable_until(
+    snapshot: CapacityWindowBudgetSnapshot,
+) -> datetime | None:
+    candidates = [
+        value
+        for value in (
+            snapshot.frozen_until,
+            snapshot.minute_reset_at
+            if _budget_snapshot_minute_exhausted(snapshot)
+            else None,
+            snapshot.daily_reset_at
+            if _budget_snapshot_daily_exhausted(snapshot)
+            else None,
+        )
+        if value is not None
+    ]
+    if not candidates:
+        return None
+    return min(candidates)
+
+
+def _budget_snapshot_minute_exhausted(
+    snapshot: CapacityWindowBudgetSnapshot,
+) -> bool:
+    return _budget_value_exhausted(
+        remaining=snapshot.remaining_minute_requests,
+        reserved=snapshot.reserved_minute_requests,
+    ) or _budget_value_exhausted(
+        remaining=snapshot.remaining_minute_tokens,
+        reserved=snapshot.reserved_minute_tokens,
+    )
+
+
+def _budget_snapshot_daily_exhausted(
+    snapshot: CapacityWindowBudgetSnapshot,
+) -> bool:
+    return _budget_value_exhausted(
+        remaining=snapshot.remaining_daily_requests,
+        reserved=snapshot.reserved_daily_requests,
+    ) or _budget_value_exhausted(
+        remaining=snapshot.remaining_daily_tokens,
+        reserved=snapshot.reserved_daily_tokens,
+    )
+
+
+def _budget_value_exhausted(
+    *,
+    remaining: int | None,
+    reserved: int,
+) -> bool:
+    return remaining is not None and remaining - reserved <= 0
+
+
+def _first_budget_window_wakeup_at(
+    capacity_windows: Sequence[_DirectCapacityWindow],
+    *,
+    now: datetime,
+) -> datetime | None:
+    candidates = [
+        window.unavailable_until
+        for window in capacity_windows
+        if window.unavailable_until is not None and window.unavailable_until > now
+    ]
+    if not candidates:
+        return None
+    return min(candidates)
+
+
+def _rescheduled_prepare_dispatch_batch_command(
+    *,
+    workflow_command: WorkflowCommand,
+    run_after: datetime,
+    occurred_at: datetime,
+    reason: str,
+) -> WorkflowCommand:
+    command_id = WorkflowCommandId(
+        f"{workflow_command.command_id.value}:rescheduled:{reason}:"
+        f"{run_after.isoformat()}"
+    )
+    return replace(
+        workflow_command,
+        command_id=command_id,
+        idempotency_key=WorkflowIdempotencyKey(
+            f"{workflow_command.idempotency_key.value}:rescheduled:{reason}:"
+            f"{run_after.isoformat()}"
+        ),
+        status=WorkflowCommandStatus.PENDING,
+        run_after=run_after,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
 
 
 def _first_capacity_window_index_that_fits(
