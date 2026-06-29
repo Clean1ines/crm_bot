@@ -476,6 +476,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     execute_prepared_llm_dispatch_attempt
                 ),
                 capacity_observation_repository=capacity_observation_repository,
+                capacity_window_budget_repository=capacity_window_budget_repository,
                 claim_builder_output_validation_policy=(
                     claim_builder_output_validation_policy
                 ),

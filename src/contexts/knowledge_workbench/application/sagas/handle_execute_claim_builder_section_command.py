@@ -14,6 +14,9 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
     LlmAttemptCapacityObservation,
     LlmAttemptCapacityObservationRepositoryPort,
 )
+from src.contexts.capacity_admission_queue.application.ports.capacity_window_budget_repository_port import (
+    CapacityWindowBudgetRepositoryPort,
+)
 from src.contexts.execution_runtime.domain.value_objects.lease_token import LeaseToken
 from src.shared.json_value import JsonInputValue
 from src.contexts.knowledge_workbench.extraction.application.policies.claim_builder_attempt_decision_policy import (
@@ -267,6 +270,7 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         *,
         execute_prepared_llm_dispatch_attempt: ExecutePreparedLlmDispatchAttemptPort,
         capacity_observation_repository: LlmAttemptCapacityObservationRepositoryPort,
+        capacity_window_budget_repository: CapacityWindowBudgetRepositoryPort | None = None,
         claim_builder_output_validation_policy: ClaimBuilderOutputValidationPolicy,
         draft_claim_observation_persistence: PersistValidatedDraftClaimObservationsPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
@@ -334,6 +338,21 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
             await capacity_observation_repository.record_observation(
                 capacity_observation,
             )
+            if capacity_window_budget_repository is not None:
+                await capacity_window_budget_repository.apply_capacity_observation(
+                    provider=capacity_observation.provider,
+                    account_ref=capacity_observation.account_ref,
+                    model_ref=capacity_observation.model_ref,
+                    remaining_minute_requests=(
+                        capacity_observation.remaining_minute_requests
+                    ),
+                    remaining_minute_tokens=capacity_observation.remaining_minute_tokens,
+                    remaining_daily_requests=capacity_observation.remaining_daily_requests,
+                    remaining_daily_tokens=capacity_observation.remaining_daily_tokens,
+                    minute_reset_at=capacity_observation.minute_reset_at,
+                    daily_reset_at=capacity_observation.daily_reset_at,
+                    observed_at=finished_at,
+                )
             LOGGER.info(
                 "knowledge_claim_builder_capacity_observation_record",
                 workflow_run_id=workflow_run_id,
@@ -404,8 +423,19 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                 capacity_observation=capacity_observation,
                 occurred_at=finished_at,
             )
+            if capacity_window_budget_repository is not None:
+                immediate_prepare_command = _prepare_claim_builder_dispatch_batch_command(
+                    workflow_command=workflow_command,
+                    workflow_run_id=workflow_run_id,
+                    occurred_at=finished_at,
+                )
+                await workflow_unit_of_work.command_log.append_pending_command(
+                    immediate_prepare_command,
+                )
+                capacity_window_wakeup_count += 1
+
             if wakeup is not None:
-                capacity_window_wakeup_count = 1
+                capacity_window_wakeup_count += 1
                 scheduled_wakeup_event = capacity_window_scheduled_wakeup_event(
                     workflow_run_id=workflow_run_id,
                     provider=wakeup.provider,
@@ -1502,6 +1532,66 @@ def _allocation_payload(dispatch_payload: Mapping[str, object]) -> dict[str, obj
         "account_ref": allocation.get("account_ref"),
         "model_ref": allocation.get("model_ref"),
     }
+
+
+
+def _prepare_claim_builder_dispatch_batch_command(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    occurred_at: datetime,
+) -> WorkflowCommand:
+    payload = dict(workflow_command.payload)
+
+    source_document_ref = payload.get("source_document_ref")
+    if not isinstance(source_document_ref, str):
+        source_document_ref = ""
+
+    scheduled_work_item_count = payload.get("scheduled_work_item_count")
+    if not isinstance(scheduled_work_item_count, int) or scheduled_work_item_count <= 0:
+        scheduled_work_item_count = 1
+
+    dispatch_preparation = payload.get("llm_dispatch_preparation")
+    if not isinstance(dispatch_preparation, Mapping):
+        dispatch_preparation = payload.get("claim_builder_dispatch_preparation")
+    if not isinstance(dispatch_preparation, Mapping):
+        dispatch_preparation = {}
+
+    command_id = WorkflowCommandId(
+        "workflow-command:"
+        f"{workflow_run_id}:"
+        "PrepareClaimBuilderDispatchBatch:"
+        f"capacity-change:{workflow_command.command_id.value}"
+    )
+    return WorkflowCommand(
+        command_id=command_id,
+        command_type=(
+            KnowledgeExtractionCanonicalCommandType
+            .PREPARE_CLAIM_BUILDER_DISPATCH_BATCH
+            .value
+        ),
+        workflow_run_id=workflow_run_id,
+        idempotency_key=WorkflowIdempotencyKey(
+            "workflow-command-idempotency:"
+            f"{workflow_run_id}:"
+            "PrepareClaimBuilderDispatchBatch:"
+            f"capacity-change:{workflow_command.command_id.value}"
+        ),
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "source_document_ref": source_document_ref,
+            "scheduled_work_item_count": scheduled_work_item_count,
+            "llm_dispatch_preparation": dict(dispatch_preparation),
+            "trigger": "capacity_window_budget_changed",
+            "causation_command_id": workflow_command.command_id.value,
+        },
+        status=WorkflowCommandStatus.PENDING,
+        run_after=occurred_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+        causation_event_id=None,
+        correlation_id=workflow_command.correlation_id,
+    )
 
 
 def _reconcile_claim_builder_progress_command(
