@@ -41,7 +41,7 @@ class ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector:
             )
         if (
             event.event_type
-            is KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
+            == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
             and _is_capacity_owned_retryable_failure(event.payload)
         ):
             return None
@@ -83,17 +83,17 @@ def _outcome_patch(
 ) -> Mapping[str, object]:
     if (
         event_type
-        is KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value
+        == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTED.value
     ):
         return _extracted_patch(payload)
     if (
         event_type
-        is KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
+        == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
     ):
         return _retryable_failed_patch(payload)
     if (
         event_type
-        is KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_TERMINAL_FAILED.value
+        == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_TERMINAL_FAILED.value
     ):
         return _terminal_failed_patch(payload)
     raise ValueError(f"unsupported outcome event type: {event_type}")
