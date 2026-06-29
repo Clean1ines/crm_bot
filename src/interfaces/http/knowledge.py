@@ -2974,6 +2974,18 @@ async def _delete_project_orphan_knowledge_runtime_tails(
                 if dict(row).get("workflow_run_id") is not None
             )
 
+            frontend_event_status = await connection.execute(
+                """
+                DELETE FROM frontend_workflow_events
+                WHERE project_id = $1
+                   OR document_id LIKE $2
+                   OR workflow_run_id LIKE $3
+                """,
+                project_id,
+                f"source-document:{project_id}:%",
+                workflow_prefix,
+            )
+
             if not workflow_run_ids:
                 return {
                     "workflow_commands": 0,
@@ -2981,6 +2993,9 @@ async def _delete_project_orphan_knowledge_runtime_tails(
                     "workflow_progress_snapshots": 0,
                     "timeline_entries": 0,
                     "resource_usage_snapshots": 0,
+                    "frontend_workflow_events": _deleted_row_count(
+                        frontend_event_status
+                    ),
                 }
 
             outbox_status = await connection.execute(
@@ -3018,7 +3033,6 @@ async def _delete_project_orphan_knowledge_runtime_tails(
                 """,
                 workflow_run_ids,
             )
-
     return {
         "workflow_commands": _deleted_row_count(command_status),
         "workflow_outbox_events": _deleted_row_count(outbox_status),
