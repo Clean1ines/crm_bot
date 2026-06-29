@@ -491,7 +491,10 @@ async def _execute_direct_execution_queue_prepare(
             occurred_at=occurred_at,
         )
         if capacity_window_budget_repository is not None:
-            budget_reservation = await capacity_window_budget_repository.try_reserve(
+            # Best-effort telemetry reservation. This must not block dispatch:
+            # capacity_window_budget_state is for accounting/observability, not
+            # the executor/admission source of truth.
+            await capacity_window_budget_repository.try_reserve(
                 provider=selected_window.capacity.provider,
                 account_ref=selected_window.capacity.account_ref,
                 model_ref=selected_window.capacity.model_ref,
@@ -499,10 +502,6 @@ async def _execute_direct_execution_queue_prepare(
                 token_count=required_window_tokens,
                 now=occurred_at,
             )
-            if budget_reservation is None:
-                raise RuntimeError(
-                    "claim-builder budget reservation failed after direct lease"
-                )
         capacity_windows[selected_index] = selected_window.reserve_locally(
             required_window_tokens=required_window_tokens,
         )
@@ -607,23 +606,15 @@ async def _execute_direct_execution_queue_prepare(
         ):
             await workflow_unit_of_work.timeline.append_entry(timeline_entry)
 
-    if (
-        capacity_window_budget_repository is not None
-        and due_records
-        and capacity_windows
-        and not started_attempts
-    ):
-        LOGGER.error(
-            "knowledge_claim_builder_prepare_zero_dispatch_invariant_failed",
+    if due_records and capacity_windows and not started_attempts:
+        LOGGER.warning(
+            "knowledge_claim_builder_prepare_zero_dispatch",
             workflow_run_id=workflow_run_id,
             command_id=workflow_command.command_id.value,
             due_record_count=len(due_records),
             capacity_window_count=len(capacity_windows),
             scheduled_work_item_count=scheduled_work_item_count,
-        )
-        raise RuntimeError(
-            "claim-builder budget prepare found due work items and capacity windows "
-            "but started zero attempts"
+            capacity_window_budget_enabled=capacity_window_budget_repository is not None,
         )
 
     LOGGER.info(
@@ -1005,57 +996,9 @@ async def _direct_capacity_windows(
             account_ref=account_capacity.account_ref,
             model_ref=account_capacity.model_ref,
         )
-        if capacity_window_budget_repository is not None:
-            snapshot = await _ensure_budget_window_for_account_capacity(
-                capacity_window_budget_repository=capacity_window_budget_repository,
-                account_capacity=account_capacity,
-                now=occurred_at,
-            )
-            remaining_minute_requests = _effective_budget_remaining_value(
-                observed_remaining=snapshot.remaining_minute_requests,
-                planned_remaining=account_capacity.remaining_minute_requests,
-                reserved=snapshot.reserved_minute_requests,
-                reset_at=snapshot.minute_reset_at,
-            )
-            remaining_minute_tokens = _effective_budget_remaining_value(
-                observed_remaining=snapshot.remaining_minute_tokens,
-                planned_remaining=account_capacity.remaining_minute_tokens,
-                reserved=snapshot.reserved_minute_tokens,
-                reset_at=snapshot.minute_reset_at,
-            )
-            remaining_daily_requests = _effective_budget_remaining_value(
-                observed_remaining=snapshot.remaining_daily_requests,
-                planned_remaining=account_capacity.remaining_daily_requests,
-                reserved=snapshot.reserved_daily_requests,
-                reset_at=snapshot.daily_reset_at,
-            )
-            remaining_daily_tokens = _effective_budget_remaining_value(
-                observed_remaining=snapshot.remaining_daily_tokens,
-                planned_remaining=account_capacity.remaining_daily_tokens,
-                reserved=snapshot.reserved_daily_tokens,
-                reset_at=snapshot.daily_reset_at,
-            )
-            budget_capacity = LlmProviderAccountCapacity(
-                provider=account_capacity.provider,
-                account_ref=account_capacity.account_ref,
-                model_ref=account_capacity.model_ref,
-                remaining_minute_requests=remaining_minute_requests,
-                remaining_minute_tokens=remaining_minute_tokens,
-                remaining_daily_requests=remaining_daily_requests,
-                remaining_daily_tokens=remaining_daily_tokens,
-            )
-            windows.append(
-                _DirectCapacityWindow(
-                    capacity=budget_capacity,
-                    remaining_minute_requests=remaining_minute_requests,
-                    remaining_minute_tokens=remaining_minute_tokens,
-                    remaining_daily_requests=remaining_daily_requests,
-                    remaining_daily_tokens=remaining_daily_tokens,
-                    unavailable_until=_budget_snapshot_unavailable_until(snapshot),
-                    capacity_observation=None,
-                )
-            )
-            continue
+        # capacity_window_budget_repository is telemetry/accounting state.
+        # Do not use observed budget tokens as the Prepare admission gate.
+        # Prepare gates on planned account capacities minus active reservations below.
 
         observed_state = await _capacity_after_latest_observation(
             account_capacity,
