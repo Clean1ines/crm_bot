@@ -427,7 +427,10 @@ async def _execute_direct_execution_queue_prepare(
                 required_window_tokens=required_window_tokens,
                 capacity_window_count=len(capacity_windows),
             )
-            break
+            # Do not let one oversized due item block the whole batch.
+            # Prepare must scan the due set and dispatch any item that fits
+            # the current capacity windows.
+            continue
 
         selected_window = capacity_windows[selected_index]
         lease_token = LeaseToken(
@@ -1008,41 +1011,29 @@ async def _direct_capacity_windows(
                 account_capacity=account_capacity,
                 now=occurred_at,
             )
-            remaining_minute_requests = max(
-                0,
-                (
-                    snapshot.remaining_minute_requests
-                    if snapshot.remaining_minute_requests is not None
-                    else account_capacity.remaining_minute_requests
-                )
-                - snapshot.reserved_minute_requests,
+            remaining_minute_requests = _effective_budget_remaining_value(
+                observed_remaining=snapshot.remaining_minute_requests,
+                planned_remaining=account_capacity.remaining_minute_requests,
+                reserved=snapshot.reserved_minute_requests,
+                reset_at=snapshot.minute_reset_at,
             )
-            remaining_minute_tokens = max(
-                0,
-                (
-                    snapshot.remaining_minute_tokens
-                    if snapshot.remaining_minute_tokens is not None
-                    else account_capacity.remaining_minute_tokens
-                )
-                - snapshot.reserved_minute_tokens,
+            remaining_minute_tokens = _effective_budget_remaining_value(
+                observed_remaining=snapshot.remaining_minute_tokens,
+                planned_remaining=account_capacity.remaining_minute_tokens,
+                reserved=snapshot.reserved_minute_tokens,
+                reset_at=snapshot.minute_reset_at,
             )
-            remaining_daily_requests = max(
-                0,
-                (
-                    snapshot.remaining_daily_requests
-                    if snapshot.remaining_daily_requests is not None
-                    else account_capacity.remaining_daily_requests
-                )
-                - snapshot.reserved_daily_requests,
+            remaining_daily_requests = _effective_budget_remaining_value(
+                observed_remaining=snapshot.remaining_daily_requests,
+                planned_remaining=account_capacity.remaining_daily_requests,
+                reserved=snapshot.reserved_daily_requests,
+                reset_at=snapshot.daily_reset_at,
             )
-            remaining_daily_tokens = max(
-                0,
-                (
-                    snapshot.remaining_daily_tokens
-                    if snapshot.remaining_daily_tokens is not None
-                    else account_capacity.remaining_daily_tokens
-                )
-                - snapshot.reserved_daily_tokens,
+            remaining_daily_tokens = _effective_budget_remaining_value(
+                observed_remaining=snapshot.remaining_daily_tokens,
+                planned_remaining=account_capacity.remaining_daily_tokens,
+                reserved=snapshot.reserved_daily_tokens,
+                reset_at=snapshot.daily_reset_at,
             )
             budget_capacity = LlmProviderAccountCapacity(
                 provider=account_capacity.provider,
@@ -1307,6 +1298,29 @@ def _is_failure_capacity_observation(
     observation: LlmAttemptCapacityObservation,
 ) -> bool:
     return observation.outcome_class != "succeeded"
+
+
+
+
+def _effective_budget_remaining_value(
+    *,
+    observed_remaining: int | None,
+    planned_remaining: int,
+    reserved: int,
+    reset_at: datetime | None,
+) -> int:
+    # Provider observations without reset_at are not a reliable hard cap for
+    # the next scheduling decision. Treat planned profile/account capacity as
+    # the floor, otherwise a stale/partial observation can poison the budget
+    # window forever.
+    if observed_remaining is None:
+        effective_remaining = planned_remaining
+    elif reset_at is None:
+        effective_remaining = max(observed_remaining, planned_remaining)
+    else:
+        effective_remaining = observed_remaining
+
+    return max(0, effective_remaining - reserved)
 
 
 
