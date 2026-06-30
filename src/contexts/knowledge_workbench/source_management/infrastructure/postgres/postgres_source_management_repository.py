@@ -83,7 +83,7 @@ class PostgresSourceManagementRepository(SourceManagementRepositoryPort):
                 created_at,
                 updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'processing', NULL, 'source_ingestion', $8, TRUE, 'active_processing', $9, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'processing', 'knowledge-extraction:' || $1, 'source_ingestion', $8, TRUE, 'active_processing', $9, $9)
             ON CONFLICT (document_id) DO UPDATE SET
                 project_id = EXCLUDED.project_id,
                 file_name = EXCLUDED.file_name,
@@ -96,6 +96,7 @@ class PostgresSourceManagementRepository(SourceManagementRepositoryPort):
                     THEN knowledge_workbench_documents.status
                     ELSE EXCLUDED.status
                 END,
+                current_processing_run_id = EXCLUDED.current_processing_run_id,
                 uploaded_by_actor_type = EXCLUDED.uploaded_by_actor_type,
                 uploaded_by_actor_id = EXCLUDED.uploaded_by_actor_id,
                 trusted_upload = EXCLUDED.trusted_upload,

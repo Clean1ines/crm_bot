@@ -376,7 +376,9 @@ class FakePrepareLlmDispatchBatch:
                         attempt_id="work-1:attempt:1",
                         work_item_id="work-1",
                         attempt_number=1,
-                        dispatch_payload={"work_item_id": "work-1"},
+                        dispatch_payload=_claim_builder_dispatch_payload(
+                            "work-1:attempt:1"
+                        ),
                     ),
                 ),
             ),

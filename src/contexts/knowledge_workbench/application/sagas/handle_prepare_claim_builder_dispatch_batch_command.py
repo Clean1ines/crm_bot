@@ -838,13 +838,8 @@ def _claim_builder_dispatch_attempt_prepared_events(
 ) -> tuple[WorkflowEvent, ...]:
     events: list[WorkflowEvent] = []
     for attempt in started_attempts:
-        dispatch_payload = _attempt_mapping(attempt, "dispatch_payload")
-        schedule_payload = dispatch_payload.get("schedule_payload")
-        allocation = dispatch_payload.get("llm_allocation")
-        if not isinstance(schedule_payload, Mapping):
-            raise ValueError("dispatch attempt schedule_payload must be mapping")
-        if not isinstance(allocation, Mapping):
-            raise ValueError("dispatch attempt llm_allocation must be mapping")
+        schedule_payload = _attempt_schedule_payload(attempt)
+        allocation = _attempt_llm_allocation(attempt)
         attempt_id = _attempt_text(attempt, "attempt_id")
         work_item_id = _attempt_text(attempt, "work_item_id")
         attempt_number = _attempt_positive_int(attempt, "attempt_number")
@@ -1146,6 +1141,24 @@ def _attempt_positive_int(attempt: object, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError(f"started attempt {field_name} must be positive int")
     return value
+
+
+def _attempt_llm_allocation(attempt: object) -> Mapping[str, object]:
+    dispatch_payload = _attempt_mapping(attempt, "dispatch_payload")
+    allocation = dispatch_payload.get("llm_allocation")
+    if isinstance(allocation, Mapping):
+        return allocation
+
+    return dispatch_payload
+
+
+def _attempt_schedule_payload(attempt: object) -> Mapping[str, object]:
+    dispatch_payload = _attempt_mapping(attempt, "dispatch_payload")
+    schedule_payload = dispatch_payload.get("schedule_payload")
+    if isinstance(schedule_payload, Mapping):
+        return schedule_payload
+
+    return dispatch_payload
 
 
 def _attempt_mapping(
