@@ -348,22 +348,11 @@ def _prepare_llm_dispatch_batch_command(
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
     occurred_at: datetime,
-) -> PrepareLlmDispatchBatchCommand | None:
+) -> PrepareLlmDispatchBatchCommand:
     requested_items = _payload_positive_int(
         workflow_command.payload,
         "scheduled_work_item_count",
     )
-    llm_dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
-    if isinstance(llm_dispatch_preparation, Mapping):
-        account_capacities = llm_dispatch_preparation.get("account_capacities")
-        if (
-            isinstance(account_capacities, Sequence)
-            and not isinstance(account_capacities, str)
-            and not isinstance(account_capacities, bytes)
-            and len(account_capacities) == 0
-        ):
-            return None
-
     return PrepareLlmDispatchBatchCommand(
         work_kind=DRAFT_CLAIM_COMPACTION_WORK_KIND,
         active_model_ref=_active_model_ref_from_payload(workflow_command.payload),

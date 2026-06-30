@@ -335,28 +335,12 @@ def _prepare_dispatch_batch_command(
             "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
             "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
             "caused_by_command_id": workflow_command.command_id.value,
-            "llm_dispatch_preparation": {
-                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-                "requested_items": scheduled_work_item_count,
-                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-                "profile": _draft_claim_compaction_dispatch_profile_payload(),
-            },
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=occurred_at,
         created_at=occurred_at,
         updated_at=occurred_at,
     )
-
-
-def _draft_claim_compaction_dispatch_profile_payload() -> dict[str, object]:
-    prompt_tokens = draft_claim_compaction_prompt_tokens("draft_vs_draft")
-    return {
-        "profile_id": "draft_claim_compaction.real_due_batch",
-        "input_tokens": prompt_tokens,
-        "artifact_tokens": 0,
-        "request_count": 1,
-    }
 
 
 def _command_causation_scope(workflow_command: WorkflowCommand) -> str:
@@ -479,6 +463,9 @@ def _batch_capacity_estimate(batch) -> dict[str, object]:
         "budget_contract_version": "v2",
         "model_ref": batch.model_id,
         "prompt_variant": batch.prompt_variant,
+        "estimated_input_tokens": input_tokens,
+        "reserved_output_tokens": artifact_tokens,
+        "estimated_total_tokens": input_tokens + artifact_tokens,
         "prompt_tokens": prompt_tokens,
         "artifact_tokens": artifact_tokens,
         "input_tokens": input_tokens,

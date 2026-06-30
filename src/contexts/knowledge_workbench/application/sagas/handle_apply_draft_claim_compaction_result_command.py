@@ -615,43 +615,15 @@ def _prepare_dispatch_batch_command(
             "workflow_run_id": workflow_run_id,
             "work_kind": WORK_KIND.value,
             "scheduled_work_item_count": scheduled_work_item_count,
+            "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+            "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
             "caused_by_command_id": workflow_command.command_id.value,
-            "llm_dispatch_preparation": {
-                "profile": _next_work_profile_payload(
-                    batch_ref=batch_ref,
-                    next_work_item=next_work_item,
-                ),
-                "account_capacities": (),
-                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-                "requested_items": scheduled_work_item_count,
-                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-                "lease_token_prefix": (
-                    f"draft-claim-compaction-dispatch:{workflow_run_id}"
-                ),
-                "lease_ttl_seconds": 300,
-            },
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=occurred_at,
         created_at=occurred_at,
         updated_at=occurred_at,
     )
-
-
-def _next_work_profile_payload(
-    *,
-    batch_ref: str,
-    next_work_item: DraftClaimCompactionNextWorkItem,
-) -> dict[str, int | str]:
-    prompt_tokens = max(next_work_item.prompt_tokens, 1)
-    return {
-        "profile_id": f"draft_claim_compaction:{batch_ref}",
-        "prompt_tokens": prompt_tokens,
-        "artifact_tokens": next_work_item.artifact_tokens,
-            "input_tokens": next_work_item.input_tokens,
-            "required_window_tokens": next_work_item.required_window_tokens,
-        "request_count": next_work_item.request_count,
-    }
 
 
 def _command_causation_scope(workflow_command: WorkflowCommand) -> str:
