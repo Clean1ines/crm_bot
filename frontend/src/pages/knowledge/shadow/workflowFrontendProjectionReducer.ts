@@ -7,6 +7,7 @@ import type {
   WorkbenchWorkflowStageLiveState,
   WorkbenchWorkflowTimelineEntryLiveState,
   WorkbenchClaimClusterLiveState,
+  WorkbenchClaimClusterBatchLiveState,
 } from "@shared/api/modules/knowledge";
 
 export type InitialWorkflowProjectionDocument = {
@@ -744,6 +745,45 @@ const recomputeClusterBatchCounters = (
   };
 };
 
+const compactionBatchFromPayload = (
+  payload: Record<string, unknown>,
+  key: "next_batch",
+): WorkbenchClaimClusterBatchLiveState | null => {
+  const value = payload[key];
+  if (!isRecord(value)) return null;
+  return value as unknown as WorkbenchClaimClusterBatchLiveState;
+};
+
+const upsertCompactionBatch = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  batch: WorkbenchClaimClusterBatchLiveState,
+): void => {
+  const clusters = response.workflow.claim_clusters ?? [];
+  response.workflow.claim_clusters = clusters.map((cluster) => {
+    if (cluster.group_ref !== batch.group_ref && cluster.cluster_ref !== batch.group_ref) {
+      return cluster;
+    }
+
+    const batches = cluster.batches ?? [];
+    const existingIndex = batches.findIndex(
+      (item) =>
+        item.batch_ref === batch.batch_ref ||
+        item.work_item_id === batch.work_item_id,
+    );
+    const nextBatches =
+      existingIndex >= 0
+        ? batches.map((item, index) =>
+            index === existingIndex ? { ...item, ...batch } : item,
+          )
+        : [...batches, batch];
+
+    return recomputeClusterBatchCounters({
+      ...cluster,
+      batches: nextBatches,
+    });
+  });
+};
+
 const updateCompactionBatch = (
   response: WorkbenchWorkflowLiveStateResponse,
   patch: {
@@ -999,6 +1039,17 @@ export const reduceWorkflowFrontendProjectionEvent = (
       markStage(next, "draft_claim_compaction", "running", normalizedEvent.occurred_at);
       next.workflow.current_phase = "draft_claim_compaction";
       appendTimeline(next, normalizedEvent, "Результат batch compaction применён");
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_next_work_scheduled": {
+      const nextBatch = compactionBatchFromPayload(payload, "next_batch");
+      if (nextBatch) {
+        upsertCompactionBatch(next, nextBatch);
+      }
+      markStage(next, "draft_claim_compaction", "running", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(next, normalizedEvent, "Запланирован следующий batch compaction");
       break;
     }
 

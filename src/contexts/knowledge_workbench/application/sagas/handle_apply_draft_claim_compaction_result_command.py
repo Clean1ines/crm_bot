@@ -716,6 +716,14 @@ async def _append_next_event(
         "already_scheduled_work_item_count": schedule.already_exists_count,
         "appended_next_command_count": appended_next_command_count,
     }
+    next_batch = _next_batch_live_row(
+        workflow_run_id=apply_command.workflow_run_id,
+        group_ref=apply_command.group_ref,
+        next_work_item=outcome.next_decision.next_work_item,
+        scheduled_count=schedule.created_count + schedule.already_exists_count,
+    )
+    if next_batch is not None:
+        payload["next_batch"] = next_batch
     if work_type is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE:
         resume_work_type = (
             outcome.next_decision.next_work_item.user_choice_resume_work_type
@@ -755,6 +763,44 @@ async def _append_next_event(
             correlation_id=workflow_command.command_id.value,
         )
     )
+
+
+def _next_batch_live_row(
+    *,
+    workflow_run_id: str,
+    group_ref: str,
+    next_work_item: DraftClaimCompactionNextWorkItem,
+    scheduled_count: int,
+) -> JsonObject | None:
+    if scheduled_count <= 0:
+        return None
+    if next_work_item.work_type not in {
+        DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT,
+        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
+        DraftClaimCompactionNextWorkItemType.MIXED,
+        DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
+    }:
+        return None
+
+    batch_ref = _next_batch_ref(
+        group_ref=group_ref,
+        next_work_item=next_work_item,
+    )
+    return {
+        "batch_ref": batch_ref,
+        "work_item_id": f"claim-compaction:{workflow_run_id}:{batch_ref}",
+        "group_ref": group_ref,
+        "status": "ready",
+        "prompt_variant": next_work_item.work_type.value,
+        "model_id": next_work_item.primary_model_id,
+        "artifact_tokens": next_work_item.artifact_tokens,
+        "member_count": len(next_work_item.node_refs),
+        "source_claim_refs": list(_raw_claim_refs(next_work_item)),
+        "source_node_refs": list(next_work_item.node_refs),
+        "raw_claim_refs": list(_raw_claim_refs(next_work_item)),
+        "compacted_node_refs": list(_compacted_node_refs(next_work_item)),
+    }
+
 
 
 async def _save_progress_snapshot(

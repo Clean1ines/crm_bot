@@ -378,6 +378,9 @@ export type WorkbenchClaimClusterBatchLiveState = {
   artifact_tokens: number;
   member_count: number;
   source_claim_refs: string[];
+  source_node_refs?: string[];
+  raw_claim_refs?: string[];
+  compacted_node_refs?: string[];
 };
 
 export type WorkbenchClaimClusterLiveState = {
