@@ -687,6 +687,7 @@ async def _append_applied_event(
                 "created_node_refs": list(outcome.created_node_refs),
                 "superseded_node_refs": list(outcome.superseded_node_refs),
                 "comparison_refs": list(outcome.comparison_refs),
+                "compacted_artifacts": list(outcome.compacted_artifacts),
                 "next_work_type": outcome.next_decision.work_type.value,
             },
             occurred_at=workflow_command.updated_at,

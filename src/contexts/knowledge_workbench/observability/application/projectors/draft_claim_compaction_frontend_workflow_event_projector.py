@@ -84,6 +84,7 @@ _ALLOWED_PAYLOAD_KEYS = frozenset(
         "created_node_refs",
         "superseded_node_refs",
         "comparison_refs",
+        "compacted_artifacts",
         "next_work_type",
         "reason",
         "scheduled_work_item_count",

@@ -363,9 +363,27 @@ export type WorkbenchCompactedClaimPreviewLiveState = {
   node_ref: string;
   claim: string;
   claim_kind?: string | null;
+  granularity?: string | null;
   merge_decision?: string | null;
   source_claim_refs: string[];
   active: boolean;
+  compacted_payload?: {
+    key?: string;
+    claim?: string;
+    claim_kind?: string;
+    granularity?: string;
+    source_claim_refs?: string[];
+    triples?: Array<{
+      subject?: string;
+      predicate?: string;
+      object?: string;
+      qualifiers?: string[];
+    }>;
+    merge_decision?: string;
+    possible_questions?: string[];
+    exclusion_scope?: string;
+    evidence_block?: string;
+  } | null;
 };
 
 export type WorkbenchClaimClusterBatchLiveState = {

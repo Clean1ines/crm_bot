@@ -50,11 +50,15 @@ class ApplyDraftClaimCompactionResult:
         self,
         command: DraftClaimCompactionApplyResultCommand,
     ) -> DraftClaimCompactionApplyResultOutcome:
+        compacted_artifacts = ()
         if command.output_kind is DraftClaimCompactionApplyOutputKind.COMPACTED_CLAIMS:
             source_claims = await self._load_source_claims(command.compacted_claims)
             enriched_output = self.draft_claim_compaction_output_enricher.enrich(
                 output_claims=command.compacted_claims,
                 source_claims=source_claims,
+            )
+            compacted_artifacts = tuple(
+                claim.to_json_dict() for claim in enriched_output.compacted_claims
             )
             await self.reduction_state_repository.apply_compacted_claims_result(
                 workflow_run_id=command.workflow_run_id,
@@ -144,6 +148,7 @@ class ApplyDraftClaimCompactionResult:
             created_node_refs=created_node_refs,
             superseded_node_refs=superseded_node_refs,
             comparison_refs=comparison_refs,
+            compacted_artifacts=compacted_artifacts,
             next_decision=next_decision,
         )
 

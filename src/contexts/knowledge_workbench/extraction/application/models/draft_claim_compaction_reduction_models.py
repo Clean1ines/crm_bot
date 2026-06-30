@@ -129,6 +129,7 @@ class DraftClaimCompactionNodeReadModel:
     compacted_claim_kind: str | None
     compacted_granularity: str | None
     compacted_merge_decision: str | None
+    compacted_payload: JsonObject | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -157,6 +158,8 @@ class DraftClaimCompactionNodeReadModel:
             _text(self.compacted_granularity, "compacted_granularity")
         if self.compacted_merge_decision is not None:
             _text(self.compacted_merge_decision, "compacted_merge_decision")
+        if self.compacted_payload is not None:
+            _json_object(self.compacted_payload, "compacted_payload")
         if not isinstance(self.created_at, datetime):
             raise TypeError("created_at must be datetime")
         if not isinstance(self.updated_at, datetime):

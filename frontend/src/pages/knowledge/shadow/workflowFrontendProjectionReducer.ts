@@ -8,6 +8,7 @@ import type {
   WorkbenchWorkflowTimelineEntryLiveState,
   WorkbenchClaimClusterLiveState,
   WorkbenchClaimClusterBatchLiveState,
+  WorkbenchCompactedClaimPreviewLiveState,
 } from "@shared/api/modules/knowledge";
 
 export type InitialWorkflowProjectionDocument = {
@@ -754,6 +755,65 @@ const compactionBatchFromPayload = (
   return value as unknown as WorkbenchClaimClusterBatchLiveState;
 };
 
+const compactedArtifactsFromPayload = (
+  payload: Record<string, unknown>,
+): WorkbenchCompactedClaimPreviewLiveState[] => {
+  const value = payload.compacted_artifacts;
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter(isRecord)
+    .map((artifact) => {
+      const sourceClaimRefs = stringArray(artifact, "source_claim_refs");
+      return {
+        node_ref:
+          text(artifact, "node_ref") ||
+          text(artifact, "key") ||
+          sourceClaimRefs.join(":") ||
+          text(payload, "batch_ref") ||
+          text(payload, "work_item_id") ||
+          "compacted-artifact",
+        claim: text(artifact, "claim") || "",
+        claim_kind: text(artifact, "claim_kind"),
+        granularity: text(artifact, "granularity"),
+        merge_decision: text(artifact, "merge_decision"),
+        source_claim_refs: sourceClaimRefs,
+        active: true,
+        compacted_payload:
+          artifact as WorkbenchCompactedClaimPreviewLiveState["compacted_payload"],
+      };
+    })
+    .filter((artifact) => artifact.claim.trim().length > 0);
+};
+
+const upsertCompactedArtifacts = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  groupRef: string | null,
+  artifacts: WorkbenchCompactedClaimPreviewLiveState[],
+): void => {
+  if (!groupRef || artifacts.length === 0) return;
+
+  const clusters = response.workflow.claim_clusters ?? [];
+  response.workflow.claim_clusters = clusters.map((cluster) => {
+    if (cluster.group_ref !== groupRef && cluster.cluster_ref !== groupRef) return cluster;
+
+    const existing = cluster.compacted_claims ?? [];
+    const byRef = new Map(existing.map((claim) => [claim.node_ref, claim]));
+
+    for (const artifact of artifacts) {
+      byRef.set(artifact.node_ref, {
+        ...byRef.get(artifact.node_ref),
+        ...artifact,
+      });
+    }
+
+    return {
+      ...cluster,
+      compacted_claims: Array.from(byRef.values()),
+    };
+  });
+};
+
 const upsertCompactionBatch = (
   response: WorkbenchWorkflowLiveStateResponse,
   batch: WorkbenchClaimClusterBatchLiveState,
@@ -1030,6 +1090,11 @@ export const reduceWorkflowFrontendProjectionEvent = (
     }
 
     case "workflow_draft_claim_compaction_result_applied": {
+      upsertCompactedArtifacts(
+        next,
+        text(payload, "group_ref"),
+        compactedArtifactsFromPayload(payload),
+      );
       updateCompactionBatch(next, {
         groupRef: text(payload, "group_ref"),
         batchRef: text(payload, "batch_ref"),

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+
+from src.domain.project_plane.json_types import JsonObject
 from datetime import datetime
 from enum import StrEnum
 from hashlib import sha256
@@ -101,6 +103,7 @@ class DraftClaimCompactionApplyResultOutcome:
     superseded_node_refs: tuple[str, ...]
     comparison_refs: tuple[str, ...]
     next_decision: DraftClaimCompactionPlannerDecision
+    compacted_artifacts: tuple[JsonObject, ...] = ()
 
     def __post_init__(self) -> None:
         _text_tuple(self.created_node_refs, "created_node_refs", allow_empty=True)

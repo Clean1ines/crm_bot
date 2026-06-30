@@ -669,12 +669,14 @@ class WorkbenchWorkflowLiveStateQuery:
                         'node_ref', node.node_ref,
                         'claim', COALESCE(node.compacted_payload->>'claim', ''),
                         'claim_kind', node.compacted_claim_kind,
+                        'granularity', node.compacted_granularity,
                         'merge_decision', node.compacted_merge_decision,
                         'source_claim_refs', COALESCE(
                             node.compacted_payload->'source_claim_refs',
                             '[]'::jsonb
                         ),
-                        'active', COALESCE(node.active, FALSE)
+                        'active', COALESCE(node.active, FALSE),
+                        'compacted_payload', node.compacted_payload
                     )
                     ORDER BY node.active DESC, node.updated_at DESC
                 ) AS compacted_claims

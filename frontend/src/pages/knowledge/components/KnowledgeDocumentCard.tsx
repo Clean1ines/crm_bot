@@ -12,6 +12,7 @@ import {
   type WorkbenchSectionQueueItemLiveState,
   type WorkbenchLlmAttemptLiveState,
   type WorkbenchClaimClusterClaimLiveState,
+  WorkbenchCompactedClaimPreviewLiveState,
 } from '@shared/api/modules/knowledge';
 
 type DocCardDocument = {
@@ -525,6 +526,41 @@ const draftClaimQuestions = (claim: DraftClaimRecord): string[] =>
     'queries',
   ]);
 
+const draftClaimExclusionScope = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, [
+    'exclusion_scope',
+    'exclusionScope',
+    'scope_exclusion',
+  ]) ||
+  firstStringArrayField(claim, [
+    'exclusions',
+    'excluded_questions',
+    'scope_exclusions',
+  ]).join('\n') ||
+  null;
+
+const draftClaimGranularity = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, ['granularity', 'claim_granularity']);
+
+const draftClaimValidationDecision = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, ['validation_decision', 'decision']);
+
+const draftClaimDispatchAttemptId = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, [
+    'dispatch_attempt_id',
+    'attempt_id',
+    'node_run_id',
+  ]);
+
+const draftClaimWorkItemId = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, ['work_item_id', 'queue_item_id']);
+
+const draftClaimProvider = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, ['provider', 'model_provider']);
+
+const draftClaimModelRef = (claim: DraftClaimRecord): string | null =>
+  firstTextField(claim, ['model_ref', 'model_id', 'model_name']);
+
 const draftClaimKey = (claim: DraftClaimRecord, index: number): string =>
   firstTextField(claim, ['observation_ref', 'id', 'claim_id', 'ref']) ||
   `draft-claim-${index}`;
@@ -639,6 +675,22 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       });
     });
     return claims;
+  };
+
+  const draftClaimsForAttempt = (
+    attempt: WorkbenchLlmAttemptLiveState,
+  ): DraftClaimRecord[] => {
+    const byAttempt = draftClaims.filter(
+      (claim) => draftClaimDispatchAttemptId(claim) === attempt.node_run_id,
+    );
+
+    if (byAttempt.length > 0) return byAttempt;
+
+    if (!attempt.section_id) return [];
+    return draftClaimsForSection(
+      sourceUnitById.get(attempt.section_id) ?? null,
+      attempt.section_id,
+    );
   };
 
   const sourceStage = stages.find((stage) => stage.id === 'source_ingestion') ?? null;
@@ -925,6 +977,87 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     onCardAction(action.action_id);
   };
 
+  const renderEnrichedCompactedArtifact = (
+    compactedClaim: WorkbenchCompactedClaimPreviewLiveState,
+  ) => {
+    const artifact = compactedClaim.compacted_payload;
+    const triples = artifact?.triples ?? [];
+    const possibleQuestions: string[] = artifact?.possible_questions ?? [];
+    const exclusionScope = artifact?.exclusion_scope?.trim() ?? "";
+    const evidenceBlock = artifact?.evidence_block?.trim() ?? "";
+
+    return (
+      <details className="mt-2 rounded bg-[var(--control-bg)] p-2" open>
+        <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+          Enriched artifact
+        </summary>
+        <div className="mt-2 space-y-3 text-[var(--text-secondary)]">
+          <div>
+            <div className="font-medium text-[var(--text-primary)]">Утверждение</div>
+            <div>{artifact?.claim || compactedClaim.claim}</div>
+          </div>
+
+          <div className="grid gap-1 text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
+            <div>Тип: {artifact?.claim_kind || compactedClaim.claim_kind || "—"}</div>
+            <div>Гранулярность: {artifact?.granularity || compactedClaim.granularity || "—"}</div>
+            <div>Решение: {artifact?.merge_decision || compactedClaim.merge_decision || "—"}</div>
+          </div>
+
+          {possibleQuestions.length > 0 && (
+            <div>
+              <div className="font-medium text-[var(--text-primary)]">
+                Возможные вопросы
+              </div>
+              <ul className="mt-1 list-disc pl-5">
+                {possibleQuestions.map((question) => (
+                  <li key={question}>{question}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {exclusionScope && (
+            <div>
+              <div className="font-medium text-[var(--text-primary)]">
+                Исключения
+              </div>
+              <pre className="mt-1 whitespace-pre-wrap rounded bg-[var(--surface-elevated)] p-2 text-[var(--text-secondary)]">
+                {exclusionScope}
+              </pre>
+            </div>
+          )}
+
+          {triples.length > 0 && (
+            <div>
+              <div className="font-medium text-[var(--text-primary)]">Тройки</div>
+              <ul className="mt-1 list-disc pl-5">
+                {triples.map((triple: NonNullable<NonNullable<WorkbenchCompactedClaimPreviewLiveState["compacted_payload"]>["triples"]>[number], index: number) => (
+                  <li key={`${triple.subject ?? "s"}-${triple.predicate ?? "p"}-${triple.object ?? "o"}-${index}`}>
+                    {triple.subject || "—"} · {triple.predicate || "—"} · {triple.object || "—"}
+                    {(triple.qualifiers ?? []).length > 0
+                      ? ` (${(triple.qualifiers ?? []).join(", ")})`
+                      : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {evidenceBlock && (
+            <div>
+              <div className="font-medium text-[var(--text-primary)]">
+                Доказательство
+              </div>
+              <blockquote className="mt-1 whitespace-pre-wrap rounded border-l-2 border-[var(--accent-primary)] bg-[var(--surface-elevated)] p-2">
+                {evidenceBlock}
+              </blockquote>
+            </div>
+          )}
+        </div>
+      </details>
+    );
+  };
+
   const attemptSectionIndex = (attempt: WorkbenchLlmAttemptLiveState): number | null => {
     if (!attempt.section_id) return null;
     const byId = sourceUnitById.get(attempt.section_id);
@@ -1112,6 +1245,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                             ? `Объединено из ${formatNumber(fact.source_claim_refs.length)} фактов`
                             : 'Сохранён как отдельный факт'}
                         </div>
+                        {renderEnrichedCompactedArtifact(fact)}
                       </div>
                     ))}
                   </div>
@@ -1476,6 +1610,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                     <div className="mt-2 space-y-1">
                     {attempts.map((attempt) => {
                       const sectionIndex = attemptSectionIndex(attempt);
+                      const attemptDraftClaims = draftClaimsForAttempt(attempt);
                       return (
                         <details
                           key={attempt.node_run_id}
@@ -1504,6 +1639,82 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                               ? ` · токены: ${formatNumber(attempt.total_tokens)}`
                               : ''}
                           </div>
+                          {attemptDraftClaims.length > 0 && (
+                            <div className="mt-2 space-y-2 rounded bg-[var(--control-bg)] p-2">
+                              <div className="font-medium text-[var(--text-primary)]">
+                                Сохранённые claim artifacts: {formatNumber(attemptDraftClaims.length)}
+                              </div>
+
+                              {attemptDraftClaims.map((claim, claimIndex) => {
+                                const questions = draftClaimQuestions(claim);
+                                const exclusionScope = draftClaimExclusionScope(claim);
+                                const evidenceRef = draftClaimEvidence(claim);
+                                const granularity = draftClaimGranularity(claim);
+                                const validationDecision = draftClaimValidationDecision(claim);
+                                const provider = draftClaimProvider(claim);
+                                const modelRef = draftClaimModelRef(claim);
+                                const workItemId = draftClaimWorkItemId(claim);
+
+                                return (
+                                  <details
+                                    key={draftClaimKey(claim, claimIndex)}
+                                    className="rounded bg-[var(--surface-elevated)] p-2"
+                                    open
+                                  >
+                                    <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                                      {formatNumber(claimIndex + 1)}. {draftClaimText(claim)}
+                                    </summary>
+
+                                    <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
+                                      <div className="grid gap-1 text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
+                                        <div>granularity: {granularity || '—'}</div>
+                                        <div>validation: {validationDecision || '—'}</div>
+                                        <div>provider: {provider || attempt.model_provider || '—'}</div>
+                                        <div>model: {modelRef || attempt.model_name || '—'}</div>
+                                        <div>work item: {workItemId || '—'}</div>
+                                      </div>
+
+                                      {questions.length > 0 && (
+                                        <div>
+                                          <div className="font-medium text-[var(--text-primary)]">
+                                            possible_questions
+                                          </div>
+                                          <ul className="mt-1 list-disc pl-5">
+                                            {questions.map((question) => (
+                                              <li key={question}>{question}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+
+                                      {exclusionScope && (
+                                        <div>
+                                          <div className="font-medium text-[var(--text-primary)]">
+                                            exclusion_scope
+                                          </div>
+                                          <pre className="mt-1 whitespace-pre-wrap rounded bg-[var(--control-bg)] p-2">
+                                            {exclusionScope}
+                                          </pre>
+                                        </div>
+                                      )}
+
+                                      {evidenceRef && (
+                                        <div>
+                                          <div className="font-medium text-[var(--text-primary)]">
+                                            evidence/source ref
+                                          </div>
+                                          <div className="mt-1 rounded bg-[var(--control-bg)] p-2 font-mono text-[11px] text-[var(--text-muted)]">
+                                            {evidenceRef}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </details>
+                                );
+                              })}
+                            </div>
+                          )}
+
                           {(attempt.error_message_user || attempt.error_kind) && (
                             <div className="mt-1 rounded bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-300">
                               {userErrorLabel(attempt.error_message_user || attempt.error_kind)}
