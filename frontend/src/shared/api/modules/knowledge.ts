@@ -368,6 +368,18 @@ export type WorkbenchCompactedClaimPreviewLiveState = {
   active: boolean;
 };
 
+export type WorkbenchClaimClusterBatchLiveState = {
+  batch_ref: string;
+  work_item_id: string;
+  group_ref: string;
+  status: string;
+  prompt_variant: string;
+  model_id: string;
+  artifact_tokens: number;
+  member_count: number;
+  source_claim_refs: string[];
+};
+
 export type WorkbenchClaimClusterLiveState = {
   group_ref: string;
   cluster_ref: string;
@@ -387,6 +399,7 @@ export type WorkbenchClaimClusterLiveState = {
   retryable_failed_work_item_count?: number;
   terminal_failed_work_item_count?: number;
   user_action_required_work_item_count?: number;
+  batches?: WorkbenchClaimClusterBatchLiveState[];
   members: WorkbenchClaimClusterClaimLiveState[];
   claims: WorkbenchClaimClusterClaimLiveState[];
   comparisons: WorkbenchClaimCompactionComparisonLiveState[];

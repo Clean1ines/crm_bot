@@ -6,6 +6,7 @@ import type {
   WorkbenchWorkflowLiveStateResponse,
   WorkbenchWorkflowStageLiveState,
   WorkbenchWorkflowTimelineEntryLiveState,
+  WorkbenchClaimClusterLiveState,
 } from "@shared/api/modules/knowledge";
 
 export type InitialWorkflowProjectionDocument = {
@@ -176,6 +177,7 @@ const cloneResponse = (
       ...item,
       members: item.members.map((member) => ({ ...member })),
       claims: item.claims.map((claim) => ({ ...claim })),
+      batches: item.batches?.map((batch) => ({ ...batch })),
       comparisons: item.comparisons.map((comparison) => ({ ...comparison })),
       compacted_claims: item.compacted_claims?.map((claim) => ({ ...claim })),
     })),
@@ -468,7 +470,13 @@ const syncStagesFromLanes = (
 
   if (claimStage.status === "completed") {
     response.document_status = "processing";
-    response.workflow.current_phase = "draft_claim_embeddings";
+    if (
+      response.workflow.current_phase === "source_ingestion" ||
+      response.workflow.current_phase === "claim_builder_work_scheduling" ||
+      response.workflow.current_phase === "claim_builder_section_extraction"
+    ) {
+      response.workflow.current_phase = "draft_claim_embeddings";
+    }
   } else if (claimStage.status === "running") {
     response.document_status = "processing";
     response.workflow.current_phase = "claim_builder_section_extraction";
@@ -662,6 +670,126 @@ const applyBatchPrepared = (
   );
 };
 
+const markStage = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  id: string,
+  status: WorkbenchWorkflowStageLiveState["status"],
+  occurredAt: string,
+  current?: number,
+  total?: number,
+): void => {
+  const item = stageById(response, id);
+  item.status = status;
+  if (typeof total === "number") item.total = Math.max(item.total, total);
+  if (typeof current === "number") item.current = Math.max(item.current, current);
+  if (status === "running") {
+    item.started_at = item.started_at ?? occurredAt;
+  }
+  if (status === "completed") {
+    item.started_at = item.started_at ?? occurredAt;
+    item.completed_at = item.completed_at ?? occurredAt;
+    if (item.total > 0) item.current = Math.max(item.current, item.total);
+  }
+};
+
+const claimClustersFromPayload = (
+  payload: Record<string, unknown>,
+): WorkbenchClaimClusterLiveState[] => {
+  const value = payload.clusters;
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord) as unknown as WorkbenchClaimClusterLiveState[];
+};
+
+const recomputeClusterBatchCounters = (
+  cluster: WorkbenchClaimClusterLiveState,
+): WorkbenchClaimClusterLiveState => {
+  const batches = cluster.batches ?? [];
+  const ready = batches.filter((item) => normalize(item.status) === "ready").length;
+  const leased = batches.filter((item) =>
+    ["leased", "running"].includes(normalize(item.status)),
+  ).length;
+  const completed = batches.filter((item) =>
+    ["completed", "succeeded"].includes(normalize(item.status)),
+  ).length;
+  const retryableFailed = batches.filter((item) =>
+    normalize(item.status) === "retryable_failed",
+  ).length;
+  const terminalFailed = batches.filter((item) =>
+    ["terminal_failed", "failed"].includes(normalize(item.status)),
+  ).length;
+  const userActionRequired = batches.filter((item) =>
+    normalize(item.status) === "user_action_required",
+  ).length;
+
+  return {
+    ...cluster,
+    status:
+      batches.length > 0 && completed === batches.length
+        ? "compacted"
+        : leased > 0
+          ? "processing"
+          : retryableFailed + terminalFailed + userActionRequired > 0
+            ? "needs_attention"
+            : ready > 0
+              ? "ready"
+              : cluster.status,
+    batch_count: Math.max(cluster.batch_count, batches.length),
+    work_item_count: Math.max(cluster.work_item_count, batches.length),
+    ready_work_item_count: ready,
+    leased_work_item_count: leased,
+    completed_work_item_count: completed,
+    retryable_failed_work_item_count: retryableFailed,
+    terminal_failed_work_item_count: terminalFailed,
+    user_action_required_work_item_count: userActionRequired,
+  };
+};
+
+const updateCompactionBatch = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  patch: {
+    groupRef?: string | null;
+    batchRef?: string | null;
+    workItemId?: string | null;
+    status: string;
+  },
+): void => {
+  const clusters = response.workflow.claim_clusters ?? [];
+  if (!patch.batchRef && !patch.workItemId) return;
+
+  response.workflow.claim_clusters = clusters.map((cluster) => {
+    if (patch.groupRef && cluster.group_ref !== patch.groupRef && cluster.cluster_ref !== patch.groupRef) {
+      return cluster;
+    }
+
+    const batches = cluster.batches ?? [];
+    let changed = false;
+    const nextBatches = batches.map((batch) => {
+      const sameBatch =
+        (patch.batchRef ? batch.batch_ref === patch.batchRef : false) ||
+        (patch.workItemId ? batch.work_item_id === patch.workItemId : false);
+      if (!sameBatch) return batch;
+      changed = true;
+      return {
+        ...batch,
+        status: patch.status,
+      };
+    });
+
+    return changed
+      ? recomputeClusterBatchCounters({ ...cluster, batches: nextBatches })
+      : cluster;
+  });
+};
+
+const replaceClaimClusters = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  clusters: WorkbenchClaimClusterLiveState[],
+): void => {
+  response.workflow.claim_clusters = clusters
+    .slice()
+    .sort((left, right) => left.cluster_ref.localeCompare(right.cluster_ref));
+};
+
 export const reduceWorkflowFrontendProjectionEvent = (
   current: WorkbenchWorkflowLiveStateResponse,
   event: FrontendWorkflowEventEnvelope,
@@ -737,6 +865,199 @@ export const reduceWorkflowFrontendProjectionEvent = (
       appendTimeline(next, normalizedEvent, "Все разделы обработаны");
       break;
     }
+    case "workflow_draft_claim_embedding_batch_completed": {
+      const requested = intValue(payload, "requested_embedding_count") ?? 0;
+      const persisted = intValue(payload, "persisted_embedding_count") ?? 0;
+      markStage(
+        next,
+        "draft_claim_embeddings",
+        "running",
+        normalizedEvent.occurred_at,
+        persisted,
+        Math.max(requested, persisted),
+      );
+      next.workflow.current_phase = "draft_claim_embeddings";
+      appendTimeline(next, normalizedEvent, `Векторизация batch: ${persisted}/${Math.max(requested, persisted)}`);
+      break;
+    }
+
+    case "workflow_draft_claim_embeddings_generated": {
+      const requested = intValue(payload, "requested_embedding_count") ?? 0;
+      const persisted = intValue(payload, "persisted_embedding_count") ?? 0;
+      const total = Math.max(requested, persisted);
+      markStage(next, "draft_claim_embeddings", "completed", normalizedEvent.occurred_at, total, total);
+      markStage(next, "draft_claim_clustering", "running", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_clustering";
+      appendTimeline(next, normalizedEvent, `Векторизация утверждений завершена: ${persisted}`);
+      break;
+    }
+
+    case "workflow_draft_claim_clusters_built": {
+      const clusters = claimClustersFromPayload(payload);
+      const groupCount = intValue(payload, "group_count") ?? clusters.length;
+      const batchCount = intValue(payload, "batch_count") ?? 0;
+
+      if (clusters.length > 0) {
+        replaceClaimClusters(next, clusters);
+      }
+
+      markStage(
+        next,
+        "draft_claim_clustering",
+        "completed",
+        normalizedEvent.occurred_at,
+        groupCount,
+        groupCount,
+      );
+      markStage(
+        next,
+        "draft_claim_compaction",
+        batchCount > 0 ? "running" : "completed",
+        normalizedEvent.occurred_at,
+        0,
+        batchCount,
+      );
+
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(
+        next,
+        normalizedEvent,
+        `Сформированы кластеры утверждений: ${groupCount}`,
+      );
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_dispatch_batch_prepared": {
+      const workItemIds = stringArray(payload, "work_item_ids");
+      workItemIds.forEach((workItemId) => {
+        updateCompactionBatch(next, {
+          workItemId,
+          status: "leased",
+        });
+      });
+      markStage(
+        next,
+        "draft_claim_compaction",
+        "running",
+        normalizedEvent.occurred_at,
+      );
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(
+        next,
+        normalizedEvent,
+        `Подготовлены batch work items compaction: ${workItemIds.length}`,
+      );
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_attempt_completed": {
+      updateCompactionBatch(next, {
+        groupRef: text(payload, "group_ref"),
+        batchRef: text(payload, "batch_ref"),
+        workItemId: text(payload, "work_item_id"),
+        status: "completed",
+      });
+      markStage(next, "draft_claim_compaction", "running", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(next, normalizedEvent, "Batch compaction завершён");
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_attempt_retryable_failed": {
+      updateCompactionBatch(next, {
+        groupRef: text(payload, "group_ref"),
+        batchRef: text(payload, "batch_ref"),
+        workItemId: text(payload, "work_item_id"),
+        status: "retryable_failed",
+      });
+      markStage(next, "draft_claim_compaction", "running", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(next, normalizedEvent, "Batch compaction требует повторной обработки");
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_attempt_terminal_failed": {
+      updateCompactionBatch(next, {
+        groupRef: text(payload, "group_ref"),
+        batchRef: text(payload, "batch_ref"),
+        workItemId: text(payload, "work_item_id"),
+        status: "terminal_failed",
+      });
+      markStage(next, "draft_claim_compaction", "failed", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(next, normalizedEvent, "Batch compaction завершился ошибкой");
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_result_applied": {
+      updateCompactionBatch(next, {
+        groupRef: text(payload, "group_ref"),
+        batchRef: text(payload, "batch_ref"),
+        workItemId: text(payload, "work_item_id"),
+        status: "completed",
+      });
+      markStage(next, "draft_claim_compaction", "running", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(next, normalizedEvent, "Результат batch compaction применён");
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_cluster_done": {
+      const groupRef = text(payload, "group_ref");
+      next.workflow.claim_clusters = (next.workflow.claim_clusters ?? []).map((cluster) =>
+        groupRef && (cluster.group_ref === groupRef || cluster.cluster_ref === groupRef)
+          ? recomputeClusterBatchCounters({
+              ...cluster,
+              status: "compacted",
+              batches: (cluster.batches ?? []).map((batch) => ({
+                ...batch,
+                status: "completed",
+              })),
+            })
+          : cluster,
+      );
+      const completedClusters = (next.workflow.claim_clusters ?? []).filter(
+        (cluster) => normalize(cluster.status) === "compacted",
+      ).length;
+      const totalClusters = next.workflow.claim_clusters?.length ?? 0;
+      markStage(
+        next,
+        "draft_claim_compaction",
+        totalClusters > 0 && completedClusters >= totalClusters ? "completed" : "running",
+        normalizedEvent.occurred_at,
+        completedClusters,
+        totalClusters,
+      );
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(next, normalizedEvent, "Кластер compaction завершён");
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_all_groups_compacted": {
+      next.workflow.claim_clusters = (next.workflow.claim_clusters ?? []).map((cluster) =>
+        recomputeClusterBatchCounters({
+          ...cluster,
+          status: "compacted",
+          batches: (cluster.batches ?? []).map((batch) => ({
+            ...batch,
+            status: "completed",
+          })),
+        }),
+      );
+      const totalClusters = next.workflow.claim_clusters?.length ?? 0;
+      markStage(
+        next,
+        "draft_claim_compaction",
+        "completed",
+        normalizedEvent.occurred_at,
+        totalClusters,
+        totalClusters,
+      );
+      next.workflow.current_phase = "cluster_preview";
+      appendTimeline(next, normalizedEvent, "Все кластеры compaction завершены");
+      break;
+    }
+
     default:
       appendTimeline(
         next,

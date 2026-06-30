@@ -1244,6 +1244,33 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                           </div>
                           <div>work items: {formatNumber(cluster.work_item_count)}</div>
                         </div>
+
+                        {(cluster.batches ?? []).length > 0 && (
+                          <div className="mt-2 space-y-1 rounded-lg bg-[var(--surface-elevated)] p-2">
+                            <div className="font-medium text-[var(--text-primary)]">
+                              Батчи compaction: {formatNumber(cluster.batches?.length ?? 0)}
+                            </div>
+                            <div className="mt-1 space-y-1">
+                              {(cluster.batches ?? []).map((batch, batchIndex) => (
+                                <div
+                                  key={batch.batch_ref}
+                                  className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-secondary)] px-2 py-1"
+                                >
+                                  <span className="font-medium text-[var(--text-primary)]">
+                                    Batch {formatNumber(batchIndex + 1)}
+                                  </span>
+                                  <span className="text-[var(--text-muted)]">
+                                    утверждений: {formatNumber(batch.member_count)}
+                                  </span>
+                                  <span className={`rounded-full px-2 py-0.5 font-medium ${statusPillTone(batch.status)}`}>
+                                    {queueStatusLabel(batch.status)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="mt-2 space-y-2">
                           {(cluster.claims ?? cluster.members).map((claim) => (
                             <details

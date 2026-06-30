@@ -223,6 +223,14 @@ class HandleClusterDraftClaimsCommandHandler:
                     "batch_count": persistence.requested_batch_count,
                     "scheduled_work_item_count": scheduled_work_item_count,
                     "semantic_meaning": "build hybrid draft claim compaction plan",
+                    "clusters": list(
+                        _cluster_live_rows(
+                            groups=budget_plan.groups,
+                            batches=budget_plan.batches,
+                            claims_by_ref=claims_by_ref,
+                            edges=edges,
+                        )
+                    ),
                 },
                 occurred_at=workflow_command.updated_at,
                 causation_command_id=workflow_command.command_id,
@@ -281,6 +289,133 @@ class HandleClusterDraftClaimsCommandHandler:
             already_scheduled_work_item_count=schedule.already_exists_count,
         )
 
+
+
+
+def _cluster_live_rows(
+    *,
+    groups,
+    batches,
+    claims_by_ref: Mapping[str, DraftClaimForCompaction],
+    edges,
+) -> tuple[dict[str, object], ...]:
+    batches_by_group = {}
+    for batch in batches:
+        batches_by_group.setdefault(batch.group_ref, []).append(batch)
+
+    return tuple(
+        _cluster_live_row(
+            group=group,
+            group_batches=tuple(batches_by_group.get(group.group_ref, ())),
+            claims_by_ref=claims_by_ref,
+            edges=edges,
+        )
+        for group in groups
+    )
+
+
+def _cluster_live_row(
+    *,
+    group,
+    group_batches,
+    claims_by_ref: Mapping[str, DraftClaimForCompaction],
+    edges,
+) -> dict[str, object]:
+    claims = tuple(
+        _cluster_claim_live_row(
+            claim=claims_by_ref[observation_ref],
+            group_ref=group.group_ref,
+            member_rank=rank,
+        )
+        for rank, observation_ref in enumerate(group.member_observation_refs)
+        if observation_ref in claims_by_ref
+    )
+    batches = tuple(_cluster_batch_live_row(batch) for batch in group_batches)
+    batch_count = len(batches)
+
+    return {
+        "group_ref": group.group_ref,
+        "cluster_ref": group.group_ref,
+        "status": "ready" if batch_count > 0 else "compacted",
+        "member_count": group.member_count,
+        "candidate_edge_count": _candidate_edge_count_for_group(
+            group=group,
+            edges=edges,
+        ),
+        "batch_count": batch_count,
+        "node_count": group.member_count,
+        "active_node_count": group.member_count,
+        "active_compacted_node_count": 0,
+        "comparison_count": 0,
+        "pending_comparison_count": 0,
+        "work_item_count": batch_count,
+        "ready_work_item_count": batch_count,
+        "leased_work_item_count": 0,
+        "completed_work_item_count": 0,
+        "retryable_failed_work_item_count": 0,
+        "terminal_failed_work_item_count": 0,
+        "user_action_required_work_item_count": 0,
+        "members": list(claims),
+        "claims": list(claims),
+        "batches": list(batches),
+        "comparisons": [],
+        "compacted_claims": [],
+    }
+
+
+def _cluster_batch_live_row(batch) -> dict[str, object]:
+    return {
+        "batch_ref": batch.batch_ref,
+        "work_item_id": f"claim-compaction:{batch.workflow_run_id}:{batch.batch_ref}",
+        "group_ref": batch.group_ref,
+        "status": "ready",
+        "prompt_variant": batch.prompt_variant,
+        "model_id": batch.model_id,
+        "artifact_tokens": batch.artifact_tokens,
+        "member_count": batch.member_count,
+        "source_claim_refs": list(batch.member_observation_refs),
+    }
+
+
+def _cluster_claim_live_row(
+    *,
+    claim: DraftClaimForCompaction,
+    group_ref: str,
+    member_rank: int,
+) -> dict[str, object]:
+    return {
+        "observation_ref": claim.observation_ref,
+        "claim": claim.claim,
+        "possible_questions": list(claim.possible_questions),
+        "exclusion_scope": list(claim.exclusion_scope),
+        "granularity": claim.granularity,
+        "source_document_ref": claim.source_document_ref,
+        "source_unit_ref": claim.source_unit_ref,
+        "embedding_ref": claim.embedding_ref,
+        "embedding_model_id": claim.embedding_model_id,
+        "embedding_dimensions": claim.dimensions,
+        "embedding_status": "embedded",
+        "node_ref": raw_claim_node_ref(
+            workflow_run_id=claim.workflow_run_id,
+            group_ref=group_ref,
+            observation_ref=claim.observation_ref,
+        ),
+        "node_kind": "raw",
+        "node_active": True,
+        "node_status": "active",
+        "member_rank": member_rank,
+        "member_kind": "raw_claim",
+    }
+
+
+def _candidate_edge_count_for_group(*, group, edges) -> int:
+    members = set(group.member_observation_refs)
+    return sum(
+        1
+        for edge in edges
+        if edge.left_observation_ref in members
+        and edge.right_observation_ref in members
+    )
 
 
 def _payload_text(

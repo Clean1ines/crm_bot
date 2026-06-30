@@ -27,6 +27,7 @@ _ALLOWED_PAYLOAD_KEYS = frozenset(
         "batch_count",
         "scheduled_work_item_count",
         "semantic_meaning",
+        "clusters",
     }
 )
 
