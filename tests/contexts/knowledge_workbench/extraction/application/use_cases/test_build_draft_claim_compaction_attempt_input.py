@@ -170,7 +170,7 @@ def _batch(
         group_ref="group-1",
         prompt_variant=prompt_variant,
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         member_observation_refs=("claim-a", "claim-b"),
     )
 
@@ -233,7 +233,7 @@ async def test_builds_single_draft_claim_enrichment_attempt_input() -> None:
         group_ref="group-1",
         prompt_variant="single_draft_claim_enrichment",
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         member_observation_refs=("claim-a",),
     )
     use_case = BuildDraftClaimCompactionAttemptInput(
@@ -364,7 +364,7 @@ async def test_reduced_rewrite_builds_payload_from_compacted_node_refs() -> None
         group_ref="group-1",
         prompt_variant="reduced_rewrite",
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         member_observation_refs=("compacted-b", "compacted-a"),
     )
     use_case = BuildDraftClaimCompactionAttemptInput(
@@ -395,7 +395,7 @@ async def test_reduced_rewrite_is_unavailable_without_compacted_node_refs() -> N
         group_ref="group-1",
         prompt_variant="reduced_rewrite",
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         member_observation_refs=("claim-a", "claim-b"),
     )
     use_case = BuildDraftClaimCompactionAttemptInput(
@@ -438,7 +438,7 @@ async def test_mixed_builds_payload_from_compacted_node_and_raw_claim_ref() -> N
         group_ref="group-1",
         prompt_variant="mixed",
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         member_observation_refs=("compacted-a", raw_node_ref),
     )
     use_case = BuildDraftClaimCompactionAttemptInput(
@@ -478,7 +478,7 @@ async def test_compacted_vs_compacted_uses_enriched_prompt_contract() -> None:
         group_ref="group-1",
         prompt_variant="compacted_vs_compacted",
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         member_observation_refs=("compacted-a", "compacted-b"),
     )
     use_case = BuildDraftClaimCompactionAttemptInput(
@@ -512,7 +512,7 @@ async def test_mixed_rejects_compacted_node_from_another_cluster_state() -> None
         group_ref="group-1",
         prompt_variant="mixed",
         model_id="openai/gpt-oss-120b",
-        estimated_input_tokens=100,
+        artifact_tokens=100,
         member_observation_refs=("compacted-from-other-group", raw_node_ref),
     )
     use_case = BuildDraftClaimCompactionAttemptInput(

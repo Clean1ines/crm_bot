@@ -22,14 +22,14 @@ def _raw(
     ref: str,
     *,
     active: bool = True,
-    estimated_input_tokens: int = 1,
+    artifact_tokens: int = 1,
 ) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
         node_ref=ref,
         node_kind=DraftClaimCompactionNodeKind.RAW,
         source_claim_refs=(f"source-{ref}",),
         active=active,
-        estimated_input_tokens=estimated_input_tokens,
+        artifact_tokens=artifact_tokens,
     )
 
 
@@ -37,7 +37,7 @@ def _compacted(
     ref: str,
     *,
     active: bool = True,
-    estimated_input_tokens: int = 1,
+    artifact_tokens: int = 1,
     source_claim_refs: tuple[str, ...] | None = None,
 ) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
@@ -45,7 +45,7 @@ def _compacted(
         node_kind=DraftClaimCompactionNodeKind.COMPACTED,
         source_claim_refs=source_claim_refs or (f"source-{ref}",),
         active=active,
-        estimated_input_tokens=estimated_input_tokens,
+        artifact_tokens=artifact_tokens,
     )
 
 
@@ -109,9 +109,9 @@ def test_next_work_item_carries_prompt_estimate_from_node_refs() -> None:
     decision = _plan(
         _state(
             nodes=(
-                _compacted("A", estimated_input_tokens=1200),
-                _compacted("B", estimated_input_tokens=1400),
-                _raw("X", estimated_input_tokens=999),
+                _compacted("A", artifact_tokens=1200),
+                _compacted("B", artifact_tokens=1400),
+                _raw("X", artifact_tokens=999),
             ),
         )
     )
@@ -121,16 +121,20 @@ def test_next_work_item_carries_prompt_estimate_from_node_refs() -> None:
         is DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED
     )
     assert decision.node_refs == ("A", "B")
-    assert decision.next_work_item.estimated_prompt_tokens == 4750
-    assert decision.next_work_item.estimated_completion_tokens == 2600
+    assert decision.next_work_item.prompt_tokens == 2150
+    assert decision.next_work_item.artifact_tokens == 2600
+    assert decision.next_work_item.input_tokens == 4750
+    assert decision.next_work_item.prompt_tokens == 2150
+    assert decision.next_work_item.artifact_tokens == 2600
+    assert decision.next_work_item.input_tokens == 4750
 
 
 def test_compacted_pair_uses_enriched_prompt_for_tpm_boundary() -> None:
     decision = _plan(
         _state(
             nodes=(
-                _compacted("A", estimated_input_tokens=1475),
-                _compacted("B", estimated_input_tokens=1475),
+                _compacted("A", artifact_tokens=1475),
+                _compacted("B", artifact_tokens=1475),
             ),
         )
     )
@@ -139,8 +143,12 @@ def test_compacted_pair_uses_enriched_prompt_for_tpm_boundary() -> None:
         DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
     )
     assert decision.node_refs == ("A", "B")
-    assert decision.next_work_item.estimated_prompt_tokens == 5100
-    assert decision.next_work_item.estimated_completion_tokens == 2950
+    assert decision.next_work_item.prompt_tokens == 2150
+    assert decision.next_work_item.artifact_tokens == 2950
+    assert decision.next_work_item.input_tokens == 5100
+    assert decision.next_work_item.prompt_tokens == 2150
+    assert decision.next_work_item.artifact_tokens == 2950
+    assert decision.next_work_item.input_tokens == 5100
 
 
 def test_known_different_compacted_pair_blocks_raw_bridge_to_other_side() -> None:
@@ -197,9 +205,9 @@ def test_estimated_tpm_overflow_uses_pending_raw_as_bridge_before_dispatch() -> 
     decision = _plan(
         _state(
             nodes=(
-                _compacted("A", estimated_input_tokens=1600),
-                _compacted("B", estimated_input_tokens=1600),
-                _raw("X", estimated_input_tokens=100),
+                _compacted("A", artifact_tokens=1600),
+                _compacted("B", artifact_tokens=1600),
+                _raw("X", artifact_tokens=100),
             ),
         )
     )
@@ -212,8 +220,8 @@ def test_estimated_tpm_overflow_without_bridge_waits_for_user_choice() -> None:
     decision = _plan(
         _state(
             nodes=(
-                _compacted("A", estimated_input_tokens=1600),
-                _compacted("B", estimated_input_tokens=1600),
+                _compacted("A", artifact_tokens=1600),
+                _compacted("B", artifact_tokens=1600),
             ),
         )
     )
@@ -328,7 +336,7 @@ def test_user_choice_boundary_when_reduced_payload_is_too_large() -> None:
             ),
             budget_fit=DraftClaimCompactionBudgetFit(
                 status=DraftClaimCompactionBudgetFitStatus.TOO_LARGE_EVEN_REDUCED,
-                estimated_input_tokens=150000,
+                artifact_tokens=150000,
             ),
         )
     )

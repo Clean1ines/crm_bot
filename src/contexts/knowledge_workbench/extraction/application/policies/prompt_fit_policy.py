@@ -47,7 +47,7 @@ class PromptFitDecisionKind(StrEnum):
 @dataclass(frozen=True, slots=True)
 class PromptFitDecision:
     kind: PromptFitDecisionKind
-    estimated_input_tokens: int
+    input_tokens: int
     output_token_budget: int
     context_window_tokens: int
     max_output_tokens: int
@@ -55,7 +55,7 @@ class PromptFitDecision:
 
 class PromptFitPolicy:
     def decide(self, input: SourceUnitFitInput) -> PromptFitDecision:
-        estimated_input_tokens = (
+        input_tokens = (
             input.prompt_envelope.static_prompt_token_estimate
             + input.source_text_token_estimate
         )
@@ -65,14 +65,14 @@ class PromptFitPolicy:
 
         if output_token_budget > max_output_tokens:
             decision_kind = PromptFitDecisionKind.OUTPUT_BUDGET_TOO_LARGE
-        elif estimated_input_tokens + output_token_budget > context_window_tokens:
+        elif input_tokens + output_token_budget > context_window_tokens:
             decision_kind = PromptFitDecisionKind.INPUT_TOO_LARGE
         else:
             decision_kind = PromptFitDecisionKind.FITS
 
         return PromptFitDecision(
             kind=decision_kind,
-            estimated_input_tokens=estimated_input_tokens,
+            input_tokens=input_tokens,
             output_token_budget=output_token_budget,
             context_window_tokens=context_window_tokens,
             max_output_tokens=max_output_tokens,

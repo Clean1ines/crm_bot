@@ -7,12 +7,11 @@ vertical. Queue-based FAQ Workbench document upload is retired.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 from uuid import UUID
 import asyncpg
 from fastapi import (
@@ -28,6 +27,7 @@ from fastapi import (
     UploadFile,
 )
 from starlette.responses import StreamingResponse
+
 
 from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.json_types import JsonObject
@@ -67,6 +67,9 @@ from src.contexts.knowledge_workbench.observability.application.models.frontend_
 from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
     PostgresFrontendWorkflowEventRepository,
 )
+from src.interfaces.realtime.redis_frontend_workflow_event_bus import (
+    subscribe_frontend_workflow_events,
+)
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
 )
@@ -85,7 +88,6 @@ from src.interfaces.composition.knowledge_extraction_after_upload_composition im
 from src.interfaces.composition.knowledge_extraction_workflow_after_upload import (
     RunKnowledgeExtractionWorkflowAfterUploadCommand,
 )
-from src.interfaces.composition.prepare_llm_dispatch_batch import AsyncPool
 from src.interfaces.composition.knowledge_extraction_workflow_pause_resume import (
     make_pause_knowledge_extraction_workflow,
     make_resume_knowledge_extraction_workflow_transition,
@@ -114,6 +116,14 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_o
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_observation_read_repository import (
     DraftClaimObservationReadConnectionLike,
     PostgresDraftClaimObservationReadRepository,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
+    DraftClaimCompactionBatchReadModel,
+    DraftClaimCompactionGroupMemberReadModel,
+    DraftClaimCompactionGroupReadModel,
+)
+from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_plan_repository import (
+    PostgresDraftClaimCompactionPlanRepository,
 )
 from src.contexts.knowledge_workbench.source_management.application.ports.source_management_repository_port import (
     SourceManagementRepositoryPort,
@@ -153,6 +163,12 @@ from src.contexts.knowledge_workbench.curation.infrastructure.postgres.postgres_
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
+)
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_reduction_models import (
+    DraftClaimCompactionFrontierReadModel,
+    DraftClaimCompactionFrontierNodeReadModel,
+    DraftClaimCompactionNodeReadModel,
+    DraftClaimCompactionPendingReductionWorkReadModel,
 )
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
     DraftClaimCompactionReductionStateConnectionLike,
@@ -209,6 +225,13 @@ from src.interfaces.http.dependencies import (
 )
 
 logger = get_logger(__name__)
+
+
+class AsyncPool(Protocol):
+    async def acquire(self) -> object: ...
+
+    async def release(self, connection: object) -> None: ...
+
 
 router = APIRouter(prefix="/api/projects/{project_id}/knowledge", tags=["knowledge"])
 
@@ -428,12 +451,16 @@ def _document_card_lifecycle_state(status: object) -> str:
     normalized = str(status or "").strip().lower()
     if normalized in {"processing", "pending"}:
         return "processing"
+    if normalized in {"paused", "manual_pause", "manually_paused"}:
+        return "paused"
     if normalized in {"cancelled", "canceled", "cancelled_by_user"}:
         return "cancelled"
     if normalized in {"error", "failed"}:
         return "failed"
     if normalized in {"processed", "completed", "done"}:
         return "ready"
+    if normalized == "published":
+        return "published"
     return "processing"
 
 
@@ -453,6 +480,7 @@ def _workbench_document_card_view_fallback(
         else 0
     )
     running = lifecycle_state == "processing"
+    paused = lifecycle_state == "paused"
 
     return {
         "document_id": document_id,
@@ -462,7 +490,7 @@ def _workbench_document_card_view_fallback(
         "lifecycle_state": lifecycle_state,
         "retention_state": "retained",
         "transient_purged": False,
-        "resume_available": False,
+        "resume_available": paused,
         "status_i18n_key": f"knowledge.workbench.status.{lifecycle_state}",
         "default_status_label": (
             "Обрабатывается"
@@ -486,7 +514,7 @@ def _workbench_document_card_view_fallback(
             else "Документ обработан."
         ),
         "timer": {
-            "mode": "running" if running else "stopped",
+            "mode": "running" if running else "paused" if paused else "stopped",
             "active_elapsed_seconds": 0,
             "wall_elapsed_seconds": 0,
             "current_active_started_at": (
@@ -544,6 +572,17 @@ def _workbench_document_card_view_fallback(
                 "reason_code": None if running else "not_running",
                 "confirmation_i18n_key": None,
                 "default_confirmation": "Остановить обработку документа?",
+            },
+            {
+                "action_id": "resume_processing",
+                "visible": paused,
+                "enabled": paused,
+                "tone": "primary",
+                "i18n_key": "knowledge.actions.resume",
+                "default_label": "Продолжить",
+                "reason_code": None if paused else "not_paused",
+                "confirmation_i18n_key": None,
+                "default_confirmation": "Продолжить обработку документа?",
             },
             {
                 "action_id": "delete_document",
@@ -767,6 +806,196 @@ def _draft_claim_observation_read_model(
             "prompt_version": item.prompt_version,
             "claim_index": item.claim_index,
         },
+        "created_at": item.created_at.isoformat(),
+    }
+
+
+def _derived_compaction_work_item_id(*, workflow_run_id: str, batch_ref: str) -> str:
+    return f"claim-compaction:{workflow_run_id}:{batch_ref}"
+
+
+def _draft_claim_compaction_node_read_model(
+    item: DraftClaimCompactionNodeReadModel,
+) -> dict[str, object]:
+    return {
+        "node_ref": item.node_ref,
+        "workflow_run_id": item.workflow_run_id,
+        "group_ref": item.group_ref,
+        "node_kind": item.node_kind,
+        "active": item.active,
+        "source_claim_refs": list(item.source_claim_refs),
+        "source_claim_count": len(item.source_claim_refs),
+        "supersedes_node_refs": list(item.supersedes_node_refs),
+        "supersedes_node_count": len(item.supersedes_node_refs),
+        "artifact_tokens": item.artifact_tokens,
+        "compacted_key": item.compacted_key,
+        "compacted_claim": item.compacted_claim,
+        "compacted_claim_kind": item.compacted_claim_kind,
+        "compacted_granularity": item.compacted_granularity,
+        "compacted_merge_decision": item.compacted_merge_decision,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def _draft_claim_compaction_frontier_node_read_model(
+    item: DraftClaimCompactionFrontierNodeReadModel,
+) -> dict[str, object]:
+    return {
+        "node_ref": item.node_ref,
+        "workflow_run_id": item.workflow_run_id,
+        "group_ref": item.group_ref,
+        "node_kind": item.node_kind,
+        "active": item.active,
+        "frontier_state": item.frontier_state,
+        "source_claim_refs": list(item.source_claim_refs),
+        "source_claim_count": item.source_claim_count,
+        "supersedes_node_refs": list(item.supersedes_node_refs),
+        "supersedes_node_count": item.supersedes_node_count,
+        "artifact_tokens": item.artifact_tokens,
+        "compacted_key": item.compacted_key,
+        "compacted_claim": item.compacted_claim,
+        "compacted_claim_kind": item.compacted_claim_kind,
+        "compacted_granularity": item.compacted_granularity,
+        "compacted_merge_decision": item.compacted_merge_decision,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def _draft_claim_compaction_pending_work_read_model(
+    item: DraftClaimCompactionPendingReductionWorkReadModel,
+) -> dict[str, object]:
+    return {
+        "workflow_run_id": item.workflow_run_id,
+        "group_ref": item.group_ref,
+        "batch_ref": item.batch_ref,
+        "work_item_id": item.work_item_id,
+        "input_node_refs": list(item.input_node_refs),
+        "input_claim_refs": list(item.input_claim_refs),
+        "work_item_status": item.work_item_status,
+        "dispatch_attempt_id": item.dispatch_attempt_id,
+        "capacity_window_key": item.capacity_window_key,
+        "capacity_waiting": item.capacity_waiting,
+        "provider": item.provider,
+        "account_ref": item.account_ref,
+        "model_id": item.model_id,
+        "waiting_reason": item.waiting_reason,
+        "created_at": item.created_at.isoformat()
+        if item.created_at is not None
+        else None,
+        "updated_at": item.updated_at.isoformat()
+        if item.updated_at is not None
+        else None,
+    }
+
+
+def _draft_claim_compaction_frontier_read_model(
+    item: DraftClaimCompactionFrontierReadModel,
+    *,
+    limit: int,
+    offset: int,
+    include_inactive: bool,
+) -> dict[str, object]:
+    return {
+        "workflow_run_id": item.workflow_run_id,
+        "group_ref": item.group_ref,
+        "include_inactive": include_inactive,
+        "count": len(item.rows),
+        "limit": limit,
+        "offset": offset,
+        "summary": {
+            "workflow_run_id": item.summary.workflow_run_id,
+            "group_ref": item.summary.group_ref,
+            "group_count": item.summary.group_count,
+            "active_raw_count": item.summary.active_raw_count,
+            "active_compacted_count": item.summary.active_compacted_count,
+            "inactive_node_count": item.summary.inactive_node_count,
+            "superseded_node_count": item.summary.superseded_node_count,
+            "total_node_count": item.summary.total_node_count,
+            "group_done_count": item.summary.group_done_count,
+            "all_groups_compacted": item.summary.all_groups_compacted,
+        },
+        "separation_summary": {
+            "edge_count": item.separation_summary.edge_count,
+            "origin_count": item.separation_summary.origin_count,
+            "affected_active_node_count": (
+                item.separation_summary.affected_active_node_count
+            ),
+            "sample_origin_pairs": [
+                list(pair) for pair in item.separation_summary.sample_origin_pairs
+            ],
+        },
+        "pending_work_summary": {
+            "pending_work_item_count": item.pending_work_summary.pending_work_item_count,
+            "leased_or_running_count": item.pending_work_summary.leased_or_running_count,
+            "waiting_for_capacity_count": (
+                item.pending_work_summary.waiting_for_capacity_count
+            ),
+            "next_work_scheduled_count": (
+                item.pending_work_summary.next_work_scheduled_count
+            ),
+        },
+        "rows": [
+            _draft_claim_compaction_frontier_node_read_model(row) for row in item.rows
+        ],
+        "pending_work_items": [
+            _draft_claim_compaction_pending_work_read_model(row)
+            for row in item.pending_work_items
+        ],
+    }
+
+
+def _draft_claim_cluster_batch_read_model(
+    item: DraftClaimCompactionBatchReadModel,
+) -> dict[str, object]:
+    return {
+        "batch_ref": item.batch_ref,
+        "group_ref": item.group_ref,
+        "workflow_run_id": item.workflow_run_id,
+        "prompt_variant": item.prompt_variant,
+        "model_id": item.model_id,
+        "artifact_tokens": item.artifact_tokens,
+        "batch_status": item.batch_status,
+        "member_count": item.member_count,
+        "derived_work_item_id": _derived_compaction_work_item_id(
+            workflow_run_id=item.workflow_run_id,
+            batch_ref=item.batch_ref,
+        ),
+        "created_at": item.created_at.isoformat(),
+    }
+
+
+def _draft_claim_cluster_group_read_model(
+    item: DraftClaimCompactionGroupReadModel,
+    *,
+    batches: tuple[DraftClaimCompactionBatchReadModel, ...],
+) -> dict[str, object]:
+    return {
+        "group_ref": item.group_ref,
+        "workflow_run_id": item.workflow_run_id,
+        "source_document_ref": item.source_document_ref,
+        "embedding_model_id": item.embedding_model_id,
+        "group_algorithm": item.group_algorithm,
+        "group_threshold": item.group_threshold,
+        "member_count": item.member_count,
+        "artifact_tokens": item.artifact_tokens,
+        "requires_split": item.requires_split,
+        "created_at": item.created_at.isoformat(),
+        "batches": [_draft_claim_cluster_batch_read_model(batch) for batch in batches],
+    }
+
+
+def _draft_claim_cluster_member_read_model(
+    item: DraftClaimCompactionGroupMemberReadModel,
+) -> dict[str, object]:
+    return {
+        "group_ref": item.group_ref,
+        "observation_ref": item.observation_ref,
+        "embedding_ref": item.embedding_ref,
+        "source_unit_ref": item.source_unit_ref,
+        "member_rank": item.member_rank,
+        "member_kind": item.member_kind,
         "created_at": item.created_at.isoformat(),
     }
 
@@ -1029,6 +1258,14 @@ async def upload_knowledge(
         llm_executor=llm_executor,
     )
 
+    logger.info(
+        "Knowledge upload accepted",
+        project_id=project_id,
+        file_name=file.filename,
+        source_format=source_format,
+        content_size_bytes=len(file_content),
+        preprocessing_mode=preprocessing_mode,
+    )
     try:
         result = await workflow_runner.execute(
             RunKnowledgeExtractionWorkflowAfterUploadCommand(
@@ -1064,6 +1301,19 @@ async def upload_knowledge(
             status_code=500,
             detail="Source ingestion completed without source_document_ref",
         )
+
+    logger.info(
+        "Knowledge upload workflow result",
+        project_id=project_id,
+        workflow_run_id=result.workflow_run_id,
+        source_document_ref=source_document_ref,
+        source_ingestion_completed=result.source_ingestion_completed,
+        source_unit_count=result.source_unit_count,
+        drained_inspected_count=result.drained_inspected_count,
+        drained_dispatched_count=result.drained_dispatched_count,
+        blocked_command_type=result.blocked_command_type,
+        blocked_reason=result.blocked_reason,
+    )
 
     return {
         "status": "knowledge_extraction_workflow_started",
@@ -1261,31 +1511,57 @@ async def stream_knowledge_frontend_workflow_events(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     async def event_stream():
-        poll_cursor = cursor
+        replay_cursor = cursor
         async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
             repository = PostgresFrontendWorkflowEventRepository(
                 cast(asyncpg.Connection, raw_connection)
             )
-            while True:
-                events = await repository.list_frontend_events(
-                    workflow_run_id,
-                    poll_cursor,
-                    200,
-                )
-                for event in events:
-                    poll_cursor = FrontendWorkflowEventCursor.from_event(event)
+            replay_events = await repository.list_frontend_events(
+                workflow_run_id,
+                replay_cursor,
+                200,
+            )
+
+        for event in replay_events:
+            replay_cursor = FrontendWorkflowEventCursor.from_event(event)
+            if (
+                event.project_id == project_id
+                and event.document_id == document_id
+                and event.workflow_run_id == workflow_run_id
+            ):
+                yield _frontend_workflow_event_sse(event)
+
+        if await request.is_disconnected():
+            return
+
+        try:
+            async with subscribe_frontend_workflow_events(
+                workflow_run_id=workflow_run_id,
+            ) as subscription:
+                while True:
+                    if await request.is_disconnected():
+                        return
+
+                    event = await subscription.next_event(timeout_seconds=15.0)
+                    if event is None:
+                        yield ": keepalive\n\n"
+                        continue
+
                     if (
                         event.project_id == project_id
                         and event.document_id == document_id
                         and event.workflow_run_id == workflow_run_id
+                        and event.source_sequence_number
+                        > replay_cursor.source_sequence_number
                     ):
+                        replay_cursor = FrontendWorkflowEventCursor.from_event(event)
                         yield _frontend_workflow_event_sse(event)
-
-                if await request.is_disconnected():
-                    return
-                if not events:
-                    yield ": keepalive\n\n"
-                await asyncio.sleep(1.0)
+        except Exception as exc:
+            logger.warning(
+                "Frontend workflow event Redis stream unavailable",
+                extra={"error": str(exc)},
+            )
+            return
 
     return StreamingResponse(
         event_stream(),
@@ -1370,6 +1646,103 @@ async def source_unit_draft_claims(
     }
 
 
+@router.get("/workflows/{workflow_run_id}/draft-claim-compaction-frontier")
+async def workflow_draft_claim_compaction_frontier(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    group_ref: str | None = Query(default=None),
+    include_inactive: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+    normalized_group_ref = _normalize_optional_query_text(group_ref)
+
+    repository = PostgresDraftClaimCompactionReductionStateRepository(pool)
+    try:
+        frontier = await repository.list_compaction_frontier_for_workflow(
+            workflow_run_id=normalized_workflow_run_id,
+            group_ref=normalized_group_ref,
+            include_inactive=include_inactive,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return _draft_claim_compaction_frontier_read_model(
+        frontier,
+        limit=limit,
+        offset=offset,
+        include_inactive=include_inactive,
+    )
+
+
+@router.get("/workflows/{workflow_run_id}/draft-claim-compaction-nodes")
+async def workflow_draft_claim_compaction_nodes(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    group_ref: str | None = Query(default=None),
+    node_ref: str | None = Query(default=None),
+    active_only: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+    normalized_group_ref = _normalize_optional_query_text(group_ref)
+    normalized_node_ref = _normalize_optional_query_text(node_ref)
+
+    repository = PostgresDraftClaimCompactionReductionStateRepository(pool)
+    try:
+        items = await repository.list_compaction_nodes_for_workflow(
+            workflow_run_id=normalized_workflow_run_id,
+            group_ref=normalized_group_ref,
+            node_ref=normalized_node_ref,
+            active_only=active_only,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "workflow_run_id": normalized_workflow_run_id,
+        "group_ref": normalized_group_ref,
+        "node_ref": normalized_node_ref,
+        "active_only": active_only,
+        "count": len(items),
+        "limit": limit,
+        "offset": offset,
+        "items": [_draft_claim_compaction_node_read_model(item) for item in items],
+    }
+
+
 @router.get("/workflows/{workflow_run_id}/draft-claims")
 async def workflow_draft_claims(
     project_id: str,
@@ -1428,6 +1801,108 @@ async def workflow_draft_claims(
         "limit": limit,
         "offset": offset,
         "items": [_draft_claim_observation_read_model(item) for item in items],
+    }
+
+
+@router.get("/workflows/{workflow_run_id}/draft-claim-clusters")
+async def workflow_draft_claim_clusters(
+    project_id: str,
+    workflow_run_id: str,
+    authorization: str | None = Header(default=None),
+    include_batches: bool = Query(True),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns DraftClaimClusterGroup rows for one workflow."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+
+    repository = PostgresDraftClaimCompactionPlanRepository(pool)
+    groups = await repository.list_cluster_groups_for_workflow(
+        workflow_run_id=normalized_workflow_run_id,
+        limit=limit,
+        offset=offset,
+    )
+    batches_by_group: dict[str, list[DraftClaimCompactionBatchReadModel]] = {}
+    if include_batches and groups:
+        group_refs = {group.group_ref for group in groups}
+        for batch in await repository.list_cluster_batches_for_workflow(
+            workflow_run_id=normalized_workflow_run_id,
+        ):
+            if batch.group_ref in group_refs:
+                batches_by_group.setdefault(batch.group_ref, []).append(batch)
+
+    return {
+        "workflow_run_id": normalized_workflow_run_id,
+        "count": len(groups),
+        "limit": limit,
+        "offset": offset,
+        "include_batches": include_batches,
+        "groups": [
+            _draft_claim_cluster_group_read_model(
+                group,
+                batches=tuple(batches_by_group.get(group.group_ref, ())),
+            )
+            for group in groups
+        ],
+    }
+
+
+@router.get("/workflows/{workflow_run_id}/draft-claim-clusters/{group_ref}/members")
+async def workflow_draft_claim_cluster_members(
+    project_id: str,
+    workflow_run_id: str,
+    group_ref: str,
+    authorization: str | None = Header(default=None),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    """Returns member refs for an expanded DraftClaimClusterGroup row."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    normalized_workflow_run_id = _normalize_optional_query_text(workflow_run_id)
+    normalized_group_ref = _normalize_optional_query_text(group_ref)
+    if normalized_workflow_run_id is None:
+        raise HTTPException(status_code=400, detail="workflow_run_id must be non-empty")
+    if normalized_group_ref is None:
+        raise HTTPException(status_code=400, detail="group_ref must be non-empty")
+
+    repository = PostgresDraftClaimCompactionPlanRepository(pool)
+    members = await repository.list_cluster_members_for_group(
+        workflow_run_id=normalized_workflow_run_id,
+        group_ref=normalized_group_ref,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "workflow_run_id": normalized_workflow_run_id,
+        "group_ref": normalized_group_ref,
+        "count": len(members),
+        "limit": limit,
+        "offset": offset,
+        "items": [_draft_claim_cluster_member_read_model(member) for member in members],
     }
 
 
@@ -1693,12 +2168,12 @@ async def publish_draft_claim_curation_workspace(
 
     try:
         await _enqueue_draft_claim_curation_publication(
-            pool=cast(AsyncPool, pool),
+            pool=cast(Any, pool),
             workflow_run_id=workflow_run_id,
             requested_at=datetime.now(timezone.utc),
         )
         drain_result = await make_knowledge_extraction_workflow_resume(
-            pool=cast(AsyncPool, pool),
+            pool=cast(Any, pool),
         ).execute(
             RunKnowledgeExtractionWorkflowResumeCommand(
                 project_id=project_id,
@@ -2755,36 +3230,17 @@ async def cancel_knowledge_processing(
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
 ):
-    """Cancels active Workbench processing and disables automatic recovery."""
+    """Compatibility alias for pausing current source-ingestion workflow processing."""
 
-    await _require_project_access(
+    return await stop_knowledge_source_document_processing(
         project_id=project_id,
+        source_document_ref=document_id,
         authorization=authorization,
+        reason="manual_stop",
+        pool=pool,
         project_repo=project_repo,
         user_repo=user_repo,
     )
-    from src.interfaces.composition.faq_workbench_cancel import (
-        WorkbenchCancelProcessingNotFoundError,
-        WorkbenchCancelProcessingRejectedError,
-        cancel_workbench_processing,
-    )
-
-    try:
-        return await cancel_workbench_processing(
-            pool=pool,
-            project_id=project_id,
-            document_id=document_id,
-        )
-    except WorkbenchCancelProcessingNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail="Knowledge document not found",
-        ) from exc
-    except WorkbenchCancelProcessingRejectedError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=str(exc),
-        ) from exc
 
 
 async def _delete_knowledge_document_by_source_ref(
@@ -3039,6 +3495,7 @@ async def _delete_project_orphan_knowledge_runtime_tails(
         "workflow_progress_snapshots": _deleted_row_count(progress_status),
         "timeline_entries": _deleted_row_count(timeline_status),
         "resource_usage_snapshots": _deleted_row_count(usage_status),
+        "frontend_workflow_events": _deleted_row_count(frontend_event_status),
     }
 
 
@@ -3101,6 +3558,17 @@ async def clear_knowledge(
     )
     for key, value in orphan_runtime_tail_counts.items():
         total_counts[key] = total_counts.get(key, 0) + value
+
+    logger.info(
+        "Knowledge project clear completed",
+        project_id=project_id,
+        deleted_document_count=sum(
+            1 for item in deleted_results if item["deleted"] is True
+        ),
+        source_document_refs=list(source_document_refs),
+        deleted_counts=total_counts,
+        orphan_runtime_tail_counts=orphan_runtime_tail_counts,
+    )
 
     return {
         "deleted": True,

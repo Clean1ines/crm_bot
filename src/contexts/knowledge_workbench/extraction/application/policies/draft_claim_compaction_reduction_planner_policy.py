@@ -13,10 +13,24 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionPlannerDecision,
     DraftClaimCompactionPlannerState,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_budget_profile import (
+    draft_claim_compaction_max_batch_tokens,
+    draft_claim_compaction_prompt_tokens,
+    draft_claim_compaction_request_safety_gap_tokens,
+)
 
-DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS = 2_050
-ENRICHED_CLAIM_COMPACTION_PROMPT_TOKENS = 2_150
-GPT_OSS_FREE_PLAN_TPM = 8_000
+
+def calculate_input_tokens(*, prompt_tokens: int, artifact_tokens: int) -> int:
+    return prompt_tokens + artifact_tokens
+
+
+def calculate_required_window_tokens(
+    *,
+    input_tokens: int,
+    artifact_tokens: int,
+    safety_gap_tokens: int,
+) -> int:
+    return input_tokens + artifact_tokens + safety_gap_tokens
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,7 +262,10 @@ class _LineageComparisonIndex:
             node_ref: frozenset(find(source_ref) for source_ref in source_refs)
             for node_ref, source_refs in raw_source_claim_refs_by_node_ref.items()
         }
-        incompatible_source_pairs: list[tuple[frozenset[str], frozenset[str]]] = []
+        incompatible_source_pairs: list[tuple[frozenset[str], frozenset[str]]] = [
+            (frozenset((edge.origin_ref_a,)), frozenset((edge.origin_ref_b,)))
+            for edge in state.origin_separation_edges
+        ]
         for comparison in state.comparisons:
             if comparison.status is not DraftClaimCompactionComparisonStatus.NOT_MERGED:
                 continue
@@ -521,9 +538,8 @@ def _work_item_fits_primary_tpm(
     work_type: DraftClaimCompactionNextWorkItemType,
     node_refs: tuple[str, ...],
 ) -> bool:
-    task_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
-    prompt_tokens = _prompt_tokens_for_work_type(work_type)
-    return prompt_tokens + task_tokens + task_tokens <= GPT_OSS_FREE_PLAN_TPM
+    artifact_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
+    return artifact_tokens <= draft_claim_compaction_max_batch_tokens(work_type.value)
 
 
 def _node_pairs(
@@ -548,18 +564,39 @@ def _decision(
     node_refs: tuple[str, ...],
     reason: str,
 ) -> DraftClaimCompactionPlannerDecision:
-    task_tokens = _estimated_task_tokens(
+    if work_type is DraftClaimCompactionNextWorkItemType.DONE:
+        return DraftClaimCompactionPlannerDecision(
+            next_work_item=DraftClaimCompactionNextWorkItem(
+                work_type=work_type,
+                node_refs=node_refs,
+                primary_model_id=state.primary_model_id,
+            ),
+            reason=reason,
+        )
+
+    artifact_tokens = _estimated_task_tokens(
         state=state,
         node_refs=node_refs,
     )
     prompt_tokens = _prompt_tokens_for_work_type(work_type)
+    input_tokens = calculate_input_tokens(
+        prompt_tokens=prompt_tokens,
+        artifact_tokens=artifact_tokens,
+    )
+    required_window_tokens = calculate_required_window_tokens(
+        input_tokens=input_tokens,
+        artifact_tokens=artifact_tokens,
+        safety_gap_tokens=draft_claim_compaction_request_safety_gap_tokens(),
+    )
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=work_type,
             node_refs=node_refs,
             primary_model_id=state.primary_model_id,
-            estimated_prompt_tokens=prompt_tokens + task_tokens,
-            estimated_completion_tokens=task_tokens,
+            prompt_tokens=prompt_tokens,
+            artifact_tokens=artifact_tokens,
+            input_tokens=input_tokens,
+            required_window_tokens=required_window_tokens,
         ),
         reason=reason,
     )
@@ -576,7 +613,7 @@ def _estimated_task_tokens(
         node = nodes_by_ref.get(node_ref)
         if node is None:
             continue
-        total += node.estimated_input_tokens
+        total += node.artifact_tokens
 
     if node_refs and total <= 0:
         return 1
@@ -586,13 +623,7 @@ def _estimated_task_tokens(
 def _prompt_tokens_for_work_type(
     work_type: DraftClaimCompactionNextWorkItemType,
 ) -> int:
-    if work_type in {
-        DraftClaimCompactionNextWorkItemType.COMPACTED_VS_COMPACTED,
-        DraftClaimCompactionNextWorkItemType.MIXED,
-        DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
-    }:
-        return ENRICHED_CLAIM_COMPACTION_PROMPT_TOKENS
-    return DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS
+    return draft_claim_compaction_prompt_tokens(work_type.value)
 
 
 def _wait_for_user_model_choice(
@@ -602,7 +633,16 @@ def _wait_for_user_model_choice(
     node_refs: tuple[str, ...],
     resume_work_type: DraftClaimCompactionNextWorkItemType,
 ) -> DraftClaimCompactionPlannerDecision:
-    task_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
+    artifact_tokens = _estimated_task_tokens(state=state, node_refs=node_refs)
+    prompt_tokens = _prompt_tokens_for_work_type(resume_work_type)
+    input_tokens = calculate_input_tokens(
+        prompt_tokens=prompt_tokens, artifact_tokens=artifact_tokens
+    )
+    required_window_tokens = calculate_required_window_tokens(
+        input_tokens=input_tokens,
+        artifact_tokens=artifact_tokens,
+        safety_gap_tokens=draft_claim_compaction_request_safety_gap_tokens(),
+    )
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE,
@@ -610,10 +650,10 @@ def _wait_for_user_model_choice(
             primary_model_id=state.primary_model_id,
             degraded_model_id=state.degraded_candidate_model_id,
             user_choice_resume_work_type=resume_work_type,
-            estimated_prompt_tokens=(
-                _prompt_tokens_for_work_type(resume_work_type) + task_tokens
-            ),
-            estimated_completion_tokens=task_tokens,
+            prompt_tokens=prompt_tokens,
+            artifact_tokens=artifact_tokens,
+            input_tokens=input_tokens,
+            required_window_tokens=required_window_tokens,
         ),
         reason=reason,
     )

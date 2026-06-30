@@ -659,6 +659,7 @@ async def test_rejects_non_pending_command() -> None:
         )
 
 
+
 def _decision(
     work_type: DraftClaimCompactionNextWorkItemType,
     *,
@@ -666,6 +667,11 @@ def _decision(
     estimated_prompt_tokens: int = 1,
     estimated_completion_tokens: int | None = None,
 ) -> DraftClaimCompactionPlannerDecision:
+    artifact_tokens = (
+        4000 if estimated_completion_tokens is None else estimated_completion_tokens
+    )
+    input_tokens = estimated_prompt_tokens + artifact_tokens
+    required_window_tokens = input_tokens + artifact_tokens + 256
     return DraftClaimCompactionPlannerDecision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=work_type,
@@ -680,10 +686,10 @@ def _decision(
                 is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
                 else None
             ),
-            estimated_prompt_tokens=estimated_prompt_tokens,
-            estimated_completion_tokens=4000
-            if estimated_completion_tokens is None
-            else estimated_completion_tokens,
+            prompt_tokens=estimated_prompt_tokens,
+            artifact_tokens=artifact_tokens,
+            input_tokens=input_tokens,
+            required_window_tokens=required_window_tokens,
         ),
         reason="test decision",
     )
@@ -767,9 +773,9 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         == "knowledge-workbench-draft-claim-compaction-dispatch"
     )
     assert dispatch_payload["account_capacities"] == ()
-    assert dispatch_payload["profile"]["estimated_prompt_tokens"] == 1
-    assert dispatch_payload["profile"]["estimated_completion_tokens"] == 4000
-    assert dispatch_payload["profile"]["estimated_requests"] == 1
+    assert dispatch_payload["profile"]["prompt_tokens"] == 1
+    assert dispatch_payload["profile"]["artifact_tokens"] == 4000
+    assert dispatch_payload["profile"]["request_count"] == 1
     scheduled_payload = scheduling.saved_payloads[0]
     assert isinstance(scheduled_payload, dict)
     assert scheduled_payload["compacted_node_refs"] == [
@@ -777,13 +783,13 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
         "compacted-b",
     ]
     assert scheduled_payload["raw_claim_refs"] == []
-    assert scheduled_payload["estimated_prompt_tokens"] == 1
-    assert scheduled_payload["estimated_completion_tokens"] == 4000
+    assert scheduled_payload["prompt_tokens"] == 1
+    assert scheduled_payload["artifact_tokens"] == 4000
     assert [message["role"] for message in scheduled_payload["provider_messages"]] == [
         "system",
         "user",
     ]
-    assert scheduled_payload["estimated_requests"] == 1
+    assert scheduled_payload["request_count"] == 1
     assert scheduled_payload["llm_capacity_estimate"] == {
         "estimated_input_tokens": 1,
         "reserved_output_tokens": 4000,
@@ -869,9 +875,11 @@ def _expected_next_work_schedule_payload(
         "raw_claim_refs": list(node_refs)
         if work_type is DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT
         else [],
-        "estimated_prompt_tokens": 1,
-        "estimated_completion_tokens": 4000,
-        "estimated_requests": 1,
+        "prompt_tokens": 1,
+        "artifact_tokens": 4000,
+        "input_tokens": 4001,
+        "required_window_tokens": 8257,
+        "request_count": 1,
         "llm_capacity_estimate": {
             "estimated_input_tokens": 1,
             "reserved_output_tokens": 4000,

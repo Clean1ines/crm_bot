@@ -12,6 +12,12 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
     EnsureWorkItemsScheduledCommand,
     WorkItemSchedulePlan,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_budget_profile import (
+    DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+    draft_claim_compaction_artifact_tokens,
+    draft_claim_compaction_prompt_tokens,
+    draft_claim_compaction_request_safety_gap_tokens,
+)
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
@@ -81,8 +87,6 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 )
 
 WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
-DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
-DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS = 2050
 DRAFT_CLAIM_COMPACTION_WORKER_REF = (
     "knowledge-workbench-draft-claim-compaction-dispatch"
 )
@@ -181,22 +185,20 @@ class HandleClusterDraftClaimsCommandHandler:
                 ),
                 created_at=workflow_command.updated_at,
             )
+        schedule_plans = tuple(
+            _plan(
+                workflow_run_id,
+                batch,
+                claims_by_ref=claims_by_ref,
+            )
+            for batch in budget_plan.batches
+        )
         schedule = await EnsureWorkItemsScheduled(
             work_item_scheduling_repository
-        ).execute(
-            EnsureWorkItemsScheduledCommand(
-                plans=tuple(
-                    _plan(
-                        workflow_run_id,
-                        batch,
-                        claims_by_ref=claims_by_ref,
-                    )
-                    for batch in budget_plan.batches
-                )
-            )
-        )
+        ).execute(EnsureWorkItemsScheduledCommand(plans=schedule_plans))
         if schedule.conflict_count:
             raise ValueError("draft claim compaction work item schedule conflict")
+
 
         scheduled_work_item_count = (
             schedule.created_count + schedule.already_exists_count
@@ -280,6 +282,7 @@ class HandleClusterDraftClaimsCommandHandler:
         )
 
 
+
 def _payload_text(
     payload: Mapping[str, object],
     key: str,
@@ -336,6 +339,7 @@ def _prepare_dispatch_batch_command(
                 "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
                 "requested_items": scheduled_work_item_count,
                 "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+                "profile": _draft_claim_compaction_dispatch_profile_payload(),
             },
         },
         status=WorkflowCommandStatus.PENDING,
@@ -343,6 +347,16 @@ def _prepare_dispatch_batch_command(
         created_at=occurred_at,
         updated_at=occurred_at,
     )
+
+
+def _draft_claim_compaction_dispatch_profile_payload() -> dict[str, object]:
+    prompt_tokens = draft_claim_compaction_prompt_tokens("draft_vs_draft")
+    return {
+        "profile_id": "draft_claim_compaction.real_due_batch",
+        "input_tokens": prompt_tokens,
+        "artifact_tokens": 0,
+        "request_count": 1,
+    }
 
 
 def _command_causation_scope(workflow_command: WorkflowCommand) -> str:
@@ -362,9 +376,7 @@ def _raw_nodes_for_group(
             workflow_run_id=workflow_run_id,
             group_ref=group.group_ref,
             observation_ref=observation_ref,
-            estimated_input_tokens=_estimated_raw_claim_tokens(
-                claims_by_ref[observation_ref]
-            ),
+            artifact_tokens=_estimated_raw_claim_tokens(claims_by_ref[observation_ref]),
         )
         for observation_ref in group.member_observation_refs
     )
@@ -375,7 +387,7 @@ def _build_initial_raw_node(
     workflow_run_id: str,
     group_ref: str,
     observation_ref: str,
-    estimated_input_tokens: int,
+    artifact_tokens: int,
 ) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
         node_ref=raw_claim_node_ref(
@@ -392,12 +404,24 @@ def _build_initial_raw_node(
             ),
         ),
         active=True,
-        estimated_input_tokens=estimated_input_tokens,
+        artifact_tokens=artifact_tokens,
     )
 
 
 def _estimated_raw_claim_tokens(claim: DraftClaimForCompaction) -> int:
-    return max(1, len(claim.embedding_text) // 4)
+    return draft_claim_compaction_artifact_tokens(
+        "\n".join(
+            part
+            for part in (
+                claim.claim,
+                *claim.possible_questions,
+                *claim.exclusion_scope,
+                claim.granularity,
+                claim.embedding_text,
+            )
+            if part.strip()
+        )
+    )
 
 
 def _plan(
@@ -442,18 +466,23 @@ def _plan(
 
 
 def _batch_capacity_estimate(batch) -> dict[str, object]:
-    task_input_tokens = max(1, batch.estimated_input_tokens)
-    estimated_input_tokens = DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS + task_input_tokens
-    reserved_output_tokens = task_input_tokens
+    artifact_tokens = max(1, batch.artifact_tokens)
+    prompt_tokens = draft_claim_compaction_prompt_tokens(batch.prompt_variant)
+    input_tokens = prompt_tokens + artifact_tokens
+    required_window_tokens = (
+        input_tokens
+        + artifact_tokens
+        + draft_claim_compaction_request_safety_gap_tokens()
+    )
     return {
         "estimator": "draft_claim_compaction_batch_budget_policy",
-        "prompt_message_tokens": (DRAFT_CLAIM_COMPACTION_PROMPT_TOKENS,),
-        "task_input_tokens": task_input_tokens,
-        "estimated_input_tokens": estimated_input_tokens,
-        "reserved_output_tokens": reserved_output_tokens,
-        "estimated_total_tokens": estimated_input_tokens + reserved_output_tokens,
+        "budget_contract_version": "v2",
+        "model_ref": batch.model_id,
         "prompt_variant": batch.prompt_variant,
-        "model_id": batch.model_id,
+        "prompt_tokens": prompt_tokens,
+        "artifact_tokens": artifact_tokens,
+        "input_tokens": input_tokens,
+        "required_window_tokens": required_window_tokens,
     }
 
 

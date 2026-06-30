@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
@@ -29,11 +30,19 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionComparison,
     DraftClaimCompactionComparisonStatus,
     DraftClaimCompactionComponent,
+    DraftClaimCompactionFrontierNodeReadModel,
+    DraftClaimCompactionFrontierReadModel,
+    DraftClaimCompactionFrontierSummaryReadModel,
     DraftClaimCompactionComponentIncompatibility,
     DraftClaimCompactionNextWorkItemType,
     DraftClaimCompactionNode,
     DraftClaimCompactionNodeKind,
+    DraftClaimCompactionNodeReadModel,
     DraftClaimCompactionNodeSource,
+    DraftClaimCompactionPendingReductionWorkReadModel,
+    DraftClaimCompactionPendingWorkSummaryReadModel,
+    DraftClaimCompactionSeparationSummaryReadModel,
+    DraftClaimCompactionOriginSeparationEdge,
     DraftClaimCompactionPlannerState,
     DraftClaimCompactionRound,
 )
@@ -46,9 +55,14 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
     DraftClaimCompactionReductionStateRepositoryPort,
 )
 from src.domain.project_plane.json_types import JsonObject, JsonValue
-from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    estimate_tokens_roughly,
-)
+
+
+def _rough_artifact_tokens(text: str) -> int:
+    if not isinstance(text, str):
+        raise TypeError("text must be str")
+    if not text.strip():
+        return 0
+    return max(1, len(text) // 4)
 
 
 class DraftClaimCompactionReductionStateConnectionLike(Protocol):
@@ -132,7 +146,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             SELECT
                 COUNT(*) FILTER (WHERE status = 'ready') AS ready_work_item_count,
                 COUNT(*) FILTER (WHERE status = 'leased') AS leased_work_item_count,
-                COUNT(*) FILTER (WHERE status = 'deferred') AS deferred_work_item_count,
+                0::int AS deferred_work_item_count,
                 COUNT(*) FILTER (
                     WHERE status = 'retryable_failed'
                 ) AS retryable_failed_work_item_count,
@@ -146,24 +160,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     WHERE status IN (
                         'ready',
                         'leased',
-                        'deferred',
                         'retryable_failed'
                     )
                 ) AS active_work_item_count,
                 COUNT(*) FILTER (
-                    WHERE status = 'ready'
-                       OR (
-                           status IN ('deferred', 'retryable_failed')
-                           AND (
-                               next_attempt_at IS NULL
-                               OR next_attempt_at <= now()
-                           )
-                       )
+                    WHERE status IN ('ready', 'retryable_failed')
                 ) AS due_waiting_work_item_count,
-                MIN(next_attempt_at) FILTER (
-                    WHERE status IN ('deferred', 'retryable_failed')
-                      AND next_attempt_at > now()
-                ) AS next_due_at
+                NULL::timestamptz AS next_due_at
             FROM execution_work_items
             WHERE work_kind = 'knowledge_workbench.draft_claim_compaction'
               AND work_item_id LIKE $1
@@ -307,6 +310,233 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             next_due_at=_optional_datetime(work_item_counts, "next_due_at"),
         )
 
+    async def list_compaction_nodes_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str | None,
+        node_ref: str | None,
+        active_only: bool,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionNodeReadModel, ...]:
+        _read_model_require_text(workflow_run_id, "workflow_run_id")
+        if group_ref is not None:
+            _read_model_require_text(group_ref, "group_ref")
+        if node_ref is not None:
+            _read_model_require_text(node_ref, "node_ref")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError("limit must be positive int")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be non-negative int")
+        if not isinstance(active_only, bool):
+            raise TypeError("active_only must be bool")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT workflow_run_id, group_ref, node_ref, node_kind, active,
+                   source_claim_refs, supersedes_node_refs, artifact_tokens,
+                   compacted_key, compacted_claim, compacted_claim_kind,
+                   compacted_granularity, compacted_merge_decision,
+                   created_at, updated_at
+            FROM draft_claim_compaction_nodes
+            WHERE workflow_run_id = $1
+              AND ($2::text IS NULL OR group_ref = $2)
+              AND ($3::text IS NULL OR node_ref = $3)
+              AND ($4::boolean = false OR active = true)
+            ORDER BY group_ref ASC, active DESC, updated_at DESC, node_ref ASC
+            LIMIT $5 OFFSET $6
+            """,
+            workflow_run_id,
+            group_ref,
+            node_ref,
+            active_only,
+            limit,
+            offset,
+        )
+        return tuple(_node_read_model(row) for row in rows)
+
+    async def list_compaction_frontier_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str | None,
+        include_inactive: bool,
+        limit: int,
+        offset: int,
+    ) -> DraftClaimCompactionFrontierReadModel:
+        _read_model_require_text(workflow_run_id, "workflow_run_id")
+        if group_ref is not None:
+            _read_model_require_text(group_ref, "group_ref")
+        if not isinstance(include_inactive, bool):
+            raise TypeError("include_inactive must be bool")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError("limit must be positive int")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be non-negative int")
+
+        all_nodes = await self.list_compaction_nodes_for_workflow(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            node_ref=None,
+            active_only=False,
+            limit=10000,
+            offset=0,
+        )
+        group_refs = tuple(sorted({node.group_ref for node in all_nodes}))
+        planner = DraftClaimCompactionReductionPlannerPolicy()
+
+        group_done_count = 0
+        edge_pairs: list[tuple[str, str]] = []
+        edge_origins: set[str] = set()
+        separated_origins_by_group: dict[str, set[str]] = {}
+        active_raw_count = 0
+        active_compacted_count = 0
+        inactive_node_count = 0
+        superseded_node_count = 0
+
+        for node in all_nodes:
+            if node.active and node.node_kind == DraftClaimCompactionNodeKind.RAW.value:
+                active_raw_count += 1
+            if (
+                node.active
+                and node.node_kind == DraftClaimCompactionNodeKind.COMPACTED.value
+            ):
+                active_compacted_count += 1
+            if not node.active:
+                inactive_node_count += 1
+            if node.supersedes_node_refs:
+                superseded_node_count += 1
+
+        for current_group_ref in group_refs:
+            planner_state = await self.load_planner_state(
+                workflow_run_id=workflow_run_id,
+                group_ref=current_group_ref,
+            )
+            if planner_state is None:
+                continue
+            decision = planner.plan_next_step(planner_state)
+            if decision.work_type is DraftClaimCompactionNextWorkItemType.DONE:
+                group_done_count += 1
+            separated_origins = separated_origins_by_group.setdefault(
+                current_group_ref,
+                set(),
+            )
+            for edge in planner_state.origin_separation_edges:
+                edge_pairs.append(edge.pair_key)
+                edge_origins.update(edge.pair_key)
+                separated_origins.update(edge.pair_key)
+
+        affected_active_node_count = 0
+        for node in all_nodes:
+            if not node.active:
+                continue
+            if separated_origins_by_group.get(node.group_ref, set()).intersection(
+                node.source_claim_refs,
+            ):
+                affected_active_node_count += 1
+
+        visible_nodes = tuple(
+            node for node in all_nodes if include_inactive or node.active
+        )
+        paged_nodes = visible_nodes[offset : offset + limit]
+        pending_work_items = await self.list_pending_reduction_work_for_workflow(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            limit=200,
+            offset=0,
+        )
+        pending_work_summary = DraftClaimCompactionPendingWorkSummaryReadModel(
+            pending_work_item_count=sum(
+                1
+                for item in pending_work_items
+                if item.work_item_status in {"ready", "retryable_failed"}
+            ),
+            leased_or_running_count=sum(
+                1 for item in pending_work_items if item.work_item_status == "leased"
+            ),
+            waiting_for_capacity_count=sum(
+                1 for item in pending_work_items if item.capacity_waiting
+            ),
+            next_work_scheduled_count=len(pending_work_items),
+        )
+        group_count = len(group_refs)
+        return DraftClaimCompactionFrontierReadModel(
+            workflow_run_id=workflow_run_id,
+            group_ref=group_ref,
+            summary=DraftClaimCompactionFrontierSummaryReadModel(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                group_count=group_count,
+                active_raw_count=active_raw_count,
+                active_compacted_count=active_compacted_count,
+                inactive_node_count=inactive_node_count,
+                superseded_node_count=superseded_node_count,
+                total_node_count=len(all_nodes),
+                group_done_count=group_done_count,
+                all_groups_compacted=group_count > 0
+                and group_done_count == group_count,
+            ),
+            separation_summary=DraftClaimCompactionSeparationSummaryReadModel(
+                edge_count=len(set(edge_pairs)),
+                origin_count=len(edge_origins),
+                affected_active_node_count=affected_active_node_count,
+                sample_origin_pairs=tuple(sorted(set(edge_pairs))[:5]),
+            ),
+            pending_work_summary=pending_work_summary,
+            rows=tuple(_frontier_node_read_model(node) for node in paged_nodes),
+            pending_work_items=pending_work_items,
+        )
+
+    async def list_pending_reduction_work_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionPendingReductionWorkReadModel, ...]:
+        _read_model_require_text(workflow_run_id, "workflow_run_id")
+        if group_ref is not None:
+            _read_model_require_text(group_ref, "group_ref")
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise ValueError("limit must be positive int")
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("offset must be non-negative int")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT wi.work_item_id, wi.status, wi.created_at, wi.updated_at,
+                   ws.payload AS schedule_payload,
+                   latest_dispatch.attempt_id AS dispatch_attempt_id,
+                   latest_dispatch.llm_allocation_payload AS llm_allocation_payload
+            FROM execution_work_items AS wi
+            JOIN execution_work_item_schedules AS ws
+              ON ws.work_item_id = wi.work_item_id
+            LEFT JOIN LATERAL (
+                SELECT attempt_id, llm_allocation_payload
+                FROM execution_work_item_attempt_dispatches AS dispatch
+                WHERE dispatch.work_item_id = wi.work_item_id
+                ORDER BY dispatch.attempt_number DESC
+                LIMIT 1
+            ) AS latest_dispatch ON true
+            WHERE wi.work_kind = 'knowledge_workbench.draft_claim_compaction'
+              AND wi.work_item_id LIKE $1
+              AND wi.status IN (
+                'ready', 'leased', 'retryable_failed',
+                'user_action_required'
+              )
+              AND ($2::text IS NULL OR ws.payload->>'group_ref' = $2)
+            ORDER BY wi.created_at ASC, wi.work_item_id ASC
+            LIMIT $3 OFFSET $4
+            """,
+            f"claim-compaction:{workflow_run_id}:%",
+            group_ref,
+            limit,
+            offset,
+        )
+        return tuple(_pending_reduction_work_read_model(row) for row in rows)
+
     async def load_planner_state(
         self,
         *,
@@ -316,7 +546,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         node_rows = await self._connection.fetch(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
-                   supersedes_node_refs, estimated_input_tokens,
+                   supersedes_node_refs, artifact_tokens,
                    compacted_key, compacted_claim, compacted_claim_kind,
                    compacted_granularity, compacted_merge_decision,
                    compacted_triples, compacted_payload
@@ -390,6 +620,17 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             workflow_run_id,
             group_ref,
         )
+        origin_separation_rows = await self._connection.fetch(
+            """
+            SELECT origin_ref_a, origin_ref_b, established_by_batch_ref,
+                   established_by_work_item_id, established_by_dispatch_attempt_id
+            FROM draft_claim_compaction_origin_separation_edges
+            WHERE workflow_run_id = $1 AND group_ref = $2
+            ORDER BY origin_ref_a, origin_ref_b
+            """,
+            workflow_run_id,
+            group_ref,
+        )
         incompatibility_rows = await self._connection.fetch(
             """
             SELECT left_component_ref, right_component_ref
@@ -410,6 +651,9 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             incompatibilities=tuple(
                 _component_incompatibility(row) for row in incompatibility_rows
             ),
+            origin_separation_edges=tuple(
+                _origin_separation_edge(row) for row in origin_separation_rows
+            ),
         )
 
     async def apply_compacted_claims_result(
@@ -424,7 +668,6 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         compared_node_refs: tuple[str, ...] = (),
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
-        del batch_ref, work_item_id
         compared_node_refs = tuple(compared_node_refs)
         compared_nodes = await self._load_compared_nodes_for_apply(
             workflow_run_id=workflow_run_id,
@@ -441,6 +684,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         requested_sources = 0
         requested_comparisons = 0
         output_node_refs: list[str] = []
+        output_origin_sets: list[tuple[str, ...]] = []
 
         for claim in compacted_claims:
             node_ref = compacted_claim_node_ref(
@@ -449,6 +693,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 source_claim_refs=claim.source_claim_refs,
             )
             output_node_refs.append(node_ref)
+            output_origin_sets.append(tuple(claim.source_claim_refs))
             fallback_raw_node_refs = tuple(
                 raw_claim_node_ref(
                     workflow_run_id=workflow_run_id,
@@ -468,7 +713,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     """
                     INSERT INTO draft_claim_compaction_nodes
                     (node_ref, workflow_run_id, group_ref, node_kind, active,
-                     source_claim_refs, supersedes_node_refs, estimated_input_tokens,
+                     source_claim_refs, supersedes_node_refs, artifact_tokens,
                      compacted_key, compacted_claim, compacted_claim_kind,
                      compacted_granularity, compacted_merge_decision,
                      compacted_triples, compacted_payload, created_at, updated_at)
@@ -549,6 +794,13 @@ class PostgresDraftClaimCompactionReductionStateRepository(
 
         for left_output, right_output in _node_ref_pairs(tuple(output_node_refs)):
             requested_comparisons += 1
+            source_comparison_ref = comparison_ref(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                round_index=round_index,
+                left_node_ref=ordered_pair(left_output, right_output)[0],
+                right_node_ref=ordered_pair(left_output, right_output)[1],
+            )
             if await self._insert_not_merged_comparison(
                 workflow_run_id=workflow_run_id,
                 group_ref=group_ref,
@@ -558,6 +810,23 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 created_at=created_at,
             ):
                 inserted_comparisons += 1
+            for left_origin, right_origin in _cross_origin_pairs_for_output_partitions(
+                output_origin_sets,
+                left_output,
+                right_output,
+                tuple(output_node_refs),
+            ):
+                await self._insert_origin_separation_edge(
+                    workflow_run_id=workflow_run_id,
+                    group_ref=group_ref,
+                    origin_ref_a=left_origin,
+                    origin_ref_b=right_origin,
+                    established_by_batch_ref=batch_ref,
+                    established_by_work_item_id=work_item_id,
+                    established_by_dispatch_attempt_id=None,
+                    source_comparison_ref=source_comparison_ref,
+                    established_at=created_at,
+                )
 
         requested_total = requested_nodes + requested_sources + requested_comparisons
         inserted_total = inserted_nodes + inserted_sources + inserted_comparisons
@@ -582,7 +851,6 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rewrite: DraftClaimReducedRewriteOutput,
         created_at: datetime,
     ) -> DraftClaimCompactionApplyPersistenceResult:
-        del batch_ref, work_item_id
         source_nodes = await self._load_nodes_by_ref(
             workflow_run_id=workflow_run_id,
             group_ref=group_ref,
@@ -613,7 +881,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                 """
                 INSERT INTO draft_claim_compaction_nodes
                 (node_ref, workflow_run_id, group_ref, node_kind, active,
-                 source_claim_refs, supersedes_node_refs, estimated_input_tokens,
+                 source_claim_refs, supersedes_node_refs, artifact_tokens,
                  compacted_key, compacted_claim, compacted_claim_kind,
                  compacted_granularity, compacted_merge_decision,
                  compacted_triples, compacted_payload, created_at, updated_at)
@@ -704,6 +972,49 @@ class PostgresDraftClaimCompactionReductionStateRepository(
             already_exists_count=requested_total - inserted_total,
         )
 
+    async def _insert_origin_separation_edge(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        origin_ref_a: str,
+        origin_ref_b: str,
+        established_by_batch_ref: str | None,
+        established_by_work_item_id: str | None,
+        established_by_dispatch_attempt_id: str | None,
+        source_comparison_ref: str | None,
+        established_at: datetime,
+    ) -> bool:
+        left_origin, right_origin = ordered_pair(origin_ref_a, origin_ref_b)
+        result = await self._connection.execute(
+            """
+            INSERT INTO draft_claim_compaction_origin_separation_edges
+            (separation_ref, workflow_run_id, group_ref,
+             origin_ref_a, origin_ref_b,
+             established_by_batch_ref, established_by_work_item_id,
+             established_by_dispatch_attempt_id, source_comparison_ref, established_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            ON CONFLICT (workflow_run_id, group_ref, origin_ref_a, origin_ref_b)
+            DO NOTHING
+            """,
+            origin_separation_ref(
+                workflow_run_id=workflow_run_id,
+                group_ref=group_ref,
+                origin_ref_a=left_origin,
+                origin_ref_b=right_origin,
+            ),
+            workflow_run_id,
+            group_ref,
+            left_origin,
+            right_origin,
+            established_by_batch_ref,
+            established_by_work_item_id,
+            established_by_dispatch_attempt_id,
+            source_comparison_ref,
+            established_at,
+        )
+        return _inserted(result)
+
     async def _load_nodes_by_ref(
         self,
         *,
@@ -716,7 +1027,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rows = await self._connection.fetch(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
-                   supersedes_node_refs, estimated_input_tokens,
+                   supersedes_node_refs, artifact_tokens,
                    compacted_key, compacted_claim, compacted_claim_kind,
                    compacted_granularity, compacted_merge_decision,
                    compacted_triples, compacted_payload
@@ -1076,7 +1387,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     """
                     INSERT INTO draft_claim_compaction_nodes
                     (node_ref, workflow_run_id, group_ref, node_kind, active,
-                     source_claim_refs, supersedes_node_refs, estimated_input_tokens,
+                     source_claim_refs, supersedes_node_refs, artifact_tokens,
                      created_at, updated_at)
                     VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10)
                     ON CONFLICT (node_ref) DO NOTHING
@@ -1088,7 +1399,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                     node.active,
                     json.dumps(list(node.source_claim_refs), sort_keys=True),
                     json.dumps(list(node.supersedes_node_refs), sort_keys=True),
-                    node.estimated_input_tokens,
+                    node.artifact_tokens,
                     created_at,
                     created_at,
                 )
@@ -1140,7 +1451,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
         rows = await self._connection.fetch(
             """
             SELECT node_ref, node_kind, active, source_claim_refs,
-                   supersedes_node_refs, estimated_input_tokens,
+                   supersedes_node_refs, artifact_tokens,
                    compacted_key, compacted_claim, compacted_claim_kind,
                    compacted_granularity, compacted_merge_decision,
                    compacted_triples, compacted_payload
@@ -1208,7 +1519,7 @@ def build_initial_raw_node(
     workflow_run_id: str,
     group_ref: str,
     observation_ref: str,
-    estimated_input_tokens: int,
+    artifact_tokens: int,
 ) -> DraftClaimCompactionNode:
     return DraftClaimCompactionNode(
         node_ref=raw_node_ref(
@@ -1225,7 +1536,7 @@ def build_initial_raw_node(
             ),
         ),
         active=True,
-        estimated_input_tokens=estimated_input_tokens,
+        artifact_tokens=artifact_tokens,
     )
 
 
@@ -1236,7 +1547,260 @@ def _estimated_compacted_claim_tokens(payload: JsonObject) -> int:
         separators=(",", ":"),
         sort_keys=True,
     )
-    return max(1, estimate_tokens_roughly(serialized))
+    return 0 if not serialized.strip() else max(1, len(serialized) // 4)
+
+
+def _origin_separation_edge(
+    row: Mapping[str, object],
+) -> DraftClaimCompactionOriginSeparationEdge:
+    return DraftClaimCompactionOriginSeparationEdge(
+        origin_ref_a=_read_model_text(row, "origin_ref_a"),
+        origin_ref_b=_read_model_text(row, "origin_ref_b"),
+        established_by_batch_ref=_read_model_optional_text(
+            row,
+            "established_by_batch_ref",
+        ),
+        established_by_work_item_id=_read_model_optional_text(
+            row,
+            "established_by_work_item_id",
+        ),
+        established_by_dispatch_attempt_id=_read_model_optional_text(
+            row,
+            "established_by_dispatch_attempt_id",
+        ),
+    )
+
+
+def origin_separation_ref(
+    *,
+    workflow_run_id: str,
+    group_ref: str,
+    origin_ref_a: str,
+    origin_ref_b: str,
+) -> str:
+    left, right = sorted((origin_ref_a, origin_ref_b))
+    _text(workflow_run_id, "workflow_run_id")
+    _text(group_ref, "group_ref")
+    _text(left, "origin_ref_a")
+    _text(right, "origin_ref_b")
+    return f"origin-separation:{workflow_run_id}:{group_ref}:{left}:{right}"
+
+
+def _cross_origin_pairs_for_output_partitions(
+    output_origin_sets: list[tuple[str, ...]],
+    left_output_ref: str,
+    right_output_ref: str,
+    output_node_refs: tuple[str, ...],
+) -> tuple[tuple[str, str], ...]:
+    try:
+        left_index = output_node_refs.index(left_output_ref)
+        right_index = output_node_refs.index(right_output_ref)
+    except ValueError:
+        return ()
+    pairs: list[tuple[str, str]] = []
+    for left_origin in output_origin_sets[left_index]:
+        for right_origin in output_origin_sets[right_index]:
+            if left_origin == right_origin:
+                continue
+            left, right = sorted((left_origin, right_origin))
+            pairs.append((left, right))
+    return tuple(dict.fromkeys(pairs))
+
+
+def _pending_reduction_work_read_model(
+    row: Mapping[str, object],
+) -> DraftClaimCompactionPendingReductionWorkReadModel:
+    schedule_payload = _json_mapping(row.get("schedule_payload"))
+    allocation_payload = _json_mapping(row.get("llm_allocation_payload"))
+    provider = _optional_mapping_text(allocation_payload, "provider")
+    account_ref = _optional_mapping_text(allocation_payload, "account_ref")
+    model_id = _optional_mapping_text(allocation_payload, "model_ref")
+    capacity_window_key = None
+    if provider is not None and account_ref is not None and model_id is not None:
+        capacity_window_key = f"{provider}:{account_ref}:{model_id}"
+    status = _str(row, "status")
+    return DraftClaimCompactionPendingReductionWorkReadModel(
+        workflow_run_id=_str(schedule_payload, "workflow_run_id"),
+        group_ref=_str(schedule_payload, "group_ref"),
+        batch_ref=_optional_mapping_text(schedule_payload, "batch_ref"),
+        work_item_id=_str(row, "work_item_id"),
+        input_node_refs=_text_tuple_from_payload(
+            schedule_payload,
+            ("source_node_refs", "node_refs"),
+        ),
+        input_claim_refs=_text_tuple_from_payload(
+            schedule_payload,
+            ("source_claim_refs",),
+        ),
+        work_item_status=status,
+        dispatch_attempt_id=_optional_row_text(row, "dispatch_attempt_id"),
+        capacity_window_key=capacity_window_key,
+        capacity_waiting=False,
+        provider=provider,
+        account_ref=account_ref,
+        model_id=model_id,
+        waiting_reason=_waiting_reason_from_status(status),
+        created_at=_read_model_datetime(row, "created_at"),
+        updated_at=_read_model_datetime(row, "updated_at"),
+    )
+
+
+def _json_mapping(value: object) -> Mapping[str, object]:
+    if isinstance(value, Mapping):
+        return value
+    return {}
+
+
+def _optional_mapping_text(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _optional_row_text(row: Mapping[str, object], key: str) -> str | None:
+    value = row.get(key)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
+def _text_tuple_from_payload(
+    payload: Mapping[str, object],
+    keys: tuple[str, ...],
+) -> tuple[str, ...]:
+    for key in keys:
+        value = payload.get(key)
+        if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+            continue
+        refs: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                refs.append(item)
+        if refs:
+            return tuple(refs)
+    return ()
+
+
+def _waiting_reason_from_status(status: str) -> str | None:
+    if status == "retryable_failed":
+        return "retryable_failure_ready_for_admission"
+    if status == "leased":
+        return "leased_or_running"
+    if status == "ready":
+        return "ready_for_capacity_admission"
+    if status == "user_action_required":
+        return "user_action_required"
+    return None
+
+
+def _node_read_model(row: Mapping[str, object]) -> DraftClaimCompactionNodeReadModel:
+    return DraftClaimCompactionNodeReadModel(
+        workflow_run_id=_read_model_text(row, "workflow_run_id"),
+        group_ref=_read_model_text(row, "group_ref"),
+        node_ref=_read_model_text(row, "node_ref"),
+        node_kind=_read_model_text(row, "node_kind"),
+        active=_read_model_bool(row, "active"),
+        source_claim_refs=_read_model_json_text_tuple(row, "source_claim_refs"),
+        supersedes_node_refs=_read_model_json_text_tuple(row, "supersedes_node_refs"),
+        artifact_tokens=_read_model_int(row, "artifact_tokens"),
+        compacted_key=_read_model_optional_text(row, "compacted_key"),
+        compacted_claim=_read_model_optional_text(row, "compacted_claim"),
+        compacted_claim_kind=_read_model_optional_text(row, "compacted_claim_kind"),
+        compacted_granularity=_read_model_optional_text(row, "compacted_granularity"),
+        compacted_merge_decision=_read_model_optional_text(
+            row,
+            "compacted_merge_decision",
+        ),
+        created_at=_read_model_datetime(row, "created_at"),
+        updated_at=_read_model_datetime(row, "updated_at"),
+    )
+
+
+def _frontier_node_read_model(
+    node: DraftClaimCompactionNodeReadModel,
+) -> DraftClaimCompactionFrontierNodeReadModel:
+    if not node.active:
+        frontier_state = "inactive_superseded"
+    elif node.node_kind == DraftClaimCompactionNodeKind.RAW.value:
+        frontier_state = "active_raw_waiting"
+    else:
+        frontier_state = "active_compacted"
+    return DraftClaimCompactionFrontierNodeReadModel(
+        workflow_run_id=node.workflow_run_id,
+        group_ref=node.group_ref,
+        node_ref=node.node_ref,
+        node_kind=node.node_kind,
+        active=node.active,
+        frontier_state=frontier_state,
+        source_claim_refs=node.source_claim_refs,
+        source_claim_count=len(node.source_claim_refs),
+        supersedes_node_refs=node.supersedes_node_refs,
+        supersedes_node_count=len(node.supersedes_node_refs),
+        artifact_tokens=node.artifact_tokens,
+        compacted_key=node.compacted_key,
+        compacted_claim=node.compacted_claim,
+        compacted_claim_kind=node.compacted_claim_kind,
+        compacted_granularity=node.compacted_granularity,
+        compacted_merge_decision=node.compacted_merge_decision,
+        created_at=node.created_at,
+        updated_at=node.updated_at,
+    )
+
+
+def _read_model_text(row: Mapping[str, object], key: str) -> str:
+    value = row[key]
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text")
+    return value
+
+
+def _read_model_optional_text(row: Mapping[str, object], key: str) -> str | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{key} must be non-empty text or null")
+    return value
+
+
+def _read_model_int(row: Mapping[str, object], key: str) -> int:
+    value = row[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key} must be int")
+    return value
+
+
+def _read_model_bool(row: Mapping[str, object], key: str) -> bool:
+    value = row[key]
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} must be bool")
+    return value
+
+
+def _read_model_datetime(row: Mapping[str, object], key: str) -> datetime:
+    value = row[key]
+    if not isinstance(value, datetime):
+        raise TypeError(f"{key} must be datetime")
+    return value
+
+
+def _read_model_json_text_tuple(row: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = row[key]
+    decoded = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(decoded, list | tuple):
+        raise ValueError(f"{key} must be JSON array")
+    result: list[str] = []
+    for item in decoded:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{key} must contain non-empty strings")
+        result.append(item)
+    return tuple(result)
+
+
+def _read_model_require_text(value: str, name: str) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{name} must be non-empty text")
 
 
 def _node(
@@ -1256,7 +1820,7 @@ def _node(
             row["supersedes_node_refs"],
             "supersedes_node_refs",
         ),
-        estimated_input_tokens=_int(row, "estimated_input_tokens"),
+        artifact_tokens=_int(row, "artifact_tokens"),
         compacted_key=_optional_str(row, "compacted_key"),
         compacted_claim=_optional_str(row, "compacted_claim"),
         compacted_triples=_triples(row.get("compacted_triples", [])),

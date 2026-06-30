@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_prompt_contract import (
@@ -45,14 +46,14 @@ class DraftClaimCompactionBudgetFitStatus(StrEnum):
 @dataclass(frozen=True, slots=True)
 class DraftClaimCompactionBudgetFit:
     status: DraftClaimCompactionBudgetFitStatus
-    estimated_input_tokens: int = 0
+    artifact_tokens: int = 0
     primary_model_id: str = PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID
     degraded_candidate_model_id: str = DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "status", _budget_fit_status(self.status))
-        if self.estimated_input_tokens < 0:
-            raise ValueError("estimated_input_tokens must be >= 0")
+        if self.artifact_tokens < 0:
+            raise ValueError("artifact_tokens must be >= 0")
         _text(self.primary_model_id, "primary_model_id")
         _text(self.degraded_candidate_model_id, "degraded_candidate_model_id")
 
@@ -75,7 +76,7 @@ class DraftClaimCompactionNode:
     sources: tuple[DraftClaimCompactionNodeSource, ...] = ()
     active: bool = True
     supersedes_node_refs: tuple[str, ...] = ()
-    estimated_input_tokens: int = 1
+    artifact_tokens: int = 1
     compacted_key: str | None = None
     compacted_claim: str | None = None
     compacted_triples: tuple[DraftClaimCompactionTriple, ...] = ()
@@ -96,8 +97,8 @@ class DraftClaimCompactionNode:
             "supersedes_node_refs",
             allow_empty=True,
         )
-        if self.estimated_input_tokens < 0:
-            raise ValueError("estimated_input_tokens must be >= 0")
+        if self.artifact_tokens < 0:
+            raise ValueError("artifact_tokens must be >= 0")
         if self.compacted_key is not None:
             _text(self.compacted_key, "compacted_key")
         if self.compacted_claim is not None:
@@ -111,6 +112,286 @@ class DraftClaimCompactionNode:
             _text(self.compacted_merge_decision, "compacted_merge_decision")
         if self.compacted_payload is not None:
             _json_object(self.compacted_payload, "compacted_payload")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionNodeReadModel:
+    workflow_run_id: str
+    group_ref: str
+    node_ref: str
+    node_kind: str
+    active: bool
+    source_claim_refs: tuple[str, ...]
+    supersedes_node_refs: tuple[str, ...]
+    artifact_tokens: int
+    compacted_key: str | None
+    compacted_claim: str | None
+    compacted_claim_kind: str | None
+    compacted_granularity: str | None
+    compacted_merge_decision: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("workflow_run_id", self.workflow_run_id),
+            ("group_ref", self.group_ref),
+            ("node_ref", self.node_ref),
+            ("node_kind", self.node_kind),
+        ):
+            _text(value, name)
+        if self.node_kind not in {item.value for item in DraftClaimCompactionNodeKind}:
+            raise ValueError("node_kind must be raw or compacted")
+        if not isinstance(self.active, bool):
+            raise TypeError("active must be bool")
+        _text_tuple(self.source_claim_refs, "source_claim_refs", allow_empty=False)
+        _text_tuple(self.supersedes_node_refs, "supersedes_node_refs", allow_empty=True)
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
+        if self.compacted_key is not None:
+            _text(self.compacted_key, "compacted_key")
+        if self.compacted_claim is not None:
+            _text(self.compacted_claim, "compacted_claim")
+        if self.compacted_claim_kind is not None:
+            _text(self.compacted_claim_kind, "compacted_claim_kind")
+        if self.compacted_granularity is not None:
+            _text(self.compacted_granularity, "compacted_granularity")
+        if self.compacted_merge_decision is not None:
+            _text(self.compacted_merge_decision, "compacted_merge_decision")
+        if not isinstance(self.created_at, datetime):
+            raise TypeError("created_at must be datetime")
+        if not isinstance(self.updated_at, datetime):
+            raise TypeError("updated_at must be datetime")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionFrontierNodeReadModel:
+    workflow_run_id: str
+    group_ref: str
+    node_ref: str
+    node_kind: str
+    active: bool
+    frontier_state: str
+    source_claim_refs: tuple[str, ...]
+    source_claim_count: int
+    supersedes_node_refs: tuple[str, ...]
+    supersedes_node_count: int
+    artifact_tokens: int
+    compacted_key: str | None
+    compacted_claim: str | None
+    compacted_claim_kind: str | None
+    compacted_granularity: str | None
+    compacted_merge_decision: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("workflow_run_id", self.workflow_run_id),
+            ("group_ref", self.group_ref),
+            ("node_ref", self.node_ref),
+            ("node_kind", self.node_kind),
+            ("frontier_state", self.frontier_state),
+        ):
+            _text(value, name)
+        if self.node_kind not in {item.value for item in DraftClaimCompactionNodeKind}:
+            raise ValueError("node_kind must be raw or compacted")
+        if not isinstance(self.active, bool):
+            raise TypeError("active must be bool")
+        _text_tuple(self.source_claim_refs, "source_claim_refs", allow_empty=False)
+        _non_negative_int(self.source_claim_count, "source_claim_count")
+        if self.source_claim_count != len(self.source_claim_refs):
+            raise ValueError("source_claim_count must match source_claim_refs")
+        _text_tuple(self.supersedes_node_refs, "supersedes_node_refs", allow_empty=True)
+        _non_negative_int(self.supersedes_node_count, "supersedes_node_count")
+        if self.supersedes_node_count != len(self.supersedes_node_refs):
+            raise ValueError("supersedes_node_count must match supersedes_node_refs")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
+        if self.compacted_key is not None:
+            _text(self.compacted_key, "compacted_key")
+        if self.compacted_claim is not None:
+            _text(self.compacted_claim, "compacted_claim")
+        if self.compacted_claim_kind is not None:
+            _text(self.compacted_claim_kind, "compacted_claim_kind")
+        if self.compacted_granularity is not None:
+            _text(self.compacted_granularity, "compacted_granularity")
+        if self.compacted_merge_decision is not None:
+            _text(self.compacted_merge_decision, "compacted_merge_decision")
+        if not isinstance(self.created_at, datetime):
+            raise TypeError("created_at must be datetime")
+        if not isinstance(self.updated_at, datetime):
+            raise TypeError("updated_at must be datetime")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionSeparationSummaryReadModel:
+    edge_count: int
+    origin_count: int
+    affected_active_node_count: int
+    sample_origin_pairs: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        _non_negative_int(self.edge_count, "edge_count")
+        _non_negative_int(self.origin_count, "origin_count")
+        _non_negative_int(
+            self.affected_active_node_count,
+            "affected_active_node_count",
+        )
+        if not isinstance(self.sample_origin_pairs, tuple):
+            raise TypeError("sample_origin_pairs must be tuple")
+        for pair in self.sample_origin_pairs:
+            if not isinstance(pair, tuple) or len(pair) != 2:
+                raise TypeError("sample_origin_pairs must contain origin pairs")
+            left, right = pair
+            _text(left, "sample_origin_pairs")
+            _text(right, "sample_origin_pairs")
+            if left >= right:
+                raise ValueError("sample origin pairs must be ordered")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionPendingReductionWorkReadModel:
+    workflow_run_id: str
+    group_ref: str
+    batch_ref: str | None
+    work_item_id: str
+    input_node_refs: tuple[str, ...]
+    input_claim_refs: tuple[str, ...]
+    work_item_status: str
+    dispatch_attempt_id: str | None = None
+    capacity_window_key: str | None = None
+    capacity_waiting: bool = False
+    provider: str | None = None
+    account_ref: str | None = None
+    model_id: str | None = None
+    waiting_reason: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.workflow_run_id, "workflow_run_id")
+        _text(self.group_ref, "group_ref")
+        if self.batch_ref is not None:
+            _text(self.batch_ref, "batch_ref")
+        _text(self.work_item_id, "work_item_id")
+        _text_tuple(self.input_node_refs, "input_node_refs", allow_empty=True)
+        _text_tuple(self.input_claim_refs, "input_claim_refs", allow_empty=True)
+        _text(self.work_item_status, "work_item_status")
+        if self.dispatch_attempt_id is not None:
+            _text(self.dispatch_attempt_id, "dispatch_attempt_id")
+        if self.capacity_window_key is not None:
+            _text(self.capacity_window_key, "capacity_window_key")
+        if not isinstance(self.capacity_waiting, bool):
+            raise TypeError("capacity_waiting must be bool")
+        if self.provider is not None:
+            _text(self.provider, "provider")
+        if self.account_ref is not None:
+            _text(self.account_ref, "account_ref")
+        if self.model_id is not None:
+            _text(self.model_id, "model_id")
+        if self.waiting_reason is not None:
+            _text(self.waiting_reason, "waiting_reason")
+        if self.created_at is not None and not isinstance(self.created_at, datetime):
+            raise TypeError("created_at must be datetime")
+        if self.updated_at is not None and not isinstance(self.updated_at, datetime):
+            raise TypeError("updated_at must be datetime")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionPendingWorkSummaryReadModel:
+    pending_work_item_count: int
+    leased_or_running_count: int
+    waiting_for_capacity_count: int
+    next_work_scheduled_count: int
+
+    def __post_init__(self) -> None:
+        _non_negative_int(self.pending_work_item_count, "pending_work_item_count")
+        _non_negative_int(self.leased_or_running_count, "leased_or_running_count")
+        _non_negative_int(self.waiting_for_capacity_count, "waiting_for_capacity_count")
+        _non_negative_int(self.next_work_scheduled_count, "next_work_scheduled_count")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionFrontierSummaryReadModel:
+    workflow_run_id: str
+    group_ref: str | None
+    group_count: int
+    active_raw_count: int
+    active_compacted_count: int
+    inactive_node_count: int
+    superseded_node_count: int
+    total_node_count: int
+    group_done_count: int
+    all_groups_compacted: bool
+
+    def __post_init__(self) -> None:
+        _text(self.workflow_run_id, "workflow_run_id")
+        if self.group_ref is not None:
+            _text(self.group_ref, "group_ref")
+        for name, value in (
+            ("group_count", self.group_count),
+            ("active_raw_count", self.active_raw_count),
+            ("active_compacted_count", self.active_compacted_count),
+            ("inactive_node_count", self.inactive_node_count),
+            ("superseded_node_count", self.superseded_node_count),
+            ("total_node_count", self.total_node_count),
+            ("group_done_count", self.group_done_count),
+        ):
+            _non_negative_int(value, name)
+        if not isinstance(self.all_groups_compacted, bool):
+            raise TypeError("all_groups_compacted must be bool")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionFrontierReadModel:
+    workflow_run_id: str
+    group_ref: str | None
+    summary: DraftClaimCompactionFrontierSummaryReadModel
+    separation_summary: DraftClaimCompactionSeparationSummaryReadModel
+    pending_work_summary: DraftClaimCompactionPendingWorkSummaryReadModel
+    rows: tuple[DraftClaimCompactionFrontierNodeReadModel, ...]
+    pending_work_items: tuple[
+        DraftClaimCompactionPendingReductionWorkReadModel, ...
+    ] = ()
+
+    def __post_init__(self) -> None:
+        _text(self.workflow_run_id, "workflow_run_id")
+        if self.group_ref is not None:
+            _text(self.group_ref, "group_ref")
+        if not isinstance(self.summary, DraftClaimCompactionFrontierSummaryReadModel):
+            raise TypeError(
+                "summary must be DraftClaimCompactionFrontierSummaryReadModel"
+            )
+        if not isinstance(
+            self.separation_summary,
+            DraftClaimCompactionSeparationSummaryReadModel,
+        ):
+            raise TypeError(
+                "separation_summary must be "
+                "DraftClaimCompactionSeparationSummaryReadModel"
+            )
+        if not isinstance(
+            self.pending_work_summary,
+            DraftClaimCompactionPendingWorkSummaryReadModel,
+        ):
+            raise TypeError(
+                "pending_work_summary must be "
+                "DraftClaimCompactionPendingWorkSummaryReadModel"
+            )
+        if not isinstance(self.rows, tuple):
+            raise TypeError("rows must be tuple")
+        for row in self.rows:
+            if not isinstance(row, DraftClaimCompactionFrontierNodeReadModel):
+                raise TypeError(
+                    "rows must contain DraftClaimCompactionFrontierNodeReadModel"
+                )
+        if not isinstance(self.pending_work_items, tuple):
+            raise TypeError("pending_work_items must be tuple")
+        for item in self.pending_work_items:
+            if not isinstance(item, DraftClaimCompactionPendingReductionWorkReadModel):
+                raise TypeError(
+                    "pending_work_items must contain "
+                    "DraftClaimCompactionPendingReductionWorkReadModel"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +465,34 @@ class DraftClaimCompactionComponentIncompatibility:
 
 
 @dataclass(frozen=True, slots=True)
+class DraftClaimCompactionOriginSeparationEdge:
+    origin_ref_a: str
+    origin_ref_b: str
+    established_by_batch_ref: str | None = None
+    established_by_work_item_id: str | None = None
+    established_by_dispatch_attempt_id: str | None = None
+
+    def __post_init__(self) -> None:
+        _text(self.origin_ref_a, "origin_ref_a")
+        _text(self.origin_ref_b, "origin_ref_b")
+        if self.origin_ref_a >= self.origin_ref_b:
+            raise ValueError("origin separation refs must be ordered")
+        if self.established_by_batch_ref is not None:
+            _text(self.established_by_batch_ref, "established_by_batch_ref")
+        if self.established_by_work_item_id is not None:
+            _text(self.established_by_work_item_id, "established_by_work_item_id")
+        if self.established_by_dispatch_attempt_id is not None:
+            _text(
+                self.established_by_dispatch_attempt_id,
+                "established_by_dispatch_attempt_id",
+            )
+
+    @property
+    def pair_key(self) -> tuple[str, str]:
+        return self.origin_ref_a, self.origin_ref_b
+
+
+@dataclass(frozen=True, slots=True)
 class DraftClaimCompactionRound:
     round_index: int
     comparisons: tuple[DraftClaimCompactionComparison, ...]
@@ -202,6 +511,7 @@ class DraftClaimCompactionPlannerState:
     rounds: tuple[DraftClaimCompactionRound, ...] = ()
     components: tuple[DraftClaimCompactionComponent, ...] = ()
     incompatibilities: tuple[DraftClaimCompactionComponentIncompatibility, ...] = ()
+    origin_separation_edges: tuple[DraftClaimCompactionOriginSeparationEdge, ...] = ()
     budget_fit: DraftClaimCompactionBudgetFit = field(
         default_factory=lambda: DraftClaimCompactionBudgetFit(
             DraftClaimCompactionBudgetFitStatus.FITS_PRIMARY,
@@ -217,6 +527,7 @@ class DraftClaimCompactionPlannerState:
         _rounds_tuple(self.rounds)
         _components_tuple(self.components)
         _incompatibilities_tuple(self.incompatibilities)
+        _origin_separation_edges_tuple(self.origin_separation_edges)
         if not isinstance(self.budget_fit, DraftClaimCompactionBudgetFit):
             raise TypeError("budget_fit must be DraftClaimCompactionBudgetFit")
         _text(self.primary_model_id, "primary_model_id")
@@ -239,9 +550,11 @@ class DraftClaimCompactionNextWorkItem:
     primary_model_id: str = PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID
     degraded_model_id: str | None = None
     user_choice_resume_work_type: DraftClaimCompactionNextWorkItemType | None = None
-    estimated_prompt_tokens: int = 0
-    estimated_completion_tokens: int = 4000
-    estimated_requests: int = 1
+    prompt_tokens: int = 0
+    artifact_tokens: int = 0
+    input_tokens: int = 0
+    required_window_tokens: int = 0
+    request_count: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "work_type", _next_work_item_type(self.work_type))
@@ -266,15 +579,20 @@ class DraftClaimCompactionNextWorkItem:
                 DraftClaimCompactionNextWorkItemType.DONE,
             }:
                 raise ValueError("user choice resume work type must be executable")
-        _non_negative_int(
-            self.estimated_prompt_tokens,
-            "estimated_prompt_tokens",
-        )
-        _non_negative_int(
-            self.estimated_completion_tokens,
-            "estimated_completion_tokens",
-        )
-        _positive_int(self.estimated_requests, "estimated_requests")
+        _non_negative_int(self.prompt_tokens, "prompt_tokens")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
+        _non_negative_int(self.input_tokens, "input_tokens")
+        _non_negative_int(self.required_window_tokens, "required_window_tokens")
+        _positive_int(self.request_count, "request_count")
+        if self.input_tokens and self.input_tokens != (
+            self.prompt_tokens + self.artifact_tokens
+        ):
+            raise ValueError("input_tokens must equal prompt_tokens + artifact_tokens")
+        if (
+            self.required_window_tokens
+            and self.required_window_tokens < self.input_tokens
+        ):
+            raise ValueError("required_window_tokens must be >= input_tokens")
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +748,19 @@ def _incompatibilities_tuple(
             raise TypeError(
                 "incompatibilities must contain "
                 "DraftClaimCompactionComponentIncompatibility",
+            )
+
+
+def _origin_separation_edges_tuple(
+    value: tuple[DraftClaimCompactionOriginSeparationEdge, ...],
+) -> None:
+    if not isinstance(value, tuple):
+        raise TypeError("origin_separation_edges must be tuple")
+    for edge in value:
+        if not isinstance(edge, DraftClaimCompactionOriginSeparationEdge):
+            raise TypeError(
+                "origin_separation_edges must contain "
+                "DraftClaimCompactionOriginSeparationEdge"
             )
 
 

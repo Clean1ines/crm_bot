@@ -20,6 +20,11 @@ from src.contexts.knowledge_workbench.application.sagas.source_ingestion_workflo
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
     DraftClaimObservationReadModel,
 )
+from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
+    DraftClaimCompactionBatchReadModel,
+    DraftClaimCompactionGroupMemberReadModel,
+    DraftClaimCompactionGroupReadModel,
+)
 from src.contexts.knowledge_workbench.application.sagas.source_ingestion_admission import (
     SourceIngestionAdmissionStatus,
 )
@@ -265,6 +270,124 @@ class _FakeDraftClaimObservationReadRepository:
             )
         ]
         return tuple(filtered[offset : offset + limit])
+
+
+@dataclass(slots=True)
+class _FakeDraftClaimCompactionPlanRepository:
+    groups: tuple[DraftClaimCompactionGroupReadModel, ...] = ()
+    batches: tuple[DraftClaimCompactionBatchReadModel, ...] = ()
+    members: tuple[DraftClaimCompactionGroupMemberReadModel, ...] = ()
+    group_calls: list[dict[str, object]] = field(default_factory=list)
+    batch_calls: list[dict[str, object]] = field(default_factory=list)
+    member_calls: list[dict[str, object]] = field(default_factory=list)
+
+    instances: ClassVar[list[_FakeDraftClaimCompactionPlanRepository]] = []
+    configured_groups: ClassVar[tuple[DraftClaimCompactionGroupReadModel, ...]] = ()
+    configured_batches: ClassVar[tuple[DraftClaimCompactionBatchReadModel, ...]] = ()
+    configured_members: ClassVar[
+        tuple[DraftClaimCompactionGroupMemberReadModel, ...]
+    ] = ()
+
+    def __init__(self, pool: object) -> None:
+        del pool
+        self.groups = self.configured_groups
+        self.batches = self.configured_batches
+        self.members = self.configured_members
+        self.group_calls = []
+        self.batch_calls = []
+        self.member_calls = []
+        self.instances.append(self)
+
+    async def list_cluster_groups_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionGroupReadModel, ...]:
+        self.group_calls.append(
+            {
+                "workflow_run_id": workflow_run_id,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        filtered = tuple(
+            group for group in self.groups if group.workflow_run_id == workflow_run_id
+        )
+        return filtered[offset : offset + limit]
+
+    async def list_cluster_batches_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> tuple[DraftClaimCompactionBatchReadModel, ...]:
+        self.batch_calls.append({"workflow_run_id": workflow_run_id})
+        return tuple(
+            batch for batch in self.batches if batch.workflow_run_id == workflow_run_id
+        )
+
+    async def list_cluster_members_for_group(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionGroupMemberReadModel, ...]:
+        self.member_calls.append(
+            {
+                "workflow_run_id": workflow_run_id,
+                "group_ref": group_ref,
+                "limit": limit,
+                "offset": offset,
+            }
+        )
+        filtered = tuple(
+            member for member in self.members if member.group_ref == group_ref
+        )
+        return filtered[offset : offset + limit]
+
+
+def _cluster_group_read_model() -> DraftClaimCompactionGroupReadModel:
+    return DraftClaimCompactionGroupReadModel(
+        group_ref="draft-claim-cluster-group:1",
+        workflow_run_id="workflow-1",
+        source_document_ref="source-document:project-1:abc",
+        embedding_model_id="text-embedding-3-small",
+        group_algorithm="hybrid_similarity",
+        group_threshold=0.82,
+        member_count=2,
+        artifact_tokens=1200,
+        requires_split=False,
+        created_at=datetime(2026, 6, 13, 12, 0, tzinfo=timezone.utc),
+    )
+
+
+def _cluster_batch_read_model() -> DraftClaimCompactionBatchReadModel:
+    return DraftClaimCompactionBatchReadModel(
+        batch_ref="draft-claim-cluster-batch:1",
+        workflow_run_id="workflow-1",
+        group_ref="draft-claim-cluster-group:1",
+        prompt_variant="draft_vs_draft",
+        model_id="openai/gpt-oss-120b",
+        artifact_tokens=900,
+        batch_status="planned",
+        member_count=2,
+        created_at=datetime(2026, 6, 13, 12, 1, tzinfo=timezone.utc),
+    )
+
+
+def _cluster_member_read_model() -> DraftClaimCompactionGroupMemberReadModel:
+    return DraftClaimCompactionGroupMemberReadModel(
+        group_ref="draft-claim-cluster-group:1",
+        observation_ref="draft-claim-observation:1",
+        embedding_ref="draft-claim-embedding:1",
+        source_unit_ref="source-unit:1",
+        member_rank=0,
+        member_kind="draft_claim",
+        created_at=datetime(2026, 6, 13, 12, 2, tzinfo=timezone.utc),
+    )
 
 
 def _draft_claim_read_model(
@@ -1173,6 +1296,149 @@ def test_knowledge_http_routes_are_not_duplicated() -> None:
 
     for marker in forbidden:
         assert marker not in guarded_region
+
+
+@pytest.mark.asyncio
+async def test_workflow_draft_claim_clusters_endpoint_returns_groups_and_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        assert authorization == "Bearer valid-token"
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimCompactionPlanRepository",
+        _FakeDraftClaimCompactionPlanRepository,
+    )
+    _FakeDraftClaimCompactionPlanRepository.instances = []
+    _FakeDraftClaimCompactionPlanRepository.configured_groups = (
+        _cluster_group_read_model(),
+    )
+    _FakeDraftClaimCompactionPlanRepository.configured_batches = (
+        _cluster_batch_read_model(),
+    )
+    _FakeDraftClaimCompactionPlanRepository.configured_members = (
+        _cluster_member_read_model(),
+    )
+
+    response = await knowledge.workflow_draft_claim_clusters(
+        project_id="project-1",
+        workflow_run_id="workflow-1",
+        authorization="Bearer valid-token",
+        include_batches=True,
+        limit=50,
+        offset=0,
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert response["workflow_run_id"] == "workflow-1"
+    assert response["count"] == 1
+    assert response["include_batches"] is True
+    groups = response["groups"]
+    assert isinstance(groups, list)
+    assert groups[0]["group_ref"] == "draft-claim-cluster-group:1"
+    assert groups[0]["member_count"] == 2
+    assert groups[0]["artifact_tokens"] == 1200
+    assert groups[0]["requires_split"] is False
+    batches = groups[0]["batches"]
+    assert isinstance(batches, list)
+    assert batches[0]["batch_ref"] == "draft-claim-cluster-batch:1"
+    assert batches[0]["group_ref"] == "draft-claim-cluster-group:1"
+    assert batches[0]["prompt_variant"] == "draft_vs_draft"
+    assert batches[0]["model_id"] == "openai/gpt-oss-120b"
+    assert batches[0]["batch_status"] == "planned"
+    assert batches[0]["derived_work_item_id"] == (
+        "claim-compaction:workflow-1:draft-claim-cluster-batch:1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_draft_claim_cluster_members_endpoint_returns_refs_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        assert authorization == "Bearer valid-token"
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimCompactionPlanRepository",
+        _FakeDraftClaimCompactionPlanRepository,
+    )
+    _FakeDraftClaimCompactionPlanRepository.instances = []
+    _FakeDraftClaimCompactionPlanRepository.configured_groups = (
+        _cluster_group_read_model(),
+    )
+    _FakeDraftClaimCompactionPlanRepository.configured_batches = (
+        _cluster_batch_read_model(),
+    )
+    _FakeDraftClaimCompactionPlanRepository.configured_members = (
+        _cluster_member_read_model(),
+    )
+
+    response = await knowledge.workflow_draft_claim_cluster_members(
+        project_id="project-1",
+        workflow_run_id="workflow-1",
+        group_ref="draft-claim-cluster-group:1",
+        authorization="Bearer valid-token",
+        limit=100,
+        offset=0,
+        pool=object(),
+        project_repo=_FakeProjectRepo(has_role=True),
+        user_repo=_user_repo(),
+    )
+
+    assert response["workflow_run_id"] == "workflow-1"
+    assert response["group_ref"] == "draft-claim-cluster-group:1"
+    assert response["count"] == 1
+    items = response["items"]
+    assert isinstance(items, list)
+    assert items[0] == {
+        "group_ref": "draft-claim-cluster-group:1",
+        "observation_ref": "draft-claim-observation:1",
+        "embedding_ref": "draft-claim-embedding:1",
+        "source_unit_ref": "source-unit:1",
+        "member_rank": 0,
+        "member_kind": "draft_claim",
+        "created_at": "2026-06-13T12:02:00+00:00",
+    }
+
+
+@pytest.mark.asyncio
+async def test_workflow_draft_claim_clusters_endpoint_requires_project_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresDraftClaimCompactionPlanRepository",
+        _FakeDraftClaimCompactionPlanRepository,
+    )
+    _FakeDraftClaimCompactionPlanRepository.instances = []
+
+    with pytest.raises(HTTPException) as exc_info:
+        await knowledge.workflow_draft_claim_clusters(
+            project_id="project-1",
+            workflow_run_id="workflow-1",
+            authorization="Bearer valid-token",
+            include_batches=True,
+            limit=50,
+            offset=0,
+            pool=object(),
+            project_repo=_FakeProjectRepo(has_role=False),
+            user_repo=_user_repo(platform_admin=False),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert _FakeDraftClaimCompactionPlanRepository.instances == []
 
 
 @pytest.mark.asyncio
@@ -2129,3 +2395,36 @@ async def test_list_knowledge_documents_returns_fallback_documents(
     assert card_view["lifecycle_state"] == "processing"
     assert response["items"][0]["document_id"] == "source-document:project-1:abc"
     assert response["count"] == 1
+
+
+def test_patch_18c_compaction_node_endpoint_is_read_model_only() -> None:
+    knowledge_py = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
+
+    route_marker = (
+        '@router.get("/workflows/{workflow_run_id}/draft-claim-compaction-nodes")'
+    )
+    assert route_marker in knowledge_py
+
+    route_start = knowledge_py.index(route_marker)
+    next_route = knowledge_py.find("\n@router.", route_start + len(route_marker))
+    if next_route == -1:
+        next_route = len(knowledge_py)
+
+    endpoint_slice = knowledge_py[route_start:next_route]
+
+    assert "PostgresDraftClaimCompactionReductionStateRepository" in endpoint_slice
+    assert "list_compaction_nodes_for_workflow" in endpoint_slice
+    assert "_draft_claim_compaction_node_read_model" in endpoint_slice
+
+    forbidden = (
+        "open_draft_claim_curation_workspace",
+        "publish_draft_claim_curation_workspace",
+        "fetch_workbench_workflow_live_state",
+        "make_knowledge_extraction_workflow_resume",
+        "workflow_live_state",
+        "raw_output",
+        "parsed_output",
+        "model_output",
+    )
+    for marker in forbidden:
+        assert marker not in endpoint_slice

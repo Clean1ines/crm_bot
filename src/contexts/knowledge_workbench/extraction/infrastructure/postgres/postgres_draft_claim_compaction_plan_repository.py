@@ -8,8 +8,11 @@ from typing import Protocol
 from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_compaction_models import (
     DraftClaimCompactionBatchCandidate,
     DraftClaimCompactionBatchForDispatch,
+    DraftClaimCompactionBatchReadModel,
     DraftClaimCompactionEdgeCandidate,
     DraftClaimCompactionGroupCandidate,
+    DraftClaimCompactionGroupMemberReadModel,
+    DraftClaimCompactionGroupReadModel,
     DraftClaimForCompaction,
 )
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_plan_repository_port import (
@@ -29,6 +32,79 @@ class PostgresDraftClaimCompactionPlanRepository(
     def __init__(self, connection: DraftClaimCompactionPlanConnectionLike) -> None:
         self._connection = connection
 
+    async def list_cluster_groups_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionGroupReadModel, ...]:
+        _require_non_empty_text(workflow_run_id, "workflow_run_id")
+        _validate_page(limit=limit, offset=offset)
+        rows = await self._connection.fetch(
+            """
+            SELECT group_ref, workflow_run_id, source_document_ref,
+                   embedding_model_id, group_algorithm, group_threshold,
+                   member_count, artifact_tokens, requires_split, created_at
+            FROM draft_claim_compaction_groups
+            WHERE workflow_run_id = $1
+            ORDER BY created_at ASC, group_ref ASC
+            LIMIT $2 OFFSET $3
+            """,
+            workflow_run_id,
+            limit,
+            offset,
+        )
+        return tuple(_group_read_model(row) for row in rows)
+
+    async def list_cluster_batches_for_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+    ) -> tuple[DraftClaimCompactionBatchReadModel, ...]:
+        _require_non_empty_text(workflow_run_id, "workflow_run_id")
+        rows = await self._connection.fetch(
+            """
+            SELECT batch_ref, workflow_run_id, group_ref, prompt_variant, model_id,
+                   artifact_tokens, batch_status, member_count, created_at
+            FROM draft_claim_compaction_batches
+            WHERE workflow_run_id = $1
+            ORDER BY group_ref ASC, created_at ASC, batch_ref ASC
+            """,
+            workflow_run_id,
+        )
+        return tuple(_batch_read_model(row) for row in rows)
+
+    async def list_cluster_members_for_group(
+        self,
+        *,
+        workflow_run_id: str,
+        group_ref: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[DraftClaimCompactionGroupMemberReadModel, ...]:
+        _require_non_empty_text(workflow_run_id, "workflow_run_id")
+        _require_non_empty_text(group_ref, "group_ref")
+        _validate_page(limit=limit, offset=offset)
+        rows = await self._connection.fetch(
+            """
+            SELECT gm.group_ref, gm.observation_ref, gm.embedding_ref,
+                   gm.source_unit_ref, gm.member_rank, gm.member_kind, gm.created_at
+            FROM draft_claim_compaction_group_members AS gm
+            JOIN draft_claim_compaction_groups AS g
+              ON g.group_ref = gm.group_ref
+            WHERE g.workflow_run_id = $1
+              AND gm.group_ref = $2
+            ORDER BY gm.member_rank ASC, gm.observation_ref ASC
+            LIMIT $3 OFFSET $4
+            """,
+            workflow_run_id,
+            group_ref,
+            limit,
+            offset,
+        )
+        return tuple(_member_read_model(row) for row in rows)
+
     async def get_compaction_batch_by_ref(
         self,
         *,
@@ -37,7 +113,7 @@ class PostgresDraftClaimCompactionPlanRepository(
         rows = await self._connection.fetch(
             """
             SELECT b.batch_ref, b.workflow_run_id, b.group_ref, b.prompt_variant,
-                   b.model_id, b.estimated_input_tokens,
+                   b.model_id, b.artifact_tokens,
                    COALESCE(
                        array_agg(gm.observation_ref ORDER BY gm.member_rank)
                        FILTER (WHERE gm.observation_ref IS NOT NULL),
@@ -48,7 +124,7 @@ class PostgresDraftClaimCompactionPlanRepository(
                 ON gm.group_ref = b.group_ref
             WHERE b.batch_ref = $1
             GROUP BY b.batch_ref, b.workflow_run_id, b.group_ref, b.prompt_variant,
-                     b.model_id, b.estimated_input_tokens
+                     b.model_id, b.artifact_tokens
             """,
             batch_ref,
         )
@@ -205,7 +281,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             """
             INSERT INTO draft_claim_compaction_groups
             (group_ref, workflow_run_id, source_document_ref, embedding_model_id,
-             group_algorithm, group_threshold, member_count, estimated_input_tokens,
+             group_algorithm, group_threshold, member_count, artifact_tokens,
              requires_split, created_at)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
             ON CONFLICT (workflow_run_id, group_ref) DO NOTHING
@@ -217,7 +293,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             group.group_algorithm,
             group.group_threshold,
             group.member_count,
-            group.estimated_input_tokens,
+            group.artifact_tokens,
             group.requires_split,
             created_at,
         )
@@ -252,7 +328,7 @@ class PostgresDraftClaimCompactionPlanRepository(
             """
             INSERT INTO draft_claim_compaction_batches
             (batch_ref, workflow_run_id, group_ref, prompt_variant, model_id,
-             estimated_input_tokens, batch_status, member_count, created_at)
+             artifact_tokens, batch_status, member_count, created_at)
             VALUES ($1,$2,$3,$4,$5,$6,'planned',$7,$8)
             ON CONFLICT (workflow_run_id, group_ref, batch_ref) DO NOTHING
             """,
@@ -261,10 +337,53 @@ class PostgresDraftClaimCompactionPlanRepository(
             batch.group_ref,
             batch.prompt_variant,
             batch.model_id,
-            batch.estimated_input_tokens,
+            batch.artifact_tokens,
             batch.member_count,
             created_at,
         )
+
+
+def _group_read_model(row: Mapping[str, object]) -> DraftClaimCompactionGroupReadModel:
+    return DraftClaimCompactionGroupReadModel(
+        group_ref=_s(row, "group_ref"),
+        workflow_run_id=_s(row, "workflow_run_id"),
+        source_document_ref=_s(row, "source_document_ref"),
+        embedding_model_id=_s(row, "embedding_model_id"),
+        group_algorithm=_s(row, "group_algorithm"),
+        group_threshold=_f(row, "group_threshold"),
+        member_count=_i(row, "member_count"),
+        artifact_tokens=_i(row, "artifact_tokens"),
+        requires_split=_b(row, "requires_split"),
+        created_at=_dt(row, "created_at"),
+    )
+
+
+def _batch_read_model(row: Mapping[str, object]) -> DraftClaimCompactionBatchReadModel:
+    return DraftClaimCompactionBatchReadModel(
+        batch_ref=_s(row, "batch_ref"),
+        workflow_run_id=_s(row, "workflow_run_id"),
+        group_ref=_s(row, "group_ref"),
+        prompt_variant=_s(row, "prompt_variant"),
+        model_id=_s(row, "model_id"),
+        artifact_tokens=_i(row, "artifact_tokens"),
+        batch_status=_s(row, "batch_status"),
+        member_count=_i(row, "member_count"),
+        created_at=_dt(row, "created_at"),
+    )
+
+
+def _member_read_model(
+    row: Mapping[str, object],
+) -> DraftClaimCompactionGroupMemberReadModel:
+    return DraftClaimCompactionGroupMemberReadModel(
+        group_ref=_s(row, "group_ref"),
+        observation_ref=_s(row, "observation_ref"),
+        embedding_ref=_s(row, "embedding_ref"),
+        source_unit_ref=_s(row, "source_unit_ref"),
+        member_rank=_i(row, "member_rank"),
+        member_kind=_s(row, "member_kind"),
+        created_at=_dt(row, "created_at"),
+    )
 
 
 def _batch_for_dispatch(
@@ -276,7 +395,7 @@ def _batch_for_dispatch(
         group_ref=_s(row, "group_ref"),
         prompt_variant=_s(row, "prompt_variant"),
         model_id=_s(row, "model_id"),
-        estimated_input_tokens=_i(row, "estimated_input_tokens"),
+        artifact_tokens=_i(row, "artifact_tokens"),
         member_observation_refs=_strings(row["member_observation_refs"]),
     )
 
@@ -303,6 +422,24 @@ def _claim(row: Mapping[str, object]) -> DraftClaimForCompaction:
     )
 
 
+def _require_non_empty_text(value: str, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"{field_name} must be str")
+    if not value.strip():
+        raise ValueError(f"{field_name} must be non-empty")
+
+
+def _validate_page(*, limit: int, offset: int) -> None:
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise TypeError("limit must be int")
+    if limit <= 0:
+        raise ValueError("limit must be > 0")
+    if isinstance(offset, bool) or not isinstance(offset, int):
+        raise TypeError("offset must be int")
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
+
+
 def _s(row: Mapping[str, object], key: str) -> str:
     value = row[key]
     if not isinstance(value, str) or not value.strip():
@@ -321,6 +458,27 @@ def _i(row: Mapping[str, object], key: str) -> int:
     value = row[key]
     if not isinstance(value, int):
         raise TypeError(f"{key} must be int")
+    return value
+
+
+def _f(row: Mapping[str, object], key: str) -> float:
+    value = row[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{key} must be numeric")
+    return float(value)
+
+
+def _b(row: Mapping[str, object], key: str) -> bool:
+    value = row[key]
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} must be bool")
+    return value
+
+
+def _dt(row: Mapping[str, object], key: str):
+    value = row[key]
+    if not isinstance(value, datetime):
+        raise TypeError(f"{key} must be datetime")
     return value
 
 

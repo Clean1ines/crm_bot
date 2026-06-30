@@ -110,12 +110,19 @@ class _PostgresDegradedFallbackScheduler:
         resume_work_type = DraftClaimCompactionNextWorkItemType(
             decision.resume_work_type
         )
+        prompt_tokens = decision.estimated_prompt_tokens
+        artifact_tokens = decision.estimated_completion_tokens
+        input_tokens = prompt_tokens + artifact_tokens
+        required_window_tokens = input_tokens + artifact_tokens
+
         next_work_item = DraftClaimCompactionNextWorkItem(
             work_type=resume_work_type,
             node_refs=decision.node_refs,
             primary_model_id=decision.degraded_model_ref,
-            estimated_prompt_tokens=decision.estimated_prompt_tokens,
-            estimated_completion_tokens=decision.estimated_completion_tokens,
+            prompt_tokens=prompt_tokens,
+            artifact_tokens=artifact_tokens,
+            input_tokens=input_tokens,
+            required_window_tokens=required_window_tokens,
         )
         state_repository = PostgresDraftClaimCompactionReductionStateRepository(
             self.connection

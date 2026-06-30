@@ -50,6 +50,9 @@ class FakeReductionStateConnection:
     incompatibilities: dict[tuple[str, str], dict[str, object]] = field(
         default_factory=dict
     )
+    origin_separations: dict[tuple[str, str], dict[str, object]] = field(
+        default_factory=dict
+    )
 
     async def execute(self, query: str, *args: object) -> object:
         if "INSERT INTO draft_claim_compaction_components" in query:
@@ -89,6 +92,23 @@ class FakeReductionStateConnection:
             }
             return "INSERT 0 1"
 
+        if "INSERT INTO draft_claim_compaction_origin_separation_edges" in query:
+            key = (_str_arg(args[3]), _str_arg(args[4]))
+            if key in self.origin_separations:
+                return "INSERT 0 0"
+            self.origin_separations[key] = {
+                "separation_ref": _str_arg(args[0]),
+                "workflow_run_id": _str_arg(args[1]),
+                "group_ref": _str_arg(args[2]),
+                "origin_ref_a": key[0],
+                "origin_ref_b": key[1],
+                "established_by_batch_ref": _optional_str_arg(args[5]),
+                "established_by_work_item_id": _optional_str_arg(args[6]),
+                "established_by_dispatch_attempt_id": _optional_str_arg(args[7]),
+                "source_comparison_ref": _optional_str_arg(args[8]),
+            }
+            return "INSERT 0 1"
+
         if "INSERT INTO draft_claim_compaction_nodes" in query:
             node_ref = _str_arg(args[0])
             if node_ref in self.nodes:
@@ -102,7 +122,7 @@ class FakeReductionStateConnection:
                 "active": _bool_arg(args[4]),
                 "source_claim_refs": json.loads(_str_arg(args[5])),
                 "supersedes_node_refs": json.loads(_str_arg(args[6])),
-                "estimated_input_tokens": _int_arg(args[7]),
+                "artifact_tokens": _int_arg(args[7]),
                 "compacted_key": _optional_str_arg(args[8])
                 if is_enriched_compacted_insert
                 else None,
@@ -128,6 +148,8 @@ class FakeReductionStateConnection:
                     if is_enriched_compacted_insert
                     else None
                 ),
+                "created_at": _now(),
+                "updated_at": _now(),
             }
             return "INSERT 0 1"
 
@@ -252,6 +274,22 @@ class FakeReductionStateConnection:
                     ),
                 }
                 for group_ref in group_refs
+            ]
+
+        if "FROM draft_claim_compaction_origin_separation_edges" in query:
+            workflow_run_id = _str_arg(args[0])
+            group_ref = _str_arg(args[1])
+            return [
+                separation
+                for separation in sorted(
+                    self.origin_separations.values(),
+                    key=lambda row: (
+                        str(row["origin_ref_a"]),
+                        str(row["origin_ref_b"]),
+                    ),
+                )
+                if separation["workflow_run_id"] == workflow_run_id
+                and separation["group_ref"] == group_ref
             ]
 
         if "FROM draft_claim_compaction_component_incompatibilities" in query:
@@ -431,18 +469,24 @@ class FakeReductionStateConnection:
             return []
 
         if "FROM execution_work_items" in query:
-            return [
-                {
-                    "ready_work_item_count": 0,
-                    "leased_work_item_count": 0,
-                    "deferred_work_item_count": 0,
-                    "retryable_failed_work_item_count": 0,
-                    "completed_work_item_count": 0,
-                    "terminal_failed_work_item_count": 0,
-                    "active_work_item_count": 0,
-                    "due_waiting_work_item_count": 0,
-                }
-            ]
+            if (
+                "ready_work_item_count" in query
+                and "leased_work_item_count" in query
+                and "active_work_item_count" in query
+            ):
+                return [
+                    {
+                        "ready_work_item_count": 0,
+                        "leased_work_item_count": 0,
+                        "deferred_work_item_count": 0,
+                        "retryable_failed_work_item_count": 0,
+                        "completed_work_item_count": 0,
+                        "terminal_failed_work_item_count": 0,
+                        "active_work_item_count": 0,
+                        "due_waiting_work_item_count": 0,
+                    }
+                ]
+            return []
 
         raise AssertionError(f"unexpected fetch query: {query}")
 
@@ -456,13 +500,13 @@ async def test_seeds_raw_nodes_and_sources_idempotently() -> None:
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref="claim-a",
-            estimated_input_tokens=10,
+            artifact_tokens=10,
         ),
         build_initial_raw_node(
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref="claim-b",
-            estimated_input_tokens=11,
+            artifact_tokens=11,
         ),
     )
 
@@ -502,7 +546,7 @@ async def test_load_planner_state_returns_active_raw_nodes_and_sources() -> None
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -565,7 +609,7 @@ def _compacted_node_row(
         "active": True,
         "source_claim_refs": json.dumps((f"source-{node_ref}",)),
         "supersedes_node_refs": json.dumps(()),
-        "estimated_input_tokens": 10,
+        "artifact_tokens": 10,
         "compacted_key": f"key-{node_ref}",
         "compacted_claim": f"Compacted claim {node_ref}",
         "compacted_claim_kind": "definition",
@@ -573,6 +617,8 @@ def _compacted_node_row(
         "compacted_merge_decision": "merged",
         "compacted_triples": json.dumps([_triple().to_json_dict()]),
         "compacted_payload": None,
+        "created_at": _now(),
+        "updated_at": _now(),
     }
 
 
@@ -614,13 +660,13 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -670,7 +716,7 @@ async def test_apply_compacted_claims_result_creates_active_compacted_node_idemp
     assert active_nodes[0].source_claim_refs == ("claim-a", "claim-b")
     assert active_nodes[0].compacted_key == "refund_support"
     assert active_nodes[0].compacted_claim == "Product supports refunds."
-    assert active_nodes[0].estimated_input_tokens > 0
+    assert active_nodes[0].artifact_tokens > 0
     assert active_nodes[0].compacted_triples == (_triple(),)
     assert active_nodes[0].compacted_claim_kind == "capability"
     assert active_nodes[0].compacted_granularity == "atomic"
@@ -695,7 +741,7 @@ async def test_apply_compacted_claims_result_marks_distinct_outputs_not_merged()
             workflow_run_id="workflow-1",
             group_ref="group-1",
             observation_ref=claim_ref,
-            estimated_input_tokens=10,
+            artifact_tokens=10,
         )
         for claim_ref in ("claim-1", "claim-2", "claim-3", "claim-4")
     )
@@ -755,19 +801,19 @@ async def test_not_merged_lineage_survives_reload_after_mixed_merge() -> None:
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-c",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -982,7 +1028,7 @@ def _active_compacted_node_row(
         "active": True,
         "source_claim_refs": source_claim_refs_list,
         "supersedes_node_refs": [],
-        "estimated_input_tokens": 0,
+        "artifact_tokens": 0,
         "compacted_key": node_ref,
         "compacted_claim": node_ref,
         "compacted_claim_kind": "capability",
@@ -1014,13 +1060,13 @@ async def test_summarize_compaction_progress_completes_from_lineage_comparisons(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-1",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1074,13 +1120,13 @@ async def test_summarize_compaction_progress_counts_done_and_active_groups() -> 
                 workflow_run_id="workflow-1",
                 group_ref="group-done",
                 observation_ref="claim-a",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
             build_initial_raw_node(
                 workflow_run_id="workflow-1",
                 group_ref="group-done",
                 observation_ref="claim-b",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1102,7 +1148,7 @@ async def test_summarize_compaction_progress_counts_done_and_active_groups() -> 
                 workflow_run_id="workflow-1",
                 group_ref="group-active",
                 observation_ref="claim-c",
-                estimated_input_tokens=10,
+                artifact_tokens=10,
             ),
         ),
         created_at=_now(),
@@ -1120,3 +1166,316 @@ async def test_summarize_compaction_progress_counts_done_and_active_groups() -> 
     assert summary.pending_comparison_count == 0
     assert summary.active_component_count == 2
     assert summary.component_incompatibility_count == 0
+
+
+@pytest.mark.asyncio
+async def test_partial_non_merge_persists_origin_level_separation_edges() -> None:
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    raw_nodes = tuple(
+        build_initial_raw_node(
+            workflow_run_id="workflow-1",
+            group_ref="group-1",
+            observation_ref=claim_ref,
+            artifact_tokens=10,
+        )
+        for claim_ref in ("claim-4", "claim-5", "claim-6")
+    )
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=raw_nodes,
+        created_at=_now(),
+    )
+
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(
+            _compacted_claim(("claim-4", "claim-5")),
+            _compacted_claim(("claim-6",)),
+        ),
+        compared_node_refs=tuple(node.node_ref for node in raw_nodes),
+        created_at=_now(),
+    )
+
+    assert set(connection.origin_separations) == {
+        ("claim-4", "claim-6"),
+        ("claim-5", "claim-6"),
+    }
+    assert ("claim-4", "claim-5") not in connection.origin_separations
+
+
+@pytest.mark.asyncio
+async def test_origin_separation_blocks_descendant_comparison_after_mixed_merge() -> (
+    None
+):
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    raw_nodes = tuple(
+        build_initial_raw_node(
+            workflow_run_id="workflow-1",
+            group_ref="group-1",
+            observation_ref=claim_ref,
+            artifact_tokens=10,
+        )
+        for claim_ref in ("claim-4", "claim-5", "claim-6", "claim-7")
+    )
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=raw_nodes,
+        created_at=_now(),
+    )
+
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(
+            _compacted_claim(("claim-4", "claim-5")),
+            _compacted_claim(("claim-6",)),
+        ),
+        compared_node_refs=tuple(node.node_ref for node in raw_nodes[:3]),
+        created_at=_now(),
+    )
+    z6 = compacted_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        source_claim_refs=("claim-6",),
+    )
+    raw_7 = raw_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        observation_ref="claim-7",
+    )
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-2",
+        work_item_id="work-item-2",
+        round_index=1,
+        compacted_claims=(_compacted_claim(("claim-6", "claim-7")),),
+        compared_node_refs=(z6, raw_7),
+        created_at=_now(),
+    )
+
+    state = await repository.load_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+    )
+    assert state is not None
+    active_origin_sets = {node.source_claim_refs for node in state.active_nodes()}
+    assert active_origin_sets == {("claim-4", "claim-5"), ("claim-6", "claim-7")}
+    decision = DraftClaimCompactionReductionPlannerPolicy().plan_next_step(state)
+    assert decision.work_type is DraftClaimCompactionNextWorkItemType.DONE
+    assert decision.node_refs == ()
+
+
+@pytest.mark.asyncio
+async def test_existing_compacted_artifact_preserves_stored_payload_when_returned_modified() -> (
+    None
+):
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+                artifact_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(_compacted_claim(("claim-a",)),),
+        created_at=_now(),
+    )
+    node_ref = compacted_claim_node_ref(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        source_claim_refs=("claim-a",),
+    )
+    stored_claim = connection.nodes[node_ref]["compacted_claim"]
+
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-2",
+        work_item_id="work-item-2",
+        round_index=1,
+        compacted_claims=(
+            EnrichedDraftClaimCompactionOutputClaim(
+                key="mutated_key",
+                claim="LLM tried to mutate existing artifact.",
+                claim_kind="capability",
+                granularity="atomic",
+                source_claim_refs=("claim-a",),
+                triples=(_triple(),),
+                merge_decision="unmerged",
+                possible_questions=("mutated",),
+                exclusion_scope="mutated",
+                evidence_block="mutated",
+            ),
+        ),
+        created_at=_now(),
+    )
+
+    assert connection.nodes[node_ref]["compacted_claim"] == stored_claim
+
+
+@pytest.mark.asyncio
+async def test_list_compaction_frontier_returns_active_raw_and_compacted_nodes() -> (
+    None
+):
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+                artifact_tokens=10,
+            ),
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-b",
+                artifact_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(_compacted_claim(("claim-a",)),),
+        compared_node_refs=(
+            raw_claim_node_ref(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+            ),
+        ),
+        created_at=_now(),
+    )
+
+    frontier = await repository.list_compaction_frontier_for_workflow(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        include_inactive=False,
+        limit=50,
+        offset=0,
+    )
+
+    assert frontier.summary.active_raw_count == 1
+    assert frontier.summary.active_compacted_count == 1
+    assert {row.frontier_state for row in frontier.rows} == {
+        "active_raw_waiting",
+        "active_compacted",
+    }
+    assert all(row.active for row in frontier.rows)
+    assert all(
+        row.source_claim_count == len(row.source_claim_refs) for row in frontier.rows
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_compaction_frontier_includes_separation_summary_count() -> None:
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    raw_nodes = tuple(
+        build_initial_raw_node(
+            workflow_run_id="workflow-1",
+            group_ref="group-1",
+            observation_ref=claim_ref,
+            artifact_tokens=10,
+        )
+        for claim_ref in ("claim-1", "claim-2", "claim-3")
+    )
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=raw_nodes,
+        created_at=_now(),
+    )
+    await repository.apply_compacted_claims_result(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        batch_ref="batch-1",
+        work_item_id="work-item-1",
+        round_index=0,
+        compacted_claims=(
+            _compacted_claim(("claim-1", "claim-2")),
+            _compacted_claim(("claim-3",)),
+        ),
+        compared_node_refs=tuple(node.node_ref for node in raw_nodes),
+        created_at=_now(),
+    )
+
+    frontier = await repository.list_compaction_frontier_for_workflow(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        include_inactive=False,
+        limit=50,
+        offset=0,
+    )
+
+    assert frontier.separation_summary.edge_count == 2
+    assert frontier.separation_summary.origin_count == 3
+    assert frontier.separation_summary.sample_origin_pairs == (
+        ("claim-1", "claim-3"),
+        ("claim-2", "claim-3"),
+    )
+    assert not hasattr(frontier.separation_summary, "raw_edges")
+
+
+@pytest.mark.asyncio
+async def test_singleton_waiting_raw_node_is_visible_in_active_frontier() -> None:
+    connection = FakeReductionStateConnection()
+    repository = PostgresDraftClaimCompactionReductionStateRepository(connection)
+    await repository.seed_initial_planner_state(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        raw_nodes=(
+            build_initial_raw_node(
+                workflow_run_id="workflow-1",
+                group_ref="group-1",
+                observation_ref="claim-a",
+                artifact_tokens=10,
+            ),
+        ),
+        created_at=_now(),
+    )
+
+    frontier = await repository.list_compaction_frontier_for_workflow(
+        workflow_run_id="workflow-1",
+        group_ref="group-1",
+        include_inactive=False,
+        limit=50,
+        offset=0,
+    )
+
+    assert frontier.summary.active_raw_count == 1
+    assert frontier.rows[0].frontier_state == "active_raw_waiting"
+    assert frontier.rows[0].source_claim_refs == ("claim-a",)

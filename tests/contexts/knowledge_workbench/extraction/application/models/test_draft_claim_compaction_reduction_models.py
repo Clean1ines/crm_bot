@@ -74,7 +74,7 @@ def test_planner_state_rejects_duplicate_node_refs() -> None:
 def test_budget_fit_records_primary_and_degraded_models() -> None:
     fit = DraftClaimCompactionBudgetFit(
         status="too_large_even_reduced",
-        estimated_input_tokens=120000,
+        artifact_tokens=120000,
     )
 
     assert fit.status is DraftClaimCompactionBudgetFitStatus.TOO_LARGE_EVEN_REDUCED

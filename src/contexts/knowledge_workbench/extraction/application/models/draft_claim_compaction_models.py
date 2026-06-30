@@ -2,9 +2,93 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from types import MappingProxyType
 
 from src.domain.project_plane.json_types import JsonValue
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionGroupReadModel:
+    group_ref: str
+    workflow_run_id: str
+    source_document_ref: str
+    embedding_model_id: str
+    group_algorithm: str
+    group_threshold: float
+    member_count: int
+    artifact_tokens: int
+    requires_split: bool
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("group_ref", self.group_ref),
+            ("workflow_run_id", self.workflow_run_id),
+            ("source_document_ref", self.source_document_ref),
+            ("embedding_model_id", self.embedding_model_id),
+            ("group_algorithm", self.group_algorithm),
+        ):
+            _text(value, name)
+        _score(self.group_threshold)
+        _non_negative_int(self.member_count, "member_count")
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
+        _bool(self.requires_split, "requires_split")
+        _datetime_value(self.created_at, "created_at")
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionBatchReadModel:
+    batch_ref: str
+    workflow_run_id: str
+    group_ref: str
+    prompt_variant: str
+    model_id: str
+    artifact_tokens: int
+    batch_status: str
+    member_count: int
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("batch_ref", self.batch_ref),
+            ("workflow_run_id", self.workflow_run_id),
+            ("group_ref", self.group_ref),
+            ("prompt_variant", self.prompt_variant),
+            ("model_id", self.model_id),
+            ("batch_status", self.batch_status),
+        ):
+            _text(value, name)
+        _non_negative_int(self.artifact_tokens, "artifact_tokens")
+        _non_negative_int(self.member_count, "member_count")
+        _datetime_value(self.created_at, "created_at")
+
+    @property
+    def derived_work_item_id(self) -> str:
+        return f"claim-compaction:{self.workflow_run_id}:{self.batch_ref}"
+
+
+@dataclass(frozen=True, slots=True)
+class DraftClaimCompactionGroupMemberReadModel:
+    group_ref: str
+    observation_ref: str
+    embedding_ref: str
+    source_unit_ref: str
+    member_rank: int
+    member_kind: str
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("group_ref", self.group_ref),
+            ("observation_ref", self.observation_ref),
+            ("embedding_ref", self.embedding_ref),
+            ("source_unit_ref", self.source_unit_ref),
+            ("member_kind", self.member_kind),
+        ):
+            _text(value, name)
+        _non_negative_int(self.member_rank, "member_rank")
+        _datetime_value(self.created_at, "created_at")
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,7 +171,7 @@ class DraftClaimCompactionGroupCandidate:
     member_observation_refs: tuple[str, ...]
     member_embedding_refs: tuple[str, ...]
     member_source_unit_refs: tuple[str, ...]
-    estimated_input_tokens: int
+    artifact_tokens: int
     requires_split: bool
 
     @property
@@ -102,7 +186,7 @@ class DraftClaimCompactionBatchCandidate:
     group_ref: str
     prompt_variant: str
     model_id: str
-    estimated_input_tokens: int
+    artifact_tokens: int
     member_observation_refs: tuple[str, ...]
 
     @property
@@ -117,7 +201,7 @@ class DraftClaimCompactionBatchForDispatch:
     group_ref: str
     prompt_variant: str
     model_id: str
-    estimated_input_tokens: int
+    artifact_tokens: int
     member_observation_refs: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -126,8 +210,8 @@ class DraftClaimCompactionBatchForDispatch:
         _text(self.group_ref, "group_ref")
         _text(self.prompt_variant, "prompt_variant")
         _text(self.model_id, "model_id")
-        if self.estimated_input_tokens < 0:
-            raise ValueError("estimated_input_tokens must be >= 0")
+        if self.artifact_tokens < 0:
+            raise ValueError("artifact_tokens must be >= 0")
         _text_tuple(
             self.member_observation_refs,
             "member_observation_refs",
@@ -137,6 +221,23 @@ class DraftClaimCompactionBatchForDispatch:
     @property
     def member_count(self) -> int:
         return len(self.member_observation_refs)
+
+
+def _non_negative_int(value: int, name: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be int")
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0")
+
+
+def _bool(value: bool, name: str) -> None:
+    if not isinstance(value, bool):
+        raise TypeError(f"{name} must be bool")
+
+
+def _datetime_value(value: datetime, name: str) -> None:
+    if not isinstance(value, datetime):
+        raise TypeError(f"{name} must be datetime")
 
 
 def _text(value: str, name: str) -> None:
