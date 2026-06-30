@@ -129,7 +129,7 @@ class DraftClaimCompactionNodeReadModel:
     compacted_claim_kind: str | None
     compacted_granularity: str | None
     compacted_merge_decision: str | None
-    compacted_payload: JsonObject | None = None
+    compacted_payload: JsonObject | None
     created_at: datetime
     updated_at: datetime
 
