@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Clock3, FileText, Trash2, Zap } from 'lucide-react';
 
-import { visibleWorkflowActions } from '../workflow/workflowActions';
+import { visibleWorkflowActions, workflowActionLabel } from '../workflow/workflowActions';
 import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnit,
@@ -368,22 +368,8 @@ const userErrorLabel = (errorKind: string | null | undefined): string => {
 
 
 
-const liveActionLabel = (action: WorkbenchWorkflowActionLiveState): string => {
-  const labels: Record<string, string> = {
-    pause_processing: 'Пауза',
-    resume_processing: 'Восстановить',
-    cancel_processing: 'Отменить обработку',
-    open_curation: 'Открыть проверку',
-    publish_ready: 'Опубликовать',
-    open_published_surfaces: 'Опубликованное',
-    confirm_degraded_fallback: 'Продолжить на упрощённой модели',
-    delete_document: 'Удалить',
-  };
-  return labels[action.action_id] || action.action_id;
-};
-
 const disabledActionTitle = (action: WorkbenchWorkflowActionLiveState): string => {
-  if (action.enabled) return liveActionLabel(action);
+  if (action.enabled) return workflowActionLabel(action);
 
   const labels: Record<string, string> = {
     not_paused: 'Доступно только когда обработка на паузе',
@@ -1738,7 +1724,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                 </section>
               )}
 
-              {actions.filter((action) => action.visible).length > 0 && (
+              {visibleWorkflowActions(actions).length > 0 && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {visibleWorkflowActions(actions).map((action) => (
                       <button
@@ -1749,7 +1735,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                         onClick={() => handleLiveAction(action)}
                         className={liveActionClassName(action)}
                       >
-                        {liveActionLabel(action)}
+                        {workflowActionLabel(action)}
                       </button>
                     ))}
                 </div>

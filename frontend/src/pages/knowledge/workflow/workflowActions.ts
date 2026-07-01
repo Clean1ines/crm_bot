@@ -17,3 +17,19 @@ export const visibleWorkflowActions = (
 
     return true;
   });
+
+export const workflowActionLabel = (
+  action: WorkbenchWorkflowActionLiveState,
+): string => {
+  const labels: Record<string, string> = {
+    pause_processing: 'Пауза',
+    resume_processing: 'Восстановить',
+    open_curation: 'Открыть проверку',
+    publish_ready: 'Опубликовать',
+    open_published_surfaces: 'Опубликованное',
+    confirm_degraded_fallback: 'Продолжить на упрощённой модели',
+    delete_document: 'Удалить',
+  };
+
+  return labels[action.action_id] || action.action_id;
+};
