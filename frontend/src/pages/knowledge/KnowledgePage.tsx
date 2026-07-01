@@ -384,6 +384,7 @@ const shouldUseWorkflowProjectionForDocument = (doc: Document): boolean => {
       action.visible &&
       (action.action_id === "open_curation" ||
         action.action_id === "resume_processing" ||
+        action.action_id === "pause_processing" ||
         action.action_id === "cancel_processing"),
   );
 };
@@ -1275,6 +1276,25 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
+  const pauseProcessingMutation = useMutation({
+    mutationFn: async (documentId: string) => {
+      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
+      await knowledgeApi.pauseProcessing(projectId, documentId);
+    },
+    onSuccess: async () => {
+      toast.success("Обработка документа остановлена");
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-documents", projectId],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["knowledge-processing-reports", projectId],
+      });
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err, "Не удалось остановить обработку документа"));
+    },
+  });
+
   const cancelProcessingMutation = useMutation({
     mutationFn: async (documentId: string) => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
@@ -1908,10 +1928,11 @@ export const KnowledgePage: React.FC = () => {
                   sourceUnitsResponse={sourceUnits[doc.id] ?? null}
                   answerDraftsResponse={answerDrafts[doc.id] ?? null}
                   onCardAction={(actionId) => {
-                    if (
-                      actionId === "cancel_processing" ||
-                      actionId === "pause_processing"
-                    ) {
+                    if (actionId === "pause_processing") {
+                      pauseProcessingMutation.mutate(doc.id);
+                      return;
+                    }
+                    if (actionId === "cancel_processing") {
                       cancelProcessingMutation.mutate(doc.id);
                       return;
                     }
