@@ -1382,6 +1382,7 @@ export const knowledgeApi = {
       method: 'POST',
     }),
 
+
   resumeProcessing: (projectId: string, documentId: string) =>
     authedJsonRequest(`/api/projects/${projectId}/knowledge/source-documents/${encodeURIComponent(documentId)}/restore`, {
       method: 'POST',

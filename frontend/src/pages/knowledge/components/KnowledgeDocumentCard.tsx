@@ -371,8 +371,8 @@ const userErrorLabel = (errorKind: string | null | undefined): string => {
 const liveActionLabel = (action: WorkbenchWorkflowActionLiveState): string => {
   const labels: Record<string, string> = {
     pause_processing: 'Пауза',
-    resume_processing: 'Продолжить',
-    cancel_processing: 'Остановить',
+    resume_processing: 'Восстановить',
+    cancel_processing: 'Отменить обработку',
     open_curation: 'Открыть проверку',
     publish_ready: 'Опубликовать',
     open_published_surfaces: 'Опубликованное',
@@ -974,11 +974,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
   const handleLiveAction = (action: WorkbenchWorkflowActionLiveState): void => {
     if (!canRunLiveAction(action)) return;
-
-    if (action.action_id === 'cancel_processing' || action.action_id === 'pause_processing') {
-      onStopProcessing();
-      return;
-    }
 
     if (action.action_id === 'open_curation') {
       onOpenCuration(workflow?.curation.workflow_run_id ?? workflow?.workflow_run_id ?? null);
@@ -1748,6 +1743,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                 <div className="flex flex-wrap gap-2 pt-1">
                   {actions
                     .filter((action) => action.visible)
+                    .filter((action) => action.action_id !== 'cancel_processing')
                     .map((action) => (
                       <button
                         key={action.action_id}

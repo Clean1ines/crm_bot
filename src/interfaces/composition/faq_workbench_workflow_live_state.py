@@ -1098,21 +1098,21 @@ def _actions(
         ),
         WorkbenchWorkflowActionView(
             action_id="pause_processing",
-            visible=True,
+            visible=not paused and not terminal,
             enabled=not paused and not terminal,
             reason_code=None if not paused and not terminal else "not_running",
         ),
         WorkbenchWorkflowActionView(
             action_id="resume_processing",
-            visible=True,
-            enabled=paused,
-            reason_code=None if paused else "not_paused",
+            visible=paused and not terminal,
+            enabled=paused and not terminal,
+            reason_code=None if paused and not terminal else "not_paused",
         ),
         WorkbenchWorkflowActionView(
             action_id="cancel_processing",
-            visible=True,
-            enabled=not terminal,
-            reason_code=None if not terminal else "terminal_workflow",
+            visible=False,
+            enabled=False,
+            reason_code="hidden_terminal_cancel",
         ),
         WorkbenchWorkflowActionView(
             action_id="confirm_degraded_fallback",
