@@ -27,8 +27,6 @@ import {
 import { BaseModal } from "@shared/ui";
 import { t } from "@shared/i18n";
 import { CommercialTruthReviewSummary } from "./components/CommercialTruthReviewSummary";
-import { DraftsModal } from "./components/DraftsModal";
-import { SourceUnitsModal } from "./components/SourceUnitsModal";
 import { DocumentStatusBlock } from "./components/DocumentStatusBlock";
 import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
 import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
@@ -136,15 +134,6 @@ const formatPreviewScore = (value: number): string =>
 
 const DRAFT_FETCH_LIMIT = 1000;
 const SOURCE_UNIT_FETCH_LIMIT = 1000;
-
-const omitDocumentState = <T,>(
-  values: Record<string, T>,
-  documentId: string,
-): Record<string, T> => {
-  const next = { ...values };
-  delete next[documentId];
-  return next;
-};
 
 // Legacy fallback only for display/status of old rows that predate
 // backend KnowledgeDocumentLifecycle actions. Do not use this text as
@@ -565,26 +554,12 @@ export const KnowledgePage: React.FC = () => {
     useState<KnowledgePreprocessingMode>("faq");
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [deleteDocumentId, setDeleteDocumentId] = useState<string | null>(null);
-  const [draftsDocumentId, setDraftsDocumentId] = useState<string | null>(null);
-  const [sourceUnitsDocumentId, setSourceUnitsDocumentId] = useState<
-    string | null
-  >(null);
   const [curationTarget, setDraftClaimCurationTarget] =
     useState<DraftClaimCurationTarget | null>(null);
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<
     "documents" | "ai_playground"
   >("documents");
-  const [draftFiltersByDocument, setDraftFiltersByDocument] = useState<
-    Record<string, string>
-  >({});
-  const [sourceUnitFiltersByDocument, setSourceUnitFiltersByDocument] =
-    useState<Record<string, string>>({});
-  const [expandedDraftIdsByDocument, setExpandedDraftIdsByDocument] = useState<
-    Record<string, string[]>
-  >({});
-  const [expandedSourceUnitIdsByDocument, setExpandedSourceUnitIdsByDocument] =
-    useState<Record<string, string[]>>({});
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -826,7 +801,6 @@ export const KnowledgePage: React.FC = () => {
   const importQualityReports = importQualityReportsQuery.data || {};
   const draftPreviewDocumentIds = Array.from(
     new Set([
-      ...(draftsDocumentId ? [draftsDocumentId] : []),
       ...workflowProjectionDocumentIds,
       ...Object.values(processingReports)
         .filter((report) => {
@@ -885,7 +859,6 @@ export const KnowledgePage: React.FC = () => {
   const answerDrafts = answerDraftsQuery.data || {};
   const sourceUnitDocumentIds = Array.from(
     new Set([
-      ...(sourceUnitsDocumentId ? [sourceUnitsDocumentId] : []),
       ...workflowProjectionDocumentIds,
       ...Object.values(processingReports)
         .filter((report) => {
@@ -1042,24 +1015,6 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
   const commercialTruthReviews = commercialTruthReviewQuery.data || {};
-  const draftsDocument = draftsDocumentId
-    ? (documents.find((doc) => doc.id === draftsDocumentId) ?? null)
-    : null;
-  const draftsModalResponse = draftsDocumentId
-    ? answerDrafts[draftsDocumentId]
-    : undefined;
-  const draftsModalFilter = draftsDocumentId
-    ? draftFiltersByDocument[draftsDocumentId] || ""
-    : "";
-  const draftsModalExpandedIds = draftsDocumentId
-    ? expandedDraftIdsByDocument[draftsDocumentId] || []
-    : [];
-  const sourceUnitsDocument = sourceUnitsDocumentId
-    ? (documents.find((doc) => doc.id === sourceUnitsDocumentId) ?? null)
-    : null;
-  const sourceUnitsModalResponse = sourceUnitsDocumentId
-    ? sourceUnits[sourceUnitsDocumentId]
-    : undefined;
   const deleteDocument = deleteDocumentId
     ? (documents.find((doc) => doc.id === deleteDocumentId) ?? null)
     : null;
@@ -1072,70 +1027,9 @@ export const KnowledgePage: React.FC = () => {
   const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
   const documentsGridRef = useRef<HTMLDivElement | null>(null);
 
-  const sourceUnitsModalFilter = sourceUnitsDocumentId
-    ? sourceUnitFiltersByDocument[sourceUnitsDocumentId] || ""
-    : "";
-  const sourceUnitsModalExpandedIds = sourceUnitsDocumentId
-    ? expandedSourceUnitIdsByDocument[sourceUnitsDocumentId] || []
-    : [];
-  const openDraftsModal = (documentId: string): void => {
-    setDraftsDocumentId(documentId);
-  };
-  const openSourceUnitsModal = (documentId: string): void => {
-    setSourceUnitsDocumentId(documentId);
-  };
-  const setDraftFilter = (documentId: string, value: string): void => {
-    setDraftFiltersByDocument((current) => ({
-      ...current,
-      [documentId]: value,
-    }));
-  };
-  const setSourceUnitFilter = (documentId: string, value: string): void => {
-    setSourceUnitFiltersByDocument((current) => ({
-      ...current,
-      [documentId]: value,
-    }));
-  };
-  const toggleDraftExpanded = (documentId: string, draftId: string): void => {
-    setExpandedDraftIdsByDocument((current) => {
-      const currentIds = current[documentId] || [];
-      const nextIds = currentIds.includes(draftId)
-        ? currentIds.filter((item) => item !== draftId)
-        : [...currentIds, draftId];
-      return { ...current, [documentId]: nextIds };
-    });
-  };
-  const toggleSourceUnitExpanded = (
-    documentId: string,
-    sourceUnitId: string,
-  ): void => {
-    setExpandedSourceUnitIdsByDocument((current) => {
-      const currentIds = current[documentId] || [];
-      const nextIds = currentIds.includes(sourceUnitId)
-        ? currentIds.filter((item) => item !== sourceUnitId)
-        : [...currentIds, sourceUnitId];
-      return { ...current, [documentId]: nextIds };
-    });
-  };
   const removeDocumentLocalState = (documentId: string): void => {
-    setDraftsDocumentId((current) => (current === documentId ? null : current));
-    setSourceUnitsDocumentId((current) =>
-      current === documentId ? null : current,
-    );
     setDraftClaimCurationTarget((current) =>
       current?.documentId === documentId ? null : current,
-    );
-    setDraftFiltersByDocument((current) =>
-      omitDocumentState(current, documentId),
-    );
-    setSourceUnitFiltersByDocument((current) =>
-      omitDocumentState(current, documentId),
-    );
-    setExpandedDraftIdsByDocument((current) =>
-      omitDocumentState(current, documentId),
-    );
-    setExpandedSourceUnitIdsByDocument((current) =>
-      omitDocumentState(current, documentId),
     );
   };
   const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -1603,7 +1497,6 @@ export const KnowledgePage: React.FC = () => {
                           behavior: "smooth",
                           block: "center",
                         });
-                      openDraftsModal(doc.id);
                     }}
                     className="w-full rounded-lg px-3 py-2 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)]"
                   >
@@ -1993,24 +1886,6 @@ export const KnowledgePage: React.FC = () => {
         </>
       )}
 
-      {draftsDocumentId && draftsDocument && (
-        <DraftsModal
-          documentName={draftsDocument.file_name}
-          response={draftsModalResponse}
-          isLoading={
-            answerDraftsQuery.isLoading ||
-            (answerDraftsQuery.isFetching && !draftsModalResponse)
-          }
-          filter={draftsModalFilter}
-          expandedDraftIds={draftsModalExpandedIds}
-          onFilterChange={(value) => setDraftFilter(draftsDocumentId, value)}
-          onToggleDraft={(draftId) =>
-            toggleDraftExpanded(draftsDocumentId, draftId)
-          }
-          isDebugMode={isDebugMode}
-          onClose={() => setDraftsDocumentId(null)}
-        />
-      )}
 
       {curationTarget && projectId && (
         <DraftClaimCurationWorkspaceModal
@@ -2021,25 +1896,6 @@ export const KnowledgePage: React.FC = () => {
         />
       )}
 
-      {sourceUnitsDocumentId && sourceUnitsDocument && (
-        <SourceUnitsModal
-          documentName={sourceUnitsDocument.file_name}
-          response={sourceUnitsModalResponse}
-          isLoading={
-            sourceUnitsQuery.isLoading ||
-            (sourceUnitsQuery.isFetching && !sourceUnitsModalResponse)
-          }
-          filter={sourceUnitsModalFilter}
-          expandedSourceUnitIds={sourceUnitsModalExpandedIds}
-          onFilterChange={(value) =>
-            setSourceUnitFilter(sourceUnitsDocumentId, value)
-          }
-          onToggleSourceUnit={(sourceUnitId) =>
-            toggleSourceUnitExpanded(sourceUnitsDocumentId, sourceUnitId)
-          }
-          onClose={() => setSourceUnitsDocumentId(null)}
-        />
-      )}
 
       <BaseModal
         isOpen={deleteDocumentId !== null}
