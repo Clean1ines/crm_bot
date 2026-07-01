@@ -115,10 +115,22 @@ export const createInitialWorkflowLiveStateResponse = (
       },
       actions: [
         {
-          action_id: "cancel_processing",
+          action_id: "pause_processing",
           visible: true,
           enabled: true,
           reason_code: null,
+        },
+        {
+          action_id: "resume_processing",
+          visible: false,
+          enabled: false,
+          reason_code: "not_paused",
+        },
+        {
+          action_id: "cancel_processing",
+          visible: false,
+          enabled: false,
+          reason_code: "hidden_terminal_cancel",
         },
       ],
     },
