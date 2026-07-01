@@ -27,14 +27,10 @@ import { ClaimBuilderPanel } from './workflow-card/claim-builder/ClaimBuilderPan
 import { selectClaimBuilderSectionRows } from './workflow-card/claim-builder/claimBuilderSelectors';
 import { t } from '@shared/i18n';
 import {
-  type KnowledgeSourceUnit,
   type KnowledgeSourceUnitsResponse,
-  type KnowledgeAnswerDraftsResponse,
   type WorkbenchWorkflowActionLiveState,
   type WorkbenchWorkflowLiveStateResponse,
   type WorkbenchWorkflowStageLiveState,
-  type WorkbenchSectionQueueItemLiveState,
-  type WorkbenchLlmAttemptLiveState,
   type WorkbenchClaimClusterClaimLiveState,
   WorkbenchCompactedClaimPreviewLiveState,
 } from '@shared/api/modules/knowledge';
@@ -56,7 +52,7 @@ type KnowledgeDocumentCardProps = {
   workflowLiveStateLoading?: boolean;
   workflowLiveStateError?: string | null;
   sourceUnitsResponse?: KnowledgeSourceUnitsResponse | null;
-  answerDraftsResponse?: KnowledgeAnswerDraftsResponse | null;
+  answerDraftsResponse?: unknown;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
 };
@@ -121,167 +117,6 @@ const liveActionClassName = (action: WorkbenchWorkflowActionLiveState): string =
   return `${base} bg-[var(--control-bg)] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)]`;
 };
 
-const sourceUnitTitle = (unit: KnowledgeSourceUnit | null): string =>
-  unit?.title?.trim() || 'Без заголовка';
-
-const sectionDisplayNumber = (index: number): string => formatNumber(index + 1);
-
-
-type DraftClaimRecord = Record<string, unknown>;
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const firstTextField = (
-  record: DraftClaimRecord,
-  keys: readonly string[],
-): string | null => {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'string' && value.trim()) return value.trim();
-  }
-  return null;
-};
-
-const firstStringArrayField = (
-  record: DraftClaimRecord,
-  keys: readonly string[],
-): string[] => {
-  for (const key of keys) {
-    const value = record[key];
-    if (Array.isArray(value)) {
-      return value.filter(
-        (item): item is string => typeof item === 'string' && item.trim().length > 0,
-      );
-    }
-  }
-  return [];
-};
-
-const collectDraftClaims = (
-  response: KnowledgeAnswerDraftsResponse | null,
-): DraftClaimRecord[] => {
-  if (!response) return [];
-
-  const payload = response as unknown;
-  if (Array.isArray(payload)) {
-    return payload.filter(isRecord);
-  }
-
-  if (!isRecord(payload)) return [];
-
-  const containers = [
-    payload.draft_claims,
-    payload.claims,
-    payload.items,
-    payload.fragments,
-    payload.drafts,
-    payload.answers,
-  ];
-
-  for (const container of containers) {
-    if (Array.isArray(container)) {
-      return container.filter(isRecord);
-    }
-  }
-
-  return [];
-};
-
-const collectLiveDraftClaims = (
-  workflowLiveState: WorkbenchWorkflowLiveStateResponse | null | undefined,
-): DraftClaimRecord[] => {
-  const lanes = workflowLiveState?.workflow?.section_lanes ?? [];
-  return lanes.flatMap((lane) =>
-    lane.items.flatMap((item) => {
-      const value = (item as unknown as { draft_claims?: unknown }).draft_claims;
-      if (!Array.isArray(value)) return [];
-      return value.filter(isRecord);
-    }),
-  );
-};
-
-const draftClaimSourceRef = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, [
-    'source_unit_ref',
-    'source_unit_id',
-    'section_id',
-    'source_ref',
-    'sourceUnitRef',
-    'sourceUnitId',
-  ]);
-
-const draftClaimTitle = (claim: DraftClaimRecord, index: number): string =>
-  firstTextField(claim, ['title', 'claim_title', 'question', 'canonical_question']) ||
-  `Утверждение ${formatNumber(index + 1)}`;
-
-const draftClaimText = (claim: DraftClaimRecord): string =>
-  firstTextField(claim, [
-    'claim',
-    'claim_text',
-    'canonical_claim',
-    'answer',
-    'content',
-    'text',
-    'body',
-  ]) || 'Текст утверждения недоступен';
-
-const draftClaimEvidence = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, [
-    'evidence_block',
-    'source_excerpt',
-    'evidence',
-    'quote',
-    'source_quote',
-  ]);
-
-const draftClaimQuestions = (claim: DraftClaimRecord): string[] =>
-  firstStringArrayField(claim, [
-    'Возможные вопросы',
-    'questions',
-    'similar_questions',
-    'queries',
-  ]);
-
-const draftClaimExclusionScope = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, [
-    'Исключения',
-    'exclusionScope',
-    'scope_exclusion',
-  ]) ||
-  firstStringArrayField(claim, [
-    'exclusions',
-    'excluded_questions',
-    'scope_exclusions',
-  ]).join('\n') ||
-  null;
-
-const draftClaimGranularity = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, ['granularity', 'claim_granularity']);
-
-const draftClaimValidationDecision = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, ['validation_decision', 'decision']);
-
-const draftClaimDispatchAttemptId = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, [
-    'dispatch_attempt_id',
-    'attempt_id',
-    'node_run_id',
-  ]);
-
-const draftClaimWorkItemId = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, ['work_item_id', 'queue_item_id']);
-
-const draftClaimProvider = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, ['provider', 'model_provider']);
-
-const draftClaimModelRef = (claim: DraftClaimRecord): string | null =>
-  firstTextField(claim, ['model_ref', 'model_id', 'model_name']);
-
-const draftClaimKey = (claim: DraftClaimRecord, index: number): string =>
-  firstTextField(claim, ['observation_ref', 'id', 'claim_id', 'ref']) ||
-  `draft-claim-${index}`;
-
 export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   doc,
   isDeletePending,
@@ -292,7 +127,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   workflowLiveStateLoading = false,
   workflowLiveStateError = null,
   sourceUnitsResponse = null,
-  answerDraftsResponse = null,
   formatSize,
   knowledgeProcessingModeLabel,
 }) => {
@@ -374,90 +208,17 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const compactionComparisons =
     workflow?.claim_compaction_comparisons ?? nestedCompactionComparisons;
   const usage = workflow?.usage ?? null;
-  const sourceUnits = sourceUnitsResponse?.source_units ?? [];
   const claimBuilderSectionRows = useMemo(
     () => selectClaimBuilderSectionRows(workflowLiveState, sourceUnitsResponse),
     [workflowLiveState, sourceUnitsResponse],
   );
-  const draftClaims = useMemo(
-    () => [
-      ...collectDraftClaims(answerDraftsResponse),
-      ...collectLiveDraftClaims(workflowLiveState),
-    ],
-    [answerDraftsResponse, workflowLiveState],
+  const claimBuilderDraftArtifacts = useMemo(
+    () =>
+      claimBuilderSectionRows.flatMap((row) =>
+        row.attempts.flatMap((attempt) => attempt.artifacts),
+      ),
+    [claimBuilderSectionRows],
   );
-
-
-  const sourceUnitByIndex = useMemo(() => {
-    const map = new Map<number, KnowledgeSourceUnit>();
-    sourceUnits.forEach((unit) => map.set(unit.source_index, unit));
-    return map;
-  }, [sourceUnits]);
-
-  const sourceUnitById = useMemo(() => {
-    const map = new Map<string, KnowledgeSourceUnit>();
-    sourceUnits.forEach((unit) => map.set(unit.id, unit));
-    return map;
-  }, [sourceUnits]);
-
-  const draftClaimsBySourceRef = useMemo(() => {
-    const map = new Map<string, DraftClaimRecord[]>();
-    draftClaims.forEach((claim) => {
-      const sourceRef = draftClaimSourceRef(claim);
-      if (!sourceRef) return;
-      const existing = map.get(sourceRef) ?? [];
-      existing.push(claim);
-      map.set(sourceRef, existing);
-    });
-    return map;
-  }, [draftClaims]);
-
-  const sourceUnitForSection = (
-    item: WorkbenchSectionQueueItemLiveState,
-  ): KnowledgeSourceUnit | null =>
-    sourceUnitById.get(item.section_id) ??
-    sourceUnitByIndex.get(item.section_index) ??
-    null;
-
-  const draftClaimsForSection = (
-    sourceUnit: KnowledgeSourceUnit | null,
-    sectionId: string,
-  ): DraftClaimRecord[] => {
-    const candidates = [
-      sourceUnit?.id,
-      sectionId,
-      sourceUnit ? (sourceUnit as unknown as Record<string, unknown>).unit_ref : null,
-      sourceUnit ? (sourceUnit as unknown as Record<string, unknown>).source_unit_ref : null,
-    ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
-
-    const claims: DraftClaimRecord[] = [];
-    const seen = new Set<string>();
-    candidates.forEach((candidate) => {
-      (draftClaimsBySourceRef.get(candidate) ?? []).forEach((claim, index) => {
-        const key = draftClaimKey(claim, index);
-        if (seen.has(key)) return;
-        seen.add(key);
-        claims.push(claim);
-      });
-    });
-    return claims;
-  };
-
-  const draftClaimsForAttempt = (
-    attempt: WorkbenchLlmAttemptLiveState,
-  ): DraftClaimRecord[] => {
-    const byAttempt = draftClaims.filter(
-      (claim) => draftClaimDispatchAttemptId(claim) === attempt.node_run_id,
-    );
-
-    if (byAttempt.length > 0) return byAttempt;
-
-    if (!attempt.section_id) return [];
-    return draftClaimsForSection(
-      sourceUnitById.get(attempt.section_id) ?? null,
-      attempt.section_id,
-    );
-  };
 
   const sourceStage = stages.find((stage) => stage.id === 'source_ingestion') ?? null;
   const claimStage =
@@ -523,9 +284,9 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             key: claim.observation_ref,
             text: claim.claim,
           }))
-        : draftClaims.map((claim, index) => ({
-            key: draftClaimKey(claim, index),
-            text: draftClaimText(claim),
+        : claimBuilderDraftArtifacts.map((artifact) => ({
+            key: artifact.observationRef,
+            text: artifact.claim,
           }))
       )
         .filter((fact) => fact.text.trim().length > 0)
@@ -844,14 +605,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         </div>
       </details>
     );
-  };
-
-  const attemptSectionIndex = (attempt: WorkbenchLlmAttemptLiveState): number | null => {
-    if (!attempt.section_id) return null;
-    const byId = sourceUnitById.get(attempt.section_id);
-    if (byId) return byId.source_index;
-    const bySection = sectionItems.find((item) => item.section_id === attempt.section_id);
-    return bySection?.section_index ?? null;
   };
 
   return (
