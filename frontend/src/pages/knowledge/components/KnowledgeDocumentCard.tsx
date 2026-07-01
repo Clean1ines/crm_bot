@@ -23,8 +23,8 @@ import {
   workflowStageHasStarted,
   workflowStatusLabel,
 } from './workflow-card/workflowCardLabels';
-import { ClaimBuilderPanel } from './workflow-card/claim-builder/ClaimBuilderPanel';
-import { selectClaimBuilderSectionRows } from './workflow-card/claim-builder/claimBuilderSelectors';
+import { ClaimBuilderPanel } from './claim-builder/ClaimBuilderPanel';
+import { selectClaimBuilderSectionRows } from './claim-builder/claimBuilderSelectors';
 import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnitsResponse,
