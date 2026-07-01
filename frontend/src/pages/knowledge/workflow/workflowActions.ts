@@ -23,7 +23,7 @@ export const workflowActionLabel = (
 ): string => {
   const labels: Record<string, string> = {
     pause_processing: 'Пауза',
-    resume_processing: 'Восстановить',
+    resume_processing: 'Продолжить',
     open_curation: 'Открыть проверку',
     publish_ready: 'Опубликовать',
     open_published_surfaces: 'Опубликованное',

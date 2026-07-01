@@ -584,6 +584,9 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const timerStartedAtMs = timerStartedAt ? Date.parse(timerStartedAt) : Number.NaN;
   const isLiveTimer = Boolean(timer?.is_live && timerStartedAt);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [optimisticProcessingControl, setOptimisticProcessingControl] = useState<
+    'running' | 'paused' | null
+  >(null);
 
   useEffect(() => {
     if (!isLiveTimer) return undefined;
@@ -602,6 +605,45 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const lanes = workflow?.section_lanes ?? [];
   const attempts = workflow?.llm_attempts ?? [];
   const actions = workflow?.actions ?? [];
+  const workflowTimerMode = normalize(timer?.mode);
+  const workflowState = normalize(workflowStatus);
+
+  useEffect(() => {
+    setOptimisticProcessingControl(null);
+  }, [workflowTimerMode, workflowState, workflow?.workflow_run_id]);
+
+  const isTerminalWorkflow = [
+    'completed',
+    'done',
+    'published',
+    'failed',
+    'cancelled',
+    'stopped',
+  ].includes(workflowState) || [
+    'completed',
+    'published',
+    'stopped',
+  ].includes(workflowTimerMode);
+  const backendPauseAction = actions.find(
+    (action) => normalize(action.action_id) === 'pause_processing',
+  );
+  const backendResumeAction = actions.find(
+    (action) => normalize(action.action_id) === 'resume_processing',
+  );
+  const effectiveProcessingControlState =
+    optimisticProcessingControl ??
+    (workflowTimerMode === 'paused' || workflowState === 'paused'
+      ? 'paused'
+      : 'running');
+  const primaryProcessingActionId =
+    effectiveProcessingControlState === 'paused'
+      ? 'resume_processing'
+      : 'pause_processing';
+  const primaryProcessingAction =
+    primaryProcessingActionId === 'pause_processing'
+      ? backendPauseAction
+      : backendResumeAction;
+  const canShowPrimaryProcessingControl = Boolean(workflow) && !isTerminalWorkflow;
   const hasClaimClusters = Array.isArray(workflow?.claim_clusters);
   const claimClusters = workflow?.claim_clusters ?? [];
   const nestedCompactionComparisons = claimClusters.flatMap(
@@ -957,6 +999,16 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         }`
     : 'Нет данных обработки';
 
+  const handlePrimaryProcessingControl = (): void => {
+    if (!canShowPrimaryProcessingControl) return;
+
+    const actionId = primaryProcessingActionId;
+    setOptimisticProcessingControl(
+      actionId === 'pause_processing' ? 'paused' : 'running',
+    );
+    onCardAction(actionId);
+  };
+
   const handleLiveAction = (action: WorkbenchWorkflowActionLiveState): void => {
     if (!canRunLiveAction(action)) return;
 
@@ -1076,6 +1128,16 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
             {workflowStatusLabel(workflowStatus)}
           </span>
+          {canShowPrimaryProcessingControl && (
+            <button
+              type="button"
+              onClick={handlePrimaryProcessingControl}
+              title={primaryProcessingAction?.reason_code || undefined}
+              className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
+            >
+              {primaryProcessingActionId === 'pause_processing' ? 'Пауза' : 'Продолжить'}
+            </button>
+          )}
           <button
             type="button"
             onClick={onRequestDelete}
@@ -1597,117 +1659,18 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                 </details>
               )}
 
-              {attempts.length > 0 && (
-                <section>
-                  <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
-                    <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                      Попытки обработки ИИ: {formatNumber(attempts.length)}
-                    </summary>
-                    <div className="mt-2 space-y-1">
-                    {attempts.map((attempt) => {
-                      const sectionIndex = attemptSectionIndex(attempt);
-                      const attemptDraftClaims = draftClaimsForAttempt(attempt);
-                      return (
-                        <details
-                          key={attempt.node_run_id}
-                          className={`rounded-lg border px-3 py-2 ${attemptRowTone(attempt.status)}`}
-                        >
-                          <summary className="cursor-pointer list-none">
-                            <span className="flex flex-wrap items-center justify-between gap-2">
-                              <span>
-                                <span className="font-semibold text-[var(--text-primary)]">
-                                  {sectionIndex !== null
-                                    ? `Раздел ${sectionDisplayNumber(sectionIndex)}`
-                                    : 'Раздел не определён'}
-                                </span>
-                                <span className="ml-2 text-[var(--text-muted)]">
-                                  {attempt.model_name || attempt.model_provider || 'модель не определена'}
-                                </span>
-                              </span>
-                              <span className={`rounded-full px-2.5 py-1 font-medium ${statusPillTone(attempt.status)}`}>
-                                {attemptStatusLabel(attempt.status)}
-                              </span>
-                            </span>
-                          </summary>
-                          {attemptDraftClaims.length > 0 && (
-                            <div className="mt-2 space-y-2 rounded bg-[var(--control-bg)] p-2">
-                              <div className="font-medium text-[var(--text-primary)]">
-                                Извлечённые утверждения: {formatNumber(attemptDraftClaims.length)}
-                              </div>
 
-                              {attemptDraftClaims.map((claim, claimIndex) => {
-                                const questions = draftClaimQuestions(claim);
-                                const exclusionScope = draftClaimExclusionScope(claim);
-                                const evidenceRef = draftClaimEvidence(claim);
-
-                                return (
-                                  <details
-                                    key={draftClaimKey(claim, claimIndex)}
-                                    className="rounded bg-[var(--surface-elevated)] p-2"
-                                    open
-                                  >
-                                    <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                                      {formatNumber(claimIndex + 1)}. {draftClaimText(claim)}
-                                    </summary>
-
-                                    <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
-                                      {questions.length > 0 && (
-                                        <div>
-                                          <div className="font-medium text-[var(--text-primary)]">
-                                            Возможные вопросы
-                                          </div>
-                                          <ul className="mt-1 list-disc pl-5">
-                                            {questions.map((question) => (
-                                              <li key={question}>{question}</li>
-                                            ))}
-                                          </ul>
-                                        </div>
-                                      )}
-
-                                      {exclusionScope && (
-                                        <div>
-                                          <div className="font-medium text-[var(--text-primary)]">
-                                            Исключения
-                                          </div>
-                                          <pre className="mt-1 whitespace-pre-wrap rounded bg-[var(--control-bg)] p-2">
-                                            {exclusionScope}
-                                          </pre>
-                                        </div>
-                                      )}
-
-                                      {evidenceRef && (
-                                        <div>
-                                          <div className="font-medium text-[var(--text-primary)]">
-                                            Дословное доказательство
-                                          </div>
-                                          <div className="mt-1 rounded bg-[var(--control-bg)] p-2 font-mono text-[11px] text-[var(--text-muted)]">
-                                            {evidenceRef}
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </details>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {(attempt.error_message_user || attempt.error_kind) && (
-                            <div className="mt-1 rounded bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-300">
-                              {userErrorLabel(attempt.error_message_user || attempt.error_kind)}
-                            </div>
-                          )}
-                        </details>
-                      );
-                    })}
-                    </div>
-                  </details>
-                </section>
-              )}
-
-              {visibleWorkflowActions(actions).length > 0 && (
+              {visibleWorkflowActions(actions).filter(
+                (action) =>
+                  normalize(action.action_id) !== 'pause_processing' &&
+                  normalize(action.action_id) !== 'resume_processing',
+              ).length > 0 && (
                 <div className="flex flex-wrap gap-2 pt-1">
-                  {visibleWorkflowActions(actions).map((action) => (
+                  {visibleWorkflowActions(actions).filter(
+                    (action) =>
+                      normalize(action.action_id) !== 'pause_processing' &&
+                      normalize(action.action_id) !== 'resume_processing',
+                  ).map((action) => (
                       <button
                         key={action.action_id}
                         type="button"
