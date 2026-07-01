@@ -750,9 +750,6 @@ export const KnowledgePage: React.FC = () => {
         queryKey: ["knowledge-processing-reports", projectId],
       });
       await queryClient.invalidateQueries({
-        queryKey: ["knowledge-answer-drafts", projectId],
-      });
-      await queryClient.invalidateQueries({
         queryKey: ["knowledge-source-units", projectId],
       });
     },
