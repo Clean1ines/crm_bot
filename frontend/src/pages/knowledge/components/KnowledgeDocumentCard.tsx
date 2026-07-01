@@ -9,15 +9,12 @@ import {
   clusterStatusTitle,
   clusterStatusTone,
   embeddingStatusLabel,
-  liveStageLabel,
   nodeActivityLabel,
   normalize,
   phaseLabel,
   queueRowTone,
   queueStatusLabel,
   queueStatusTone,
-  stageStatusLabel,
-  stageStatusTone,
   statusPillTone,
   userErrorLabel,
   workflowStageHasStarted,
@@ -27,12 +24,13 @@ import { ClaimBuilderPanel } from './claim-builder/ClaimBuilderPanel';
 import { selectClaimBuilderSectionRows } from './claim-builder/claimBuilderSelectors';
 import { SourceIngestionProgressPanel } from './source-ingestion/SourceIngestionProgressPanel';
 import { selectSourceIngestionProgress } from './source-ingestion/sourceIngestionSelectors';
+import { WorkflowStagesPanel } from './workflow-stages/WorkflowStagesPanel';
+import { selectWorkflowStageRows } from './workflow-stages/workflowStagesSelectors';
 import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnitsResponse,
   type WorkbenchWorkflowActionLiveState,
   type WorkbenchWorkflowLiveStateResponse,
-  type WorkbenchWorkflowStageLiveState,
   type WorkbenchClaimClusterClaimLiveState,
   WorkbenchCompactedClaimPreviewLiveState,
 } from '@shared/api/modules/knowledge';
@@ -155,7 +153,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const workflowStatus = workflow?.workflow_status ?? null;
   const currentPhase = workflow?.current_phase ?? null;
   const stages = workflow?.stages ?? [];
-  const visibleStages = stages.filter(workflowStageHasStarted);
   const lanes = workflow?.section_lanes ?? [];
   const attempts = workflow?.llm_attempts ?? [];
   const actions = workflow?.actions ?? [];
@@ -359,23 +356,26 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     0,
   );
 
-  const displayedStageCounts = (
-    stage: WorkbenchWorkflowStageLiveState,
-  ): { current: number; total: number } => {
-    if (stage.id === 'draft_claim_embeddings' && hasClaimClusters) {
-      return { current: embeddedClaimCount, total: clusteredClaimCount };
-    }
-    if (stage.id === 'draft_claim_clustering' && hasClaimClusters) {
-      return { current: claimClusters.length, total: claimClusters.length };
-    }
-    if (stage.id === 'draft_claim_compaction' && hasCompactionComparisons) {
-      return {
-        current: compactedClusterCount,
-        total: claimClusters.length,
-      };
-    }
-    return { current: stage.current, total: stage.total };
-  };
+  const workflowStageRows = useMemo(
+    () =>
+      selectWorkflowStageRows(stages, {
+        hasClaimClusters,
+        embeddedClaimCount,
+        clusteredClaimCount,
+        claimClusterCount: claimClusters.length,
+        hasCompactionComparisons,
+        compactedClusterCount,
+      }),
+    [
+      stages,
+      hasClaimClusters,
+      embeddedClaimCount,
+      clusteredClaimCount,
+      claimClusters.length,
+      hasCompactionComparisons,
+      compactedClusterCount,
+    ],
+  );
 
   const sectionItems = lanes
     .flatMap((lane) => lane.items)
@@ -800,50 +800,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             </summary>
 
             <div className="mt-3 space-y-3">
-              {visibleStages.length > 0 && (
-                <section>
-                  <div className="mb-2 font-medium text-[var(--text-primary)]">
-                    Этапы обработки
-                  </div>
-                  <div className="space-y-1.5">
-                    {visibleStages.map((stage, stageIndex) => {
-                    const stageCounts = displayedStageCounts(stage);
-                    return (
-                      <details
-                        key={stage.id}
-                        className={`rounded-lg border px-3 py-2 ${stageStatusTone(stage)}`}
-                      >
-                        <summary className="cursor-pointer list-none">
-                          <span className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="min-w-0">
-                              <span className="font-semibold text-[var(--text-primary)]">
-                                {formatNumber(stageIndex + 1)}. {liveStageLabel(stage)}
-                              </span>
-                              <span className="ml-2 text-[var(--text-muted)]">
-                                {stageStatusLabel(stage)}
-                                {stageCounts.total > 0 && stage.id !== 'cluster_preview'
-                                  ? ` · ${formatNumber(stageCounts.current)} / ${formatNumber(
-                                      stageCounts.total,
-                                    )}`
-                                  : ''}
-                              </span>
-                            </span>
-                            <span className={`rounded-full px-2.5 py-1 font-medium ${statusPillTone(stage.status)}`}>
-                              {stageStatusLabel(stage)}
-                            </span>
-                          </span>
-                        </summary>
-                        {stage.message && (
-                          <div className="mt-2 text-[var(--text-secondary)]">
-                            {stage.message}
-                          </div>
-                        )}
-                      </details>
-                    );
-                  })}
-                  </div>
-                </section>
-              )}
+              <WorkflowStagesPanel
+                rows={workflowStageRows}
+                formatNumber={formatNumber}
+              />
 
               {hasClaimClusters && (
                 <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
