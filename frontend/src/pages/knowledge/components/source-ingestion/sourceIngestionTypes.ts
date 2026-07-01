@@ -18,10 +18,8 @@ export type SourceIngestionLaneInput = {
 
 export type SourceIngestionWorkflowInput = {
   stages: SourceIngestionStageInput[];
-  section_lanes: SourceInestionLaneInput[];
+  section_lanes: SourceIngestionLaneInput[];
 } | null | undefined;
-
-export type SourceInestionLaneInput = SourceIngestionLaneInput;
 
 export type SourceIngestionWorkflowStateInput = {
   workflow: SourceIngestionWorkflowInput;
