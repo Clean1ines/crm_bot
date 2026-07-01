@@ -12,55 +12,65 @@ type ClaimBuilderSectionRowProps = {
 };
 
 export const ClaimBuilderSectionRow = ({ row }: ClaimBuilderSectionRowProps) => (
-  <div className={`rounded-xl border p-3 ${claimBuilderSectionRowTone(row.status)}`}>
-    <div className="flex flex-wrap items-start justify-between gap-2">
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-[var(--text-primary)]">
-          Раздел {formatClaimBuilderNumber(row.sectionIndex + 1)} · {row.title}
-        </div>
-        <div className={`mt-1 text-xs ${claimBuilderSectionStatusTone(row.status)}`}>
-          {claimBuilderSectionStatusLabel(row.status)}
-          {row.attemptCount > 0
-            ? ` · попыток: ${formatClaimBuilderNumber(row.attemptCount)}`
-            : ''}
-        </div>
-      </div>
-
-      {row.userActionRequired && (
-        <span className="rounded-full bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
-          Нужно решение
+  <details className={`rounded-lg border px-3 py-2 ${claimBuilderSectionRowTone(row.status)}`}>
+    <summary className="cursor-pointer list-none">
+      <span className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0">
+          <span className="font-medium text-[var(--text-primary)]">
+            Раздел {formatClaimBuilderNumber(row.sectionIndex + 1)}
+          </span>
+          <span className="ml-2 text-[var(--text-muted)]">
+            {row.title}
+          </span>
         </span>
+
+        <span className="flex flex-wrap items-center gap-2">
+          <span className={`text-xs ${claimBuilderSectionStatusTone(row.status)}`}>
+            {claimBuilderSectionStatusLabel(row.status)}
+            {row.attemptCount > 0
+              ? ` · попыток: ${formatClaimBuilderNumber(row.attemptCount)}`
+              : ''}
+          </span>
+
+          {row.userActionRequired && (
+            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+              Нужно решение
+            </span>
+          )}
+        </span>
+      </span>
+    </summary>
+
+    <div className="mt-2 space-y-2">
+      {row.text && (
+        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded bg-[var(--surface-elevated)] p-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+          {row.text}
+        </pre>
       )}
-    </div>
 
-    {row.text && (
-      <p className="mt-3 whitespace-pre-wrap rounded-lg bg-[var(--surface-elevated)] p-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-        {row.text}
-      </p>
-    )}
-
-    {row.errorKind && (
-      <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-        Ошибка: {row.errorKind}
-      </p>
-    )}
-
-    {row.blockedReason && (
-      <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-        Причина блокировки: {row.blockedReason}
-      </p>
-    )}
-
-    <div className="mt-3 space-y-2">
-      {row.attempts.length > 0 ? (
-        row.attempts.map((attempt) => (
-          <ClaimBuilderAttemptRow key={attempt.nodeRunId} attempt={attempt} />
-        ))
-      ) : (
-        <div className="rounded-lg border border-dashed border-[var(--border-subtle)] p-3 text-xs text-[var(--text-muted)]">
-          Попытки обработки этой секции ещё не начались.
+      {row.errorKind && (
+        <div className="text-xs text-amber-700 dark:text-amber-300">
+          Ошибка: {row.errorKind}
         </div>
       )}
+
+      {row.blockedReason && (
+        <div className="text-xs text-amber-700 dark:text-amber-300">
+          Причина блокировки: {row.blockedReason}
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {row.attempts.length > 0 ? (
+          row.attempts.map((attempt) => (
+            <ClaimBuilderAttemptRow key={attempt.nodeRunId} attempt={attempt} />
+          ))
+        ) : (
+          <div className="rounded border border-dashed border-[var(--border-subtle)] px-2 py-1.5 text-xs text-[var(--text-muted)]">
+            Попытки обработки этой секции ещё не начались.
+          </div>
+        )}
+      </div>
     </div>
-  </div>
+  </details>
 );

@@ -26,41 +26,49 @@ export const ClaimBuilderAttemptRow = ({ attempt }: ClaimBuilderAttemptRowProps)
     .join(' · ');
 
   return (
-    <div className={`rounded-xl border p-3 ${claimBuilderAttemptRowTone(attempt.status)}`}>
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="text-sm font-medium text-[var(--text-primary)]">
-            {claimBuilderAttemptStatusLabel(attempt.status)}
-          </div>
-          <div className="mt-1 text-xs text-[var(--text-muted)]">
-            {modelText || 'модель не указана'} · {tokenText} ·{' '}
-            {formatClaimBuilderMilliseconds(attempt.durationMs)}
-          </div>
-        </div>
-
-        {attempt.errorKind && (
-          <span className="rounded-full bg-amber-500/10 px-2 py-1 text-xs text-amber-700 dark:text-amber-300">
-            {claimBuilderUserErrorLabel(attempt.errorKind)}
+    <details className={`rounded-lg border px-2.5 py-2 ${claimBuilderAttemptRowTone(attempt.status)}`}>
+      <summary className="cursor-pointer list-none">
+        <span className="flex flex-wrap items-center justify-between gap-2">
+          <span className="min-w-0">
+            <span className="font-medium text-[var(--text-primary)]">
+              {claimBuilderAttemptStatusLabel(attempt.status)}
+            </span>
+            <span className="ml-2 text-xs text-[var(--text-muted)]">
+              {modelText || 'модель не указана'} · {tokenText} ·{' '}
+              {formatClaimBuilderMilliseconds(attempt.durationMs)}
+            </span>
           </span>
+
+          {attempt.errorKind && (
+            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
+              {claimBuilderUserErrorLabel(attempt.errorKind)}
+            </span>
+          )}
+        </span>
+      </summary>
+
+      <div className="mt-2 space-y-2">
+        {attempt.errorMessageUser && (
+          <div className="text-xs text-amber-700 dark:text-amber-300">
+            {attempt.errorMessageUser}
+          </div>
+        )}
+
+        {attempt.artifacts.length > 0 ? (
+          <div className="space-y-1.5">
+            {attempt.artifacts.map((artifact) => (
+              <ClaimBuilderDraftClaimArtifact
+                key={artifact.observationRef}
+                artifact={artifact}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded border border-dashed border-[var(--border-subtle)] px-2 py-1.5 text-xs text-[var(--text-muted)]">
+            Извлечённых фактов в этой попытке нет.
+          </div>
         )}
       </div>
-
-      {attempt.errorMessageUser && (
-        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-          {attempt.errorMessageUser}
-        </p>
-      )}
-
-      {attempt.artifacts.length > 0 && (
-        <div className="mt-3 space-y-2">
-          {attempt.artifacts.map((artifact) => (
-            <ClaimBuilderDraftClaimArtifact
-              key={artifact.observationRef}
-              artifact={artifact}
-            />
-          ))}
-        </div>
-      )}
-    </div>
+    </details>
   );
 };

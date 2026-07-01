@@ -6,30 +6,36 @@ type ClaimBuilderPanelProps = {
 };
 
 export const ClaimBuilderPanel = ({ sectionRows }: ClaimBuilderPanelProps) => (
-  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-4">
-    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-      <div>
-        <h4 className="font-medium text-[var(--text-primary)]">Разделы документа</h4>
-        <p className="mt-1 text-xs text-[var(--text-muted)]">
-          Claim Builder извлекает факты из каждой секции документа. Попытки ИИ и
-          извлечённые факты показаны внутри своей секции.
-        </p>
-      </div>
-      <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
-        {sectionRows.length} секц.
+  <details
+    className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3"
+    open
+  >
+    <summary className="cursor-pointer list-none">
+      <span className="flex flex-wrap items-center justify-between gap-2">
+        <span>
+          <span className="font-medium text-[var(--text-primary)]">
+            Разделы документа
+          </span>
+          <span className="ml-2 text-xs text-[var(--text-muted)]">
+            Claim Builder · {sectionRows.length} секц.
+          </span>
+        </span>
+        <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
+          {sectionRows.length}
+        </span>
       </span>
-    </div>
+    </summary>
 
-    <div className="space-y-3">
+    <div className="mt-2 space-y-1.5">
       {sectionRows.length > 0 ? (
         sectionRows.map((row) => (
           <ClaimBuilderSectionRow key={row.queueItemId} row={row} />
         ))
       ) : (
-        <div className="rounded-xl border border-dashed border-[var(--border-subtle)] p-3 text-sm text-[var(--text-muted)]">
+        <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-muted)]">
           Разделы документа ещё не подготовлены.
         </div>
       )}
     </div>
-  </div>
+  </details>
 );
