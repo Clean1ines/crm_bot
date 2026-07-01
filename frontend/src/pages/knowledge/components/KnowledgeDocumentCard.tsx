@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Clock3, FileText, Trash2, Zap } from 'lucide-react';
 
+import { visibleWorkflowActions } from '../workflow/workflowActions';
 import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnit,
@@ -1739,10 +1740,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
               {actions.filter((action) => action.visible).length > 0 && (
                 <div className="flex flex-wrap gap-2 pt-1">
-                  {actions
-                    .filter((action) => action.visible)
-                    .filter((action) => action.action_id !== 'cancel_processing')
-                    .map((action) => (
+                  {visibleWorkflowActions(actions).map((action) => (
                       <button
                         key={action.action_id}
                         type="button"
