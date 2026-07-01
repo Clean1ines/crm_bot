@@ -14,19 +14,13 @@ import {
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
   type KnowledgeProcessingAction,
-  type KnowledgeImportQualityReport,
   type KnowledgeAnswerDraftsResponse,
   type KnowledgeSourceUnitsResponse,
-  type KnowledgePriceFact,
-  type KnowledgePriceFactsResponse,
-  type KnowledgeCommercialTruthReviewResponse,
-  type KnowledgeCommercialTruthReviewPolicy,
   type WorkbenchDocumentCardView,
   type WorkbenchWorkflowLiveStateResponse,
 } from "@shared/api/modules/knowledge";
 import { BaseModal } from "@shared/ui";
 import { t } from "@shared/i18n";
-import { CommercialTruthReviewSummary } from "./components/CommercialTruthReviewSummary";
 import { DocumentStatusBlock } from "./components/DocumentStatusBlock";
 import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
 import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
@@ -43,10 +37,6 @@ type KnowledgeProcessingReportByDocument = Record<
   string,
   KnowledgeProcessingReport
 >;
-type KnowledgeImportQualityByDocument = Record<
-  string,
-  KnowledgeImportQualityReport
->;
 type KnowledgeAnswerDraftsByDocument = Record<
   string,
   KnowledgeAnswerDraftsResponse
@@ -54,14 +44,6 @@ type KnowledgeAnswerDraftsByDocument = Record<
 type KnowledgeSourceUnitsByDocument = Record<
   string,
   KnowledgeSourceUnitsResponse
->;
-type KnowledgePriceFactsByDocument = Record<
-  string,
-  KnowledgePriceFactsResponse
->;
-type KnowledgeCommercialTruthReviewsByDocument = Record<
-  string,
-  KnowledgeCommercialTruthReviewResponse
 >;
 type KnowledgeWorkflowLiveStateByDocument = Record<
   string,
@@ -74,11 +56,6 @@ type DraftClaimCurationTarget = {
   documentName: string;
 };
 
-type PriceFactActionVariables = {
-  documentId: string;
-  factId: string;
-  reason?: string;
-};
 
 interface Document {
   id: string;
@@ -163,22 +140,6 @@ const enabledPrimaryProcessingReportActions = (
 
 const formatNumber = (value: number): string =>
   new Intl.NumberFormat("ru-RU").format(value);
-
-const shouldFetchPriceFactsForDocument = (
-  doc: Document,
-  report: KnowledgeProcessingReport | undefined,
-): boolean => {
-  if (doc.preprocessing_mode === "price_list") return true;
-
-  const candidateCount = report
-    ? metricNumber(report.metrics, "price_acquisition_fact_candidate_count")
-    : null;
-  const reviewFactCount = report
-    ? metricNumber(report.metrics, "price_review_fact_count")
-    : null;
-
-  return (candidateCount ?? 0) > 0 || (reviewFactCount ?? 0) > 0;
-};
 
 const metricNumber = (
   metrics: KnowledgeProcessingMetrics | null | undefined,
@@ -762,43 +723,6 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
   const processingReports = processingReportsQuery.data || {};
-  const importQualityDocumentIds = hasProcessingDocuments
-    ? []
-    : documents.map((doc) => doc.id).sort();
-  const importQualityReportsQuery = useQuery({
-    queryKey: [
-      "knowledge-import-quality-reports",
-      projectId,
-      importQualityDocumentIds.join(","),
-    ],
-    queryFn: async () => {
-      if (!projectId || importQualityDocumentIds.length === 0) return {};
-
-      const reports = await Promise.all(
-        importQualityDocumentIds.map(async (documentId) => {
-          try {
-            const { data } = await knowledgeApi.importQuality(
-              projectId,
-              documentId,
-            );
-            return [documentId, data] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-
-      return reports.reduce<KnowledgeImportQualityByDocument>((acc, item) => {
-        if (item !== null) {
-          acc[item[0]] = item[1];
-        }
-        return acc;
-      }, {});
-    },
-    enabled: !!projectId && importQualityDocumentIds.length > 0,
-    retry: false,
-  });
-  const importQualityReports = importQualityReportsQuery.data || {};
   const draftPreviewDocumentIds = Array.from(
     new Set([
       ...workflowProjectionDocumentIds,
@@ -913,108 +837,6 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
   const sourceUnits = sourceUnitsQuery.data || {};
-  const priceFactDocumentIds = hasProcessingDocuments
-    ? []
-    : documents
-        .filter((doc) =>
-          shouldFetchPriceFactsForDocument(doc, processingReports[doc.id]),
-        )
-        .map((doc) => doc.id)
-        .sort();
-  const priceFactsQuery = useQuery({
-    queryKey: [
-      "knowledge-price-facts",
-      projectId,
-      priceFactDocumentIds.join(","),
-    ],
-    queryFn: async () => {
-      if (!projectId || priceFactDocumentIds.length === 0) return {};
-
-      const priceFacts = await Promise.all(
-        priceFactDocumentIds.map(async (documentId) => {
-          try {
-            const { data } = await knowledgeApi.priceFacts(
-              projectId,
-              documentId,
-            );
-            return [documentId, data] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-
-      return priceFacts.reduce<KnowledgePriceFactsByDocument>((acc, item) => {
-        if (item !== null) {
-          acc[item[0]] = item[1];
-        }
-        return acc;
-      }, {});
-    },
-    enabled: !!projectId && priceFactDocumentIds.length > 0,
-    retry: false,
-  });
-  const priceFacts = priceFactsQuery.data || {};
-  const [commercialTruthReviewPolicy, setCommercialTruthReviewPolicy] =
-    useState<KnowledgeCommercialTruthReviewPolicy>("manual_review");
-  const projectCommercialTruthReviewQuery = useQuery({
-    queryKey: [
-      "project-commercial-truth-review",
-      projectId,
-      commercialTruthReviewPolicy,
-    ],
-    queryFn: async () => {
-      if (!projectId) return undefined;
-
-      const { data } = await knowledgeApi.projectCommercialTruthReview(
-        projectId,
-        commercialTruthReviewPolicy,
-      );
-      return data;
-    },
-    enabled: !!projectId && !hasProcessingDocuments,
-    retry: false,
-  });
-  const commercialTruthReviewQuery = useQuery({
-    queryKey: [
-      "knowledge-commercial-truth-review",
-      projectId,
-      priceFactDocumentIds.join(","),
-      commercialTruthReviewPolicy,
-    ],
-    queryFn: async () => {
-      if (!projectId || priceFactDocumentIds.length === 0) return {};
-
-      const reviews = await Promise.all(
-        priceFactDocumentIds.map(async (documentId) => {
-          try {
-            const { data } = await knowledgeApi.commercialTruthReview(
-              projectId,
-              documentId,
-              commercialTruthReviewPolicy,
-            );
-            return [documentId, data] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-
-      return reviews.reduce<KnowledgeCommercialTruthReviewsByDocument>(
-        (acc, item) => {
-          if (item !== null) {
-            acc[item[0]] = item[1];
-          }
-          return acc;
-        },
-        {},
-      );
-    },
-    enabled:
-      !!projectId && priceFactDocumentIds.length > 0 && !hasProcessingDocuments,
-    retry: false,
-  });
-  const commercialTruthReviews = commercialTruthReviewQuery.data || {};
   const deleteDocument = deleteDocumentId
     ? (documents.find((doc) => doc.id === deleteDocumentId) ?? null)
     : null;
@@ -1024,7 +846,6 @@ export const KnowledgePage: React.FC = () => {
     )?.default_confirmation ||
     `Документ «${deleteDocument?.file_name || "этот документ"}» и все связанные артефакты будут удалены из базы. Это действие нельзя отменить.`;
 
-  const projectCommercialTruthRef = useRef<HTMLDivElement | null>(null);
   const documentsGridRef = useRef<HTMLDivElement | null>(null);
 
   const removeDocumentLocalState = (documentId: string): void => {
@@ -1145,22 +966,10 @@ export const KnowledgePage: React.FC = () => {
         queryKey: ["knowledge-processing-reports", projectId],
       });
       await queryClient.invalidateQueries({
-        queryKey: ["knowledge-import-quality-reports", projectId],
-      });
-      await queryClient.invalidateQueries({
         queryKey: ["knowledge-answer-drafts", projectId],
       });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-source-units", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-price-facts", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["project-commercial-truth-review", projectId],
-      });
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-commercial-truth-review", projectId],
       });
     },
     onError: (err: unknown) => {
@@ -1275,82 +1084,6 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
-  const priceFactActionMutation = useMutation<
-    "publish" | "reject",
-    unknown,
-    PriceFactActionVariables
-  >({
-    mutationFn: async ({ documentId, factId, reason }) => {
-      if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
-
-      if (reason !== undefined) {
-        await knowledgeApi.rejectPriceFacts(projectId, documentId, {
-          fact_ids: [factId],
-          reason,
-        });
-        return "reject";
-      }
-
-      await knowledgeApi.publishPriceFacts(projectId, documentId, {
-        fact_ids: [factId],
-      });
-      return "publish";
-    },
-    onSuccess: async (action) => {
-      toast.success(
-        action === "reject"
-          ? t("knowledge.priceFacts.actions.rejectSuccess")
-          : t("knowledge.priceFacts.actions.publishSuccess"),
-      );
-      await queryClient.invalidateQueries({
-        queryKey: ["knowledge-price-facts", projectId],
-      });
-    },
-    onError: (err: unknown, variables) => {
-      toast.error(
-        getErrorMessage(
-          err,
-          variables.reason !== undefined
-            ? t("knowledge.priceFacts.actions.rejectFailed")
-            : t("knowledge.priceFacts.actions.publishFailed"),
-        ),
-      );
-    },
-  });
-
-  const handlePublishPriceFact = (
-    documentId: string,
-    fact: KnowledgePriceFact,
-  ): void => {
-    priceFactActionMutation.mutate({
-      documentId,
-      factId: fact.id,
-    });
-  };
-
-  const handleRejectPriceFact = (
-    documentId: string,
-    fact: KnowledgePriceFact,
-  ): void => {
-    const reason = window.prompt(
-      t("knowledge.priceFacts.actions.reasonPlaceholder"),
-      "",
-    );
-    if (reason === null) return;
-
-    const cleanedReason = reason.trim();
-    if (!cleanedReason) {
-      toast.error(t("knowledge.priceFacts.actions.rejectReasonRequired"));
-      return;
-    }
-
-    priceFactActionMutation.mutate({
-      documentId,
-      factId: fact.id,
-      reason: cleanedReason,
-    });
-  };
-
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -1414,41 +1147,6 @@ export const KnowledgePage: React.FC = () => {
     normalizedSearchQuery.length > 0 ? filteredDocuments.slice(0, 8) : [];
 
   const previewResult = previewMutation.data;
-
-  const getStatusBadge = (doc: Document) => {
-    const status = doc.status;
-
-    if (isDocumentCancelled(doc)) {
-      return {
-        label: t("knowledge.status.stopped"),
-        className: "bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]",
-      };
-    }
-    if (isDocumentFailed(doc)) {
-      return {
-        label: t("knowledge.status.error"),
-        className:
-          "bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)]",
-      };
-    }
-    if (isDocumentProcessing(doc)) {
-      return {
-        label: t("knowledge.status.processing"),
-        className: "bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]",
-      };
-    }
-    if (status === "processed") {
-      return {
-        label: t("knowledge.status.processed"),
-        className:
-          "bg-[var(--accent-success-bg)] text-[var(--accent-success-text)]",
-      };
-    }
-    return {
-      label: t("knowledge.status.queued"),
-      className: "bg-[var(--accent-warning-bg)] text-[var(--accent-warning)]",
-    };
-  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-500">
@@ -1738,55 +1436,11 @@ export const KnowledgePage: React.FC = () => {
       ) : (
         <>
           <div
-            ref={projectCommercialTruthRef}
-            id="knowledge-project-commercial-truth"
-          >
-            <CommercialTruthReviewSummary
-              response={projectCommercialTruthReviewQuery.data}
-              isLoading={
-                projectCommercialTruthReviewQuery.isLoading ||
-                (projectCommercialTruthReviewQuery.isFetching &&
-                  !projectCommercialTruthReviewQuery.data)
-              }
-              policy={commercialTruthReviewPolicy}
-              onPolicyChange={setCommercialTruthReviewPolicy}
-            />
-          </div>
-
-          <div
             ref={documentsGridRef}
             id="knowledge-documents-grid"
             className="grid grid-cols-1 gap-6"
           >
             {filteredDocuments.map((doc) => {
-              const statusBadge = getStatusBadge(doc);
-              const processingReport = processingReports[doc.id];
-              const importQualityReport = importQualityReports[doc.id];
-              const priceFactsResponse = priceFacts[doc.id];
-              const commercialTruthReviewResponse =
-                commercialTruthReviews[doc.id];
-              const shouldLoadPriceFacts = priceFactDocumentIds.includes(
-                doc.id,
-              );
-              const isPriceFactsLoading =
-                shouldLoadPriceFacts &&
-                (priceFactsQuery.isLoading ||
-                  (priceFactsQuery.isFetching && !priceFactsResponse));
-              const isCommercialTruthReviewLoading =
-                shouldLoadPriceFacts &&
-                (commercialTruthReviewQuery.isLoading ||
-                  (commercialTruthReviewQuery.isFetching &&
-                    !commercialTruthReviewResponse));
-              const mutatingPriceFactId =
-                priceFactActionMutation.variables?.documentId === doc.id
-                  ? priceFactActionMutation.variables.factId
-                  : null;
-              const canCancelProcessing = Boolean(
-                enabledProcessingReportAction(processingReport, "cancel"),
-              );
-              const primaryProcessingReportActions =
-                enabledPrimaryProcessingReportActions(processingReport);
-
               return (
                 <KnowledgeDocumentCard
                   key={doc.id}
