@@ -6,10 +6,14 @@ import type { WorkflowTimerInput } from './workflowTimerTypes';
 
 type WorkflowTimerCardProps = {
   timer: WorkflowTimerInput;
+  workflowStatus?: string | null;
 };
 
-export const WorkflowTimerCard: React.FC<WorkflowTimerCardProps> = ({ timer }) => {
-  const elapsedText = useWorkflowTimerText(timer);
+export const WorkflowTimerCard: React.FC<WorkflowTimerCardProps> = ({
+  timer,
+  workflowStatus = null,
+}) => {
+  const elapsedText = useWorkflowTimerText(timer, workflowStatus);
 
   return (
     <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">

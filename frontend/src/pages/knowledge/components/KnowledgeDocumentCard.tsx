@@ -612,7 +612,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         )}
 
         <div className="grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
-          <WorkflowTimerCard timer={timer} />
+          <WorkflowTimerCard timer={timer} workflowStatus={workflowStatus} />
 
           {llmUsageVisible && (
             <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">

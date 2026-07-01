@@ -7,3 +7,7 @@ export type WorkflowTimerInput = {
   completed_at?: string | null;
   is_live?: boolean | null;
 } | null | undefined;
+
+export type WorkflowTimerStatusInput = {
+  workflowStatus?: string | null;
+};
