@@ -95,8 +95,7 @@ const attemptsForSection = (
     .filter(
       (attempt) =>
         attempt.section_id === item.section_id ||
-        attempt.section_id === item.section_key ||
-        attempt.node_run_id.includes(item.queue_item_id),
+        attempt.section_id === item.section_key,
     )
     .sort(
       (left, right) =>
