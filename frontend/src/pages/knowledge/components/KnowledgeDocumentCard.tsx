@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Clock3, FileText, Trash2, Zap } from 'lucide-react';
+import { AlertTriangle, FileText, Trash2, Zap } from 'lucide-react';
 
 import { visibleWorkflowActions, workflowActionLabel } from '../workflow/workflowActions';
 import {
@@ -26,6 +26,7 @@ import { SourceIngestionProgressPanel } from './source-ingestion/SourceIngestion
 import { selectSourceIngestionProgress } from './source-ingestion/sourceIngestionSelectors';
 import { WorkflowStagesPanel } from './workflow-stages/WorkflowStagesPanel';
 import { selectWorkflowStageRows } from './workflow-stages/workflowStagesSelectors';
+import { WorkflowTimerCard } from './workflow-timer/WorkflowTimerCard';
 import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnitsResponse,
@@ -58,21 +59,6 @@ type KnowledgeDocumentCardProps = {
 
 const formatNumber = (value: number): string =>
   new Intl.NumberFormat('ru-RU').format(Math.max(0, Math.floor(value || 0)));
-
-const formatDuration = (seconds: number): string => {
-  const safeSeconds = Math.max(0, Math.floor(seconds || 0));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-  const restSeconds = safeSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${restSeconds
-      .toString()
-      .padStart(2, '0')}`;
-  }
-
-  return `${minutes}:${restSeconds.toString().padStart(2, '0')}`;
-};
 
 const formatMilliseconds = (value: number | null | undefined): string => {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
@@ -131,24 +117,9 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 }) => {
   const workflow = workflowLiveState?.workflow ?? null;
   const timer = workflow?.timer ?? null;
-  const timerStartedAt = timer?.current_active_started_at ?? null;
-  const timerStartedAtMs = timerStartedAt ? Date.parse(timerStartedAt) : Number.NaN;
-  const isLiveTimer = Boolean(timer?.is_live && timerStartedAt);
-  const [nowMs, setNowMs] = useState(() => Date.now());
   const [optimisticProcessingControl, setOptimisticProcessingControl] = useState<
     'running' | 'paused' | null
   >(null);
-
-  useEffect(() => {
-    if (!isLiveTimer) return undefined;
-
-    setNowMs(Date.now());
-    const intervalId = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-
-    return () => window.clearInterval(intervalId);
-  }, [isLiveTimer, timerStartedAt, workflow?.workflow_run_id]);
 
   const workflowStatus = workflow?.workflow_status ?? null;
   const currentPhase = workflow?.current_phase ?? null;
@@ -393,14 +364,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     hasClaimClusters ||
     hasCompactionComparisons ||
     finalCompactedFacts.length > 0;
-
-  const baseElapsedSeconds = timer?.active_elapsed_seconds ?? 0;
-  const activeElapsedSeconds =
-    isLiveTimer && Number.isFinite(timerStartedAtMs)
-      ? baseElapsedSeconds + Math.max(0, Math.floor((nowMs - timerStartedAtMs) / 1000))
-      : baseElapsedSeconds;
-  const elapsedText =
-    activeElapsedSeconds > 0 || isLiveTimer ? formatDuration(activeElapsedSeconds) : '—';
 
   const fileSizeText = doc.file_size > 0 ? formatSize(doc.file_size) : 'размер недоступен';
   const attemptPromptTokens = attempts.reduce(
@@ -649,13 +612,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         )}
 
         <div className="grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
-          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
-              <Clock3 className="h-3.5 w-3.5" />
-              Активная обработка
-            </div>
-            <div className="text-[var(--text-muted)]">{elapsedText}</div>
-          </div>
+          <WorkflowTimerCard timer={timer} />
 
           {llmUsageVisible && (
             <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
