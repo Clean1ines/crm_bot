@@ -167,6 +167,20 @@ const stageStatusTone = (stage: WorkbenchWorkflowStageLiveState): string => {
   return 'border-[var(--border-subtle)] bg-[var(--surface-elevated)]';
 };
 
+const workflowStageHasStarted = (
+  stage: WorkbenchWorkflowStageLiveState | null | undefined,
+): boolean => {
+  if (!stage) return false;
+
+  const status = normalize(stage.status);
+  if (!['pending', 'unknown'].includes(status)) return true;
+  if ((stage.current ?? 0) > 0) return true;
+  if ((stage.total ?? 0) > 0 && status !== 'unknown') return true;
+  if (stage.started_at || stage.completed_at) return true;
+
+  return false;
+};
+
 const statusPillTone = (status: string): string => {
   const value = normalize(status);
   if (value === 'completed' || value === 'ready' || value === 'succeeded' || value === 'claim_observations_persisted') {
@@ -602,6 +616,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const workflowStatus = workflow?.workflow_status ?? null;
   const currentPhase = workflow?.current_phase ?? null;
   const stages = workflow?.stages ?? [];
+  const visibleStages = stages.filter(workflowStageHasStarted);
   const lanes = workflow?.section_lanes ?? [];
   const attempts = workflow?.llm_attempts ?? [];
   const actions = workflow?.actions ?? [];
@@ -915,6 +930,23 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           ),
         )
       : 0;
+  const sectionProgressVisible =
+    sectionProgressTotal > 0 ||
+    workflowStageHasStarted(sourceStage) ||
+    workflowStageHasStarted(claimStage) ||
+    sectionItems.length > 0;
+  const llmUsageVisible =
+    attempts.length > 0 ||
+    workflowStageHasStarted(claimStage) ||
+    workflowStageHasStarted(embeddingStage) ||
+    workflowStageHasStarted(clusterStage) ||
+    workflowStageHasStarted(compactionStage);
+  const resultSummaryVisible =
+    workflowStageHasStarted(previewStage) ||
+    workflow?.curation.available ||
+    hasClaimClusters ||
+    hasCompactionComparisons ||
+    finalCompactedFacts.length > 0;
 
   const baseElapsedSeconds = timer?.active_elapsed_seconds ?? 0;
   const activeElapsedSeconds =
@@ -1192,31 +1224,35 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             <div className="text-[var(--text-muted)]">{elapsedText}</div>
           </div>
 
-          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
-              <Zap className="h-3.5 w-3.5" />
-              ИИ
+          {llmUsageVisible && (
+            <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
+              <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
+                <Zap className="h-3.5 w-3.5" />
+                ИИ
+              </div>
+              <div className="text-[var(--text-muted)]">{llmUsageText}</div>
             </div>
-            <div className="text-[var(--text-muted)]">{llmUsageText}</div>
-          </div>
+          )}
 
-          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 font-medium text-[var(--text-primary)]">Прогресс</div>
-            <div className="text-[var(--text-muted)]">
-              Извлечение утверждений: {sectionProgressText}
-              {laneLeased > 0 ? ` · сейчас обрабатывается ${formatNumber(laneLeased)}` : ''}
-              {laneReady > 0 ? ` · ожидает ${formatNumber(laneReady)}` : ''}
-              {laneWaiting > 0 ? ` · отложено ${formatNumber(laneWaiting)}` : ''}
-              {laneFailed > 0 ? ` · ошибок ${formatNumber(laneFailed)}` : ''}
+          {sectionProgressVisible && (
+            <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
+              <div className="mb-1 font-medium text-[var(--text-primary)]">Прогресс</div>
+              <div className="text-[var(--text-muted)]">
+                Извлечение утверждений: {sectionProgressText}
+                {laneLeased > 0 ? ` · сейчас обрабатывается ${formatNumber(laneLeased)}` : ''}
+                {laneReady > 0 ? ` · ожидает ${formatNumber(laneReady)}` : ''}
+                {laneWaiting > 0 ? ` · отложено ${formatNumber(laneWaiting)}` : ''}
+                {laneFailed > 0 ? ` · ошибок ${formatNumber(laneFailed)}` : ''}
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--control-bg)]">
+                <div
+                  className="h-full rounded-full bg-[var(--accent-primary)]"
+                  style={{ width: `${sectionProgressPercent}%` }}
+                />
+              </div>
+              <div className="mt-1 text-[var(--text-muted)]">{sectionProgressPercent}%</div>
             </div>
-            <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--control-bg)]">
-              <div
-                className="h-full rounded-full bg-[var(--accent-primary)]"
-                style={{ width: `${sectionProgressPercent}%` }}
-              />
-            </div>
-            <div className="mt-1 text-[var(--text-muted)]">{sectionProgressPercent}%</div>
-          </div>
+          )}
 
           {claimClusters.length > 0 ? (
             <div className={`min-w-0 rounded-xl border p-3 ${compactionPanelTone}`}>
@@ -1328,10 +1364,12 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             </div>
           ) : null}
 
-          <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
-            <div className="mb-1 font-medium text-[var(--text-primary)]">Итог</div>
-            <div className="text-[var(--text-muted)]">{resultSummaryText}</div>
-          </div>
+          {resultSummaryVisible && (
+            <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
+              <div className="mb-1 font-medium text-[var(--text-primary)]">Итог</div>
+              <div className="text-[var(--text-muted)]">{resultSummaryText}</div>
+            </div>
+          )}
         </div>
 
         {workflow && (
@@ -1344,12 +1382,13 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             </summary>
 
             <div className="mt-3 space-y-3">
-              <section>
-                <div className="mb-2 font-medium text-[var(--text-primary)]">
-                  Этапы обработки
-                </div>
-                <div className="space-y-1.5">
-                  {stages.map((stage, stageIndex) => {
+              {visibleStages.length > 0 && (
+                <section>
+                  <div className="mb-2 font-medium text-[var(--text-primary)]">
+                    Этапы обработки
+                  </div>
+                  <div className="space-y-1.5">
+                    {visibleStages.map((stage, stageIndex) => {
                     const stageCounts = displayedStageCounts(stage);
                     return (
                       <details
@@ -1384,8 +1423,9 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                       </details>
                     );
                   })}
-                </div>
-              </section>
+                  </div>
+                </section>
+              )}
 
               {hasClaimClusters && (
                 <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
