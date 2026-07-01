@@ -675,16 +675,6 @@ export const KnowledgePage: React.FC = () => {
     );
   };
 
-  const refreshWorkflowLiveState = async (documentId: string): Promise<void> => {
-    if (!projectId) return;
-
-    const { data } = await knowledgeApi.workflowLiveState(projectId, documentId);
-    setWorkflowLiveStates((current) => ({
-      ...current,
-      [documentId]: data,
-    }));
-  };
-
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
 
@@ -837,13 +827,12 @@ export const KnowledgePage: React.FC = () => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.cancel(projectId, documentId);
     },
-    onSuccess: async (_data, documentId) => {
-      await refreshWorkflowLiveState(documentId);
+    onSuccess: () => {
       toast.success("Обработка документа поставлена на паузу");
-      await queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
       });
-      await queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
     },
@@ -879,16 +868,15 @@ export const KnowledgePage: React.FC = () => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.resumeProcessing(projectId, documentId);
     },
-    onSuccess: async (_data, documentId) => {
-      await refreshWorkflowLiveState(documentId);
+    onSuccess: () => {
       toast.success("Обработка документа возобновлена");
-      await queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
       });
-      await queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["knowledge-usage", projectId],
       });
-      await queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: ["knowledge-processing-reports", projectId],
       });
     },
@@ -1372,8 +1360,7 @@ export const KnowledgePage: React.FC = () => {
                   sourceUnitsResponse={sourceUnits[doc.id] ?? null}
                   onCardAction={(actionId) => {
                     if (actionId === "pause_processing") {
-                      pauseProcessingMutation.mutate(doc.id);
-                      return;
+                      return pauseProcessingMutation.mutateAsync(doc.id);
                     }
                     if (actionId === "cancel_processing") {
                       cancelProcessingMutation.mutate(doc.id);
@@ -1384,8 +1371,7 @@ export const KnowledgePage: React.FC = () => {
                       return;
                     }
                     if (actionId === "resume_processing") {
-                      resumeProcessingMutation.mutate(doc.id);
-                      return;
+                      return resumeProcessingMutation.mutateAsync(doc.id);
                     }
                     if (actionId === "confirm_degraded_fallback") {
                       const workflowRunId =

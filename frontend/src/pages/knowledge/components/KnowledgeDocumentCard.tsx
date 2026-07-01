@@ -27,6 +27,7 @@ import { selectSourceIngestionProgress } from './source-ingestion/sourceIngestio
 import { WorkflowStagesPanel } from './workflow-stages/WorkflowStagesPanel';
 import { selectWorkflowStageRows } from './workflow-stages/workflowStagesSelectors';
 import { WorkflowTimerCard } from './workflow-timer/WorkflowTimerCard';
+import type { WorkflowTimerInput } from './workflow-timer/workflowTimerTypes';
 import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnitsResponse,
@@ -47,7 +48,7 @@ type KnowledgeDocumentCardProps = {
   doc: DocCardDocument;
   isDeletePending: boolean;
   onRequestDelete: () => void;
-  onCardAction: (actionId: string) => void;
+  onCardAction: (actionId: string) => Promise<void> | void;
   onOpenCuration: (workflowRunId?: string | null) => void;
   workflowLiveState?: WorkbenchWorkflowLiveStateResponse | null;
   workflowLiveStateLoading?: boolean;
@@ -55,6 +56,12 @@ type KnowledgeDocumentCardProps = {
   sourceUnitsResponse?: KnowledgeSourceUnitsResponse | null;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
+};
+
+type ProcessingControlOverride = {
+  state: 'running' | 'paused';
+  occurredAt: string;
+  frozenElapsedSeconds: number;
 };
 
 const formatNumber = (value: number): string =>
@@ -117,9 +124,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 }) => {
   const workflow = workflowLiveState?.workflow ?? null;
   const timer = workflow?.timer ?? null;
-  const [optimisticProcessingControl, setOptimisticProcessingControl] = useState<
-    'running' | 'paused' | null
-  >(null);
+  const [processingControlOverride, setProcessingControlOverride] =
+    useState<ProcessingControlOverride | null>(null);
 
   const workflowStatus = workflow?.workflow_status ?? null;
   const currentPhase = workflow?.current_phase ?? null;
@@ -131,7 +137,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const workflowState = normalize(workflowStatus);
 
   useEffect(() => {
-    setOptimisticProcessingControl(null);
+    setProcessingControlOverride(null);
   }, [workflowTimerMode, workflowState, workflow?.workflow_run_id]);
 
   const isTerminalWorkflow = [
@@ -160,14 +166,19 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   );
 
   const primaryProcessingAction =
-    optimisticProcessingControl === 'paused'
+    processingControlOverride?.state === 'paused'
       ? backendResumeAction
-      : optimisticProcessingControl === 'running'
+      : processingControlOverride?.state === 'running'
         ? backendPauseAction
         : backendResumeAction ?? backendPauseAction ?? null;
-  const primaryProcessingActionId = primaryProcessingAction?.action_id ?? null;
+  const primaryProcessingActionId =
+    processingControlOverride?.state === 'paused'
+      ? 'resume_processing'
+      : processingControlOverride?.state === 'running'
+        ? 'pause_processing'
+        : primaryProcessingAction?.action_id ?? null;
   const canShowPrimaryProcessingControl =
-    Boolean(workflow) && !isTerminalWorkflow && primaryProcessingAction !== null;
+    Boolean(workflow) && !isTerminalWorkflow && primaryProcessingActionId !== null;
   const hasClaimClusters = Array.isArray(workflow?.claim_clusters);
   const claimClusters = workflow?.claim_clusters ?? [];
   const nestedCompactionComparisons = claimClusters.flatMap(
@@ -437,15 +448,87 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         }`
     : 'Нет данных обработки';
 
-  const handlePrimaryProcessingControl = (): void => {
+  const timerTimestampMs = (value: string | null | undefined): number | null => {
+    if (!value) return null;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const timerSafeSeconds = (value: number | null | undefined): number => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 0;
+    return Math.max(0, Math.floor(value));
+  };
+
+  const elapsedSecondsAt = (
+    inputTimer: WorkflowTimerInput,
+    nowMs: number,
+  ): number => {
+    const baseElapsedSeconds = timerSafeSeconds(inputTimer?.active_elapsed_seconds);
+    if (!inputTimer?.is_live) return baseElapsedSeconds;
+
+    const activeStartedAtMs = timerTimestampMs(inputTimer.current_active_started_at);
+    if (activeStartedAtMs === null) return baseElapsedSeconds;
+
+    return baseElapsedSeconds + Math.max(0, Math.floor((nowMs - activeStartedAtMs) / 1000));
+  };
+
+  const effectiveWorkflowStatus =
+    processingControlOverride?.state === 'paused'
+      ? 'PAUSED'
+      : processingControlOverride?.state === 'running'
+        ? 'RUNNING'
+        : workflowStatus;
+
+  const effectiveTimer: WorkflowTimerInput =
+    processingControlOverride?.state === 'paused'
+      ? {
+          ...(timer ?? {}),
+          mode: 'paused',
+          active_elapsed_seconds: processingControlOverride.frozenElapsedSeconds,
+          is_live: false,
+          current_active_started_at: null,
+        }
+      : processingControlOverride?.state === 'running'
+        ? {
+            ...(timer ?? {}),
+            mode: 'running',
+            active_elapsed_seconds: processingControlOverride.frozenElapsedSeconds,
+            is_live: true,
+            current_active_started_at: processingControlOverride.occurredAt,
+          }
+        : timer;
+
+  const handlePrimaryProcessingControl = async (): Promise<void> => {
     if (!canShowPrimaryProcessingControl || primaryProcessingActionId === null) {
       return;
     }
 
-    setOptimisticProcessingControl(
-      primaryProcessingActionId === 'pause_processing' ? 'paused' : 'running',
-    );
-    onCardAction(primaryProcessingActionId);
+    const actionId = primaryProcessingActionId;
+    try {
+      await onCardAction(actionId);
+    } catch {
+      return;
+    }
+
+    const occurredAt = new Date().toISOString();
+    const frozenElapsedSeconds = elapsedSecondsAt(effectiveTimer, Date.parse(occurredAt));
+
+    if (actionId === 'pause_processing') {
+      setProcessingControlOverride({
+        state: 'paused',
+        occurredAt,
+        frozenElapsedSeconds,
+      });
+      return;
+    }
+
+    if (actionId === 'resume_processing') {
+      setProcessingControlOverride({
+        state: 'running',
+        occurredAt,
+        frozenElapsedSeconds,
+      });
+    }
   };
 
   const handleLiveAction = (action: WorkbenchWorkflowActionLiveState): void => {
@@ -615,7 +698,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         )}
 
         <div className="grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
-          <WorkflowTimerCard timer={timer} workflowStatus={workflowStatus} />
+          <WorkflowTimerCard
+            timer={effectiveTimer}
+            workflowStatus={effectiveWorkflowStatus}
+          />
 
           {llmUsageVisible && (
             <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
