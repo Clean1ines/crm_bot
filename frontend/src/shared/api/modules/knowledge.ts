@@ -280,6 +280,25 @@ export type WorkbenchRetryTimerLiveState = {
   seconds_until_retry?: number | null;
 };
 
+export type WorkbenchDraftClaimArtifactLiveState = {
+  observation_ref: string;
+  workflow_run_id?: string;
+  source_document_ref?: string;
+  source_unit_ref: string;
+  section_id?: string;
+  work_item_id: string;
+  dispatch_attempt_id: string;
+  claim_index: number;
+  provider?: string;
+  model_ref?: string;
+  claim: string;
+  granularity: string;
+  possible_questions: string[];
+  exclusion_scope: string;
+  evidence_block: string;
+  validation_decision?: string;
+};
+
 export type WorkbenchSectionQueueItemLiveState = {
   queue_item_id: string;
   section_id: string;
@@ -295,6 +314,7 @@ export type WorkbenchSectionQueueItemLiveState = {
   user_action_required: boolean;
   blocked_reason?: string | null;
   retry_timer: WorkbenchRetryTimerLiveState;
+  draft_claims?: WorkbenchDraftClaimArtifactLiveState[];
 };
 
 export type WorkbenchSectionLaneLiveState = {
