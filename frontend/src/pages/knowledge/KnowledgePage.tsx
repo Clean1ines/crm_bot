@@ -13,7 +13,6 @@ import {
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
-  type KnowledgeAnswerDraftsResponse,
   type KnowledgeSourceUnitsResponse,
   type WorkbenchDocumentCardView,
   type WorkbenchWorkflowLiveStateResponse,
@@ -33,10 +32,6 @@ type KnowledgeProcessingMetrics = Record<string, unknown>;
 type KnowledgeProcessingReportByDocument = Record<
   string,
   KnowledgeProcessingReport
->;
-type KnowledgeAnswerDraftsByDocument = Record<
-  string,
-  KnowledgeAnswerDraftsResponse
 >;
 type KnowledgeSourceUnitsByDocument = Record<
   string,
@@ -106,7 +101,6 @@ const previewTraceLabel = (value: string): string => {
 const formatPreviewScore = (value: number): string =>
   Number.isFinite(value) ? value.toFixed(3) : "0.000";
 
-const DRAFT_FETCH_LIMIT = 1000;
 const SOURCE_UNIT_FETCH_LIMIT = 1000;
 
 // Legacy fallback only for display/status of old rows that predate
@@ -571,64 +565,6 @@ export const KnowledgePage: React.FC = () => {
     retry: false,
   });
   const processingReports = processingReportsQuery.data || {};
-  const draftPreviewDocumentIds = Array.from(
-    new Set([
-      ...workflowProjectionDocumentIds,
-      ...Object.values(processingReports)
-        .filter((report) => {
-          const document = documents.find(
-            (doc) => doc.id === report.document_id,
-          );
-          const draftCount =
-            metricNumber(report.metrics, "raw_draft_count") ??
-            metricNumber(report.metrics, "draft_answer_count") ??
-            0;
-          const publishedCount =
-            metricNumber(report.metrics, "published_answer_count") ?? 0;
-          return (
-            Boolean(document && isDocumentProcessing(document)) ||
-            draftCount > publishedCount
-          );
-        })
-        .map((report) => report.document_id),
-    ]),
-  ).sort();
-  const answerDraftsQuery = useQuery({
-    queryKey: [
-      "knowledge-answer-drafts",
-      projectId,
-      draftPreviewDocumentIds.join(","),
-      DRAFT_FETCH_LIMIT,
-    ],
-    queryFn: async () => {
-      if (!projectId || draftPreviewDocumentIds.length === 0) return {};
-
-      const drafts = await Promise.all(
-        draftPreviewDocumentIds.map(async (documentId) => {
-          try {
-            const { data } = await knowledgeApi.fragments(
-              projectId,
-              documentId,
-              DRAFT_FETCH_LIMIT,
-            );
-            return [documentId, data] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-
-      return drafts.reduce<KnowledgeAnswerDraftsByDocument>((acc, item) => {
-        if (item !== null) {
-          acc[item[0]] = item[1];
-        }
-        return acc;
-      }, {});
-    },
-    enabled: !!projectId && draftPreviewDocumentIds.length > 0,
-    retry: false,
-  });
-  const answerDrafts = answerDraftsQuery.data || {};
   const sourceUnitDocumentIds = Array.from(
     new Set([
       ...workflowProjectionDocumentIds,
@@ -1316,7 +1252,6 @@ export const KnowledgePage: React.FC = () => {
                   }
                   workflowLiveStateError={workflowProjectionErrors[doc.id] ?? null}
                   sourceUnitsResponse={sourceUnits[doc.id] ?? null}
-                  answerDraftsResponse={answerDrafts[doc.id] ?? null}
                   onCardAction={(actionId) => {
                     if (actionId === "pause_processing") {
                       pauseProcessingMutation.mutate(doc.id);
