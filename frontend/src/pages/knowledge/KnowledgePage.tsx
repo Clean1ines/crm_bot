@@ -26,6 +26,13 @@ import {
   createInitialWorkflowLiveStateResponse,
   reduceWorkflowFrontendProjectionEvent,
 } from "./shadow/workflowFrontendProjectionReducer";
+import {
+  createOptimisticUploadDocument,
+  fileSha256Hex,
+  optimisticSourceDocumentRef,
+  optimisticWorkflowRunId,
+  type UploadKnowledgeVariables,
+} from "./optimisticUpload";
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -363,6 +370,9 @@ export const KnowledgePage: React.FC = () => {
   const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<
     "documents" | "ai_playground"
   >("documents");
+  const [optimisticUploadDocuments, setOptimisticUploadDocuments] = useState<
+    Record<string, Document>
+  >({});
   const searchBoxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -410,9 +420,36 @@ export const KnowledgePage: React.FC = () => {
   const baseDocuments = Array.isArray(documentsQuery.data)
     ? documentsQuery.data
     : [];
+  const optimisticDocuments = Object.values(optimisticUploadDocuments);
+  const baseDocumentIdKey = baseDocuments
+    .map((doc) => doc.id)
+    .sort()
+    .join(",");
+  const baseDocumentIds = new Set(baseDocuments.map((doc) => doc.id));
+  const documents = [
+    ...optimisticDocuments.filter((doc) => !baseDocumentIds.has(doc.id)),
+    ...baseDocuments,
+  ];
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
-  const documents = baseDocuments;
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
+
+  useEffect(() => {
+    if (baseDocuments.length === 0) return;
+
+    setOptimisticUploadDocuments((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      for (const documentId of Object.keys(next)) {
+        if (baseDocumentIds.has(documentId)) {
+          delete next[documentId];
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [baseDocuments, baseDocumentIdKey]);
   const workflowProjectionTargets = documents
     .filter(
       (doc) =>
@@ -650,8 +687,8 @@ export const KnowledgePage: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [hasProcessingDocuments]);
 
-  const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
+  const uploadMutation = useMutation<unknown, unknown, UploadKnowledgeVariables>({
+    mutationFn: async ({ file }: UploadKnowledgeVariables) => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
 
       const response = await knowledgeApi.upload(
@@ -672,8 +709,20 @@ export const KnowledgePage: React.FC = () => {
 
       return await response.json();
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, variables) => {
       toast.success(t("knowledge.feedback.documentQueued"));
+      setOptimisticUploadDocuments((current) => {
+        const document = current[variables.optimisticDocumentId];
+        if (!document) return current;
+
+        return {
+          ...current,
+          [variables.optimisticDocumentId]: {
+            ...document,
+            updated_at: new Date().toISOString(),
+          },
+        };
+      });
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
       });
@@ -684,7 +733,21 @@ export const KnowledgePage: React.FC = () => {
         queryKey: ["knowledge-processing-reports", projectId],
       });
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, variables) => {
+      setOptimisticUploadDocuments((current) => {
+        const document = current[variables.optimisticDocumentId];
+        if (!document) return current;
+
+        return {
+          ...current,
+          [variables.optimisticDocumentId]: {
+            ...document,
+            status: "error",
+            error: getErrorMessage(err, t("knowledge.feedback.uploadError")),
+            updated_at: new Date().toISOString(),
+          },
+        };
+      });
       toast.error(getErrorMessage(err, t("knowledge.feedback.uploadError")));
     },
   });
@@ -865,10 +928,55 @@ export const KnowledgePage: React.FC = () => {
     },
   });
 
+  const startUpload = async (file: File): Promise<void> => {
+    if (!projectId) {
+      toast.error(t("knowledge.errors.projectIdMissing"));
+      return;
+    }
+
+    try {
+      const hash = await fileSha256Hex(file);
+      const documentId = optimisticSourceDocumentRef(projectId, hash);
+      const workflowRunId = optimisticWorkflowRunId(documentId);
+      const optimisticDocument = createOptimisticUploadDocument({
+        projectId,
+        file,
+        preprocessingMode,
+        documentId,
+        workflowRunId,
+      });
+
+      setOptimisticUploadDocuments((current) => ({
+        ...current,
+        [documentId]: optimisticDocument,
+      }));
+
+      setWorkflowLiveStates((current) => ({
+        ...current,
+        [documentId]: createInitialWorkflowLiveStateResponse({
+          documentId,
+          projectId,
+          fileName: file.name || "Загружаемый документ",
+          documentStatus: "processing",
+          workflowRunId,
+        }),
+      }));
+
+      uploadMutation.mutate({
+        file,
+        optimisticDocumentId: documentId,
+        optimisticWorkflowRunId: workflowRunId,
+      });
+    } catch (error) {
+      toast.error(getErrorMessage(error, "Не удалось подготовить документ к загрузке"));
+    }
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      uploadMutation.mutate(file);
+      void startUpload(file);
+      e.target.value = "";
     }
   };
 
@@ -897,7 +1005,7 @@ export const KnowledgePage: React.FC = () => {
 
     const file = event.dataTransfer.files?.[0];
     if (file) {
-      uploadMutation.mutate(file);
+      void startUpload(file);
     }
   };
 
