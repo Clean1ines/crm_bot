@@ -519,7 +519,7 @@ const draftClaimEvidence = (claim: DraftClaimRecord): string | null =>
 
 const draftClaimQuestions = (claim: DraftClaimRecord): string[] =>
   firstStringArrayField(claim, [
-    'possible_questions',
+    'Возможные вопросы',
     'questions',
     'similar_questions',
     'queries',
@@ -527,7 +527,7 @@ const draftClaimQuestions = (claim: DraftClaimRecord): string[] =>
 
 const draftClaimExclusionScope = (claim: DraftClaimRecord): string | null =>
   firstTextField(claim, [
-    'exclusion_scope',
+    'Исключения',
     'exclusionScope',
     'scope_exclusion',
   ]) ||
@@ -1629,27 +1629,16 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                               </span>
                             </span>
                           </summary>
-                          <div className="mt-1 text-[var(--text-muted)]">
-                            Время: {formatMilliseconds(attempt.duration_ms)}
-                            {attempt.total_tokens > 0
-                              ? ` · токены: ${formatNumber(attempt.total_tokens)}`
-                              : ''}
-                          </div>
                           {attemptDraftClaims.length > 0 && (
                             <div className="mt-2 space-y-2 rounded bg-[var(--control-bg)] p-2">
                               <div className="font-medium text-[var(--text-primary)]">
-                                Сохранённые claim artifacts: {formatNumber(attemptDraftClaims.length)}
+                                Извлечённые утверждения: {formatNumber(attemptDraftClaims.length)}
                               </div>
 
                               {attemptDraftClaims.map((claim, claimIndex) => {
                                 const questions = draftClaimQuestions(claim);
                                 const exclusionScope = draftClaimExclusionScope(claim);
                                 const evidenceRef = draftClaimEvidence(claim);
-                                const granularity = draftClaimGranularity(claim);
-                                const validationDecision = draftClaimValidationDecision(claim);
-                                const provider = draftClaimProvider(claim);
-                                const modelRef = draftClaimModelRef(claim);
-                                const workItemId = draftClaimWorkItemId(claim);
 
                                 return (
                                   <details
@@ -1662,14 +1651,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                                     </summary>
 
                                     <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
-                                      <div className="grid gap-1 text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]">
-                                        <div>granularity: {granularity || '—'}</div>
-                                        <div>validation: {validationDecision || '—'}</div>
-                                        <div>provider: {provider || attempt.model_provider || '—'}</div>
-                                        <div>model: {modelRef || attempt.model_name || '—'}</div>
-                                        <div>work item: {workItemId || '—'}</div>
-                                      </div>
-
                                       {questions.length > 0 && (
                                         <div>
                                           <div className="font-medium text-[var(--text-primary)]">
@@ -1697,7 +1678,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                                       {evidenceRef && (
                                         <div>
                                           <div className="font-medium text-[var(--text-primary)]">
-                                            evidence/source ref
+                                            Дословное доказательство
                                           </div>
                                           <div className="mt-1 rounded bg-[var(--control-bg)] p-2 font-mono text-[11px] text-[var(--text-muted)]">
                                             {evidenceRef}
