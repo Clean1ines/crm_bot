@@ -33,7 +33,6 @@ type KnowledgeDocumentCardProps = {
   workflowLiveStateError?: string | null;
   sourceUnitsResponse?: KnowledgeSourceUnitsResponse | null;
   answerDraftsResponse?: KnowledgeAnswerDraftsResponse | null;
-  onStopProcessing: () => void;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
 };
@@ -584,7 +583,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   onRequestDelete,
   onCardAction,
   onOpenCuration,
-  onStopProcessing,
   workflowLiveState,
   workflowLiveStateLoading = false,
   workflowLiveStateError = null,

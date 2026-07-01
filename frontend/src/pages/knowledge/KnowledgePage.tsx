@@ -1279,10 +1279,10 @@ export const KnowledgePage: React.FC = () => {
   const pauseProcessingMutation = useMutation({
     mutationFn: async (documentId: string) => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
-      await knowledgeApi.pauseProcessing(projectId, documentId);
+      await knowledgeApi.cancel(projectId, documentId);
     },
     onSuccess: async () => {
-      toast.success("Обработка документа остановлена");
+      toast.success("Обработка документа поставлена на паузу");
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
       });
@@ -1291,7 +1291,7 @@ export const KnowledgePage: React.FC = () => {
       });
     },
     onError: (err: unknown) => {
-      toast.error(getErrorMessage(err, "Не удалось остановить обработку документа"));
+      toast.error(getErrorMessage(err, "Не удалось поставить обработку на паузу"));
     },
   });
 
@@ -1905,9 +1905,6 @@ export const KnowledgePage: React.FC = () => {
                     deleteDocumentMutation.variables === doc.id
                   }
                   onRequestDelete={() => setDeleteDocumentId(doc.id)}
-                  onStopProcessing={() =>
-                    cancelProcessingMutation.mutate(doc.id)
-                  }
                   onOpenCuration={(workflowRunId) => {
                     if (workflowRunId) {
                       setDraftClaimCurationTarget({

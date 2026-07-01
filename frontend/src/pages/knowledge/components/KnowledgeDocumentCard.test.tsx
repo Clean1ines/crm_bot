@@ -225,7 +225,6 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
         onCardAction={vi.fn()}
         onOpenCuration={vi.fn()}
         workflowLiveState={workflowLiveState}
-        onStopProcessing={vi.fn()}
         formatSize={() => '1 КБ'}
         knowledgeProcessingModeLabel={() => 'FAQ'}
       />,
@@ -328,7 +327,6 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
         onCardAction={vi.fn()}
         onOpenCuration={vi.fn()}
         workflowLiveState={completedState}
-        onStopProcessing={vi.fn()}
         formatSize={() => '1 КБ'}
         knowledgeProcessingModeLabel={() => 'FAQ'}
       />,
