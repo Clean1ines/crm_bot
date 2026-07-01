@@ -52,7 +52,6 @@ type KnowledgeDocumentCardProps = {
   workflowLiveStateLoading?: boolean;
   workflowLiveStateError?: string | null;
   sourceUnitsResponse?: KnowledgeSourceUnitsResponse | null;
-  answerDraftsResponse?: unknown;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
 };
