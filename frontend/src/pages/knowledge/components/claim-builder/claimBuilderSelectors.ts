@@ -1,55 +1,52 @@
 import type {
-  KnowledgeSourceUnit,
-  KnowledgeSourceUnitsResponse,
-  WorkbenchDraftClaimArtifactLiveState,
-  WorkbenchLlmAttemptLiveState,
-  WorkbenchSectionQueueItemLiveState,
-  WorkbenchWorkflowLiveState,
-  WorkbenchWorkflowLiveStateResponse,
-} from '@shared/api/modules/knowledge';
-
-import type {
   ClaimBuilderAttemptView,
+  ClaimBuilderDraftClaimArtifactInput,
   ClaimBuilderDraftClaimArtifactView,
+  ClaimBuilderLlmAttemptInput,
+  ClaimBuilderSectionQueueItemInput,
   ClaimBuilderSectionRowView,
+  ClaimBuilderSourceUnitInput,
+  ClaimBuilderSourceUnitsInput,
+  ClaimBuilderWorkflowInput,
+  ClaimBuilderWorkflowStateInput,
 } from './claimBuilderTypes';
 
-const claimBuilderAttemptStartedAtMs = (attempt: WorkbenchLlmAttemptLiveState): number => {
+const claimBuilderAttemptStartedAtMs = (attempt: ClaimBuilderLlmAttemptInput): number => {
   const startedAtMs = Date.parse(attempt.started_at || '');
   return Number.isFinite(startedAtMs) ? startedAtMs : 0;
 };
 
-const sourceUnitTitle = (unit: KnowledgeSourceUnit | null): string =>
+const sourceUnitTitle = (unit: ClaimBuilderSourceUnitInput | null): string =>
   unit?.title?.trim() || 'Без заголовка';
 
-const sourceUnitText = (unit: KnowledgeSourceUnit | null): string | null => {
+const sourceUnitText = (unit: ClaimBuilderSourceUnitInput | null): string | null => {
   const content = unit?.content?.trim();
   return content && content.length > 0 ? content : null;
 };
 
 const sourceUnitForSection = (
-  item: WorkbenchSectionQueueItemLiveState,
-  sourceUnitById: Map<string, KnowledgeSourceUnit>,
-  sourceUnitByIndex: Map<number, KnowledgeSourceUnit>,
-): KnowledgeSourceUnit | null =>
+  item: ClaimBuilderSectionQueueItemInput,
+  sourceUnitById: Map<string, ClaimBuilderSourceUnitInput>,
+  sourceUnitByIndex: Map<number, ClaimBuilderSourceUnitInput>,
+): ClaimBuilderSourceUnitInput | null =>
   sourceUnitById.get(item.section_id) ??
   sourceUnitByIndex.get(item.section_index) ??
   null;
 
 const sectionItemsFromWorkflow = (
-  workflow: WorkbenchWorkflowLiveState | null | undefined,
-): WorkbenchSectionQueueItemLiveState[] =>
+  workflow: ClaimBuilderWorkflowInput | null | undefined,
+): ClaimBuilderSectionQueueItemInput[] =>
   (workflow?.section_lanes ?? [])
     .flatMap((lane) => lane.items)
     .sort((left, right) => left.section_index - right.section_index);
 
 const draftClaimsFromSectionItems = (
-  sectionItems: WorkbenchSectionQueueItemLiveState[],
-): WorkbenchDraftClaimArtifactLiveState[] =>
+  sectionItems: ClaimBuilderSectionQueueItemInput[],
+): ClaimBuilderDraftClaimArtifactInput[] =>
   sectionItems.flatMap((item) => item.draft_claims ?? []);
 
 const draftClaimArtifactView = (
-  claim: WorkbenchDraftClaimArtifactLiveState,
+  claim: ClaimBuilderDraftClaimArtifactInput,
 ): ClaimBuilderDraftClaimArtifactView => ({
   observationRef: claim.observation_ref,
   sourceUnitRef: claim.source_unit_ref,
@@ -65,11 +62,10 @@ const draftClaimArtifactView = (
   exclusionScope: claim.exclusion_scope,
   evidenceBlock: claim.evidence_block,
   validationDecision: claim.validation_decision ?? null,
-  liveState: claim,
 });
 
 const artifactsByAttemptId = (
-  claims: WorkbenchDraftClaimArtifactLiveState[],
+  claims: ClaimBuilderDraftClaimArtifactInput[],
 ): Map<string, ClaimBuilderDraftClaimArtifactView[]> => {
   const map = new Map<string, ClaimBuilderDraftClaimArtifactView[]>();
 
@@ -87,8 +83,8 @@ const artifactsByAttemptId = (
 };
 
 const attemptsForSection = (
-  item: WorkbenchSectionQueueItemLiveState,
-  attempts: WorkbenchLlmAttemptLiveState[],
+  item: ClaimBuilderSectionQueueItemInput,
+  attempts: ClaimBuilderLlmAttemptInput[],
   artifactsByAttempt: Map<string, ClaimBuilderDraftClaimArtifactView[]>,
 ): ClaimBuilderAttemptView[] =>
   attempts
@@ -119,12 +115,11 @@ const attemptsForSection = (
       completedAt: attempt.completed_at ?? null,
       durationMs: attempt.duration_ms ?? null,
       artifacts: artifactsByAttempt.get(attempt.node_run_id) ?? [],
-      liveState: attempt,
     }));
 
 export const selectClaimBuilderSectionRows = (
-  workflowLiveState: WorkbenchWorkflowLiveStateResponse | null | undefined,
-  sourceUnitsResponse: KnowledgeSourceUnitsResponse | null | undefined,
+  workflowLiveState: ClaimBuilderWorkflowStateInput,
+  sourceUnitsResponse: ClaimBuilderSourceUnitsInput,
 ): ClaimBuilderSectionRowView[] => {
   const workflow = workflowLiveState?.workflow ?? null;
   const sourceUnits = sourceUnitsResponse?.source_units ?? [];
@@ -152,7 +147,6 @@ export const selectClaimBuilderSectionRows = (
       userActionRequired: item.user_action_required,
       blockedReason: item.blocked_reason ?? null,
       attempts: attemptsForSection(item, attempts, artifactsByAttempt),
-      liveState: item,
     };
   });
 };
