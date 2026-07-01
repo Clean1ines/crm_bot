@@ -42,10 +42,19 @@ export const ClaimBuilderSectionRow = ({ row }: ClaimBuilderSectionRowProps) => 
     </summary>
 
     <div className="mt-2 space-y-2">
-      {row.text && (
-        <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded bg-[var(--surface-elevated)] p-2 text-xs leading-relaxed text-[var(--text-secondary)]">
-          {row.text}
-        </pre>
+      {row.text ? (
+        <div>
+          <div className="mb-1 font-medium text-[var(--text-primary)]">
+            {row.title}
+          </div>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-[var(--control-bg)] p-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+            {row.text}
+          </pre>
+        </div>
+      ) : (
+        <div className="text-[var(--text-muted)]">
+          Текст раздела ещё не загружен.
+        </div>
       )}
 
       {row.errorKind && (

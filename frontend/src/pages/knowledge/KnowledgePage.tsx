@@ -674,6 +674,17 @@ export const KnowledgePage: React.FC = () => {
       current?.documentId === documentId ? null : current,
     );
   };
+
+  const refreshWorkflowLiveState = async (documentId: string): Promise<void> => {
+    if (!projectId) return;
+
+    const { data } = await knowledgeApi.workflowLiveState(projectId, documentId);
+    setWorkflowLiveStates((current) => ({
+      ...current,
+      [documentId]: data,
+    }));
+  };
+
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
 
@@ -826,7 +837,8 @@ export const KnowledgePage: React.FC = () => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.cancel(projectId, documentId);
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, documentId) => {
+      await refreshWorkflowLiveState(documentId);
       toast.success("Обработка документа поставлена на паузу");
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
@@ -867,7 +879,8 @@ export const KnowledgePage: React.FC = () => {
       if (!projectId) throw new Error(t("knowledge.errors.projectIdMissing"));
       await knowledgeApi.resumeProcessing(projectId, documentId);
     },
-    onSuccess: async () => {
+    onSuccess: async (_data, documentId) => {
+      await refreshWorkflowLiveState(documentId);
       toast.success("Обработка документа возобновлена");
       await queryClient.invalidateQueries({
         queryKey: ["knowledge-documents", projectId],
