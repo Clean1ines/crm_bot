@@ -1654,7 +1654,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                                       {questions.length > 0 && (
                                         <div>
                                           <div className="font-medium text-[var(--text-primary)]">
-                                            possible_questions
+                                            Возможные вопросы
                                           </div>
                                           <ul className="mt-1 list-disc pl-5">
                                             {questions.map((question) => (
@@ -1667,7 +1667,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
                                       {exclusionScope && (
                                         <div>
                                           <div className="font-medium text-[var(--text-primary)]">
-                                            exclusion_scope
+                                            Исключения
                                           </div>
                                           <pre className="mt-1 whitespace-pre-wrap rounded bg-[var(--control-bg)] p-2">
                                             {exclusionScope}
