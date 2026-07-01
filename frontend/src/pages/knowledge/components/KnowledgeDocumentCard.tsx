@@ -147,29 +147,27 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     'stopped',
   ].includes(workflowTimerMode);
   const backendPauseAction = actions.find(
-    (action) => normalize(action.action_id) === 'pause_processing',
+    (action) =>
+      normalize(action.action_id) === 'pause_processing' &&
+      action.visible &&
+      action.enabled,
   );
   const backendResumeAction = actions.find(
-    (action) => normalize(action.action_id) === 'resume_processing',
+    (action) =>
+      normalize(action.action_id) === 'resume_processing' &&
+      action.visible &&
+      action.enabled,
   );
-  const workflowLooksPaused =
-    workflowTimerMode === 'paused' ||
-    workflowState === 'paused' ||
-    workflowState === 'manual_paused' ||
-    workflowState === 'paused_manual' ||
-    Boolean(backendResumeAction);
-  const effectiveProcessingControlState =
-    optimisticProcessingControl ??
-    (workflowLooksPaused ? 'paused' : 'running');
-  const primaryProcessingActionId =
-    effectiveProcessingControlState === 'paused'
-      ? 'resume_processing'
-      : 'pause_processing';
+
   const primaryProcessingAction =
-    primaryProcessingActionId === 'pause_processing'
-      ? backendPauseAction
-      : backendResumeAction;
-  const canShowPrimaryProcessingControl = Boolean(workflow) && !isTerminalWorkflow;
+    optimisticProcessingControl === 'paused'
+      ? backendResumeAction
+      : optimisticProcessingControl === 'running'
+        ? backendPauseAction
+        : backendResumeAction ?? backendPauseAction ?? null;
+  const primaryProcessingActionId = primaryProcessingAction?.action_id ?? null;
+  const canShowPrimaryProcessingControl =
+    Boolean(workflow) && !isTerminalWorkflow && primaryProcessingAction !== null;
   const hasClaimClusters = Array.isArray(workflow?.claim_clusters);
   const claimClusters = workflow?.claim_clusters ?? [];
   const nestedCompactionComparisons = claimClusters.flatMap(
@@ -440,13 +438,14 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     : 'Нет данных обработки';
 
   const handlePrimaryProcessingControl = (): void => {
-    if (!canShowPrimaryProcessingControl) return;
+    if (!canShowPrimaryProcessingControl || primaryProcessingActionId === null) {
+      return;
+    }
 
-    const actionId = primaryProcessingActionId;
     setOptimisticProcessingControl(
-      actionId === 'pause_processing' ? 'paused' : 'running',
+      primaryProcessingActionId === 'pause_processing' ? 'paused' : 'running',
     );
-    onCardAction(actionId);
+    onCardAction(primaryProcessingActionId);
   };
 
   const handleLiveAction = (action: WorkbenchWorkflowActionLiveState): void => {
