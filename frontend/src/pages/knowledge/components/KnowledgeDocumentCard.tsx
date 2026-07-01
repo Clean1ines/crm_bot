@@ -152,20 +152,12 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const backendResumeAction = actions.find(
     (action) => normalize(action.action_id) === 'resume_processing',
   );
-  const backendWantsResume = Boolean(backendResumeAction?.enabled);
-  const backendWantsPause = Boolean(backendPauseAction?.enabled);
   const workflowLooksPaused =
     workflowTimerMode === 'paused' ||
     workflowState === 'paused' ||
     workflowState === 'manual_paused' ||
     workflowState === 'paused_manual' ||
-    backendWantsResume;
-  const workflowLooksActivelyRunning =
-    ['running', 'active', 'processing'].includes(workflowState) &&
-    ['running', 'active', 'processing'].includes(workflowTimerMode) &&
-    backendWantsPause &&
-    !workflowLooksPaused;
-
+    Boolean(backendResumeAction);
   const effectiveProcessingControlState =
     optimisticProcessingControl ??
     (workflowLooksPaused ? 'paused' : 'running');
@@ -177,10 +169,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     primaryProcessingActionId === 'pause_processing'
       ? backendPauseAction
       : backendResumeAction;
-  const canShowPrimaryProcessingControl =
-    Boolean(workflow) &&
-    !isTerminalWorkflow &&
-    (workflowLooksPaused || workflowLooksActivelyRunning);
+  const canShowPrimaryProcessingControl = Boolean(workflow) && !isTerminalWorkflow;
   const hasClaimClusters = Array.isArray(workflow?.claim_clusters);
   const claimClusters = workflow?.claim_clusters ?? [];
   const nestedCompactionComparisons = claimClusters.flatMap(
