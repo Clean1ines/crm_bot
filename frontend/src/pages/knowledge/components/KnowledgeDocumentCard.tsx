@@ -23,6 +23,8 @@ import {
   workflowStageHasStarted,
   workflowStatusLabel,
 } from './workflow-card/workflowCardLabels';
+import { ClaimBuilderPanel } from './workflow-card/claim-builder/ClaimBuilderPanel';
+import { selectClaimBuilderSectionRows } from './workflow-card/claim-builder/claimBuilderSelectors';
 import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnit,
@@ -373,6 +375,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     workflow?.claim_compaction_comparisons ?? nestedCompactionComparisons;
   const usage = workflow?.usage ?? null;
   const sourceUnits = sourceUnitsResponse?.source_units ?? [];
+  const claimBuilderSectionRows = useMemo(
+    () => selectClaimBuilderSectionRows(workflowLiveState, sourceUnitsResponse),
+    [workflowLiveState, sourceUnitsResponse],
+  );
   const draftClaims = useMemo(
     () => [
       ...collectDraftClaims(answerDraftsResponse),
@@ -1301,104 +1307,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               )}
 
               {sectionItems.length > 0 && (
-                <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
-                  <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                    Разделы документа: {formatNumber(sectionItems.length)}
-                  </summary>
-                  <div className="mt-2 space-y-1">
-                    {sectionItems.map((item) => {
-                      const sourceUnit = sourceUnitForSection(item);
-                      const sectionClaims = draftClaimsForSection(sourceUnit, item.section_id);
-                      return (
-                        <details
-                          key={item.queue_item_id}
-                          className={`rounded-lg border px-3 py-2 ${queueRowTone(item.status)}`}
-                        >
-                          <summary className="cursor-pointer list-none">
-                            <span className="font-medium text-[var(--text-primary)]">
-                              Раздел {sectionDisplayNumber(item.section_index)}
-                            </span>
-                            <span className={`ml-2 ${queueStatusTone(item.status)}`}>
-                              {queueStatusLabel(item.status)}
-                            </span>
-                            {item.attempt_count > 0 && (
-                              <span className="ml-2 text-[var(--text-muted)]">
-                                попыток: {formatNumber(item.attempt_count)}
-                              </span>
-                            )}
-                          </summary>
-
-                          <div className="mt-2 space-y-2">
-                            {item.error_kind && (
-                              <div className="rounded bg-amber-500/10 px-2 py-1 text-amber-700 dark:text-amber-300">
-                                {userErrorLabel(item.error_kind)}
-                              </div>
-                            )}
-
-                            {sourceUnit ? (
-                              <div>
-                                <div className="mb-1 font-medium text-[var(--text-primary)]">
-                                  {sourceUnitTitle(sourceUnit)}
-                                </div>
-                                <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-[var(--control-bg)] p-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
-                                  {sourceUnit.content}
-                                </pre>
-                              </div>
-                            ) : (
-                              <div className="text-[var(--text-muted)]">
-                                Текст раздела ещё не загружен.
-                              </div>
-                            )}
-                            {sectionClaims.length > 0 && (
-                              <details className="rounded bg-[var(--control-bg)] p-2">
-                                <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-                                  Извлечённые утверждения: {formatNumber(sectionClaims.length)}
-                                </summary>
-                                <div className="mt-2 space-y-2">
-                                  {sectionClaims.map((claim, claimIndex) => (
-                                    <details
-                                      key={draftClaimKey(claim, claimIndex)}
-                                      className="rounded bg-[var(--surface-elevated)] p-2"
-                                    >
-                                      <summary className="cursor-pointer text-[var(--text-primary)]">
-                                        {draftClaimTitle(claim, claimIndex)}
-                                      </summary>
-                                      <div className="mt-2 space-y-2 text-[var(--text-secondary)]">
-                                        <div>{draftClaimText(claim)}</div>
-                                        {draftClaimQuestions(claim).length > 0 && (
-                                          <div>
-                                            <div className="font-medium text-[var(--text-primary)]">
-                                              Возможные вопросы
-                                            </div>
-                                            <ul className="mt-1 list-disc pl-5">
-                                              {draftClaimQuestions(claim).map((question) => (
-                                                <li key={question}>{question}</li>
-                                              ))}
-                                            </ul>
-                                          </div>
-                                        )}
-                                        {draftClaimEvidence(claim) && (
-                                          <div>
-                                            <div className="font-medium text-[var(--text-primary)]">
-                                              Дословное доказательство
-                                            </div>
-                                            <blockquote className="mt-1 rounded border-l-2 border-[var(--accent-primary)] bg-[var(--control-bg)] p-2">
-                                              {draftClaimEvidence(claim)}
-                                            </blockquote>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </details>
-                                  ))}
-                                </div>
-                              </details>
-                            )}
-                          </div>
-                        </details>
-                      );
-                    })}
-                  </div>
-                </details>
+                <ClaimBuilderPanel sectionRows={claimBuilderSectionRows} />
               )}
 
 
