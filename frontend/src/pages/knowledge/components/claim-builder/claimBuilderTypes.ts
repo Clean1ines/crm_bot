@@ -117,6 +117,7 @@ export type ClaimBuilderSectionRowView = {
   sectionId: string;
   sectionIndex: number;
   sectionKey: string;
+  sourceUnit: ClaimBuilderSourceUnitInput | null;
   status: string;
   attemptCount: number;
   title: string;

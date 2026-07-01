@@ -137,6 +137,7 @@ export const selectClaimBuilderSectionRows = (
       sectionId: item.section_id,
       sectionIndex: item.section_index,
       sectionKey: item.section_key,
+      sourceUnit,
       status: item.status,
       attemptCount: item.attempt_count,
       title: sourceUnitTitle(sourceUnit),

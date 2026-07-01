@@ -30,17 +30,6 @@ export const ClaimBuilderDraftClaimArtifact = ({
         <p className="mt-1 text-sm text-[var(--text-primary)]">{artifact.claim}</p>
       </div>
 
-      {artifact.evidenceBlock.trim().length > 0 && (
-        <div>
-          <div className="font-medium uppercase tracking-wide text-[var(--text-muted)]">
-            Доказательство
-          </div>
-          <blockquote className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap rounded border-l-2 border-[var(--accent-primary)] bg-[var(--control-bg)] p-2">
-            {artifact.evidenceBlock}
-          </blockquote>
-        </div>
-      )}
-
       {artifact.possibleQuestions.length > 0 && (
         <div>
           <div className="font-medium uppercase tracking-wide text-[var(--text-muted)]">
