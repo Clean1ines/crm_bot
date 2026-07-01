@@ -589,6 +589,55 @@ const applyDispatchAttemptPrepared = (
   appendTimeline(response, event, `LLM-попытка ${attemptNumber} запущена`);
 };
 
+const draftClaimsFromPayload = (
+  payload: Record<string, unknown>,
+): Record<string, unknown>[] => {
+  const value = payload.draft_claims;
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord);
+};
+
+const attachDraftClaimsToSectionItem = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  sourceUnitRef: string,
+  draftClaims: Record<string, unknown>[],
+): void => {
+  if (!sourceUnitRef || draftClaims.length === 0) return;
+
+  for (const lane of response.workflow.section_lanes) {
+    lane.items = lane.items.map((item) => {
+      if (item.section_id !== sourceUnitRef) return item;
+      const previous =
+        (item as unknown as { draft_claims?: Record<string, unknown>[] })
+          .draft_claims ?? [];
+      const byRef = new Map<string, Record<string, unknown>>();
+
+      for (const claim of previous) {
+        const ref =
+          typeof claim.observation_ref === "string"
+            ? claim.observation_ref
+            : JSON.stringify(claim);
+        byRef.set(ref, claim);
+      }
+      for (const claim of draftClaims) {
+        const ref =
+          typeof claim.observation_ref === "string"
+            ? claim.observation_ref
+            : JSON.stringify(claim);
+        byRef.set(ref, claim);
+      }
+
+      return {
+        ...item,
+        draft_claims: Array.from(byRef.values()),
+      } as WorkbenchSectionQueueItemLiveState & {
+        draft_claims: Record<string, unknown>[];
+      };
+    });
+  }
+};
+
+
 const applySectionOutcome = (
   response: WorkbenchWorkflowLiveStateResponse,
   event: FrontendWorkflowEventEnvelope,
@@ -635,6 +684,12 @@ const applySectionOutcome = (
       errorMessageUser: text(event.payload, "validation_failure_reason"),
     });
   }
+
+  attachDraftClaimsToSectionItem(
+    response,
+    sourceUnitRef,
+    draftClaimsFromPayload(event.payload),
+  );
 
   const persisted = intValue(event.payload, "persisted_draft_claim_count") ?? 0;
   const message =

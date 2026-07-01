@@ -121,6 +121,7 @@ def _extracted_patch(payload: Mapping[str, object]) -> Mapping[str, object]:
         "persisted_draft_claim_count": persisted_count,
         "draft_claims_available": True,
         "draft_claims_count": persisted_count,
+        "draft_claims": payload.get("draft_claims", []),
         "draft_claims_scope": {
             "workflow_run_id": workflow_run_id,
             "source_document_ref": source_document_ref,

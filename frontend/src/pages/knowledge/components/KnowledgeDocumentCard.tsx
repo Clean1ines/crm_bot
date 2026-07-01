@@ -484,6 +484,19 @@ const collectDraftClaims = (
   return [];
 };
 
+const collectLiveDraftClaims = (
+  workflowLiveState: WorkbenchWorkflowLiveStateResponse | null | undefined,
+): DraftClaimRecord[] => {
+  const lanes = workflowLiveState?.workflow?.section_lanes ?? [];
+  return lanes.flatMap((lane) =>
+    lane.items.flatMap((item) => {
+      const value = (item as unknown as { draft_claims?: unknown }).draft_claims;
+      if (!Array.isArray(value)) return [];
+      return value.filter(isRecord);
+    }),
+  );
+};
+
 const draftClaimSourceRef = (claim: DraftClaimRecord): string | null =>
   firstTextField(claim, [
     'source_unit_ref',
@@ -617,8 +630,11 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const usage = workflow?.usage ?? null;
   const sourceUnits = sourceUnitsResponse?.source_units ?? [];
   const draftClaims = useMemo(
-    () => collectDraftClaims(answerDraftsResponse),
-    [answerDraftsResponse],
+    () => [
+      ...collectDraftClaims(answerDraftsResponse),
+      ...collectLiveDraftClaims(workflowLiveState),
+    ],
+    [answerDraftsResponse, workflowLiveState],
   );
 
 

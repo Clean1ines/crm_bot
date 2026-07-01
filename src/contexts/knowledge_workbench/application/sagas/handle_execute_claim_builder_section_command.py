@@ -1421,7 +1421,66 @@ def _event_payload(
     if validation_metadata is not None:
         payload.update(_public_validation_metadata(validation_metadata))
     payload["persisted_draft_claim_count"] = persisted_draft_claim_count
+    draft_claims = _draft_claims_event_payload(
+        validation_metadata=validation_metadata,
+        workflow_run_id=workflow_run_id,
+        source_document_ref=_source_document_ref(
+            execution_result.dispatch.dispatch_payload
+        ),
+        source_unit_ref=_source_unit_ref(execution_result.dispatch.dispatch_payload),
+        work_item_id=work_item_id,
+        dispatch_attempt_id=dispatch_attempt_id,
+        provider=capacity_payload.get("provider"),
+        model_ref=capacity_payload.get("model_ref"),
+    )
+    if draft_claims:
+        payload["draft_claims"] = list(draft_claims)
     return payload
+
+
+def _draft_claims_event_payload(
+    *,
+    validation_metadata: Mapping[str, object] | None,
+    workflow_run_id: str,
+    source_document_ref: str,
+    source_unit_ref: str,
+    work_item_id: str,
+    dispatch_attempt_id: str,
+    provider: object,
+    model_ref: object,
+) -> tuple[dict[str, object], ...]:
+    claims = _validated_claims_from_metadata(validation_metadata)
+    if not claims:
+        return ()
+
+    validation_decision = _validation_decision_text(validation_metadata)
+    provider_text = provider if isinstance(provider, str) else ""
+    model_ref_text = model_ref if isinstance(model_ref, str) else ""
+
+    result: list[dict[str, object]] = []
+    for index, claim in enumerate(claims):
+        result.append(
+            {
+                "observation_ref": f"{dispatch_attempt_id}:claim:{index}",
+                "workflow_run_id": workflow_run_id,
+                "source_document_ref": source_document_ref,
+                "source_unit_ref": source_unit_ref,
+                "section_id": source_unit_ref,
+                "work_item_id": work_item_id,
+                "dispatch_attempt_id": dispatch_attempt_id,
+                "claim_index": index,
+                "provider": provider_text,
+                "model_ref": model_ref_text,
+                "claim": claim.claim,
+                "granularity": claim.granularity.value,
+                "possible_questions": list(claim.possible_questions),
+                "exclusion_scope": claim.exclusion_scope,
+                "evidence_block": claim.evidence_block,
+                "validation_decision": validation_decision,
+            }
+        )
+    return tuple(result)
+
 
 
 def _allocation_payload(dispatch_payload: Mapping[str, object]) -> dict[str, object]:
