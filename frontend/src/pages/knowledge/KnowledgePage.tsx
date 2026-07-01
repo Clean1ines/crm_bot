@@ -13,7 +13,6 @@ import {
   type KnowledgePreviewResponse,
   type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
-  type KnowledgeProcessingAction,
   type KnowledgeAnswerDraftsResponse,
   type KnowledgeSourceUnitsResponse,
   type WorkbenchDocumentCardView,
@@ -21,9 +20,7 @@ import {
 } from "@shared/api/modules/knowledge";
 import { BaseModal } from "@shared/ui";
 import { t } from "@shared/i18n";
-import { DocumentStatusBlock } from "./components/DocumentStatusBlock";
 import { KnowledgeDocumentCard } from "./components/KnowledgeDocumentCard";
-import { DocumentActionsBlock } from "./components/DocumentActionsBlock";
 import { DraftClaimCurationWorkspaceModal } from "./components/DraftClaimCurationWorkspaceModal";
 import { AiPlaygroundPanel } from "./components/AiPlaygroundPanel";
 import {
@@ -118,26 +115,6 @@ const SOURCE_UNIT_FETCH_LIMIT = 1000;
 const STOPPED_BY_USER_ISSUE_NEEDLE =
   "\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c";
 
-const PROCESSING_REPORT_PRIMARY_ACTION_IDS = new Set([
-  "resume_processing",
-  "publish_ready",
-]);
-
-const enabledProcessingReportAction = (
-  report: KnowledgeProcessingReport | undefined,
-  actionId: string,
-): KnowledgeProcessingAction | null =>
-  report?.actions.find((action) => action.id === actionId && action.enabled) ??
-  null;
-
-const enabledPrimaryProcessingReportActions = (
-  report: KnowledgeProcessingReport | undefined,
-): KnowledgeProcessingAction[] =>
-  report?.actions.filter(
-    (action) =>
-      action.enabled && PROCESSING_REPORT_PRIMARY_ACTION_IDS.has(action.id),
-  ) ?? [];
-
 const formatNumber = (value: number): string =>
   new Intl.NumberFormat("ru-RU").format(value);
 
@@ -184,19 +161,9 @@ const hasWorkbenchCardArtifacts = (doc: Document): boolean => {
   );
 };
 
-const processingModelLabel = (_doc: Document): string =>
-  t("knowledge.processing.modelPending");
-
 const rawDocumentIssueText = (doc: Document): string | null => {
   const message = doc.error?.trim() || "";
   return message || null;
-};
-
-const documentIssueText = (doc: Document): string | null => {
-  const message = rawDocumentIssueText(doc);
-  if (!message) return null;
-
-  return getErrorMessage(message, t("knowledge.document.failureAdvice"));
 };
 
 const isDocumentCancelled = (doc: Document): boolean => {
@@ -289,23 +256,6 @@ const knowledgeProcessingModeLabel = (
   mode ||
   t("knowledge.common.unspecified");
 
-const processingProgressPercent = (doc: Document): number | null => {
-  const total = doc.card_view?.sections.total ?? 0;
-  if (total <= 0) return null;
-
-  const promptACompleted = workbenchPhaseNumber(
-    doc,
-    "prompt_a_completed_sections",
-  );
-  const current =
-    promptACompleted > 0
-      ? promptACompleted
-      : (doc.card_view?.sections.processed ?? 0) +
-        (doc.card_view?.sections.failed ?? 0);
-
-  return Math.max(0, Math.min(100, Math.round((current / total) * 100)));
-};
-
 const shouldUseWorkflowProjectionForDocument = (doc: Document): boolean => {
   if (doc.current_processing_run_id) return true;
   if (doc.status === "pending" || doc.status === "processing" || doc.status === "error") {
@@ -335,108 +285,6 @@ const shouldUseWorkflowProjectionForDocument = (doc: Document): boolean => {
         action.action_id === "pause_processing" ||
         action.action_id === "cancel_processing"),
   );
-};
-
-
-const processingProgressLabel = (doc: Document): string => {
-  const total = doc.card_view?.sections.total ?? 0;
-  if (total <= 0) return t("knowledge.document.preparingProcessing");
-
-  const promptACompleted = workbenchPhaseNumber(
-    doc,
-    "prompt_a_completed_sections",
-  );
-  const current =
-    promptACompleted > 0
-      ? promptACompleted
-      : (doc.card_view?.sections.processed ?? 0) +
-        (doc.card_view?.sections.failed ?? 0);
-
-  return t("knowledge.progress.stepOf", {
-    current: formatNumber(current),
-    total: formatNumber(total),
-  });
-};
-
-const answerResolutionCount = (_doc: Document): number | null => null;
-
-const retightenMetrics = (_doc: Document): KnowledgeProcessingMetrics | null => null;
-
-const retightenStatusText = (
-  _metrics: KnowledgeProcessingMetrics,
-): string | null => null;
-
-const retightenReportRows = (_doc: Document): string[] => [];
-
-const ANSWER_RESOLUTION_STEP_ID = "answer_resolution";
-
-const positiveMetric = (value: number | null): number | null =>
-  value !== null && value > 0 ? value : null;
-
-const sourceChunkCount = (doc: Document): number | null => {
-  const total = doc.card_view?.sections.total ?? 0;
-  return total > 0 ? total : null;
-};
-
-const incomingAnswerCandidateCount = (_doc: Document): number | null => null;
-
-const processingDetailRows = (_doc: Document): string[] => [];
-
-const processingStatusMessage = (doc: Document): string => {
-  const cardView = doc.card_view;
-  if (cardView?.default_status_description) return cardView.default_status_description;
-  if (isDocumentProcessing(doc))
-    return t("knowledge.document.draftStatus.processing");
-  if (doc.status === "error") return t("knowledge.document.draftStatus.error");
-  return t("knowledge.document.draftStatus.ready");
-};
-
-const documentLlmTokenText = (doc: Document): string | null => {
-  const total = doc.card_view?.usage.total_tokens ?? 0;
-  if (total <= 0) return null;
-
-  return t("knowledge.progress.processingUnits", {
-    total: formatNumber(total),
-  });
-};
-
-const documentLlmModels = (_doc: Document): string | null => null;
-
-const formatDurationSeconds = (seconds: number): string => {
-  const safeSeconds = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(safeSeconds / 3600);
-  const minutes = Math.floor((safeSeconds % 3600) / 60);
-  const restSeconds = safeSeconds % 60;
-
-  if (hours > 0) {
-    return t("knowledge.duration.hoursMinutesSeconds", {
-      hours,
-      minutes: minutes.toString().padStart(2, "0"),
-      seconds: restSeconds.toString().padStart(2, "0"),
-    });
-  }
-  if (minutes > 0) {
-    return t("knowledge.duration.minutesSeconds", {
-      minutes,
-      seconds: restSeconds.toString().padStart(2, "0"),
-    });
-  }
-  return t("knowledge.duration.seconds", { seconds: restSeconds });
-};
-
-const processingElapsedSeconds = (doc: Document, nowMs: number): number => {
-  const timer = doc.card_view?.timer;
-  if (!timer) return 0;
-
-  const activeElapsed = Math.max(0, timer.active_elapsed_seconds || 0);
-  if (timer.mode !== "running" || !timer.current_active_started_at) {
-    return activeElapsed;
-  }
-
-  const startedAt = Date.parse(timer.current_active_started_at);
-  if (!Number.isFinite(startedAt)) return activeElapsed;
-
-  return activeElapsed + Math.max(0, (nowMs - startedAt) / 1000);
 };
 
 const PreviewResultCard: React.FC<{
