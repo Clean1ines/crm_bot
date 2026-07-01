@@ -79,6 +79,12 @@ const timerBaseKey = (
     timer?.completed_at ?? '',
   ].join('|');
 
+const timestampMs = (value: string | null | undefined): number | null => {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export const useWorkflowTimerText = (
   timer: WorkflowTimerInput,
   workflowStatus?: string | null,
@@ -87,13 +93,10 @@ export const useWorkflowTimerText = (
   const isTicking = shouldTick(timer, workflowStatus ?? null);
   const baseKey = timerBaseKey(timer, workflowStatus ?? null);
 
-  const [baseObservedAtMs, setBaseObservedAtMs] = useState(() => Date.now());
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    const now = Date.now();
-    setBaseObservedAtMs(now);
-    setNowMs(now);
+    setNowMs(Date.now());
   }, [baseKey]);
 
   useEffect(() => {
@@ -109,8 +112,12 @@ export const useWorkflowTimerText = (
 
   const elapsedSeconds = useMemo(() => {
     if (!isTicking) return baseElapsedSeconds;
-    return baseElapsedSeconds + Math.max(0, Math.floor((nowMs - baseObservedAtMs) / 1000));
-  }, [baseElapsedSeconds, baseObservedAtMs, isTicking, nowMs]);
+
+    const activeStartedAtMs = timestampMs(timer?.current_active_started_at);
+    if (activeStartedAtMs === null) return baseElapsedSeconds;
+
+    return baseElapsedSeconds + Math.max(0, Math.floor((nowMs - activeStartedAtMs) / 1000));
+  }, [baseElapsedSeconds, isTicking, nowMs, timer?.current_active_started_at]);
 
   if (elapsedSeconds > 0 || isTicking) return formatDuration(elapsedSeconds);
   return '—';

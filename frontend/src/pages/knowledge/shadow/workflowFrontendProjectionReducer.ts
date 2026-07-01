@@ -164,6 +164,23 @@ const stringArray = (
 const normalize = (value: string | null | undefined): string =>
   (value || "").trim().toLowerCase();
 
+const earliestIso = (
+  left: string | null | undefined,
+  right: string | null | undefined,
+): string | null => {
+  if (!left && !right) return null;
+  if (!left) return right ?? null;
+  if (!right) return left;
+
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+
+  if (!Number.isFinite(leftMs)) return right;
+  if (!Number.isFinite(rightMs)) return left;
+
+  return leftMs <= rightMs ? left : right;
+};
+
 const cloneResponse = (
   current: WorkbenchWorkflowLiveStateResponse,
 ): WorkbenchWorkflowLiveStateResponse => ({
@@ -975,12 +992,14 @@ export const reduceWorkflowFrontendProjectionEvent = (
   next.workflow.workflow_status = "running";
   next.workflow.timer.mode = "running";
   next.workflow.timer.is_live = true;
-  next.workflow.timer.current_active_started_at =
-    next.workflow.timer.current_active_started_at ||
-    normalizedEvent.occurred_at;
-  next.workflow.timer.started_at =
-    next.workflow.timer.started_at ||
-    normalizedEvent.occurred_at;
+  next.workflow.timer.current_active_started_at = earliestIso(
+    next.workflow.timer.current_active_started_at,
+    normalizedEvent.occurred_at,
+  );
+  next.workflow.timer.started_at = earliestIso(
+    next.workflow.timer.started_at,
+    normalizedEvent.occurred_at,
+  );
 
   if (normalizedEvent.canonical_phase) {
     next.workflow.current_phase = normalizedEvent.canonical_phase;
