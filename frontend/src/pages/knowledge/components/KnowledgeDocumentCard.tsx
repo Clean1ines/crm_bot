@@ -25,6 +25,8 @@ import {
 } from './workflow-card/workflowCardLabels';
 import { ClaimBuilderPanel } from './claim-builder/ClaimBuilderPanel';
 import { selectClaimBuilderSectionRows } from './claim-builder/claimBuilderSelectors';
+import { SourceIngestionProgressPanel } from './source-ingestion/SourceIngestionProgressPanel';
+import { selectSourceIngestionProgress } from './source-ingestion/sourceIngestionSelectors';
 import { t } from '@shared/i18n';
 import {
   type KnowledgeSourceUnitsResponse,
@@ -219,6 +221,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     [claimBuilderSectionRows],
   );
 
+  const sourceIngestionProgress = useMemo(
+    () => selectSourceIngestionProgress(workflowLiveState),
+    [workflowLiveState],
+  );
   const sourceStage = stages.find((stage) => stage.id === 'source_ingestion') ?? null;
   const claimStage =
     stages.find((stage) => stage.id === 'prompt_a_claim_extraction') ?? null;
@@ -375,34 +381,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     .flatMap((lane) => lane.items)
     .sort((left, right) => left.section_index - right.section_index);
 
-  const laneReady = lanes.reduce((total, lane) => total + lane.ready_count, 0);
-  const laneLeased = lanes.reduce((total, lane) => total + lane.leased_count, 0);
-  const laneDone = lanes.reduce((total, lane) => total + lane.done_count, 0);
-  const laneFailed = lanes.reduce((total, lane) => total + lane.failed_count, 0);
-  const laneWaiting = lanes.reduce((total, lane) => total + lane.waiting_count, 0);
-  const observedLaneTotal = laneReady + laneLeased + laneDone + laneFailed + laneWaiting;
-
-  const sectionProgressTotal = Math.max(
-    claimStage?.total ?? 0,
-    sourceStage?.total ?? 0,
-    observedLaneTotal,
-  );
-  const sectionProgressCurrent = Math.max(claimStage?.current ?? 0, laneDone);
-  const sectionProgressPercent =
-    sectionProgressTotal > 0
-      ? Math.max(
-          0,
-          Math.min(
-            100,
-            Math.round((sectionProgressCurrent / sectionProgressTotal) * 100),
-          ),
-        )
-      : 0;
-  const sectionProgressVisible =
-    sectionProgressTotal > 0 ||
-    workflowStageHasStarted(sourceStage) ||
-    workflowStageHasStarted(claimStage) ||
-    sectionItems.length > 0;
   const llmUsageVisible =
     attempts.length > 0 ||
     workflowStageHasStarted(claimStage) ||
@@ -467,11 +445,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const phaseText = workflow
     ? phaseLabel(currentPhase)
     : 'после загрузки здесь будет показан текущий этап';
-
-  const sectionProgressText =
-    sectionProgressTotal > 0
-      ? `${formatNumber(sectionProgressCurrent)} из ${formatNumber(sectionProgressTotal)} разделов`
-      : 'разделы ещё не подготовлены';
 
   const resultSummaryText = workflow
     ? hasClaimClusters || hasCompactionComparisons
@@ -659,9 +632,9 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
           <p className="mt-1">
             {headline}. Сейчас: {phaseText}.
           </p>
-          {laneFailed > 0 && (
+          {sourceIngestionProgress.failedCount > 0 && (
             <p className="mt-1 text-amber-700 dark:text-amber-300">
-              {formatNumber(laneFailed)} раздела требуют повторной обработки.
+              {formatNumber(sourceIngestionProgress.failedCount)} раздела требуют повторной обработки.
             </p>
           )}
         </div>
@@ -694,25 +667,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             </div>
           )}
 
-          {sectionProgressVisible && (
-            <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
-              <div className="mb-1 font-medium text-[var(--text-primary)]">Прогресс</div>
-              <div className="text-[var(--text-muted)]">
-                Извлечение утверждений: {sectionProgressText}
-                {laneLeased > 0 ? ` · сейчас обрабатывается ${formatNumber(laneLeased)}` : ''}
-                {laneReady > 0 ? ` · ожидает ${formatNumber(laneReady)}` : ''}
-                {laneWaiting > 0 ? ` · отложено ${formatNumber(laneWaiting)}` : ''}
-                {laneFailed > 0 ? ` · ошибок ${formatNumber(laneFailed)}` : ''}
-              </div>
-              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--control-bg)]">
-                <div
-                  className="h-full rounded-full bg-[var(--accent-primary)]"
-                  style={{ width: `${sectionProgressPercent}%` }}
-                />
-              </div>
-              <div className="mt-1 text-[var(--text-muted)]">{sectionProgressPercent}%</div>
-            </div>
-          )}
+          <SourceIngestionProgressPanel
+            progress={sourceIngestionProgress}
+            formatNumber={formatNumber}
+          />
 
           {claimClusters.length > 0 ? (
             <div className={`min-w-0 rounded-xl border p-3 ${compactionPanelTone}`}>
