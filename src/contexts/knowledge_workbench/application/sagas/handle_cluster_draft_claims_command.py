@@ -296,7 +296,7 @@ def _cluster_live_rows(
     claims_by_ref: Mapping[str, DraftClaimForCompaction],
     edges,
 ) -> tuple[dict[str, object], ...]:
-    batches_by_group = {}
+    batches_by_group: dict[str, list[object]] = {}
     for batch in batches:
         batches_by_group.setdefault(batch.group_ref, []).append(batch)
 

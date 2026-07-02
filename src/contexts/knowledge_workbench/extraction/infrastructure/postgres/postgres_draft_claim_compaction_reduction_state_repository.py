@@ -338,7 +338,7 @@ class PostgresDraftClaimCompactionReductionStateRepository(
                    source_claim_refs, supersedes_node_refs, artifact_tokens,
                    compacted_key, compacted_claim, compacted_claim_kind,
                    compacted_granularity, compacted_merge_decision,
-                   created_at, updated_at
+                   compacted_payload, created_at, updated_at
             FROM draft_claim_compaction_nodes
             WHERE workflow_run_id = $1
               AND ($2::text IS NULL OR group_ref = $2)
@@ -1712,6 +1712,7 @@ def _node_read_model(row: Mapping[str, object]) -> DraftClaimCompactionNodeReadM
             row,
             "compacted_merge_decision",
         ),
+        compacted_payload=_json_object_or_none(row.get("compacted_payload")),
         created_at=_read_model_datetime(row, "created_at"),
         updated_at=_read_model_datetime(row, "updated_at"),
     )

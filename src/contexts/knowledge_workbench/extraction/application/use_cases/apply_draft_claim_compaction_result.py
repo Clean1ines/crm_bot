@@ -27,6 +27,7 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_observation_read_repository_port import (
     DraftClaimObservationReadRepositoryPort,
 )
+from src.domain.project_plane.json_types import JsonValue
 
 
 class DraftClaimCompactionApplyResultError(Exception):
@@ -50,7 +51,7 @@ class ApplyDraftClaimCompactionResult:
         self,
         command: DraftClaimCompactionApplyResultCommand,
     ) -> DraftClaimCompactionApplyResultOutcome:
-        compacted_artifacts = ()
+        compacted_artifacts: tuple[dict[str, JsonValue], ...] = ()
         if command.output_kind is DraftClaimCompactionApplyOutputKind.COMPACTED_CLAIMS:
             source_claims = await self._load_source_claims(command.compacted_claims)
             enriched_output = self.draft_claim_compaction_output_enricher.enrich(
