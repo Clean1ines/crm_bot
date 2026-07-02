@@ -7,16 +7,31 @@ import type {
 const normalize = (value: string | null | undefined): string =>
   (value || '').trim().toLowerCase();
 
-const workflowStageHasStarted = (stage: WorkflowStageInput | null | undefined): boolean => {
-  if (!stage) return false;
+const DOMAIN_SCOPED_STAGE_IDS = new Set([
+  'draft_claim_embeddings',
+  'draft_claim_clustering',
+  'draft_claim_compaction',
+]);
 
-  return (
-    normalize(stage.status) !== 'pending' ||
-    stage.current > 0 ||
-    stage.total > 0 ||
-    Boolean(stage.started_at) ||
-    Boolean(stage.completed_at)
-  );
+const hasGenericProgressEvidence = (stage: WorkflowStageInput): boolean =>
+  stage.current > 0 ||
+  stage.total > 0 ||
+  Boolean(stage.started_at) ||
+  Boolean(stage.completed_at);
+
+const workflowStageHasStarted = (
+  stage: WorkflowStageInput | null | undefined,
+  context: WorkflowStageCountContext,
+): boolean => {
+  if (!stage) return false;
+  if (context.startedStageIds?.includes(stage.id)) return true;
+
+  if (DOMAIN_SCOPED_STAGE_IDS.has(stage.id)) {
+    return false;
+  }
+
+  const status = normalize(stage.status);
+  return (status !== 'pending' && status !== 'unknown') || hasGenericProgressEvidence(stage);
 };
 
 const stageTitle = (stage: WorkflowStageInput): string => {
@@ -97,6 +112,34 @@ const statusPillClassName = (status: string): string => {
   return 'bg-[var(--control-bg)] text-[var(--text-secondary)]';
 };
 
+const displayedStageStatus = (
+  stage: WorkflowStageInput,
+  context: WorkflowStageCountContext,
+): string => {
+  if (stage.id === 'draft_claim_embeddings' && context.hasClaimClusters) {
+    return 'completed';
+  }
+
+  if (stage.id === 'draft_claim_clustering' && context.hasClaimClusters) {
+    return 'completed';
+  }
+
+  if (
+    stage.id === 'draft_claim_compaction' &&
+    (context.hasCompactionComparisons || context.finalCompactedFactCount > 0)
+  ) {
+    if (
+      context.claimClusterCount > 0 &&
+      context.compactedClusterCount >= context.claimClusterCount
+    ) {
+      return 'completed';
+    }
+    return 'running';
+  }
+
+  return stage.status;
+};
+
 const displayedStageCounts = (
   stage: WorkflowStageInput,
   context: WorkflowStageCountContext,
@@ -115,7 +158,10 @@ const displayedStageCounts = (
     };
   }
 
-  if (stage.id === 'draft_claim_compaction' && context.hasCompactionComparisons) {
+  if (
+    stage.id === 'draft_claim_compaction' &&
+    (context.hasCompactionComparisons || context.finalCompactedFactCount > 0)
+  ) {
     return {
       current: context.compactedClusterCount,
       total: context.claimClusterCount,
@@ -132,19 +178,23 @@ export const selectWorkflowStageRows = (
   stages: WorkflowStageInput[],
   context: WorkflowStageCountContext,
 ): WorkflowStageRowView[] =>
-  stages.filter(workflowStageHasStarted).map((stage) => {
+  stages.filter((stage) => workflowStageHasStarted(stage, context)).map((stage) => {
     const counts = displayedStageCounts(stage, context);
+    const rowStage = {
+      ...stage,
+      status: displayedStageStatus(stage, context),
+    };
 
     return {
-      id: stage.id,
-      title: stageTitle(stage),
-      status: stage.status,
-      statusLabel: stageStatusLabel(stage),
-      toneClassName: stageToneClassName(stage),
-      pillClassName: statusPillClassName(stage.status),
+      id: rowStage.id,
+      title: stageTitle(rowStage),
+      status: rowStage.status,
+      statusLabel: stageStatusLabel(rowStage),
+      toneClassName: stageToneClassName(rowStage),
+      pillClassName: statusPillClassName(rowStage.status),
       current: counts.current,
       total: counts.total,
-      showCounts: counts.total > 0 && stage.id !== 'cluster_preview',
-      message: stage.message?.trim() || null,
+      showCounts: counts.total > 0 && rowStage.id !== 'cluster_preview',
+      message: rowStage.message?.trim() || null,
     };
   });

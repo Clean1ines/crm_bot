@@ -16,6 +16,8 @@ export type WorkflowStageCountContext = {
   claimClusterCount: number;
   hasCompactionComparisons: boolean;
   compactedClusterCount: number;
+  finalCompactedFactCount: number;
+  startedStageIds?: readonly string[];
 };
 
 export type WorkflowStageRowView = {

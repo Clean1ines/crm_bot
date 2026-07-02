@@ -30,12 +30,11 @@ export const WorkflowStagesPanel: React.FC<WorkflowStagesPanelProps> = ({
                   <span className="font-semibold text-[var(--text-primary)]">
                     {formatNumber(stageIndex + 1)}. {stage.title}
                   </span>
-                  <span className="ml-2 text-[var(--text-muted)]">
-                    {stage.statusLabel}
-                    {stage.showCounts
-                      ? ` · ${formatNumber(stage.current)} / ${formatNumber(stage.total)}`
-                      : ''}
-                  </span>
+                  {stage.showCounts && (
+                    <span className="ml-2 text-[var(--text-muted)]">
+                      {formatNumber(stage.current)} / {formatNumber(stage.total)}
+                    </span>
+                  )}
                 </span>
                 <span className={`rounded-full px-2.5 py-1 font-medium ${stage.pillClassName}`}>
                   {stage.statusLabel}

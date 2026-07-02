@@ -159,6 +159,23 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const compactionStage =
     stages.find((stage) => stage.id === 'draft_claim_compaction') ?? null;
   const previewStage = stages.find((stage) => stage.id === 'cluster_preview') ?? null;
+  const startedStageIds = useMemo(() => {
+    const ids: string[] = [];
+
+    if (clustersView.hasClusters) {
+      ids.push('draft_claim_embeddings', 'draft_claim_clustering');
+    }
+
+    if (clustersView.hasComparisons || clustersView.finalFacts.length > 0) {
+      ids.push('draft_claim_compaction');
+    }
+
+    return ids;
+  }, [
+    clustersView.hasClusters,
+    clustersView.hasComparisons,
+    clustersView.finalFacts.length,
+  ]);
   const workflowStageRows = useMemo(
     () =>
       selectWorkflowStageRows(stages, {
@@ -168,6 +185,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         claimClusterCount: clustersView.clusters.length,
         hasCompactionComparisons: clustersView.hasComparisons,
         compactedClusterCount: clustersView.compactedClusterCount,
+        finalCompactedFactCount: clustersView.finalFacts.length,
+        startedStageIds,
       }),
     [
       stages,
@@ -177,6 +196,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       clustersView.clusters.length,
       clustersView.hasComparisons,
       clustersView.compactedClusterCount,
+      clustersView.finalFacts.length,
+      startedStageIds,
     ],
   );
 
