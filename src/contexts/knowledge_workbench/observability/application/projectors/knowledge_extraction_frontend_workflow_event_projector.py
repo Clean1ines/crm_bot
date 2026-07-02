@@ -31,7 +31,9 @@ class KnowledgeExtractionFrontendWorkflowEventProjector:
             DraftClaimEmbeddingFrontendWorkflowEventProjector()
         )
         self._draft_claim_cluster = DraftClaimClusterFrontendWorkflowEventProjector()
-        self._draft_claim_compaction = DraftClaimCompactionFrontendWorkflowEventProjector()
+        self._draft_claim_compaction = (
+            DraftClaimCompactionFrontendWorkflowEventProjector()
+        )
 
     def project(self, event: WorkflowEvent) -> FrontendWorkflowEvent | None:
         projected = self._source_ingestion.project(event)

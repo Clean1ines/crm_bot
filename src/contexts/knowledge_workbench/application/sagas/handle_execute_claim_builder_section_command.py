@@ -1482,7 +1482,6 @@ def _draft_claims_event_payload(
     return tuple(result)
 
 
-
 def _allocation_payload(dispatch_payload: Mapping[str, object]) -> dict[str, object]:
     allocation = dispatch_payload.get("llm_allocation")
     if not isinstance(allocation, Mapping):

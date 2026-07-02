@@ -659,7 +659,6 @@ async def test_rejects_non_pending_command() -> None:
         )
 
 
-
 def _decision(
     work_type: DraftClaimCompactionNextWorkItemType,
     *,

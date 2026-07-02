@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, FileText, Trash2, Zap } from 'lucide-react';
-
-import { visibleWorkflowActions, workflowActionLabel } from '../workflow/workflowActions';
+import { AlertTriangle } from 'lucide-react';
 import {
   normalize,
   phaseLabel,
@@ -18,7 +16,12 @@ import { WorkflowTimerCard } from './workflow-timer/WorkflowTimerCard';
 import type { WorkflowTimerInput } from './workflow-timer/workflowTimerTypes';
 import { ClaimClustersPanel } from './claim-clusters/ClaimClustersPanel';
 import { selectClaimClustersView } from './claim-clusters/claimClusterSelectors';
-import { t } from '@shared/i18n';
+import { CurationNotice } from './document-card/CurationNotice';
+import { DocumentCardHeader } from './document-card/DocumentCardHeader';
+import { DocumentOverviewPanel } from './document-card/DocumentOverviewPanel';
+import { LlmUsageCard } from './document-card/LlmUsageCard';
+import { ResultSummaryCard } from './document-card/ResultSummaryCard';
+import { WorkflowActionsPanel } from './document-card/WorkflowActionsPanel';
 import {
   type KnowledgeSourceUnitsResponse,
   type WorkbenchWorkflowActionLiveState,
@@ -54,41 +57,6 @@ type ProcessingControlOverride = {
 
 const formatNumber = (value: number): string =>
   new Intl.NumberFormat('ru-RU').format(Math.max(0, Math.floor(value || 0)));
-
-const disabledActionTitle = (action: WorkbenchWorkflowActionLiveState): string => {
-  if (action.enabled) return workflowActionLabel(action);
-
-  const labels: Record<string, string> = {
-    not_paused: 'Доступно только когда обработка на паузе',
-    not_running: 'Сейчас действие недоступно',
-    terminal_workflow: 'Обработка уже завершена или остановлена',
-    preview_not_ready: 'Проверка будет доступна после подготовки предпросмотра',
-    workflow_missing: 'Рабочий процесс ещё не создан',
-  };
-  return labels[action.reason_code || ''] || 'Сейчас недоступно';
-};
-
-const canRunLiveAction = (action: WorkbenchWorkflowActionLiveState): boolean =>
-  action.enabled;
-
-const liveActionClassName = (action: WorkbenchWorkflowActionLiveState): string => {
-  const base =
-    'rounded-full px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50';
-
-  if (action.action_id === 'cancel_processing' || action.action_id === 'delete_document') {
-    return `${base} bg-[var(--accent-danger-bg)] text-[var(--accent-danger-text)] hover:opacity-80`;
-  }
-
-  if (action.action_id === 'open_curation' || action.action_id === 'publish_ready') {
-    return `${base} bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] hover:bg-[var(--accent-primary)]/20`;
-  }
-
-  if (action.action_id === 'confirm_degraded_fallback') {
-    return `${base} bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300`;
-  }
-
-  return `${base} bg-[var(--control-bg)] text-[var(--text-secondary)] hover:bg-[var(--surface-secondary)]`;
-};
 
 export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   doc,
@@ -383,7 +351,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   };
 
   const handleLiveAction = (action: WorkbenchWorkflowActionLiveState): void => {
-    if (!canRunLiveAction(action)) return;
+    if (!action.enabled) return;
 
     if (action.action_id === 'open_curation') {
       onOpenCuration(workflow?.curation.workflow_run_id ?? workflow?.workflow_run_id ?? null);
@@ -399,67 +367,30 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   };
 
 
-
   return (
     <div
       id={`knowledge-doc-card-${doc.id}`}
       className="group w-full min-w-0 overflow-hidden rounded-2xl bg-[var(--surface-elevated)] p-4 break-words transition-all hover:shadow-lg sm:p-5"
     >
-      <div className="mb-4 flex min-w-0 items-start justify-between gap-2">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--surface-secondary)] text-[var(--accent-primary)]">
-          <FileText className="h-5 w-5" />
-        </div>
+      <DocumentCardHeader
+        workflowStatus={workflowStatus}
+        canShowPrimaryProcessingControl={canShowPrimaryProcessingControl}
+        primaryProcessingActionId={primaryProcessingActionId}
+        primaryProcessingActionReason={primaryProcessingAction?.reason_code}
+        isDeletePending={isDeletePending}
+        onPrimaryProcessingControl={handlePrimaryProcessingControl}
+        onRequestDelete={onRequestDelete}
+      />
 
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-          <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)]">
-            {workflowStatusLabel(workflowStatus)}
-          </span>
-          {canShowPrimaryProcessingControl && (
-            <button
-              type="button"
-              onClick={handlePrimaryProcessingControl}
-              title={primaryProcessingAction?.reason_code || undefined}
-              className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
-            >
-              {primaryProcessingActionId === 'pause_processing' ? 'Пауза' : 'Продолжить'}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onRequestDelete}
-            disabled={isDeletePending}
-            title={t('common.actions.delete')}
-            className="rounded-lg p-2 text-[var(--accent-danger-text)] transition-colors hover:bg-[var(--accent-danger-bg)] disabled:cursor-wait disabled:opacity-50"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="mb-3">
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate font-semibold text-[var(--text-primary)]" title={doc.file_name}>
-              {doc.file_name}
-            </h3>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              {fileSizeText} · {knowledgeProcessingModeLabel(doc.preprocessing_mode || 'faq')}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-2 rounded-xl bg-[var(--surface-secondary)] px-3 py-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-          <div className="font-medium text-[var(--text-primary)]">Что происходит с документом</div>
-          <p className="mt-1">
-            {headline}. Сейчас: {phaseText}.
-          </p>
-          {sourceIngestionProgress.failedCount > 0 && (
-            <p className="mt-1 text-amber-700 dark:text-amber-300">
-              {formatNumber(sourceIngestionProgress.failedCount)} раздела требуют повторной обработки.
-            </p>
-          )}
-        </div>
-      </div>
+      <DocumentOverviewPanel
+        fileName={doc.file_name}
+        fileSizeText={fileSizeText}
+        processingModeText={knowledgeProcessingModeLabel(doc.preprocessing_mode || 'faq')}
+        headline={headline}
+        phaseText={phaseText}
+        failedSourceUnitCount={sourceIngestionProgress.failedCount}
+        formatNumber={formatNumber}
+      />
 
       <div className="mb-4 space-y-3">
         {workflowLiveStateError && (
@@ -478,15 +409,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
             workflowStatus={effectiveWorkflowStatus}
           />
 
-          {llmUsageVisible && (
-            <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
-              <div className="mb-1 flex items-center gap-1 font-medium text-[var(--text-primary)]">
-                <Zap className="h-3.5 w-3.5" />
-                ИИ
-              </div>
-              <div className="text-[var(--text-muted)]">{llmUsageText}</div>
-            </div>
-          )}
+          <LlmUsageCard visible={llmUsageVisible} usageText={llmUsageText} />
 
           <SourceIngestionProgressPanel
             progress={sourceIngestionProgress}
@@ -495,12 +418,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
           {summary}
 
-          {resultSummaryVisible && (
-            <div className="min-w-0 rounded-xl bg-[var(--surface-secondary)] p-3">
-              <div className="mb-1 font-medium text-[var(--text-primary)]">Итог</div>
-              <div className="text-[var(--text-muted)]">{resultSummaryText}</div>
-            </div>
-          )}
+          <ResultSummaryCard visible={resultSummaryVisible} summaryText={resultSummaryText} />
               </div>
 
               {workflow && (
@@ -525,36 +443,12 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               )}
 
 
-              {visibleWorkflowActions(actions).filter(
-                (action) =>
-                  normalize(action.action_id) !== 'pause_processing' &&
-                  normalize(action.action_id) !== 'resume_processing',
-              ).length > 0 && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {visibleWorkflowActions(actions).filter(
-                    (action) =>
-                      normalize(action.action_id) !== 'pause_processing' &&
-                      normalize(action.action_id) !== 'resume_processing',
-                  ).map((action) => (
-                      <button
-                        key={action.action_id}
-                        type="button"
-                        disabled={!canRunLiveAction(action)}
-                        title={disabledActionTitle(action)}
-                        onClick={() => handleLiveAction(action)}
-                        className={liveActionClassName(action)}
-                      >
-                        {workflowActionLabel(action)}
-                      </button>
-                    ))}
-                </div>
-              )}
+              <WorkflowActionsPanel actions={actions} onAction={handleLiveAction} />
 
-              {workflow.curation.available && workflow.curation.workflow_run_id && (
-                <div className="rounded-lg bg-[var(--accent-primary)]/10 px-2 py-1 text-[var(--accent-primary)]">
-                  Проверка человеком доступна.
-                </div>
-              )}
+              <CurationNotice
+                available={workflow.curation.available}
+                workflowRunId={workflow.curation.workflow_run_id}
+              />
             </div>
                 </details>
               )}

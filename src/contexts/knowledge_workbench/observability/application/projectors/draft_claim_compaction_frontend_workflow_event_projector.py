@@ -112,7 +112,9 @@ class DraftClaimCompactionFrontendWorkflowEventProjector:
         if projection_type is None:
             return None
         if event.sequence_number is None:
-            raise ValueError("event sequence_number is required for frontend projection")
+            raise ValueError(
+                "event sequence_number is required for frontend projection"
+            )
 
         workflow_run_id = _payload_text(event.payload, "workflow_run_id")
         project_id, document_id = _document_scope_from_workflow_run_id(workflow_run_id)
@@ -157,7 +159,10 @@ def _projection_payload(payload: Mapping[str, object]) -> dict[str, object]:
 
 
 def _operation_key(event_type: str) -> str:
-    if event_type == KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED.value:
+    if (
+        event_type
+        == KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED.value
+    ):
         return "prepare_draft_claim_compaction_dispatch_batch"
     if event_type in {
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ATTEMPT_COMPLETED.value,
@@ -165,9 +170,15 @@ def _operation_key(event_type: str) -> str:
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_ATTEMPT_TERMINAL_FAILED.value,
     }:
         return "execute_draft_claim_compaction"
-    if event_type == KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED.value:
+    if (
+        event_type
+        == KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED.value
+    ):
         return "apply_draft_claim_compaction_result"
-    if event_type == KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED.value:
+    if (
+        event_type
+        == KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED.value
+    ):
         return "reconcile_draft_claim_compaction_progress"
     return "draft_claim_compaction"
 

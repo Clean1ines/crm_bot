@@ -102,6 +102,7 @@ def test_document_run_cleanup_collects_execution_work_items_from_schedule_payloa
     assert "payload->>'workflow_run_id'" in block
     assert "payload->>'source_unit_ref'" in block
 
+
 def test_document_run_cleanup_marks_workflow_cleanup_before_physical_delete() -> None:
     content = (
         ROOT / "src/contexts/knowledge_workbench/infrastructure/postgres/"

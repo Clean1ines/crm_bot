@@ -512,7 +512,9 @@ async def test_same_reconcile_replay_keeps_prepare_key_and_payload_stable_when_c
 
 
 @pytest.mark.asyncio
-async def test_same_reconcile_progress_payload_uses_stable_observation_event_id() -> None:
+async def test_same_reconcile_progress_payload_uses_stable_observation_event_id() -> (
+    None
+):
     workflow_command = _workflow_command()
 
     _, _, _, first_uow = await _execute(

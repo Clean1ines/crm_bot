@@ -199,7 +199,6 @@ class HandleClusterDraftClaimsCommandHandler:
         if schedule.conflict_count:
             raise ValueError("draft claim compaction work item schedule conflict")
 
-
         scheduled_work_item_count = (
             schedule.created_count + schedule.already_exists_count
         )
@@ -288,8 +287,6 @@ class HandleClusterDraftClaimsCommandHandler:
             scheduled_work_item_count=schedule.created_count,
             already_scheduled_work_item_count=schedule.already_exists_count,
         )
-
-
 
 
 def _cluster_live_rows(

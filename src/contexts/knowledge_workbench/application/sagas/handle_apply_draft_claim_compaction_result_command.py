@@ -741,9 +741,7 @@ async def _append_next_event(
                 "group_ref": apply_command.group_ref,
                 "node_refs": list(outcome.next_decision.next_work_item.node_refs),
                 "resume_work_type": resume_work_type.value,
-                "prompt_tokens": (
-                    outcome.next_decision.next_work_item.prompt_tokens
-                ),
+                "prompt_tokens": (outcome.next_decision.next_work_item.prompt_tokens),
                 "artifact_tokens": (
                     outcome.next_decision.next_work_item.artifact_tokens
                 ),
@@ -801,7 +799,6 @@ def _next_batch_live_row(
         "raw_claim_refs": list(_raw_claim_refs(next_work_item)),
         "compacted_node_refs": list(_compacted_node_refs(next_work_item)),
     }
-
 
 
 async def _save_progress_snapshot(
