@@ -246,6 +246,8 @@ def _next_command(
         idempotency_key=WorkflowIdempotencyKey(idempotency_key),
         payload={
             "workflow_run_id": workflow_run_id,
+            "summary": summary.to_payload(),
+            "caused_by_command_id": workflow_command.command_id.value,
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=occurred_at,

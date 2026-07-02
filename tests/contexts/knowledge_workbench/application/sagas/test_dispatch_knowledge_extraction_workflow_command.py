@@ -143,6 +143,7 @@ def _default_payload_for_command(
     ):
         return {
             "workflow_run_id": _workflow_run_id(),
+            "source_document_ref": _document_ref().value,
             "scheduled_work_item_count": 1,
             "llm_dispatch_preparation": _dispatch_preparation(),
         }
@@ -478,8 +479,17 @@ class FakePrepareLlmDispatchBatch:
                         attempt_number=1,
                         dispatch_payload={
                             "work_item_id": "work-1",
+                            "llm_allocation": {
+                                "provider": "groq",
+                                "account_ref": "groq_org_primary",
+                                "model_ref": "qwen/qwen3-32b",
+                            },
                             "schedule_payload": {
                                 "workflow_run_id": _workflow_run_id(),
+                                "source_document_ref": _document_ref().value,
+                                "source_unit_ref": _source_unit().unit_ref.value,
+                                "source_unit_index": 0,
+                                "section_index": 0,
                                 "group_ref": "group-1",
                                 "batch_ref": "batch-1",
                                 "round_index": 0,
@@ -1121,6 +1131,7 @@ async def test_dispatch_repairs_compaction_prepare_command_without_dispatch_prep
                 KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
                 payload={
                     "workflow_run_id": _workflow_run_id(),
+                    "source_document_ref": _document_ref().value,
                     "scheduled_work_item_count": 2,
                 },
             )
