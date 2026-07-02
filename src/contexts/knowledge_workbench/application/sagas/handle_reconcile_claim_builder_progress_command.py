@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -513,12 +514,14 @@ def _progress_reconciled_event(
         "next_command_type": next_command.command_type if next_command else None,
         "next_run_after": next_run_after,
     }
+    payload_digest = _workflow_event_payload_digest(payload)
     return WorkflowEvent(
         event_id=WorkflowEventId(
             "workflow-event:"
             f"{workflow_run_id}:"
             f"{KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED.value}:"
-            f"{workflow_command.command_id.value}"
+            f"{workflow_command.command_id.value}:"
+            f"payload:{payload_digest}"
         ),
         event_type=(
             KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED.value
@@ -529,6 +532,16 @@ def _progress_reconciled_event(
         causation_command_id=workflow_command.command_id,
         correlation_id=workflow_command.command_id.value,
     )
+
+
+def _workflow_event_payload_digest(payload: Mapping[str, object]) -> str:
+    material = json.dumps(
+        dict(payload),
+        default=str,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def _all_sections_extracted_event(

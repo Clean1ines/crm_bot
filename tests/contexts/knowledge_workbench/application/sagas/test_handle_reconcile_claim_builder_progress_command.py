@@ -512,6 +512,43 @@ async def test_same_reconcile_replay_keeps_prepare_key_and_payload_stable_when_c
 
 
 @pytest.mark.asyncio
+async def test_same_reconcile_progress_payload_uses_stable_observation_event_id() -> None:
+    workflow_command = _workflow_command()
+
+    _, _, _, first_uow = await _execute(
+        workflow_command=workflow_command,
+        summary=_summary(ready_count=2, completed_count=1),
+    )
+    _, _, _, replay_uow = await _execute(
+        workflow_command=workflow_command,
+        summary=_summary(ready_count=2, completed_count=1),
+    )
+    _, _, _, changed_uow = await _execute(
+        workflow_command=workflow_command,
+        summary=_summary(ready_count=1, completed_count=2),
+    )
+
+    first_event = first_uow.outbox.events[0]
+    replay_event = replay_uow.outbox.events[0]
+    changed_event = changed_uow.outbox.events[0]
+
+    assert first_event.event_id == replay_event.event_id
+    assert dict(first_event.payload) == dict(replay_event.payload)
+    assert first_event.event_id != changed_event.event_id
+    assert dict(first_event.payload) != dict(changed_event.payload)
+    assert first_event.causation_command_id == workflow_command.command_id
+    assert changed_event.causation_command_id == workflow_command.command_id
+
+    expected_prefix = (
+        f"workflow-event:{workflow_command.workflow_run_id}:"
+        f"{KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_PROGRESS_RECONCILED.value}:"
+        f"{workflow_command.command_id.value}:payload:"
+    )
+    assert first_event.event_id.value.startswith(expected_prefix)
+    assert changed_event.event_id.value.startswith(expected_prefix)
+
+
+@pytest.mark.asyncio
 async def test_distinct_reconcile_commands_create_distinct_prepare_keys_for_next_batches() -> (
     None
 ):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime, timezone
 from typing import Protocol, cast
 from uuid import UUID
 
@@ -111,6 +112,9 @@ class PostgresWorkbenchDocumentRunCleanupRepository:
         refs: DocumentRunRefs,
     ) -> DeletedWorkbenchDocumentRunCounts:
         async with cast(asyncpg.Pool, self._pool).acquire() as connection:
+            columns = await _load_columns(connection)
+            await _mark_workflows_cleanup_started(connection, columns, refs)
+
             async with connection.transaction():
                 columns = await _load_columns(connection)
                 counts: dict[str, int] = {}
@@ -716,6 +720,46 @@ async def _llm_attempt_ids(
             )
         )
     return _unique(values)
+
+
+async def _mark_workflows_cleanup_started(
+    connection: asyncpg.Connection,
+    columns: Mapping[str, frozenset[str]],
+    refs: DocumentRunRefs,
+) -> None:
+    if not refs.workflow_run_ids or not _has(
+        columns,
+        "knowledge_extraction_workflow_runs",
+        "workflow_run_id",
+        "status",
+        "cleanup_status",
+        "pause_reason",
+        "cancelled_at",
+        "updated_at",
+    ):
+        return
+
+    now = datetime.now(timezone.utc)
+    await connection.execute(
+        """
+        UPDATE knowledge_extraction_workflow_runs
+        SET cleanup_status = 'CLEANUP_IN_PROGRESS',
+            status = CASE
+                WHEN status IN ('COMPLETED', 'FAILED', 'CANCELLED') THEN status
+                ELSE 'CANCELLED'
+            END,
+            pause_reason = COALESCE(pause_reason, 'document_cleanup'),
+            cancelled_at = CASE
+                WHEN cancelled_at IS NULL
+                 AND status NOT IN ('COMPLETED', 'FAILED') THEN $2
+                ELSE cancelled_at
+            END,
+            updated_at = $2
+        WHERE workflow_run_id = ANY($1::text[])
+        """,
+        refs.workflow_run_ids,
+        now,
+    )
 
 
 async def _delete_by_workflows(

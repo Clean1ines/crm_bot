@@ -101,3 +101,41 @@ def test_document_run_cleanup_collects_execution_work_items_from_schedule_payloa
     assert "payload->>'source_document_ref'" in block
     assert "payload->>'workflow_run_id'" in block
     assert "payload->>'source_unit_ref'" in block
+
+def test_document_run_cleanup_marks_workflow_cleanup_before_physical_delete() -> None:
+    content = (
+        ROOT / "src/contexts/knowledge_workbench/infrastructure/postgres/"
+        "postgres_workbench_document_run_cleanup_repository.py"
+    ).read_text(encoding="utf-8")
+    delete_start = content.index("    async def delete_document_run(")
+    delete_end = content.index("async def _load_columns(", delete_start)
+    delete_block = content[delete_start:delete_end]
+
+    assert "_mark_workflows_cleanup_started(connection, columns, refs)" in delete_block
+    assert "async with connection.transaction()" in delete_block
+    assert delete_block.index("_mark_workflows_cleanup_started") < delete_block.index(
+        "async with connection.transaction()"
+    )
+
+    marker_start = content.index("async def _mark_workflows_cleanup_started(")
+    marker_end = content.index("async def _delete_by_workflows(", marker_start)
+    marker_block = content[marker_start:marker_end]
+
+    assert "cleanup_status = 'CLEANUP_IN_PROGRESS'" in marker_block
+    assert "status = CASE" in marker_block
+    assert "ELSE 'CANCELLED'" in marker_block
+    assert "cancelled_at" in marker_block
+
+
+def test_drain_blocks_cleanup_or_cancelled_workflow_before_dispatch() -> None:
+    content = (
+        ROOT / "src/contexts/knowledge_workbench/application/sagas/"
+        "drain_knowledge_extraction_workflow_commands.py"
+    ).read_text(encoding="utf-8")
+
+    assert "WORKFLOW_CLEANUP_IN_PROGRESS" in content
+    assert "WORKFLOW_CANCELLED" in content
+    assert "workflow_state.cleanup_status" in content
+    assert "KnowledgeExtractionWorkflowStatus.CANCELLED" in content
+    assert "last_blocked_reason=WORKFLOW_CLEANUP_IN_PROGRESS" in content
+    assert "last_blocked_reason=WORKFLOW_CANCELLED" in content

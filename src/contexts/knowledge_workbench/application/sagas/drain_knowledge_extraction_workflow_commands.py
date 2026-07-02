@@ -79,6 +79,8 @@ from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_wo
 
 
 WORKFLOW_MANUALLY_PAUSED = "WORKFLOW_MANUALLY_PAUSED"
+WORKFLOW_CLEANUP_IN_PROGRESS = "WORKFLOW_CLEANUP_IN_PROGRESS"
+WORKFLOW_CANCELLED = "WORKFLOW_CANCELLED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,21 +203,41 @@ class DrainKnowledgeExtractionWorkflowCommands:
             workflow_state = await workflow_state_repository.load_workflow_state(
                 command.workflow_run_id,
             )
-            if (
-                workflow_state is not None
-                and workflow_state.status is KnowledgeExtractionWorkflowStatus.PAUSED
-            ):
+            if workflow_state is not None:
+                cleanup_status = workflow_state.cleanup_status
                 next_command_type = (
                     pending_commands[0].command_type if pending_commands else None
                 )
-                return DrainKnowledgeExtractionWorkflowCommandsResult(
-                    workflow_run_id=command.workflow_run_id,
-                    inspected_count=1 if pending_commands else 0,
-                    dispatched_count=0,
-                    blocked_count=1,
-                    last_blocked_command_type=next_command_type,
-                    last_blocked_reason=WORKFLOW_MANUALLY_PAUSED,
-                )
+
+                if isinstance(cleanup_status, str) and cleanup_status.strip():
+                    return DrainKnowledgeExtractionWorkflowCommandsResult(
+                        workflow_run_id=command.workflow_run_id,
+                        inspected_count=1 if pending_commands else 0,
+                        dispatched_count=0,
+                        blocked_count=1,
+                        last_blocked_command_type=next_command_type,
+                        last_blocked_reason=WORKFLOW_CLEANUP_IN_PROGRESS,
+                    )
+
+                if workflow_state.status is KnowledgeExtractionWorkflowStatus.CANCELLED:
+                    return DrainKnowledgeExtractionWorkflowCommandsResult(
+                        workflow_run_id=command.workflow_run_id,
+                        inspected_count=1 if pending_commands else 0,
+                        dispatched_count=0,
+                        blocked_count=1,
+                        last_blocked_command_type=next_command_type,
+                        last_blocked_reason=WORKFLOW_CANCELLED,
+                    )
+
+                if workflow_state.status is KnowledgeExtractionWorkflowStatus.PAUSED:
+                    return DrainKnowledgeExtractionWorkflowCommandsResult(
+                        workflow_run_id=command.workflow_run_id,
+                        inspected_count=1 if pending_commands else 0,
+                        dispatched_count=0,
+                        blocked_count=1,
+                        last_blocked_command_type=next_command_type,
+                        last_blocked_reason=WORKFLOW_MANUALLY_PAUSED,
+                    )
 
         dispatcher = DispatchKnowledgeExtractionWorkflowCommandHandler()
 
