@@ -40,44 +40,9 @@ export const ClaimClusterRow: React.FC<ClaimClusterRowProps> = ({
         </span>
       </span>
     </summary>
-    <div className="mt-2 grid gap-1 text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(130px,1fr))]">
-      <div>кандидатных связей: {formatNumber(cluster.candidate_edge_count)}</div>
-      <div>batch: {formatNumber(cluster.batch_count)}</div>
-      <div>
-        узлов: {formatNumber(cluster.active_node_count)} активных из{' '}
-        {formatNumber(cluster.node_count)}
-      </div>
-      <div>compacted-узлов: {formatNumber(cluster.active_compacted_node_count)}</div>
-      <div>
-        сравнений: {formatNumber(cluster.comparison_count)} · ожидают:{' '}
-        {formatNumber(cluster.pending_comparison_count)}
-      </div>
-      <div>work items: {formatNumber(cluster.work_item_count)}</div>
-    </div>
-
-    {(cluster.batches ?? []).length > 0 && (
-      <div className="mt-2 space-y-1 rounded-lg bg-[var(--surface-elevated)] p-2">
-        <div className="font-medium text-[var(--text-primary)]">
-          Батчи compaction: {formatNumber(cluster.batches?.length ?? 0)}
-        </div>
-        <div className="mt-1 space-y-1">
-          {(cluster.batches ?? []).map((batch, batchIndex) => (
-            <div
-              key={batch.batch_ref}
-              className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-secondary)] px-2 py-1"
-            >
-              <span className="font-medium text-[var(--text-primary)]">
-                Batch {formatNumber(batchIndex + 1)}
-              </span>
-              <span className="text-[var(--text-muted)]">
-                утверждений: {formatNumber(batch.member_count)}
-              </span>
-              <span className={`rounded-full px-2 py-0.5 font-medium ${statusPillTone(batch.status)}`}>
-                {queueStatusLabel(batch.status)}
-              </span>
-            </div>
-          ))}
-        </div>
+    {(cluster.compacted_claims ?? []).length > 0 && (
+      <div className="mt-2 text-[var(--text-muted)]">
+        Итоговых утверждений: {formatNumber(cluster.compacted_claims?.length ?? 0)}
       </div>
     )}
 
@@ -86,7 +51,6 @@ export const ClaimClusterRow: React.FC<ClaimClusterRowProps> = ({
         <ClaimClusterClaimRow
           key={claim.observation_ref}
           claim={claim}
-          formatNumber={formatNumber}
         />
       ))}
     </div>

@@ -30,6 +30,7 @@ const sourceUnitForSection = (
   sourceUnitByIndex: Map<number, ClaimBuilderSourceUnitInput>,
 ): ClaimBuilderSourceUnitInput | null =>
   sourceUnitById.get(item.section_id) ??
+  sourceUnitById.get(item.section_key) ??
   sourceUnitByIndex.get(item.section_index) ??
   null;
 
