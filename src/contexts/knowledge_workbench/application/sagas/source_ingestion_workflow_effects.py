@@ -235,6 +235,20 @@ def _base_payload(
     }
 
 
+
+def _source_unit_title(unit: SourceUnit) -> str:
+    if unit.heading_path.parts:
+        return unit.heading_path.parts[-1]
+
+    first_line = unit.text.value.strip().splitlines()[0].strip()
+    if first_line.startswith("#"):
+        title = first_line.lstrip("#").strip()
+        if title:
+            return title
+
+    return "Без заголовка"
+
+
 def _source_unit_created_effect(
     command: BuildSourceIngestionWorkflowEffectsCommand,
     unit: SourceUnit,
@@ -247,6 +261,8 @@ def _source_unit_created_effect(
         "source_unit_ordinal": unit.ordinal,
         "unit_kind": unit.unit_kind.value,
         "heading_path": unit.heading_path.parts,
+        "source_unit_title": _source_unit_title(unit),
+        "source_unit_text": unit.text.value,
     }
     if unit.lineage.parent_refs:
         payload["parent_source_unit_ref"] = unit.lineage.parent_refs[-1].value

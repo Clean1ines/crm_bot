@@ -132,6 +132,8 @@ export const selectClaimBuilderSectionRows = (
 
   return sectionItems.map((item) => {
     const sourceUnit = sourceUnitForSection(item, sourceUnitById, sourceUnitByIndex);
+    const eventTitle = item.source_unit_title?.trim() || null;
+    const eventText = item.source_unit_text?.trim() || null;
 
     return {
       queueItemId: item.queue_item_id,
@@ -141,8 +143,8 @@ export const selectClaimBuilderSectionRows = (
       sourceUnit,
       status: item.status,
       attemptCount: item.attempt_count,
-      title: sourceUnitTitle(sourceUnit),
-      text: sourceUnitText(sourceUnit),
+      title: eventTitle ?? sourceUnitTitle(sourceUnit),
+      text: eventText ?? sourceUnitText(sourceUnit),
       errorKind: item.error_kind ?? null,
       retryPlan: item.retry_plan ?? null,
       nextAttemptAt: item.next_attempt_at ?? null,

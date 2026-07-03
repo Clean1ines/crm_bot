@@ -40,6 +40,8 @@ export type ClaimBuilderSectionQueueItemInput = {
   retry_plan?: string | null;
   user_action_required: boolean;
   blocked_reason?: string | null;
+  source_unit_title?: string | null;
+  source_unit_text?: string | null;
   draft_claims?: ClaimBuilderDraftClaimArtifactInput[];
 };
 

@@ -313,6 +313,8 @@ export type WorkbenchSectionQueueItemLiveState = {
   retry_plan?: string | null;
   user_action_required: boolean;
   blocked_reason?: string | null;
+  source_unit_title?: string | null;
+  source_unit_text?: string | null;
   retry_timer: WorkbenchRetryTimerLiveState;
   draft_claims?: WorkbenchDraftClaimArtifactLiveState[];
 };

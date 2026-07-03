@@ -83,6 +83,8 @@ def test_projects_source_unit_created_as_addressable_surface() -> None:
             "source_unit_ordinal": 0,
             "unit_kind": "section",
             "heading_path": ("Overview",),
+            "source_unit_title": "Overview",
+            "source_unit_text": "# Overview\n\nText",
             "parent_source_unit_ref": None,
         },
         occurred_at=event.occurred_at,
@@ -100,6 +102,8 @@ def test_projects_source_unit_created_as_addressable_surface() -> None:
         "source_unit_ordinal": 0,
         "unit_kind": "section",
         "heading_path": ("Overview",),
+        "source_unit_title": "Overview",
+        "source_unit_text": "# Overview\n\nText",
     }
 
 

@@ -103,6 +103,8 @@ def _projection_definition(
             ),
             "unit_kind": _payload_text(event.payload, "unit_kind"),
             "heading_path": _payload_text_tuple(event.payload, "heading_path"),
+            "source_unit_title": _payload_text(event.payload, "source_unit_title"),
+            "source_unit_text": _payload_text(event.payload, "source_unit_text"),
         }
         parent_ref = event.payload.get("parent_source_unit_ref")
         if isinstance(parent_ref, str) and parent_ref.strip():

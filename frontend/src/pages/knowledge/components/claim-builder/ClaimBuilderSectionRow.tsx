@@ -42,18 +42,18 @@ export const ClaimBuilderSectionRow = ({ row }: ClaimBuilderSectionRowProps) => 
     </summary>
 
     <div className="mt-2 space-y-2">
-      {row.sourceUnit ? (
+      {row.text ? (
         <div>
           <div className="mb-1 font-medium text-[var(--text-primary)]">
-            {row.sourceUnit.title}
+            {row.title}
           </div>
           <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded bg-[var(--surface-elevated)] p-2 text-xs leading-relaxed text-[var(--text-secondary)]">
-            {row.sourceUnit.content}
+            {row.text}
           </pre>
         </div>
       ) : (
         <div className="text-xs text-[var(--text-muted)]">
-          Текст раздела ещё не загружен.
+          Текст секции не пришёл в событии.
         </div>
       )}
 

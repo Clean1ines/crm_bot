@@ -278,6 +278,8 @@ const upsertSectionItem = (
     leaseExpiresAt?: string | null;
     userActionRequired?: boolean;
     blockedReason?: string | null;
+    sourceUnitTitle?: string | null;
+    sourceUnitText?: string | null;
   },
 ): WorkbenchSectionQueueItemLiveState => {
   const lane = claimBuilderLane(response);
@@ -304,6 +306,8 @@ const upsertSectionItem = (
     retry_plan: existing?.retry_plan ?? null,
     user_action_required: patch.userActionRequired ?? existing?.user_action_required ?? false,
     blocked_reason: patch.blockedReason ?? existing?.blocked_reason ?? null,
+    source_unit_title: patch.sourceUnitTitle ?? existing?.source_unit_title ?? null,
+    source_unit_text: patch.sourceUnitText ?? existing?.source_unit_text ?? null,
     retry_timer: existing?.retry_timer ?? {},
   };
 
@@ -549,6 +553,8 @@ const applySourceUnitCreated = (
     sourceUnitOrdinal: ordinal,
     status: "ready",
     attemptCount: 0,
+    sourceUnitTitle: text(event.payload, "source_unit_title"),
+    sourceUnitText: text(event.payload, "source_unit_text"),
   });
   appendTimeline(response, event, `Создан раздел ${ordinal + 1}`);
 };

@@ -140,6 +140,8 @@ def test_builds_source_unit_created_event_effect_per_persisted_unit() -> None:
         "source_unit_ordinal": 0,
         "unit_kind": "section",
         "heading_path": ("Overview",),
+        "source_unit_title": "Overview",
+        "source_unit_text": "# Overview\n\nText",
     }
 
 
