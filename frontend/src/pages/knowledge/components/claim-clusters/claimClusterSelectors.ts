@@ -2,6 +2,7 @@ import type { WorkbenchWorkflowLiveState } from '@shared/api/modules/knowledge';
 
 import { normalize } from '../workflow-card/workflowCardLabels';
 import type {
+  ClaimClusterCompactionAttemptView,
   ClaimClustersDraftArtifact,
   ClaimClustersView,
   FinalCompactedFact,
@@ -9,6 +10,57 @@ import type {
 
 const formatViewNumber = (value: number): string =>
   new Intl.NumberFormat('ru-RU').format(Math.max(0, Math.floor(value || 0)));
+
+const attemptNumberFromId = (attemptId: string, fallback: number): number => {
+  const match = attemptId.match(/:attempt:(\d+)$/);
+  if (!match) return fallback;
+  const parsed = Number.parseInt(match[1] ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+
+const compactionAttemptStatusLabel = (status: string | null | undefined): string => {
+  const value = normalize(status);
+  if (value === 'completed' || value === 'succeeded') return 'ответ принят';
+  if (value === 'retryable_failed') return 'ответ не принят, будет повтор';
+  if (value === 'terminal_failed' || value === 'failed') return 'ошибка';
+  if (value === 'leased' || value === 'running') return 'выполняется';
+  if (value === 'ready' || value === 'pending') return 'ожидает запуска';
+  return 'состояние уточняется';
+};
+
+const compactionAttemptTone = (status: string | null | undefined): string => {
+  const value = normalize(status);
+  if (value === 'completed' || value === 'succeeded') {
+    return 'border-emerald-500/25 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200';
+  }
+  if (value === 'retryable_failed') {
+    return 'border-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-200';
+  }
+  if (value === 'terminal_failed' || value === 'failed') {
+    return 'border-rose-500/25 bg-rose-500/10 text-rose-800 dark:text-rose-200';
+  }
+  if (value === 'leased' || value === 'running') {
+    return 'border-sky-500/25 bg-sky-500/10 text-sky-800 dark:text-sky-200';
+  }
+  return 'border-[var(--border-subtle)] bg-[var(--surface-secondary)] text-[var(--text-secondary)]';
+};
+
+const compactionAttemptErrorMessage = (attempt: {
+  status?: string | null;
+  error_message_user?: string | null;
+}): string | null => {
+  const explicit = attempt.error_message_user?.trim();
+  if (explicit) return explicit;
+
+  const value = normalize(attempt.status);
+  if (value === 'retryable_failed') {
+    return 'ИИ вернул ответ, который не прошёл проверку качества. Запланирована повторная попытка.';
+  }
+  if (value === 'terminal_failed' || value === 'failed') {
+    return 'Объединение остановилось из-за ошибки.';
+  }
+  return null;
+};
 
 export const selectClaimClustersView = (
   workflow: WorkbenchWorkflowLiveState | null,
@@ -130,8 +182,27 @@ export const selectClaimClustersView = (
   const llmAttempts = (workflow?.llm_attempts ?? []).filter(
     (attempt) => attempt.node_name === 'knowledge_workbench.draft_claim_compaction',
   );
-  const succeededAttemptCount = llmAttempts.filter(
-    (attempt) => normalize(attempt.status) === 'succeeded',
+  const compactionAttempts: ClaimClusterCompactionAttemptView[] = llmAttempts
+    .map((attempt, index) => ({
+      key: attempt.node_run_id || `draft-compaction-attempt-${index}`,
+      attemptNumber: attemptNumberFromId(attempt.node_run_id, index + 1),
+      status: attempt.status,
+      statusLabel: compactionAttemptStatusLabel(attempt.status),
+      toneClassName: compactionAttemptTone(attempt.status),
+      modelName: attempt.model_name?.trim() || null,
+      provider: attempt.model_provider?.trim() || null,
+      tokenCount: Math.max(0, attempt.total_tokens || 0),
+      startedAt: attempt.started_at ?? null,
+      completedAt: attempt.completed_at ?? null,
+      errorMessage: compactionAttemptErrorMessage(attempt),
+    }))
+    .sort((left, right) => {
+      const leftTime = left.startedAt ?? left.completedAt ?? '';
+      const rightTime = right.startedAt ?? right.completedAt ?? '';
+      return leftTime.localeCompare(rightTime) || left.key.localeCompare(right.key);
+    });
+  const succeededAttemptCount = llmAttempts.filter((attempt) =>
+    ['succeeded', 'completed'].includes(normalize(attempt.status)),
   ).length;
   const runningAttemptCount = llmAttempts.filter((attempt) =>
     ['leased', 'running', 'ready'].includes(normalize(attempt.status)),
@@ -165,6 +236,7 @@ export const selectClaimClustersView = (
       isComplete,
       panelTone,
       userSummary,
+      attempts: compactionAttempts,
       llmAttemptCount: llmAttempts.length,
       succeededAttemptCount,
       runningAttemptCount,

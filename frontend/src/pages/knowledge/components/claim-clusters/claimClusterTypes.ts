@@ -18,6 +18,20 @@ export type FinalCompactedFact = WorkbenchCompactedClaimPreviewLiveState & {
   cluster_ref: string;
 };
 
+export type ClaimClusterCompactionAttemptView = {
+  key: string;
+  attemptNumber: number;
+  status: string;
+  statusLabel: string;
+  toneClassName: string;
+  modelName: string | null;
+  provider: string | null;
+  tokenCount: number;
+  startedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+};
+
 export type ClaimClusterCompactionView = {
   ready: number;
   leased: number;
@@ -31,6 +45,7 @@ export type ClaimClusterCompactionView = {
   isComplete: boolean;
   panelTone: string;
   userSummary: string;
+  attempts: ClaimClusterCompactionAttemptView[];
   llmAttemptCount: number;
   succeededAttemptCount: number;
   runningAttemptCount: number;
