@@ -200,6 +200,68 @@ const earliestIso = (
   return leftMs <= rightMs ? left : right;
 };
 
+const secondsBetweenIso = (
+  startedAt: string | null | undefined,
+  stoppedAt: string | null | undefined,
+): number => {
+  if (!startedAt || !stoppedAt) return 0;
+
+  const startedMs = Date.parse(startedAt);
+  const stoppedMs = Date.parse(stoppedAt);
+
+  if (!Number.isFinite(startedMs) || !Number.isFinite(stoppedMs)) return 0;
+  return Math.max(0, Math.floor((stoppedMs - startedMs) / 1000));
+};
+
+const freezeWorkflowTimer = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  occurredAt: string,
+  mode: string,
+): void => {
+  const timer = response.workflow.timer;
+  const startedAt =
+    timer.started_at ??
+    timer.current_active_started_at ??
+    occurredAt;
+
+  const elapsedSeconds = Math.max(
+    timer.active_elapsed_seconds ?? 0,
+    secondsBetweenIso(startedAt, occurredAt),
+  );
+
+  timer.mode = mode;
+  timer.active_elapsed_seconds = elapsedSeconds;
+  timer.wall_elapsed_seconds = Math.max(
+    timer.wall_elapsed_seconds ?? 0,
+    secondsBetweenIso(timer.started_at ?? startedAt, occurredAt),
+    elapsedSeconds,
+  );
+  timer.current_active_started_at = null;
+  timer.completed_at = timer.completed_at ?? occurredAt;
+  timer.is_live = false;
+};
+
+const hideActiveProcessingActions = (
+  response: WorkbenchWorkflowLiveStateResponse,
+): void => {
+  setWorkflowActionState(response, "pause_processing", {
+    visible: false,
+    enabled: false,
+    reason_code: "waiting_for_curation",
+  });
+  setWorkflowActionState(response, "resume_processing", {
+    visible: false,
+    enabled: false,
+    reason_code: "waiting_for_curation",
+  });
+  setWorkflowActionState(response, "cancel_processing", {
+    visible: false,
+    enabled: false,
+    reason_code: "waiting_for_curation",
+  });
+};
+
+
 const cloneResponse = (
   current: WorkbenchWorkflowLiveStateResponse,
 ): WorkbenchWorkflowLiveStateResponse => ({
@@ -1194,13 +1256,23 @@ export const reduceWorkflowFrontendProjectionEvent = (
   next.workflow.workflow_run_id = normalizedEvent.workflow_run_id;
   next.workflow.source_document_ref =
     text(payload, "source_document_ref") || next.workflow.source_document_ref || next.document_id;
-  next.workflow.workflow_status = "running";
-  next.workflow.timer.mode = "running";
-  next.workflow.timer.is_live = true;
-  next.workflow.timer.current_active_started_at = earliestIso(
-    next.workflow.timer.current_active_started_at,
-    normalizedEvent.occurred_at,
-  );
+
+  const freezesAutomaticProcessingTimer = [
+    "workflow_draft_claim_compaction_all_groups_compacted",
+    "workflow_draft_claim_curation_workspace_opened",
+    "workflow_draft_claim_curation_review_required",
+    "workflow_draft_claim_curation_workspace_published",
+  ].includes(normalizedEvent.projection_type);
+
+  if (!freezesAutomaticProcessingTimer) {
+    next.workflow.workflow_status = "running";
+    next.workflow.timer.mode = "running";
+    next.workflow.timer.is_live = true;
+    next.workflow.timer.current_active_started_at = earliestIso(
+      next.workflow.timer.current_active_started_at,
+      normalizedEvent.occurred_at,
+    );
+  }
   next.workflow.timer.started_at = earliestIso(
     next.workflow.timer.started_at,
     normalizedEvent.occurred_at,
@@ -1503,7 +1575,11 @@ export const reduceWorkflowFrontendProjectionEvent = (
         totalClusters,
         totalClusters,
       );
-      next.workflow.current_phase = "cluster_preview";
+      next.workflow.workflow_status = "waiting_for_review";
+      next.document_status = "waiting_for_review";
+      next.workflow.current_phase = "draft_claim_curation";
+      freezeWorkflowTimer(next, normalizedEvent.occurred_at, "stopped");
+      hideActiveProcessingActions(next);
       appendTimeline(next, normalizedEvent, "Все кластеры compaction завершены");
       break;
     }
@@ -1518,8 +1594,12 @@ export const reduceWorkflowFrontendProjectionEvent = (
         workspace_status: "open",
         item_count: intValue(payload, "item_count") ?? 0,
       };
+      next.workflow.workflow_status = "waiting_for_review";
+      next.document_status = "waiting_for_review";
       markStage(next, "curation", "running", normalizedEvent.occurred_at);
       next.workflow.current_phase = "draft_claim_curation";
+      freezeWorkflowTimer(next, normalizedEvent.occurred_at, "stopped");
+      hideActiveProcessingActions(next);
       setWorkflowActionState(next, "open_curation", {
         visible: true,
         enabled: true,
@@ -1543,6 +1623,8 @@ export const reduceWorkflowFrontendProjectionEvent = (
       next.document_status = "waiting_for_review";
       markStage(next, "curation", "running", normalizedEvent.occurred_at);
       next.workflow.current_phase = "draft_claim_curation";
+      freezeWorkflowTimer(next, normalizedEvent.occurred_at, "stopped");
+      hideActiveProcessingActions(next);
       setWorkflowActionState(next, "open_curation", {
         visible: true,
         enabled: true,
@@ -1565,9 +1647,8 @@ export const reduceWorkflowFrontendProjectionEvent = (
       next.workflow.workflow_status = "completed";
       next.document_status = "completed";
       next.workflow.current_phase = "publication";
-      next.workflow.timer.mode = "completed";
-      next.workflow.timer.is_live = false;
-      next.workflow.timer.completed_at = normalizedEvent.occurred_at;
+      freezeWorkflowTimer(next, normalizedEvent.occurred_at, "completed");
+      hideActiveProcessingActions(next);
       setWorkflowActionState(next, "open_curation", {
         visible: true,
         enabled: false,

@@ -477,6 +477,50 @@ export const KnowledgePage: React.FC = () => {
   const [workflowProjectionErrors, setWorkflowProjectionErrors] = useState<
     Record<string, string | null>
   >({});
+  const autoOpenedCurationWorkflowsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!projectId || curationTarget) return;
+
+    for (const doc of documents) {
+      const liveState = workflowLiveStates[doc.id];
+      const workflow = liveState?.workflow;
+      const curation = workflow?.curation;
+      const workflowRunId =
+        curation?.workflow_run_id ??
+        workflow?.workflow_run_id ??
+        doc.current_processing_run_id ??
+        null;
+
+      if (!workflowRunId || autoOpenedCurationWorkflowsRef.current.has(workflowRunId)) {
+        continue;
+      }
+
+      const reviewGateOpen = Boolean(
+        curation?.available &&
+          curation.workspace_ref &&
+          (curation.workspace_status === "open" ||
+            workflow?.workflow_status === "waiting_for_review" ||
+            liveState?.document_status === "waiting_for_review"),
+      );
+      const alreadyPublished =
+        curation?.workspace_status === "published" ||
+        workflow?.workflow_status === "published" ||
+        liveState?.document_status === "published";
+
+      if (!reviewGateOpen || alreadyPublished) {
+        continue;
+      }
+
+      autoOpenedCurationWorkflowsRef.current.add(workflowRunId);
+      setDraftClaimCurationTarget({
+        documentId: doc.id,
+        workflowRunId,
+        documentName: doc.file_name,
+      });
+      return;
+    }
+  }, [projectId, curationTarget, documents, workflowLiveStates]);
 
   useEffect(() => {
     if (!projectId || workflowProjectionTargets.length === 0) return undefined;

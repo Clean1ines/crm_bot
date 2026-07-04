@@ -11,6 +11,9 @@ from src.contexts.knowledge_workbench.observability.application.projectors.claim
 from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_cluster_frontend_workflow_event_projector import (
     DraftClaimClusterFrontendWorkflowEventProjector,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_curation_frontend_workflow_event_projector import (
+    DraftClaimCurationFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_embedding_frontend_workflow_event_projector import (
     DraftClaimEmbeddingFrontendWorkflowEventProjector,
 )
@@ -167,6 +170,81 @@ def test_workflow_composite_routes_compaction_dispatch_prepared_event() -> None:
     )
     assert projected.operation_key == "prepare_draft_claim_compaction_dispatch_batch"
     assert projected.canonical_phase == "DRAFT_CLAIM_CLUSTERING"
+
+
+def test_workflow_composite_routes_curation_workspace_opened_event() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:curation-opened"),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CURATION_WORKSPACE_OPENED.value
+        ),
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workspace_ref": "draft-claim-curation-workspace:workflow-1",
+            "item_count": 9,
+        },
+        occurred_at=_now(),
+        sequence_number=14,
+    )
+
+    projected = KnowledgeExtractionFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_draft_claim_curation_workspace_opened"
+    assert projected.operation_key == "draft_claim_curation"
+    assert projected.canonical_phase == "DRAFT_CLAIM_CURATION"
+    assert projected.project_id == "project-1"
+    assert projected.document_id == "source-document:project-1:abc"
+    assert projected.payload["workflow_run_id"] == event.workflow_run_id
+    assert (
+        projected.payload["workspace_ref"]
+        == "draft-claim-curation-workspace:workflow-1"
+    )
+    assert projected.payload["item_count"] == 9
+
+
+def test_workflow_composite_routes_curation_review_required_event() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:curation-review-required"),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CURATION_REVIEW_REQUIRED.value
+        ),
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workspace_ref": "draft-claim-curation-workspace:workflow-1",
+            "item_count": 9,
+        },
+        occurred_at=_now(),
+        sequence_number=15,
+    )
+
+    projected = KnowledgeExtractionFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_draft_claim_curation_review_required"
+    assert projected.operation_key == "draft_claim_curation"
+    assert projected.canonical_phase == "DRAFT_CLAIM_CURATION"
+
+
+def test_curation_projector_is_curation_scoped() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:clusters-built-for-curation-scope"),
+        event_type=KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_CLUSTERS_BUILT.value,
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "operation_key": "cluster_draft_claims",
+            "canonical_phase": "DRAFT_CLAIM_CLUSTERING",
+            "candidate_edge_count": 1,
+            "group_count": 1,
+            "batch_count": 1,
+            "scheduled_work_item_count": 1,
+        },
+        occurred_at=_now(),
+        sequence_number=16,
+    )
+
+    assert DraftClaimCurationFrontendWorkflowEventProjector().project(event) is None
 
 
 def test_workflow_composite_ignores_truly_unsupported_event() -> None:

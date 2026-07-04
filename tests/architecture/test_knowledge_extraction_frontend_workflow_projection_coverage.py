@@ -63,8 +63,6 @@ _FUTURE_UNCOVERED_EVENT_MARKERS = (
     "DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED",
     "DRAFT_CLAIM_COMPACTION_ATTEMPT_STARTED",
     "DRAFT_CLAIM_COMPACTION_RESULT_APPLIED",
-    "DRAFT_CLAIM_CURATION_WORKSPACE_OPENED",
-    "DRAFT_CLAIM_CURATION_WORKSPACE_PUBLISHED",
 )
 
 
@@ -74,6 +72,9 @@ def test_embedding_canonical_events_have_projector_modules() -> None:
     ).is_file()
     assert (
         PROJECTORS_DIR / "draft_claim_cluster_frontend_workflow_event_projector.py"
+    ).is_file()
+    assert (
+        PROJECTORS_DIR / "draft_claim_curation_frontend_workflow_event_projector.py"
     ).is_file()
     assert (
         PROJECTORS_DIR / "knowledge_extraction_frontend_workflow_event_projector.py"
@@ -119,6 +120,7 @@ def test_workflow_projection_composition_is_not_claim_builder_only() -> None:
     assert "ClaimBuilderFrontendWorkflowEventProjector" in composite_source
     assert "DraftClaimEmbeddingFrontendWorkflowEventProjector" in composite_source
     assert "DraftClaimClusterFrontendWorkflowEventProjector" in composite_source
+    assert "DraftClaimCurationFrontendWorkflowEventProjector" in composite_source
 
 
 def test_clusters_built_has_frontend_projection_coverage() -> None:
@@ -190,7 +192,7 @@ def test_workflow_scoped_draft_claims_endpoint_matches_targeted_read_kind() -> N
 
     endpoint_start = knowledge_source.index("async def workflow_draft_claims(")
     endpoint_end = knowledge_source.index(
-        '@router.post("/workflows/{workflow_run_id}/curation-workspace/open")'
+        '@router.get("/workflows/{workflow_run_id}/draft-claim-clusters")'
     )
     endpoint_region = knowledge_source[endpoint_start:endpoint_end]
 
