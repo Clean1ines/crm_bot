@@ -93,6 +93,8 @@ def test_projects_claim_builder_work_item_scheduled_overlay() -> None:
             "source_document_ref": "source-document:project-1:abc",
             "source_unit_ref": "unit-1",
             "source_unit_ordinal": 0,
+            "source_unit_title": "Overview",
+            "source_unit_text": "# Overview\n\nText",
             "work_item_id": "work-1",
             "work_kind": "knowledge_workbench.claim_builder.section_extraction",
             "initial_work_item_state": "ready",
@@ -112,6 +114,8 @@ def test_projects_claim_builder_work_item_scheduled_overlay() -> None:
     assert projected is not None
     assert projected.projection_type == "workflow_claim_builder_work_item_scheduled"
     assert projected.payload["source_unit_ref"] == "unit-1"
+    assert projected.payload["source_unit_title"] == "Overview"
+    assert projected.payload["source_unit_text"] == "# Overview\n\nText"
     assert projected.payload["work_item_id"] == "work-1"
     assert projected.payload["initial_work_item_state"] == "ready"
     assert projected.payload["retry_driver"] is None

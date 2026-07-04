@@ -120,6 +120,7 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
                 source_units=source_units,
             )
         )
+        source_unit_by_ref = {unit.unit_ref.value: unit for unit in source_units}
         if scheduling_result.conflict_count > 0:
             raise ValueError("claim builder section work scheduling conflict")
 
@@ -139,10 +140,18 @@ class HandleScheduleClaimBuilderSectionWorkCommandHandler:
             await frontend_event_projection_writer.execute(persisted_scheduled_event)
         appended_event_count = 1
         for scheduled_item in scheduling_result.scheduled_items:
+            source_unit = source_unit_by_ref.get(scheduled_item.source_unit_ref)
+            if source_unit is None:
+                raise ValueError(
+                    "scheduled claim-builder work item refers to unknown source unit"
+                )
+
             item_event = _claim_builder_work_item_scheduled_event(
                 workflow_run_id=workflow_run_id,
                 source_document_ref=source_document_ref,
                 scheduled_item=scheduled_item,
+                source_unit_title=_source_unit_title(source_unit),
+                source_unit_text=source_unit.text.value,
                 occurred_at=occurred_at,
             )
             persisted_item_event = await workflow_unit_of_work.outbox.append_event(
@@ -235,6 +244,8 @@ def _claim_builder_work_item_scheduled_event(
     workflow_run_id: str,
     source_document_ref: SourceDocumentRef,
     scheduled_item: ClaimBuilderScheduledWorkItemSummary,
+    source_unit_title: str,
+    source_unit_text: str,
     occurred_at: datetime,
 ) -> WorkflowEvent:
     return WorkflowEvent(
@@ -253,6 +264,8 @@ def _claim_builder_work_item_scheduled_event(
             "source_document_ref": source_document_ref.value,
             "source_unit_ref": scheduled_item.source_unit_ref,
             "source_unit_ordinal": scheduled_item.source_unit_ordinal,
+            "source_unit_title": source_unit_title,
+            "source_unit_text": source_unit_text,
             "work_item_id": scheduled_item.work_item_id,
             "work_kind": scheduled_item.work_kind,
             "initial_work_item_state": "ready",
@@ -263,6 +276,14 @@ def _claim_builder_work_item_scheduled_event(
         },
         occurred_at=occurred_at,
     )
+
+
+def _source_unit_title(source_unit: object) -> str:
+    heading_path = getattr(source_unit, "heading_path")
+    parts = getattr(heading_path, "parts")
+    if parts:
+        return str(parts[-1])
+    return f"Раздел {getattr(source_unit, 'ordinal') + 1}"
 
 
 def _prepare_dispatch_batch_command(

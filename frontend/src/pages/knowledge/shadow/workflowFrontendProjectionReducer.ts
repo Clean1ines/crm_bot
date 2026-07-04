@@ -625,6 +625,8 @@ const applyWorkItemScheduled = (
     workItemId,
     status: queueStatusFromWorkItemState(state),
     attemptCount: intValue(event.payload, "attempt_count") ?? 0,
+    sourceUnitTitle: text(event.payload, "source_unit_title"),
+    sourceUnitText: text(event.payload, "source_unit_text"),
   });
 
   response.workflow.current_phase = "claim_builder_section_extraction";

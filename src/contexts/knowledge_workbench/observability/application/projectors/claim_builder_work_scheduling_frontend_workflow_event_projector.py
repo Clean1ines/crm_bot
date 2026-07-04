@@ -94,6 +94,8 @@ def _scheduled_work_item_patch(payload: Mapping[str, object]) -> Mapping[str, ob
             payload,
             "source_unit_ordinal",
         ),
+        "source_unit_title": _payload_text(payload, "source_unit_title"),
+        "source_unit_text": _payload_text(payload, "source_unit_text"),
         "work_item_id": _payload_text(payload, "work_item_id"),
         "work_kind": _payload_text(payload, "work_kind"),
         "initial_work_item_state": _payload_text(
