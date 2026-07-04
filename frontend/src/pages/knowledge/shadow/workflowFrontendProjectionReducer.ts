@@ -20,6 +20,8 @@ export type InitialWorkflowProjectionDocument = {
 };
 
 const CLAIM_BUILDER_NODE_NAME = "knowledge_workbench.claim_builder";
+const DRAFT_CLAIM_COMPACTION_NODE_NAME =
+  "knowledge_workbench.draft_claim_compaction";
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -159,6 +161,14 @@ const stringArray = (
   const value = payload[key];
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+};
+
+const recordValue = (
+  payload: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> | null => {
+  const value = payload[key];
+  return isRecord(value) ? value : null;
 };
 
 const normalize = (value: string | null | undefined): string =>
@@ -339,6 +349,7 @@ const upsertAttempt = (
     totalTokens?: number | null;
     errorKind?: string | null;
     errorMessageUser?: string | null;
+    nodeName?: string | null;
   },
 ): WorkbenchLlmAttemptLiveState => {
   const existing = response.workflow.llm_attempts.find(
@@ -348,7 +359,7 @@ const upsertAttempt = (
   const attempt: WorkbenchLlmAttemptLiveState = {
     node_run_id: patch.dispatchAttemptId,
     section_id: patch.sourceUnitRef ?? existing?.section_id ?? null,
-    node_name: CLAIM_BUILDER_NODE_NAME,
+    node_name: patch.nodeName ?? existing?.node_name ?? CLAIM_BUILDER_NODE_NAME,
     node_kind: "llm",
     status: patch.status,
     started_at: patch.startedAt ?? existing?.started_at ?? null,
@@ -971,6 +982,60 @@ const updateCompactionBatch = (
   });
 };
 
+
+const upsertCompactionAttempt = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+  status: string,
+): void => {
+  const payload = isRecord(event.payload) ? event.payload : {};
+  const attemptOutcome = recordValue(payload, "attempt_outcome") ?? {};
+  const attemptScope = recordValue(attemptOutcome, "attempt_scope") ?? {};
+  const providerOutcome = recordValue(attemptOutcome, "provider_outcome") ?? {};
+  const validationOutcome = recordValue(attemptOutcome, "validation_outcome") ?? {};
+
+  const dispatchAttemptId =
+    text(payload, "dispatch_attempt_id") ||
+    text(attemptScope, "dispatch_attempt_id");
+  if (!dispatchAttemptId) return;
+
+  const workItemId =
+    text(payload, "work_item_id") ||
+    text(attemptScope, "work_item_id");
+
+  const groupRef =
+    text(payload, "group_ref") ||
+    text(attemptScope, "group_ref");
+
+  upsertAttempt(response, {
+    dispatchAttemptId,
+    sourceUnitRef: workItemId ?? groupRef,
+    status,
+    provider: text(providerOutcome, "provider") ?? text(payload, "provider"),
+    accountRef: text(providerOutcome, "account_ref") ?? text(payload, "account_ref"),
+    modelRef: text(providerOutcome, "model_ref") ?? text(payload, "model_ref"),
+    completedAt: event.occurred_at,
+    promptTokens:
+      intValue(providerOutcome, "prompt_tokens") ??
+      intValue(payload, "actual_prompt_tokens"),
+    completionTokens:
+      intValue(providerOutcome, "completion_tokens") ??
+      intValue(payload, "actual_completion_tokens"),
+    totalTokens:
+      intValue(providerOutcome, "total_tokens") ??
+      intValue(payload, "actual_total_tokens"),
+    errorKind:
+      text(providerOutcome, "error_kind") ??
+      text(validationOutcome, "validation_error") ??
+      text(payload, "error_kind"),
+    errorMessageUser:
+      text(validationOutcome, "validation_decision") ??
+      text(validationOutcome, "validation_error"),
+    nodeName: DRAFT_CLAIM_COMPACTION_NODE_NAME,
+  });
+};
+
+
 const replaceClaimClusters = (
   response: WorkbenchWorkflowLiveStateResponse,
   clusters: WorkbenchClaimClusterLiveState[],
@@ -1149,6 +1214,7 @@ export const reduceWorkflowFrontendProjectionEvent = (
         workItemId: text(payload, "work_item_id"),
         status: "completed",
       });
+      upsertCompactionAttempt(next, normalizedEvent, "completed");
       markStage(next, "draft_claim_compaction", "running", normalizedEvent.occurred_at);
       next.workflow.current_phase = "draft_claim_compaction";
       appendTimeline(next, normalizedEvent, "Batch compaction завершён");
@@ -1162,6 +1228,7 @@ export const reduceWorkflowFrontendProjectionEvent = (
         workItemId: text(payload, "work_item_id"),
         status: "retryable_failed",
       });
+      upsertCompactionAttempt(next, normalizedEvent, "retryable_failed");
       markStage(next, "draft_claim_compaction", "running", normalizedEvent.occurred_at);
       next.workflow.current_phase = "draft_claim_compaction";
       appendTimeline(next, normalizedEvent, "Batch compaction требует повторной обработки");
@@ -1175,6 +1242,7 @@ export const reduceWorkflowFrontendProjectionEvent = (
         workItemId: text(payload, "work_item_id"),
         status: "terminal_failed",
       });
+      upsertCompactionAttempt(next, normalizedEvent, "terminal_failed");
       markStage(next, "draft_claim_compaction", "failed", normalizedEvent.occurred_at);
       next.workflow.current_phase = "draft_claim_compaction";
       appendTimeline(next, normalizedEvent, "Batch compaction завершился ошибкой");
