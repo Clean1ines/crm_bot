@@ -151,7 +151,7 @@ export const ClaimClustersPanel: React.FC<ClaimClustersPanelProps> = ({
     </div>
   ) : null;
 
-  const details = view.hasClusters ? (
+  const details = view.clusters.length > 0 ? (
     <details
       className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3"
       open

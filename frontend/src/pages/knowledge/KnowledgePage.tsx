@@ -528,9 +528,25 @@ export const KnowledgePage: React.FC = () => {
             };
           });
 
-          if (event.projection_type === "workflow_source_units_created") {
+          const shouldRefreshSourceUnits = [
+            "workflow_source_units_created",
+            "workflow_source_unit_created",
+            "workflow_work_items_scheduled",
+            "workflow_claim_builder_work_item_scheduled",
+            "workflow_dispatch_batch_prepared",
+            "workflow_claim_builder_dispatch_attempt_prepared",
+            "workflow_claim_builder_section_extracted",
+            "workflow_claim_builder_section_retryable_failed",
+            "workflow_claim_builder_section_terminal_failed",
+          ].includes(event.projection_type);
+
+          if (shouldRefreshSourceUnits) {
             void queryClient.invalidateQueries({
               queryKey: ["knowledge-source-units", projectId],
+            });
+            void queryClient.refetchQueries({
+              queryKey: ["knowledge-source-units", projectId],
+              type: "active",
             });
           }
         },

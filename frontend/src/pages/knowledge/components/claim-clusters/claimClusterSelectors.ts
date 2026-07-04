@@ -66,13 +66,14 @@ export const selectClaimClustersView = (
   workflow: WorkbenchWorkflowLiveState | null,
   draftArtifacts: readonly ClaimClustersDraftArtifact[] = [],
 ): ClaimClustersView => {
-  const hasClusters = Array.isArray(workflow?.claim_clusters);
   const clusters = workflow?.claim_clusters ?? [];
-  const nestedComparisons = clusters.flatMap((cluster) => cluster.comparisons);
-  const hasComparisons =
-    Array.isArray(workflow?.claim_compaction_comparisons) ||
-    clusters.some((cluster) => Array.isArray(cluster.comparisons));
-  const comparisons = workflow?.claim_compaction_comparisons ?? nestedComparisons;
+  const hasClusters = clusters.length > 0;
+  const nestedComparisons = clusters.flatMap((cluster) => cluster.comparisons ?? []);
+  const comparisons = [
+    ...(workflow?.claim_compaction_comparisons ?? []),
+    ...nestedComparisons,
+  ];
+  const hasComparisons = comparisons.length > 0;
   const clusteredClaims = clusters.flatMap((cluster) => cluster.claims ?? cluster.members);
   const clusteredClaimCount = clusters.reduce(
     (total, cluster) => total + cluster.member_count,
