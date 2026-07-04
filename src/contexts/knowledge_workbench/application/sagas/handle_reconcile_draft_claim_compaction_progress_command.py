@@ -17,6 +17,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -81,6 +84,7 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
         compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort
         ),
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleReconcileDraftClaimCompactionProgressResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -121,29 +125,47 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
             occurred_at=occurred_at,
             next_command=next_command,
         )
-        await workflow_unit_of_work.outbox.append_event(progress_event)
+        persisted_progress_event = await workflow_unit_of_work.outbox.append_event(
+            progress_event
+        )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(persisted_progress_event)
         appended_event_count = 1
 
         if decision is DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED:
-            await workflow_unit_of_work.outbox.append_event(
-                _all_groups_compacted_event(
-                    workflow_command=workflow_command,
-                    workflow_run_id=workflow_run_id,
-                    summary=summary,
-                    occurred_at=occurred_at,
-                    next_command=next_command,
+            all_groups_compacted_event = _all_groups_compacted_event(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                summary=summary,
+                occurred_at=occurred_at,
+                next_command=next_command,
+            )
+            persisted_all_groups_compacted_event = (
+                await workflow_unit_of_work.outbox.append_event(
+                    all_groups_compacted_event
                 )
             )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(
+                    persisted_all_groups_compacted_event
+                )
             appended_event_count += 1
         elif decision is DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE:
-            await workflow_unit_of_work.outbox.append_event(
-                _waiting_user_choice_event(
-                    workflow_command=workflow_command,
-                    workflow_run_id=workflow_run_id,
-                    summary=summary,
-                    occurred_at=occurred_at,
+            waiting_user_choice_event = _waiting_user_choice_event(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                summary=summary,
+                occurred_at=occurred_at,
+            )
+            persisted_waiting_user_choice_event = (
+                await workflow_unit_of_work.outbox.append_event(
+                    waiting_user_choice_event
                 )
             )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(
+                    persisted_waiting_user_choice_event
+                )
             appended_event_count += 1
 
         await _save_progress_snapshot(

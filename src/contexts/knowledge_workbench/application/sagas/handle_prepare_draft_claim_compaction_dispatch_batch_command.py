@@ -15,6 +15,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
     KnowledgeExtractionCanonicalEventType,
     KnowledgeExtractionCanonicalPhase,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -98,6 +101,7 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
         *,
         prepare_llm_dispatch_batch: PrepareLlmDispatchBatchPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandlePrepareDraftClaimCompactionDispatchBatchResult:
         workflow_command = command.workflow_command
         _validate_workflow_command(workflow_command)
@@ -194,7 +198,11 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
                 preflight_metadata=preflight_metadata,
                 occurred_at=occurred_at,
             )
-            await workflow_unit_of_work.outbox.append_event(waiting_event)
+            persisted_waiting_event = await workflow_unit_of_work.outbox.append_event(
+                waiting_event
+            )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_waiting_event)
             appended_event_count = 1
             await workflow_unit_of_work.timeline.append_entry(
                 _waiting_user_model_choice_timeline_entry(
@@ -235,7 +243,11 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
                 preflight_metadata=preflight_metadata,
                 occurred_at=occurred_at,
             )
-            await workflow_unit_of_work.outbox.append_event(prepared_event)
+            persisted_prepared_event = await workflow_unit_of_work.outbox.append_event(
+                prepared_event
+            )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_prepared_event)
             appended_event_count = 1
 
             next_commands = _execute_draft_claim_compaction_commands(

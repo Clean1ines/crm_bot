@@ -55,6 +55,9 @@ from src.contexts.knowledge_workbench.extraction.application.use_cases.apply_dra
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_provider_messages import (
     build_draft_claim_compaction_provider_messages,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -128,6 +131,7 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
         ),
         draft_claim_observation_read_repository: DraftClaimObservationReadRepositoryPort,
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleApplyDraftClaimCompactionResult:
         workflow_command = command.workflow_command
         if (
@@ -188,6 +192,7 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
             workflow_command=workflow_command,
             apply_command=apply_command,
             outcome=outcome,
+            frontend_event_projection_writer=frontend_event_projection_writer,
         )
         await _append_next_event(
             workflow_unit_of_work=workflow_unit_of_work,
@@ -196,6 +201,7 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
             outcome=outcome,
             schedule=schedule,
             appended_next_command_count=appended_next_command_count,
+            frontend_event_projection_writer=frontend_event_projection_writer,
         )
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
@@ -618,6 +624,19 @@ def _prepare_dispatch_batch_command(
             "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
             "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
             "caused_by_command_id": workflow_command.command_id.value,
+            "llm_dispatch_preparation": {
+                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
+                "requested_items": scheduled_work_item_count,
+                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
+                "account_capacities": (),
+                "profile": {
+                    "prompt_tokens": next_work_item.prompt_tokens,
+                    "artifact_tokens": next_work_item.artifact_tokens,
+                    "input_tokens": next_work_item.input_tokens,
+                    "required_window_tokens": next_work_item.required_window_tokens,
+                    "request_count": next_work_item.request_count,
+                },
+            },
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=occurred_at,
@@ -667,8 +686,9 @@ async def _append_applied_event(
     workflow_command: WorkflowCommand,
     apply_command: DraftClaimCompactionApplyResultCommand,
     outcome: DraftClaimCompactionApplyResultOutcome,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
 ) -> None:
-    await workflow_unit_of_work.outbox.append_event(
+    persisted_applied_event = await workflow_unit_of_work.outbox.append_event(
         WorkflowEvent(
             event_id=WorkflowEventId(
                 f"workflow-event:{apply_command.workflow_run_id}:"
@@ -695,6 +715,8 @@ async def _append_applied_event(
             correlation_id=workflow_command.command_id.value,
         )
     )
+    if frontend_event_projection_writer is not None:
+        await frontend_event_projection_writer.execute(persisted_applied_event)
 
 
 async def _append_next_event(
@@ -705,6 +727,7 @@ async def _append_next_event(
     outcome: DraftClaimCompactionApplyResultOutcome,
     schedule: EnsureWorkItemsScheduledResult,
     appended_next_command_count: int,
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
 ) -> None:
     work_type = outcome.next_decision.work_type
     event_type = _next_event_type(work_type)
@@ -748,7 +771,7 @@ async def _append_next_event(
             }
         )
 
-    await workflow_unit_of_work.outbox.append_event(
+    persisted_next_event = await workflow_unit_of_work.outbox.append_event(
         WorkflowEvent(
             event_id=WorkflowEventId(
                 f"workflow-event:{apply_command.workflow_run_id}:"
@@ -762,6 +785,8 @@ async def _append_next_event(
             correlation_id=workflow_command.command_id.value,
         )
     )
+    if frontend_event_projection_writer is not None:
+        await frontend_event_projection_writer.execute(persisted_next_event)
 
 
 def _next_batch_live_row(

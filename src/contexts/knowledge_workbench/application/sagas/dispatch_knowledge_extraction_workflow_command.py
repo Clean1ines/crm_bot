@@ -268,6 +268,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     ),
                     prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
                     workflow_unit_of_work=workflow_unit_of_work,
+                    frontend_event_projection_writer=frontend_event_projection_writer,
                 )
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
@@ -644,6 +645,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 compaction_reduction_state_repository=(
                     draft_claim_compaction_reduction_state_repository
                 ),
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,
@@ -685,6 +687,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                     draft_claim_observation_read_repository
                 ),
                 work_item_scheduling_repository=knowledge_unit_of_work,
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

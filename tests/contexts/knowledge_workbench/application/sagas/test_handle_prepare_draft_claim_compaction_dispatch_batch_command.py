@@ -402,7 +402,11 @@ async def test_empty_account_capacity_completes_without_prepare_call() -> None:
     )
 
     assert result.prepared_dispatch_count == 0
-    assert prepare.calls == []
+    assert len(prepare.calls) == 1
+    assert prepare.calls[0].account_capacities == ()
+    assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
+    assert workflow_uow.outbox.events == []
+    assert workflow_uow.timeline.entries == []
     assert workflow_uow.progress_snapshots.snapshot is not None
     assert workflow_uow.command_log.completed == [_command().command_id]
 

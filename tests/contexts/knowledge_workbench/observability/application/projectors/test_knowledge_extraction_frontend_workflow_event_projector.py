@@ -133,19 +133,53 @@ def test_workflow_composite_routes_clusters_built_event() -> None:
     assert projected.projection_type == "workflow_draft_claim_clusters_built"
 
 
-def test_workflow_composite_ignores_unsupported_event() -> None:
+def test_workflow_composite_routes_compaction_dispatch_prepared_event() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:compaction-dispatch-prepared"),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED.value
+        ),
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "work_kind": "knowledge_workbench.draft_claim_compaction",
+            "dispatch_attempt_ids": ["attempt-1"],
+            "work_item_ids": ["work-item-1"],
+            "dispatch_contexts": [
+                {
+                    "dispatch_attempt_id": "attempt-1",
+                    "work_item_id": "work-item-1",
+                    "group_ref": "group-1",
+                    "batch_ref": "batch-1",
+                }
+            ],
+        },
+        occurred_at=_now(),
+        sequence_number=11,
+    )
+
+    projected = KnowledgeExtractionFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert (
+        projected.projection_type
+        == "workflow_draft_claim_compaction_dispatch_batch_prepared"
+    )
+    assert projected.operation_key == "prepare_draft_claim_compaction_dispatch_batch"
+    assert projected.canonical_phase == "DRAFT_CLAIM_CLUSTERING"
+
+
+def test_workflow_composite_ignores_truly_unsupported_event() -> None:
     projected = KnowledgeExtractionFrontendWorkflowEventProjector().project(
         WorkflowEvent(
             event_id=WorkflowEventId("workflow-event:unsupported"),
-            event_type=(
-                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH_PREPARED.value
-            ),
+            event_type="UnsupportedKnowledgeExtractionEvent",
             workflow_run_id="knowledge-extraction:source-document:project-1:abc",
             payload={
                 "workflow_run_id": "knowledge-extraction:source-document:project-1:abc"
             },
             occurred_at=_now(),
-            sequence_number=11,
+            sequence_number=12,
         )
     )
 

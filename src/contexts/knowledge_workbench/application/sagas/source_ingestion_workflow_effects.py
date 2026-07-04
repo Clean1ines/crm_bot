@@ -235,7 +235,6 @@ def _base_payload(
     }
 
 
-
 def _source_unit_title(unit: SourceUnit) -> str:
     if unit.heading_path.parts:
         return unit.heading_path.parts[-1]
