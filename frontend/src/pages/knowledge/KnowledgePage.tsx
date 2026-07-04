@@ -498,8 +498,10 @@ export const KnowledgePage: React.FC = () => {
 
       const reviewGateOpen = Boolean(
         curation?.available &&
-          curation.workspace_ref &&
-          (curation.workspace_status === "open" ||
+          (curation.workspace_ref ||
+            curation.workspace_status === "pending_open" ||
+            curation.workspace_status === "open" ||
+            curation.workspace_status === "review_required" ||
             workflow?.workflow_status === "waiting_for_review" ||
             liveState?.document_status === "waiting_for_review"),
       );

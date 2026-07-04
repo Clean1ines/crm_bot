@@ -114,6 +114,13 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       action.enabled,
   );
 
+  const backendOpenCurationAction = actions.find(
+    (action) =>
+      normalize(action.action_id) === 'open_curation' &&
+      action.visible &&
+      action.enabled,
+  );
+
   const primaryProcessingAction =
     processingControlOverride?.state === 'paused'
       ? backendResumeAction
@@ -126,8 +133,17 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       : processingControlOverride?.state === 'running'
         ? 'pause_processing'
         : primaryProcessingAction?.action_id ?? null;
+  const primaryHeaderActionId =
+    backendOpenCurationAction?.action_id ?? primaryProcessingActionId;
+  const primaryHeaderActionReason =
+    backendOpenCurationAction?.reason_code ?? primaryProcessingAction?.reason_code ?? null;
+  const primaryHeaderActionLabel =
+    backendOpenCurationAction !== undefined ? 'Открыть проверку' : null;
   const canShowPrimaryProcessingControl =
     Boolean(workflow) && !isTerminalWorkflow && primaryProcessingActionId !== null;
+  const canShowPrimaryHeaderControl =
+    Boolean(workflow) &&
+    (backendOpenCurationAction !== undefined || canShowPrimaryProcessingControl);
   const usage = workflow?.usage ?? null;
   const claimBuilderSectionRows = useMemo(
     () => selectClaimBuilderSectionRows(workflowLiveState, sourceUnitsResponse),
@@ -339,6 +355,11 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         : timer;
 
   const handlePrimaryProcessingControl = async (): Promise<void> => {
+    if (backendOpenCurationAction !== undefined) {
+      handleLiveAction(backendOpenCurationAction);
+      return;
+    }
+
     if (!canShowPrimaryProcessingControl || primaryProcessingActionId === null) {
       return;
     }
@@ -395,9 +416,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     >
       <DocumentCardHeader
         workflowStatus={workflowStatus}
-        canShowPrimaryProcessingControl={canShowPrimaryProcessingControl}
-        primaryProcessingActionId={primaryProcessingActionId}
-        primaryProcessingActionReason={primaryProcessingAction?.reason_code}
+        canShowPrimaryProcessingControl={canShowPrimaryHeaderControl}
+        primaryProcessingActionId={primaryHeaderActionId}
+        primaryProcessingActionReason={primaryHeaderActionReason}
+        primaryProcessingActionLabel={primaryHeaderActionLabel}
         isDeletePending={isDeletePending}
         onPrimaryProcessingControl={handlePrimaryProcessingControl}
         onRequestDelete={onRequestDelete}

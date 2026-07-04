@@ -21,6 +21,9 @@ export const workflowStatusLabel = (status: string | null | undefined): string =
     failed: 'Нужна проверка',
     cancelled: 'Обработка остановлена',
     blocked: 'Нужна проверка',
+    waiting_for_review: 'Требуется проверка',
+    review_required: 'Требуется проверка',
+    stopped: 'Ожидает проверки',
   };
   return labels[value] || 'Состояние уточняется';
 };

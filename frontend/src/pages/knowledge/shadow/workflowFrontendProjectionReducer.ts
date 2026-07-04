@@ -1578,8 +1578,21 @@ export const reduceWorkflowFrontendProjectionEvent = (
       next.workflow.workflow_status = "waiting_for_review";
       next.document_status = "waiting_for_review";
       next.workflow.current_phase = "draft_claim_curation";
+      next.workflow.curation = {
+        ...next.workflow.curation,
+        available: true,
+        reason_code: "compaction_completed",
+        workflow_run_id: normalizedEvent.workflow_run_id,
+        workspace_ref: next.workflow.curation.workspace_ref ?? null,
+        workspace_status: next.workflow.curation.workspace_status ?? "pending_open",
+      };
       freezeWorkflowTimer(next, normalizedEvent.occurred_at, "stopped");
       hideActiveProcessingActions(next);
+      setWorkflowActionState(next, "open_curation", {
+        visible: true,
+        enabled: true,
+        reason_code: null,
+      });
       appendTimeline(next, normalizedEvent, "Все кластеры compaction завершены");
       break;
     }

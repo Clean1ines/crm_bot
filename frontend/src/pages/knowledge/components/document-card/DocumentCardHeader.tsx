@@ -9,6 +9,7 @@ type DocumentCardHeaderProps = {
   canShowPrimaryProcessingControl: boolean;
   primaryProcessingActionId: string | null;
   primaryProcessingActionReason?: string | null;
+  primaryProcessingActionLabel?: string | null;
   isDeletePending: boolean;
   onPrimaryProcessingControl: () => Promise<void> | void;
   onRequestDelete: () => void;
@@ -19,6 +20,7 @@ export const DocumentCardHeader: React.FC<DocumentCardHeaderProps> = ({
   canShowPrimaryProcessingControl,
   primaryProcessingActionId,
   primaryProcessingActionReason,
+  primaryProcessingActionLabel,
   isDeletePending,
   onPrimaryProcessingControl,
   onRequestDelete,
@@ -39,7 +41,8 @@ export const DocumentCardHeader: React.FC<DocumentCardHeaderProps> = ({
           title={primaryProcessingActionReason || undefined}
           className="rounded-full bg-[var(--accent-primary)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)] transition-colors hover:bg-[var(--accent-primary)]/20"
         >
-          {primaryProcessingActionId === 'pause_processing' ? 'Пауза' : 'Продолжить'}
+          {primaryProcessingActionLabel ??
+            (primaryProcessingActionId === 'pause_processing' ? 'Пауза' : 'Продолжить')}
         </button>
       )}
       <button
