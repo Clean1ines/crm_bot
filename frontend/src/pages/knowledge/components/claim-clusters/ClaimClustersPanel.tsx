@@ -152,19 +152,38 @@ export const ClaimClustersPanel: React.FC<ClaimClustersPanelProps> = ({
   ) : null;
 
   const details = view.hasClusters ? (
-    <details className="rounded-lg bg-[var(--surface-elevated)] p-2" open>
-      <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-        Кластеры утверждений: {formatNumber(view.clusters.length)}
+    <details
+      className="rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-secondary)] p-3"
+      open
+    >
+      <summary className="cursor-pointer list-none">
+        <span className="flex flex-wrap items-center justify-between gap-2">
+          <span>
+            <span className="font-medium text-[var(--text-primary)]">
+              Кластеры утверждений
+            </span>
+            <span className="ml-2 text-xs text-[var(--text-muted)]">
+              Claim Compaction · {formatNumber(view.clusters.length)} кл.
+            </span>
+          </span>
+          <span className="rounded-full bg-[var(--control-bg)] px-2.5 py-1 text-xs text-[var(--text-secondary)]">
+            {formatNumber(view.compaction.llmAttemptCount)} попыток
+          </span>
+        </span>
       </summary>
-      <div className="mt-2 space-y-2">
+
+      <div className="mt-2 space-y-1.5">
         {view.clusters.length === 0 && (
-          <div className="text-[var(--text-muted)]">Кластеры ещё не сформированы.</div>
+          <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-muted)]">
+            Кластеры ещё не сформированы.
+          </div>
         )}
         {view.clusters.map((cluster, clusterIndex) => (
           <ClaimClusterRow
             key={cluster.cluster_ref}
             cluster={cluster}
             clusterIndex={clusterIndex}
+            attempts={view.compaction.attempts}
             formatNumber={formatNumber}
           />
         ))}

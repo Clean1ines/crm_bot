@@ -185,6 +185,7 @@ export const selectClaimClustersView = (
   const compactionAttempts: ClaimClusterCompactionAttemptView[] = llmAttempts
     .map((attempt, index) => ({
       key: attempt.node_run_id || `draft-compaction-attempt-${index}`,
+      workItemId: attempt.section_id ?? null,
       attemptNumber: attemptNumberFromId(attempt.node_run_id, index + 1),
       status: attempt.status,
       statusLabel: compactionAttemptStatusLabel(attempt.status),
@@ -192,6 +193,7 @@ export const selectClaimClustersView = (
       modelName: attempt.model_name?.trim() || null,
       provider: attempt.model_provider?.trim() || null,
       tokenCount: Math.max(0, attempt.total_tokens || 0),
+      durationMs: attempt.duration_ms ?? null,
       startedAt: attempt.started_at ?? null,
       completedAt: attempt.completed_at ?? null,
       errorMessage: compactionAttemptErrorMessage(attempt),

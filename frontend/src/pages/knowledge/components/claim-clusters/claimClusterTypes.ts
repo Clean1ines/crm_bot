@@ -20,6 +20,7 @@ export type FinalCompactedFact = WorkbenchCompactedClaimPreviewLiveState & {
 
 export type ClaimClusterCompactionAttemptView = {
   key: string;
+  workItemId: string | null;
   attemptNumber: number;
   status: string;
   statusLabel: string;
@@ -27,6 +28,7 @@ export type ClaimClusterCompactionAttemptView = {
   modelName: string | null;
   provider: string | null;
   tokenCount: number;
+  durationMs: number | null;
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;
