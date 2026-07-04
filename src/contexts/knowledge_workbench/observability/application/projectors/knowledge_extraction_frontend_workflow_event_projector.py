@@ -12,6 +12,9 @@ from src.contexts.knowledge_workbench.observability.application.projectors.draft
 from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_compaction_frontend_workflow_event_projector import (
     DraftClaimCompactionFrontendWorkflowEventProjector,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_curation_frontend_workflow_event_projector import (
+    DraftClaimCurationFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_embedding_frontend_workflow_event_projector import (
     DraftClaimEmbeddingFrontendWorkflowEventProjector,
 )
@@ -34,6 +37,7 @@ class KnowledgeExtractionFrontendWorkflowEventProjector:
         self._draft_claim_compaction = (
             DraftClaimCompactionFrontendWorkflowEventProjector()
         )
+        self._draft_claim_curation = DraftClaimCurationFrontendWorkflowEventProjector()
 
     def project(self, event: WorkflowEvent) -> FrontendWorkflowEvent | None:
         projected = self._source_ingestion.project(event)
@@ -48,4 +52,7 @@ class KnowledgeExtractionFrontendWorkflowEventProjector:
         projected = self._draft_claim_cluster.project(event)
         if projected is not None:
             return projected
-        return self._draft_claim_compaction.project(event)
+        projected = self._draft_claim_compaction.project(event)
+        if projected is not None:
+            return projected
+        return self._draft_claim_curation.project(event)

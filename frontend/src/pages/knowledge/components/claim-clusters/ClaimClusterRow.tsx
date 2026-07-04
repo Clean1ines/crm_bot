@@ -98,13 +98,6 @@ const ClaimClusterBatchRow = ({
       </summary>
 
       <div className="mt-2 space-y-2">
-        <div className="grid gap-2 text-xs text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(140px,1fr))]">
-          <div>work item: {batch.work_item_id}</div>
-          <div>model: {batch.model_id || 'unknown'}</div>
-          <div>claims: {formatClaimBuilderNumber(batch.member_count)}</div>
-          <div>tokens: {formatClaimBuilderNumber(batch.artifact_tokens)}</div>
-        </div>
-
         <div className="space-y-1.5">
           {ownedAttempts.length > 0 ? (
             ownedAttempts.map((attempt) => (
@@ -120,16 +113,6 @@ const ClaimClusterBatchRow = ({
           )}
         </div>
 
-        {(batch.source_claim_refs.length > 0 || (batch.compacted_node_refs ?? []).length > 0) && (
-          <div className="rounded bg-[var(--surface-elevated)] p-2 text-xs text-[var(--text-secondary)]">
-            {batch.source_claim_refs.length > 0 && (
-              <div>source claims: {batch.source_claim_refs.join(', ')}</div>
-            )}
-            {(batch.compacted_node_refs ?? []).length > 0 && (
-              <div>compacted nodes: {(batch.compacted_node_refs ?? []).join(', ')}</div>
-            )}
-          </div>
-        )}
       </div>
     </details>
   );
@@ -189,6 +172,20 @@ export const ClaimClusterRow: React.FC<ClaimClusterRowProps> = ({
           <div>итогов: {formatNumber(cluster.compacted_claims?.length ?? 0)}</div>
         </div>
 
+        <details className="rounded border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-2 py-1.5" open>
+          <summary className="cursor-pointer list-none text-xs font-medium text-[var(--text-primary)]">
+            Факты кластера: {formatNumber((cluster.claims ?? cluster.members).length)}
+          </summary>
+          <div className="mt-2 space-y-2">
+            {(cluster.claims ?? cluster.members).map((claim) => (
+              <ClaimClusterClaimRow
+                key={claim.observation_ref}
+                claim={claim}
+              />
+            ))}
+          </div>
+        </details>
+
         <div className="space-y-1.5">
           {batches.length > 0 ? (
             batches.map((batch, batchIndex) => (
@@ -221,20 +218,6 @@ export const ClaimClusterRow: React.FC<ClaimClusterRowProps> = ({
             ))}
           </div>
         )}
-
-        <details className="rounded border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-2 py-1.5">
-          <summary className="cursor-pointer list-none text-xs font-medium text-[var(--text-primary)]">
-            Исходные утверждения: {formatNumber((cluster.claims ?? cluster.members).length)}
-          </summary>
-          <div className="mt-2 space-y-2">
-            {(cluster.claims ?? cluster.members).map((claim) => (
-              <ClaimClusterClaimRow
-                key={claim.observation_ref}
-                claim={claim}
-              />
-            ))}
-          </div>
-        </details>
       </div>
     </details>
   );

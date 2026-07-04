@@ -1,7 +1,6 @@
 import React, { type ReactNode } from 'react';
 
 import { ClaimClusterRow } from './ClaimClusterRow';
-import { FinalCompactedFactsPanel } from './FinalCompactedFactsPanel';
 import type { ClaimClustersView } from './claimClusterTypes';
 
 type ClaimClustersPanelSlots = {
@@ -59,77 +58,6 @@ export const ClaimClustersPanel: React.FC<ClaimClustersPanelProps> = ({
           </div>
         ))}
       </div>
-
-      {view.compaction.attempts.length > 0 && (
-        <section className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <div className="font-medium text-[var(--text-primary)]">
-                Ход объединения
-              </div>
-              <div className="mt-1 text-[var(--text-muted)]">
-                Последние попытки ИИ по объединению похожих утверждений.
-              </div>
-            </div>
-            <div className="rounded-full bg-[var(--surface-secondary)] px-2.5 py-1 text-[var(--text-secondary)]">
-              {formatNumber(view.compaction.attempts.length)} попыток
-            </div>
-          </div>
-
-          <div className="mt-3 space-y-2">
-            {view.compaction.attempts.slice(-10).map((attempt) => (
-              <div
-                key={attempt.key}
-                className={`rounded-lg border px-3 py-2 ${attempt.toneClassName}`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="font-medium">
-                    Попытка {formatNumber(attempt.attemptNumber)}
-                  </div>
-                  <div className="rounded-full bg-[var(--surface-elevated)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-primary)]">
-                    {attempt.statusLabel}
-                  </div>
-                </div>
-                <div className="mt-1 text-[var(--text-secondary)]">
-                  {attempt.modelName || 'модель не указана'}
-                  {' · '}
-                  {attempt.tokenCount > 0
-                    ? `${formatNumber(attempt.tokenCount)} токенов`
-                    : 'токены пока не записаны'}
-                </div>
-                {attempt.errorMessage && (
-                  <div className="mt-1 text-[var(--text-secondary)]">
-                    {attempt.errorMessage}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {view.extractedFacts.length > 0 && (
-        <section className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3">
-          <div className="font-medium text-[var(--text-primary)]">
-            Извлечённые факты: {formatNumber(view.extractedFacts.length)}
-          </div>
-          <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-1">
-            {view.extractedFacts.map((fact, index) => (
-              <div
-                key={fact.key}
-                className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-secondary)] px-3 py-2 text-[var(--text-secondary)]"
-              >
-                <span className="mr-2 text-[var(--text-muted)]">
-                  {formatNumber(index + 1)}.
-                </span>
-                {fact.text}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <FinalCompactedFactsPanel facts={view.finalFacts} formatNumber={formatNumber} />
 
       <div className="mt-3 text-[11px] text-[var(--text-muted)]">
         Кластеров: {formatNumber(view.clusters.length)}
