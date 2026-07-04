@@ -171,6 +171,15 @@ const recordValue = (
   return isRecord(value) ? value : null;
 };
 
+const recordArray = (
+  payload: Record<string, unknown>,
+  key: string,
+): Record<string, unknown>[] => {
+  const value = payload[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord);
+};
+
 const normalize = (value: string | null | undefined): string =>
   (value || "").trim().toLowerCase();
 
@@ -240,6 +249,32 @@ const stageById = (
   const created = stage(id, id, "pending");
   response.workflow.stages.push(created);
   return created;
+};
+
+
+const setWorkflowActionState = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  actionId: string,
+  patch: {
+    visible: boolean;
+    enabled: boolean;
+    reason_code?: string | null;
+  },
+): void => {
+  const existing = response.workflow.actions.find((item) => item.action_id === actionId);
+  if (existing) {
+    existing.visible = patch.visible;
+    existing.enabled = patch.enabled;
+    existing.reason_code = patch.reason_code ?? null;
+    return;
+  }
+
+  response.workflow.actions.push({
+    action_id: actionId,
+    visible: patch.visible,
+    enabled: patch.enabled,
+    reason_code: patch.reason_code ?? null,
+  });
 };
 
 const claimBuilderLane = (
@@ -856,6 +891,156 @@ const compactionBatchFromPayload = (
   return value as unknown as WorkbenchClaimClusterBatchLiveState;
 };
 
+
+const liveCompactionBatchFromRecord = (
+  record: Record<string, unknown>,
+  status: string,
+): WorkbenchClaimClusterBatchLiveState | null => {
+  const workItemId =
+    text(record, "work_item_id") ||
+    text(record, "row_key");
+  const batchRef =
+    text(record, "batch_ref") ||
+    text(record, "batch_id") ||
+    workItemId;
+  const groupRef =
+    text(record, "group_ref") ||
+    text(record, "cluster_ref");
+
+  if (!batchRef || !workItemId || !groupRef) return null;
+
+  const sourceClaimRefs =
+    stringArray(record, "source_claim_refs").length > 0
+      ? stringArray(record, "source_claim_refs")
+      : stringArray(record, "input_claim_refs");
+
+  const sourceNodeRefs =
+    stringArray(record, "source_node_refs").length > 0
+      ? stringArray(record, "source_node_refs")
+      : stringArray(record, "input_node_refs");
+
+  const rawClaimRefs =
+    stringArray(record, "raw_claim_refs").length > 0
+      ? stringArray(record, "raw_claim_refs")
+      : sourceClaimRefs;
+
+  const compactedNodeRefs = stringArray(record, "compacted_node_refs");
+  const memberCount = Math.max(
+    sourceClaimRefs.length,
+    sourceNodeRefs.length,
+    rawClaimRefs.length,
+    compactedNodeRefs.length,
+    intValue(record, "member_count") ?? 0,
+  );
+
+  return {
+    batch_ref: batchRef,
+    work_item_id: workItemId,
+    group_ref: groupRef,
+    status,
+    prompt_variant:
+      text(record, "prompt_variant") ||
+      text(record, "next_work_type") ||
+      text(record, "expected_output_kind") ||
+      "draft_claim_compaction",
+    model_id:
+      text(record, "model_id") ||
+      text(record, "model_ref") ||
+      text(record, "active_model_ref") ||
+      "unknown",
+    artifact_tokens: intValue(record, "artifact_tokens") ?? 0,
+    member_count: memberCount,
+    source_claim_refs: sourceClaimRefs,
+    source_node_refs: sourceNodeRefs,
+    raw_claim_refs: rawClaimRefs,
+    compacted_node_refs: compactedNodeRefs,
+  };
+};
+
+const upsertCompactionBatchFromPayload = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  payload: Record<string, unknown>,
+  status: string,
+): void => {
+  const pendingWork = recordValue(payload, "pending_reduction_work");
+  const source = pendingWork ? { ...pendingWork, ...payload } : payload;
+  const batch = liveCompactionBatchFromRecord(source, status);
+  if (batch) {
+    upsertCompactionBatch(response, batch);
+  }
+};
+
+const upsertPreparedCompactionRows = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  payload: Record<string, unknown>,
+): void => {
+  const pendingRows = recordValue(payload, "pending_reduction_work_rows");
+  const rows = [
+    ...(pendingRows ? recordArray(pendingRows, "rows") : []),
+    ...recordArray(payload, "dispatch_contexts"),
+  ];
+
+  for (const row of rows) {
+    const batch = liveCompactionBatchFromRecord(row, "leased");
+    if (batch) {
+      upsertCompactionBatch(response, batch);
+    }
+  }
+};
+
+const upsertCompactionAttempt = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+  status: string,
+): void => {
+  const payload = isRecord(event.payload) ? event.payload : {};
+  const attemptOutcome = recordValue(payload, "attempt_outcome") ?? {};
+  const attemptScope = recordValue(attemptOutcome, "attempt_scope") ?? {};
+  const providerOutcome = recordValue(attemptOutcome, "provider_outcome") ?? {};
+  const validationOutcome = recordValue(attemptOutcome, "validation_outcome") ?? {};
+
+  const dispatchAttemptId =
+    text(payload, "dispatch_attempt_id") ||
+    text(attemptScope, "dispatch_attempt_id");
+  if (!dispatchAttemptId) return;
+
+  const workItemId =
+    text(payload, "work_item_id") ||
+    text(attemptScope, "work_item_id");
+
+  const groupRef =
+    text(payload, "group_ref") ||
+    text(attemptScope, "group_ref");
+
+  upsertAttempt(response, {
+    dispatchAttemptId,
+    sourceUnitRef: workItemId ?? groupRef,
+    status,
+    provider: text(providerOutcome, "provider") ?? text(payload, "provider"),
+    accountRef: text(providerOutcome, "account_ref") ?? text(payload, "account_ref"),
+    modelRef: text(providerOutcome, "model_ref") ?? text(payload, "model_ref"),
+    completedAt: event.occurred_at,
+    promptTokens:
+      intValue(providerOutcome, "prompt_tokens") ??
+      intValue(payload, "actual_prompt_tokens"),
+    completionTokens:
+      intValue(providerOutcome, "completion_tokens") ??
+      intValue(payload, "actual_completion_tokens"),
+    totalTokens:
+      intValue(providerOutcome, "total_tokens") ??
+      intValue(payload, "actual_total_tokens"),
+    errorKind:
+      text(providerOutcome, "error_kind") ??
+      text(validationOutcome, "validation_error") ??
+      text(payload, "error_kind"),
+    errorMessageUser:
+      text(validationOutcome, "validation_decision") ??
+      text(validationOutcome, "validation_error"),
+    nodeName: DRAFT_CLAIM_COMPACTION_NODE_NAME,
+  });
+};
+
+
 const compactedArtifactsFromPayload = (
   payload: Record<string, unknown>,
 ): WorkbenchCompactedClaimPreviewLiveState[] => {
@@ -979,59 +1164,6 @@ const updateCompactionBatch = (
     return changed
       ? recomputeClusterBatchCounters({ ...cluster, batches: nextBatches })
       : cluster;
-  });
-};
-
-
-const upsertCompactionAttempt = (
-  response: WorkbenchWorkflowLiveStateResponse,
-  event: FrontendWorkflowEventEnvelope,
-  status: string,
-): void => {
-  const payload = isRecord(event.payload) ? event.payload : {};
-  const attemptOutcome = recordValue(payload, "attempt_outcome") ?? {};
-  const attemptScope = recordValue(attemptOutcome, "attempt_scope") ?? {};
-  const providerOutcome = recordValue(attemptOutcome, "provider_outcome") ?? {};
-  const validationOutcome = recordValue(attemptOutcome, "validation_outcome") ?? {};
-
-  const dispatchAttemptId =
-    text(payload, "dispatch_attempt_id") ||
-    text(attemptScope, "dispatch_attempt_id");
-  if (!dispatchAttemptId) return;
-
-  const workItemId =
-    text(payload, "work_item_id") ||
-    text(attemptScope, "work_item_id");
-
-  const groupRef =
-    text(payload, "group_ref") ||
-    text(attemptScope, "group_ref");
-
-  upsertAttempt(response, {
-    dispatchAttemptId,
-    sourceUnitRef: workItemId ?? groupRef,
-    status,
-    provider: text(providerOutcome, "provider") ?? text(payload, "provider"),
-    accountRef: text(providerOutcome, "account_ref") ?? text(payload, "account_ref"),
-    modelRef: text(providerOutcome, "model_ref") ?? text(payload, "model_ref"),
-    completedAt: event.occurred_at,
-    promptTokens:
-      intValue(providerOutcome, "prompt_tokens") ??
-      intValue(payload, "actual_prompt_tokens"),
-    completionTokens:
-      intValue(providerOutcome, "completion_tokens") ??
-      intValue(payload, "actual_completion_tokens"),
-    totalTokens:
-      intValue(providerOutcome, "total_tokens") ??
-      intValue(payload, "actual_total_tokens"),
-    errorKind:
-      text(providerOutcome, "error_kind") ??
-      text(validationOutcome, "validation_error") ??
-      text(payload, "error_kind"),
-    errorMessageUser:
-      text(validationOutcome, "validation_decision") ??
-      text(validationOutcome, "validation_error"),
-    nodeName: DRAFT_CLAIM_COMPACTION_NODE_NAME,
   });
 };
 
@@ -1185,6 +1317,7 @@ export const reduceWorkflowFrontendProjectionEvent = (
     }
 
     case "workflow_draft_claim_compaction_dispatch_batch_prepared": {
+      upsertPreparedCompactionRows(next, payload);
       const workItemIds = stringArray(payload, "work_item_ids");
       workItemIds.forEach((workItemId) => {
         updateCompactionBatch(next, {
@@ -1208,6 +1341,7 @@ export const reduceWorkflowFrontendProjectionEvent = (
     }
 
     case "workflow_draft_claim_compaction_attempt_completed": {
+      upsertCompactionBatchFromPayload(next, payload, "completed");
       updateCompactionBatch(next, {
         groupRef: text(payload, "group_ref"),
         batchRef: text(payload, "batch_ref"),
@@ -1222,6 +1356,7 @@ export const reduceWorkflowFrontendProjectionEvent = (
     }
 
     case "workflow_draft_claim_compaction_attempt_retryable_failed": {
+      upsertCompactionBatchFromPayload(next, payload, "retryable_failed");
       updateCompactionBatch(next, {
         groupRef: text(payload, "group_ref"),
         batchRef: text(payload, "batch_ref"),
@@ -1236,6 +1371,7 @@ export const reduceWorkflowFrontendProjectionEvent = (
     }
 
     case "workflow_draft_claim_compaction_attempt_terminal_failed": {
+      upsertCompactionBatchFromPayload(next, payload, "terminal_failed");
       updateCompactionBatch(next, {
         groupRef: text(payload, "group_ref"),
         batchRef: text(payload, "batch_ref"),
@@ -1268,7 +1404,9 @@ export const reduceWorkflowFrontendProjectionEvent = (
     }
 
     case "workflow_draft_claim_compaction_next_work_scheduled": {
-      const nextBatch = compactionBatchFromPayload(payload, "next_batch");
+      const nextBatch =
+        compactionBatchFromPayload(payload, "next_batch") ??
+        liveCompactionBatchFromRecord(payload, "ready");
       if (nextBatch) {
         upsertCompactionBatch(next, nextBatch);
       }
@@ -1309,6 +1447,40 @@ export const reduceWorkflowFrontendProjectionEvent = (
       break;
     }
 
+    case "workflow_draft_claim_compaction_progress_reconciled": {
+      const summary = recordValue(payload, "summary");
+      const totalGroups =
+        intValue(summary ?? {}, "total_group_count") ??
+        intValue(summary ?? {}, "group_count") ??
+        next.workflow.claim_clusters?.length ??
+        0;
+      const completedGroups =
+        intValue(summary ?? {}, "done_group_count") ??
+        intValue(summary ?? {}, "completed_group_count") ??
+        0;
+      markStage(
+        next,
+        "draft_claim_compaction",
+        completedGroups > 0 && totalGroups > 0 && completedGroups >= totalGroups
+          ? "completed"
+          : "running",
+        normalizedEvent.occurred_at,
+        completedGroups,
+        totalGroups,
+      );
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(next, normalizedEvent, "Прогресс compaction сверён");
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_waiting_user_model_choice": {
+      markStage(next, "draft_claim_compaction", "running", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_compaction";
+      appendTimeline(next, normalizedEvent, "Compaction ожидает выбора модели");
+      break;
+    }
+
+
     case "workflow_draft_claim_compaction_all_groups_compacted": {
       next.workflow.claim_clusters = (next.workflow.claim_clusters ?? []).map((cluster) =>
         recomputeClusterBatchCounters({
@@ -1333,6 +1505,76 @@ export const reduceWorkflowFrontendProjectionEvent = (
       appendTimeline(next, normalizedEvent, "Все кластеры compaction завершены");
       break;
     }
+
+    case "workflow_draft_claim_curation_workspace_opened": {
+      next.workflow.curation = {
+        ...next.workflow.curation,
+        available: true,
+        reason_code: "workspace_opened",
+        workflow_run_id: normalizedEvent.workflow_run_id,
+        workspace_ref: text(payload, "workspace_ref"),
+        workspace_status: "open",
+        item_count: intValue(payload, "item_count") ?? 0,
+      };
+      markStage(next, "curation", "running", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_curation";
+      setWorkflowActionState(next, "open_curation", {
+        visible: true,
+        enabled: true,
+        reason_code: null,
+      });
+      appendTimeline(next, normalizedEvent, "Открыто пространство проверки знаний");
+      break;
+    }
+
+    case "workflow_draft_claim_curation_review_required": {
+      next.workflow.curation = {
+        ...next.workflow.curation,
+        available: true,
+        reason_code: "review_required",
+        workflow_run_id: normalizedEvent.workflow_run_id,
+        workspace_ref: text(payload, "workspace_ref"),
+        workspace_status: "review_required",
+        item_count: intValue(payload, "item_count") ?? next.workflow.curation.item_count,
+      };
+      next.workflow.workflow_status = "waiting_for_review";
+      next.document_status = "waiting_for_review";
+      markStage(next, "curation", "running", normalizedEvent.occurred_at);
+      next.workflow.current_phase = "draft_claim_curation";
+      setWorkflowActionState(next, "open_curation", {
+        visible: true,
+        enabled: true,
+        reason_code: null,
+      });
+      appendTimeline(next, normalizedEvent, "Требуется ручная проверка знаний");
+      break;
+    }
+
+    case "workflow_draft_claim_curation_workspace_published": {
+      markStage(next, "curation", "completed", normalizedEvent.occurred_at);
+      markStage(
+        next,
+        "publication",
+        "completed",
+        normalizedEvent.occurred_at,
+        intValue(payload, "published_item_count") ?? 0,
+        intValue(payload, "published_item_count") ?? 0,
+      );
+      next.workflow.workflow_status = "completed";
+      next.document_status = "completed";
+      next.workflow.current_phase = "publication";
+      next.workflow.timer.mode = "completed";
+      next.workflow.timer.is_live = false;
+      next.workflow.timer.completed_at = normalizedEvent.occurred_at;
+      setWorkflowActionState(next, "open_curation", {
+        visible: true,
+        enabled: false,
+        reason_code: "published",
+      });
+      appendTimeline(next, normalizedEvent, "Проверенные знания опубликованы");
+      break;
+    }
+
 
     default:
       appendTimeline(
