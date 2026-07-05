@@ -68,7 +68,7 @@ class KnowledgeSearchResult:
                 KnowledgeChunk(
                     chunk_id=str(row.get("id", f"no-id-{index}")),
                     score=coerce_float(row.get("score")),
-                    content=str(row.get("content") or "")[:150],
+                    content=str(row.get("content") or ""),
                 )
             )
         return cls(chunks=chunks)

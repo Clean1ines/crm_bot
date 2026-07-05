@@ -32,3 +32,21 @@ def test_knowledge_search_result_normalizes_tool_payload():
             {"id": "no-id-1", "score": 0.5, "content": "xyz"},
         ]
     }
+
+
+def test_knowledge_search_result_preserves_full_curated_claim_text():
+    claim = (
+        "Workbench runtime facts must reach the answer prompt as complete curated "
+        "claims, because cutting them at an arbitrary early boundary can remove "
+        "the condition or limitation that makes the answer accurate."
+    )
+
+    result = KnowledgeSearchResult.from_tool_payload(
+        {"results": [{"id": "runtime-entry-1", "score": 0.91, "content": claim}]}
+    )
+
+    assert result.to_state_patch() == {
+        "knowledge_chunks": [
+            {"id": "runtime-entry-1", "score": 0.91, "content": claim}
+        ]
+    }

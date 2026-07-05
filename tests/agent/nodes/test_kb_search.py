@@ -50,3 +50,32 @@ async def test_kb_search_normalizes_tool_results():
         ]
     }
     tool_registry.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_kb_search_keeps_full_curated_claim_text():
+    claim = (
+        "Workbench runtime facts must stay complete until prompt formatting owns "
+        "the final prompt budget, because the last clause can carry the exact "
+        "customer-facing limitation that prevents a misleading answer."
+    )
+    tool_registry = MagicMock()
+    tool_registry.execute = AsyncMock(
+        return_value={"results": [{"id": "runtime-entry-1", "score": 0.93, "content": claim}]}
+    )
+    node = create_kb_search_node(tool_registry=tool_registry)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.kb_search.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node({"project_id": "project-1", "user_input": "hello"})
+
+    assert result == {
+        "knowledge_chunks": [
+            {"id": "runtime-entry-1", "score": 0.93, "content": claim}
+        ]
+    }
