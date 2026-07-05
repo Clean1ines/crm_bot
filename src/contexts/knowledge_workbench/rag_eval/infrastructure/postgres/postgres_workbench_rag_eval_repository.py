@@ -37,36 +37,29 @@ from src.contexts.knowledge_workbench.retrieval.application.models.published_wor
 PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL = """
 SELECT
     entry.runtime_entry_id,
-    CASE
-        WHEN entry.source_refs ? 'workflow_run_id'
-        THEN 'draft-claim-curation-publication:' || (entry.source_refs->>'workflow_run_id')
-        ELSE NULL
-    END AS publication_id,
+    entry.publication_id,
     entry.project_id::text AS project_id,
-    entry.source_refs->>'source_document_ref' AS source_document_ref,
-    entry.fact_id,
-    entry.source_refs->>'curation_item_ref' AS curation_item_ref,
+    entry.source_document_ref,
+    COALESCE(NULLIF(entry.fact_id, ''), entry.runtime_entry_id) AS fact_id,
+    entry.curation_item_ref,
     entry.claim,
     entry.possible_questions,
-    fact.exclusion_scope,
-    NULL::text AS evidence_block,
+    entry.exclusion_scope,
+    entry.evidence_block,
+    entry.triples,
     entry.source_refs,
-    entry.source_refs->'source_claim_refs' AS source_claim_refs,
+    entry.source_claim_refs,
     entry.embedding_text,
     1.0::double precision AS score,
     row_number() OVER (ORDER BY entry.created_at, entry.runtime_entry_id) AS rank
 FROM knowledge_workbench_runtime_retrieval_entries AS entry
-JOIN knowledge_workbench_canonical_facts AS fact
-  ON fact.fact_id = entry.fact_id
+JOIN knowledge_workbench_runtime_retrieval_entry_embeddings AS emb
+  ON emb.runtime_entry_id = entry.runtime_entry_id
 WHERE entry.project_id = $1::uuid
   AND entry.visibility = 'published'
   AND entry.status = 'active'
-  AND fact.status = 'published'
-  AND ($2::text IS NULL OR (
-        entry.source_refs ? 'workflow_run_id'
-        AND 'draft-claim-curation-publication:' || (entry.source_refs->>'workflow_run_id') = $2
-      ))
-  AND ($3::text IS NULL OR entry.source_refs->>'source_document_ref' = $3)
+  AND ($2::text IS NULL OR entry.publication_id = $2)
+  AND ($3::text IS NULL OR entry.source_document_ref = $3)
 ORDER BY entry.created_at, entry.runtime_entry_id
 LIMIT $4
 """

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Mapping
 
 import pytest
 
@@ -43,12 +43,23 @@ def test_repository_reads_published_workbench_runtime_entries_not_legacy_tables(
     sql = PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL
 
     assert "knowledge_workbench_runtime_retrieval_entries" in sql
-    assert "knowledge_workbench_canonical_facts" in sql
+    assert "knowledge_workbench_runtime_retrieval_entry_embeddings" in sql
+    assert "knowledge_workbench_canonical_facts" not in sql
+    assert "JOIN knowledge_workbench_canonical_facts" not in sql
+    assert "fact.status" not in sql
+    assert "fact.fact_id" not in sql
     assert "knowledge_" + "retrieval_" + "surface" not in sql
     assert "knowledge_workbench_surfaces" not in sql
     assert "answer_text" not in sql
     assert "entry.visibility = 'published'" in sql
     assert "entry.status = 'active'" in sql
+    assert "entry.exclusion_scope" in sql
+    assert "entry.evidence_block" in sql
+    assert "entry.triples" in sql
+    assert "entry.source_claim_refs" in sql
+    assert "entry.source_document_ref" in sql
+    assert "entry.curation_item_ref" in sql
+    assert "emb.runtime_entry_id = entry.runtime_entry_id" in sql
 
 
 def test_details_sql_reads_questions_results_and_candidates_without_legacy_tables() -> (
@@ -72,6 +83,57 @@ def test_details_sql_reads_questions_results_and_candidates_without_legacy_table
     assert "answer_text" not in combined
     assert "knowledge_" + "retrieval_" + "surface" not in combined
     assert "knowledge_workbench_surfaces" not in combined
+
+
+@pytest.mark.asyncio
+async def test_list_published_entries_for_eval_maps_runtime_entry_fields() -> None:
+    connection = FakeConnection(
+        rows=[
+            {
+                "runtime_entry_id": "runtime-entry-1",
+                "publication_id": "publication-1",
+                "project_id": "11111111-1111-1111-1111-111111111111",
+                "source_document_ref": "source-document-1",
+                "fact_id": "runtime-entry-1",
+                "curation_item_ref": "curation-item-1",
+                "claim": "Runtime claim",
+                "possible_questions": ["Question one?", "Question two?"],
+                "exclusion_scope": "Not for internal-only policies",
+                "evidence_block": "Runtime evidence",
+                "triples": [{"subject": "A", "predicate": "is", "object": "B"}],
+                "source_refs": {
+                    "workflow_run_id": "workflow-1",
+                    "source_document_ref": "source-document-1",
+                    "curation_item_ref": "curation-item-1",
+                    "source_claim_refs": ["claim-1"],
+                },
+                "source_claim_refs": ["claim-1"],
+                "embedding_text": "Claim:\nRuntime claim",
+                "score": 1.0,
+                "rank": 1,
+            }
+        ]
+    )
+
+    entries = await PostgresWorkbenchRagEvalRepository(
+        connection
+    ).list_published_entries_for_eval(
+        project_id="11111111-1111-1111-1111-111111111111",
+        publication_id=None,
+        source_document_ref=None,
+        limit=10,
+    )
+
+    assert connection.fetch_calls[0][0] == PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL
+    assert entries[0].runtime_entry_id == "runtime-entry-1"
+    assert entries[0].fact_id == "runtime-entry-1"
+    assert entries[0].claim == "Runtime claim"
+    assert entries[0].possible_questions == ("Question one?", "Question two?")
+    assert entries[0].exclusion_scope == "Not for internal-only policies"
+    assert entries[0].evidence_block == "Runtime evidence"
+    assert entries[0].source_claim_refs == ("claim-1",)
+    assert entries[0].source_ref.source_document_ref == "source-document-1"
+    assert entries[0].source_ref.curation_item_ref == "curation-item-1"
 
 
 @pytest.mark.asyncio
