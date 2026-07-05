@@ -10,31 +10,74 @@ import pytest
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL,
     WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL,
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL,
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL,
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL,
     WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL,
     PostgresWorkbenchRagEvalRepository,
 )
 
 
 @dataclass(slots=True)
+class FakeTransaction:
+    async def __aenter__(self) -> object:
+        return None
+
+    async def __aexit__(
+        self,
+        exc_type: object,
+        exc: object,
+        traceback: object,
+    ) -> bool | None:
+        return None
+
+
+@dataclass(slots=True)
 class FakeConnection:
     fetch_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+    fetchrow_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
+    execute_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     rows: list[Mapping[str, object]] = field(default_factory=list)
+    fetchrow_result: Mapping[str, object] | None = None
 
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
         self.fetch_calls.append((query, args))
         return self.rows
 
     async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
-        del query, args
-        return None
+        self.fetchrow_calls.append((query, args))
+        return self.fetchrow_result
 
     async def execute(self, query: str, *args: object) -> object:
-        del query, args
-        return None
+        self.execute_calls.append((query, args))
+        return "UPDATE 1"
+
+    def transaction(self) -> FakeTransaction:
+        return FakeTransaction()
 
 
 def _now() -> datetime:
     return datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+
+
+def _promotion_target_row() -> Mapping[str, object]:
+    return {
+        "promotion_id": "promotion-1",
+        "run_id": "run-1",
+        "question_id": "question-1",
+        "project_id": "11111111-1111-1111-1111-111111111111",
+        "target_runtime_entry_id": "runtime-entry-1",
+        "target_fact_id": "legacy-fact-1",
+        "question": "Как спросить иначе?",
+        "status": "candidate",
+        "created_at": _now(),
+        "applied_at": None,
+        "claim": "Runtime claim",
+        "runtime_possible_questions": ["Old question?"],
+        "fact_possible_questions": ["Old question?"],
+        "exclusion_scope": "Not for internal-only policies",
+        "existing_embedding_text": "Claim:\nRuntime claim",
+    }
 
 
 def test_repository_reads_published_workbench_runtime_entries_not_legacy_tables() -> (
@@ -83,6 +126,31 @@ def test_details_sql_reads_questions_results_and_candidates_without_legacy_table
     assert "answer_text" not in combined
     assert "knowledge_" + "retrieval_" + "surface" not in combined
     assert "knowledge_workbench_surfaces" not in combined
+
+
+def test_promotion_application_target_sql_reads_runtime_entries_only() -> None:
+    target_sqls = (
+        WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL,
+        WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL,
+        WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL,
+    )
+
+    for sql in target_sqls:
+        assert "knowledge_workbench_rag_eval_promoted_questions" in sql
+        assert "knowledge_workbench_runtime_retrieval_entries" in sql
+        assert "knowledge_workbench_canonical_facts" not in sql
+        assert "JOIN knowledge_workbench_canonical_facts" not in sql
+        assert "fact.status" not in sql
+        assert "fact.fact_id" not in sql
+        assert "entry.visibility = 'published'" in sql
+        assert "entry.status = 'active'" in sql
+        assert "entry.possible_questions AS runtime_possible_questions" in sql
+        assert "entry.possible_questions AS fact_possible_questions" in sql
+        assert "entry.exclusion_scope" in sql
+        assert "entry.evidence_block" in sql
+        assert "entry.triples" in sql
+        assert "entry.embedding_text AS existing_embedding_text" in sql
+        assert "FOR UPDATE OF promotion, entry, fact" not in sql
 
 
 @pytest.mark.asyncio
@@ -231,6 +299,42 @@ async def test_list_run_promotion_candidates_maps_candidates() -> None:
     assert candidates[0].promotion_id == "promotion-1"
     assert candidates[0].status.value == "candidate"
     assert candidates[0].applied_at is None
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_candidate_updates_runtime_entry_and_embedding_only() -> None:
+    connection = FakeConnection(fetchrow_result=_promotion_target_row())
+
+    result = await PostgresWorkbenchRagEvalRepository(
+        connection
+    ).apply_promotion_candidate(
+        project_id="11111111-1111-1111-1111-111111111111",
+        promotion_id="promotion-1",
+        embedding_model_id="text-embedding-3-small",
+        dimensions=2,
+        embedding=(0.1, 0.2),
+        embedding_text="Claim:\nRuntime claim\n\nPossible questions:\nOld question?\nHow ask?",
+        embedding_text_hash="hash-1",
+        applied_at=_now(),
+    )
+
+    executed_sql = "\n".join(query for query, _ in connection.execute_calls)
+    assert result.status.value == "applied"
+    assert result.possible_question_count == 2
+    assert "UPDATE knowledge_workbench_canonical_facts" not in executed_sql
+    assert "UPDATE knowledge_workbench_runtime_retrieval_entries" in executed_sql
+    assert "possible_questions = $3::jsonb" in executed_sql
+    assert "embedding_text = $4" in executed_sql
+    assert "visibility = 'published'" in executed_sql
+    assert "status = 'active'" in executed_sql
+    assert (
+        "DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings"
+        in executed_sql
+    )
+    assert (
+        "INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings"
+        in executed_sql
+    )
 
 
 def test_repository_source_does_not_use_legacy_rag_eval_or_answer_text() -> None:

@@ -152,27 +152,25 @@ SELECT
     promotion.applied_at,
     entry.claim,
     entry.possible_questions AS runtime_possible_questions,
+    entry.possible_questions AS fact_possible_questions,
+    entry.exclusion_scope,
+    entry.evidence_block,
+    entry.triples,
     entry.embedding_text AS existing_embedding_text,
-    fact.possible_questions AS fact_possible_questions,
-    fact.exclusion_scope
 FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
 JOIN knowledge_workbench_runtime_retrieval_entries AS entry
   ON entry.runtime_entry_id = promotion.target_runtime_entry_id
  AND entry.project_id = promotion.project_id
-JOIN knowledge_workbench_canonical_facts AS fact
-  ON fact.fact_id = promotion.target_fact_id
- AND fact.project_id = promotion.project_id
 WHERE promotion.project_id = $1::uuid
   AND promotion.promotion_id = $2
   AND entry.visibility = 'published'
   AND entry.status = 'active'
-  AND fact.status = 'published'
 """
 
 
 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL = (
     WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL
-    + " FOR UPDATE OF promotion, entry, fact"
+    + " FOR UPDATE OF promotion, entry"
 )
 
 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL = (
@@ -192,7 +190,7 @@ WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL = WORKBENCH_RAG_EVA
 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL = (
     WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL
     + " AND promotion.target_runtime_entry_id = $3"
-    + " FOR UPDATE OF promotion, entry, fact"
+    + " FOR UPDATE OF promotion, entry"
 )
 
 
@@ -611,24 +609,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     base.runtime_possible_questions,
                     tuple(target.question for target in targets),
                 )
-                fact_questions = _append_texts_once(
-                    base.fact_possible_questions,
-                    tuple(target.question for target in targets),
-                )
 
-                await connection.execute(
-                    """
-                    UPDATE knowledge_workbench_canonical_facts
-                    SET possible_questions = $3::jsonb,
-                        updated_at = $4
-                    WHERE project_id = $1::uuid
-                      AND fact_id = $2
-                    """,
-                    project_id,
-                    base.target_fact_id,
-                    _json_text_list(fact_questions),
-                    applied_at,
-                )
                 await connection.execute(
                     """
                     UPDATE knowledge_workbench_runtime_retrieval_entries
@@ -636,6 +617,8 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                         embedding_text = $4
                     WHERE project_id = $1::uuid
                       AND runtime_entry_id = $2
+                      AND visibility = 'published'
+                      AND status = 'active'
                     """,
                     project_id,
                     base.target_runtime_entry_id,
@@ -736,24 +719,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     target.runtime_possible_questions,
                     target.question,
                 )
-                fact_questions = _append_text_once(
-                    target.fact_possible_questions,
-                    target.question,
-                )
 
-                await connection.execute(
-                    """
-                    UPDATE knowledge_workbench_canonical_facts
-                    SET possible_questions = $3::jsonb,
-                        updated_at = $4
-                    WHERE project_id = $1::uuid
-                      AND fact_id = $2
-                    """,
-                    project_id,
-                    target.target_fact_id,
-                    _json_text_list(fact_questions),
-                    applied_at,
-                )
                 await connection.execute(
                     """
                     UPDATE knowledge_workbench_runtime_retrieval_entries
@@ -761,6 +727,8 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                         embedding_text = $4
                     WHERE project_id = $1::uuid
                       AND runtime_entry_id = $2
+                      AND visibility = 'published'
+                      AND status = 'active'
                     """,
                     project_id,
                     target.target_runtime_entry_id,
