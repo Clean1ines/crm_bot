@@ -26,7 +26,15 @@ class DraftClaimCurationPublicationTransactionLike(Protocol):
     ) -> bool | None: ...
 
 
+class DraftClaimCurationRuntimeEntryIdRowLike(Protocol):
+    def __getitem__(self, key: str) -> object: ...
+
+
 class DraftClaimCurationPublicationConnectionLike(Protocol):
+    async def fetch(
+        self, query: str, *args: object
+    ) -> list[DraftClaimCurationRuntimeEntryIdRowLike]: ...
+
     async def execute(self, query: str, *args: object) -> object: ...
 
     def transaction(self) -> DraftClaimCurationPublicationTransactionLike: ...
@@ -83,6 +91,7 @@ class PostgresDraftClaimCurationPublicationRepository(
         publication: DraftClaimCurationPublicationCandidate,
     ) -> DraftClaimCurationPublicationResult:
         async with connection.transaction():
+            await _deactivate_existing_runtime_projection(connection, publication)
             await _upsert_publication(connection, publication)
             await _upsert_fact_registry(connection, publication)
 
@@ -93,16 +102,6 @@ class PostgresDraftClaimCurationPublicationRepository(
                 await _replace_runtime_embedding(
                     connection, item, publication.published_at
                 )
-
-            deleted_draft_embeddings = _affected_count(
-                await connection.execute(
-                    """
-                    DELETE FROM draft_claim_embeddings
-                    WHERE workflow_run_id = $1
-                    """,
-                    publication.workflow_run_id,
-                )
-            )
 
             await connection.execute(
                 """
@@ -125,10 +124,53 @@ class PostgresDraftClaimCurationPublicationRepository(
             excluded_item_count=publication.excluded_item_count,
             runtime_entry_count=len(publication.items),
             embedding_count=len(publication.items),
-            deleted_draft_embedding_count=deleted_draft_embeddings,
+            deleted_draft_embedding_count=0,
             automatic_processing_elapsed_seconds=None,
             published_at=publication.published_at,
         )
+
+
+async def _deactivate_existing_runtime_projection(
+    connection: DraftClaimCurationPublicationConnectionLike,
+    publication: DraftClaimCurationPublicationCandidate,
+) -> None:
+    rows = await connection.fetch(
+        """
+        SELECT runtime_entry_id
+        FROM knowledge_workbench_runtime_retrieval_entries
+        WHERE workflow_run_id = $1
+        """,
+        publication.workflow_run_id,
+    )
+    runtime_entry_ids: list[str] = []
+    for row in rows:
+        try:
+            runtime_entry_id = row["runtime_entry_id"]
+        except KeyError:
+            continue
+        if runtime_entry_id:
+            runtime_entry_ids.append(str(runtime_entry_id))
+
+    if runtime_entry_ids:
+        await connection.execute(
+            """
+            DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings
+            WHERE runtime_entry_id = ANY($1::text[])
+            """,
+            runtime_entry_ids,
+        )
+
+    await connection.execute(
+        """
+        UPDATE knowledge_workbench_runtime_retrieval_entries
+        SET visibility = 'hidden',
+            status = 'inactive',
+            updated_at = $2
+        WHERE workflow_run_id = $1
+        """,
+        publication.workflow_run_id,
+        publication.published_at,
+    )
 
 
 async def _upsert_publication(
