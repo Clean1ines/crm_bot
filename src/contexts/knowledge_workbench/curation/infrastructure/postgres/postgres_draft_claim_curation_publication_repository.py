@@ -159,11 +159,11 @@ async def _upsert_fact_registry(
     await connection.execute(
         """
         INSERT INTO knowledge_workbench_fact_registries (
-            fact_registry_id, project_id, document_id, processing_run_id,
+            registry_id, project_id, document_id, processing_run_id,
             status, version, retention_state, created_at, updated_at
         )
         VALUES ($1, $2::uuid, $3, NULL, 'published', 1, 'runtime_published', $4, $4)
-        ON CONFLICT (fact_registry_id) DO UPDATE
+        ON CONFLICT (registry_id) DO UPDATE
         SET status = 'published',
             retention_state = 'runtime_published',
             updated_at = EXCLUDED.updated_at
@@ -183,7 +183,7 @@ async def _upsert_fact(
     await connection.execute(
         """
         INSERT INTO knowledge_workbench_canonical_facts (
-            fact_id, fact_registry_id, project_id, document_id, processing_run_id,
+            fact_id, registry_id, project_id, document_id, processing_run_id,
             claim, claim_kind, granularity, possible_questions, scope,
             exclusion_scope, derived_fact_notes, status, retention_state,
             created_at, updated_at
@@ -228,7 +228,7 @@ async def _replace_fact_triples(
         await connection.execute(
             """
             INSERT INTO knowledge_workbench_fact_triples (
-                triple_id, fact_id, fact_registry_id, subject,
+                triple_id, fact_id, registry_id, subject,
                 predicate, object, qualifiers, created_at
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
@@ -254,28 +254,57 @@ async def _upsert_runtime_entry(
     await connection.execute(
         """
         INSERT INTO knowledge_workbench_runtime_retrieval_entries (
-            runtime_entry_id, project_id, fact_id, claim, possible_questions,
-            answer_text, embedding_text, source_refs, visibility, status, created_at
+            runtime_entry_id, project_id, fact_id, publication_id, workflow_run_id,
+            source_document_ref, curation_item_ref, claim, claim_kind, granularity,
+            possible_questions, exclusion_scope, evidence_block, triples,
+            source_claim_refs, answer_text, embedding_text, source_refs,
+            visibility, status, created_at, updated_at
         )
-        VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6, $7, $8::jsonb, 'published', 'active', $9)
+        VALUES (
+            $1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+            $11::jsonb, $12, $13, $14::jsonb, $15::jsonb, $16,
+            $17, $18::jsonb, 'published', 'active', $19, $19
+        )
         ON CONFLICT (runtime_entry_id) DO UPDATE
-        SET claim = EXCLUDED.claim,
+        SET publication_id = EXCLUDED.publication_id,
+            workflow_run_id = EXCLUDED.workflow_run_id,
+            source_document_ref = EXCLUDED.source_document_ref,
+            curation_item_ref = EXCLUDED.curation_item_ref,
+            claim = EXCLUDED.claim,
+            claim_kind = EXCLUDED.claim_kind,
+            granularity = EXCLUDED.granularity,
             possible_questions = EXCLUDED.possible_questions,
+            exclusion_scope = EXCLUDED.exclusion_scope,
+            evidence_block = EXCLUDED.evidence_block,
+            triples = EXCLUDED.triples,
+            source_claim_refs = EXCLUDED.source_claim_refs,
             answer_text = EXCLUDED.answer_text,
             embedding_text = EXCLUDED.embedding_text,
             source_refs = EXCLUDED.source_refs,
             visibility = 'published',
-            status = 'active'
+            status = 'active',
+            updated_at = EXCLUDED.updated_at
         """,
         item.runtime_entry_id,
         publication.project_id,
         item.fact_id,
+        publication.publication_id,
+        publication.workflow_run_id,
+        publication.source_document_ref,
+        item.item_ref,
         item.claim,
+        item.claim_kind,
+        item.granularity,
         json.dumps(list(item.possible_questions), ensure_ascii=False),
+        item.exclusion_scope,
+        item.evidence_block,
+        json.dumps(list(item.triples), ensure_ascii=False),
+        json.dumps(list(item.source_claim_refs), ensure_ascii=False),
         item.claim,
         item.embedding_text,
         json.dumps(
             {
+                "publication_id": publication.publication_id,
                 "workflow_run_id": publication.workflow_run_id,
                 "source_document_ref": publication.source_document_ref,
                 "curation_item_ref": item.item_ref,

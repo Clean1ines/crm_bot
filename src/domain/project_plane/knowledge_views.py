@@ -57,9 +57,16 @@ class KnowledgeSearchResultView:
     source: str | None = None
     document_status: str | None = None
     entry_kind: str | None = None
+    granularity: str | None = None
+    curation_item_ref: str | None = None
+    exclusion_scope: str | None = None
+    evidence_block: str | None = None
+    triples: object | None = None
     title: str | None = None
     source_excerpt: str | None = None
     source_refs: tuple[SourceRefView, ...] = ()
+    raw_source_refs: object | None = None
+    source_claim_refs: object | None = None
     embedding_text: str | None = None
     questions: object | None = None
     synonyms: object | None = None

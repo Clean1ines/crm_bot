@@ -5,13 +5,27 @@
 
 _RUNTIME_ENTRY_SELECT = """
     entry.runtime_entry_id AS id,
+    entry.project_id::text AS project_id,
     entry.claim AS content,
-    entry.source_refs->>'source_document_ref' AS document_id,
-    entry.source_refs->>'source_document_ref' AS source,
+    entry.source_document_ref AS document_id,
+    entry.source_document_ref AS source,
     entry.status AS document_status,
-    COALESCE(NULLIF(fact.claim_kind, ''), 'faq_workbench_fact') AS entry_kind,
+    COALESCE(NULLIF(entry.claim_kind, ''), 'faq_workbench_fact') AS entry_kind,
+    entry.granularity,
+    entry.curation_item_ref,
+    entry.exclusion_scope,
+    entry.evidence_block,
+    entry.triples,
     NULL::text AS title,
-    entry.source_refs->'source_claim_refs' AS source_refs,
+    CASE
+        WHEN jsonb_typeof(entry.source_refs) = 'array'
+        THEN entry.source_refs
+        WHEN jsonb_typeof(entry.source_refs->'source_refs') = 'array'
+        THEN entry.source_refs->'source_refs'
+        ELSE '[]'::jsonb
+    END AS source_refs,
+    entry.source_refs AS raw_source_refs,
+    entry.source_claim_refs,
     entry.embedding_text,
     entry.possible_questions AS questions,
     '[]'::jsonb AS synonyms,
@@ -23,9 +37,11 @@ _RUNTIME_ENTRY_SELECT = """
         || ' '
         || COALESCE(questions_text.value, '')
         || ' '
-        || COALESCE(NULLIF(fact.exclusion_scope, ''), '')
+        || COALESCE(questions_text.value, '')
         || ' '
-        || COALESCE(NULLIF(evidence.evidence_block, ''), '')
+        || COALESCE(entry.triples::text, '')
+        || ' '
+        || COALESCE(NULLIF(entry.evidence_block, ''), '')
     ) AS search_text
 """
 
@@ -33,24 +49,16 @@ _RUNTIME_ENTRY_FROM = """
 FROM knowledge_workbench_runtime_retrieval_entries AS entry
 JOIN knowledge_workbench_runtime_retrieval_entry_embeddings AS emb
   ON emb.runtime_entry_id = entry.runtime_entry_id
-JOIN knowledge_workbench_canonical_facts AS fact
-  ON fact.fact_id = entry.fact_id
 LEFT JOIN LATERAL (
     SELECT string_agg(question_text.value, ' ') AS value
     FROM jsonb_array_elements_text(entry.possible_questions) AS question_text(value)
 ) AS questions_text ON TRUE
-LEFT JOIN LATERAL (
-    SELECT string_agg(NULLIF(mention.evidence_block, ''), E'\\n') AS evidence_block
-    FROM knowledge_workbench_fact_mentions AS mention
-    WHERE mention.fact_id = entry.fact_id
-) AS evidence ON TRUE
 """
 
 _RUNTIME_ENTRY_WHERE = """
 WHERE entry.project_id = $2::uuid
   AND entry.visibility = 'published'
   AND entry.status = 'active'
-  AND fact.status = 'published'
   AND emb.embedding_model_id IS NOT NULL
   AND emb.embedding IS NOT NULL
 """
@@ -118,13 +126,21 @@ lexical_candidates AS (
 candidates AS (
     SELECT
         id,
+        project_id,
         content,
         document_id,
         source,
         document_status,
         entry_kind,
+        granularity,
+        curation_item_ref,
+        exclusion_scope,
+        evidence_block,
+        triples,
         title,
         source_refs,
+        raw_source_refs,
+        source_claim_refs,
         embedding_text,
         questions,
         synonyms,
@@ -140,13 +156,21 @@ candidates AS (
 
     SELECT
         id,
+        project_id,
         content,
         document_id,
         source,
         document_status,
         entry_kind,
+        granularity,
+        curation_item_ref,
+        exclusion_scope,
+        evidence_block,
+        triples,
         title,
         source_refs,
+        raw_source_refs,
+        source_claim_refs,
         embedding_text,
         questions,
         synonyms,
@@ -161,13 +185,21 @@ candidates AS (
 merged AS (
     SELECT
         id,
+        max(project_id) AS project_id,
         max(content) AS content,
         max(document_id) AS document_id,
         max(source) AS source,
         max(document_status) AS document_status,
         max(entry_kind) AS entry_kind,
+        max(granularity) AS granularity,
+        max(curation_item_ref) AS curation_item_ref,
+        max(exclusion_scope) AS exclusion_scope,
+        max(evidence_block) AS evidence_block,
+        (jsonb_agg(triples)->0) AS triples,
         max(title) AS title,
         (jsonb_agg(source_refs)->0) AS source_refs,
+        (jsonb_agg(raw_source_refs)->0) AS raw_source_refs,
+        (jsonb_agg(source_claim_refs)->0) AS source_claim_refs,
         max(embedding_text) AS embedding_text,
         (jsonb_agg(questions)->0) AS questions,
         (jsonb_agg(synonyms)->0) AS synonyms,
@@ -182,13 +214,21 @@ merged AS (
 )
 SELECT
     id,
+    project_id,
     content,
     document_id,
     source,
     document_status,
     entry_kind,
+    granularity,
+    curation_item_ref,
+    exclusion_scope,
+    evidence_block,
+    triples,
     title,
     source_refs,
+    raw_source_refs,
+    source_claim_refs,
     embedding_text,
     questions,
     synonyms,
@@ -224,13 +264,27 @@ WITH q AS (
 base AS (
     SELECT
         entry.runtime_entry_id AS id,
+        entry.project_id::text AS project_id,
         entry.claim AS content,
-        entry.source_refs->>'source_document_ref' AS document_id,
-        entry.source_refs->>'source_document_ref' AS source,
+        entry.source_document_ref AS document_id,
+        entry.source_document_ref AS source,
         entry.status AS document_status,
-        COALESCE(NULLIF(fact.claim_kind, ''), 'faq_workbench_fact') AS entry_kind,
+        COALESCE(NULLIF(entry.claim_kind, ''), 'faq_workbench_fact') AS entry_kind,
+        entry.granularity,
+        entry.curation_item_ref,
+        entry.exclusion_scope,
+        entry.evidence_block,
+        entry.triples,
         NULL::text AS title,
-        entry.source_refs->'source_claim_refs' AS source_refs,
+        CASE
+            WHEN jsonb_typeof(entry.source_refs) = 'array'
+            THEN entry.source_refs
+            WHEN jsonb_typeof(entry.source_refs->'source_refs') = 'array'
+            THEN entry.source_refs->'source_refs'
+            ELSE '[]'::jsonb
+        END AS source_refs,
+        entry.source_refs AS raw_source_refs,
+        entry.source_claim_refs,
         entry.embedding_text,
         entry.possible_questions AS questions,
         '[]'::jsonb AS synonyms,
@@ -242,27 +296,25 @@ base AS (
             || ' '
             || COALESCE(questions_text.value, '')
             || ' '
-            || COALESCE(NULLIF(fact.exclusion_scope, ''), '')
+            || COALESCE(questions_text.value, '')
             || ' '
-            || COALESCE(NULLIF(evidence.evidence_block, ''), '')
+            || COALESCE(entry.triples::text, '')
+            || ' '
+            || COALESCE(NULLIF(entry.evidence_block, ''), '')
         ) AS search_text
     FROM knowledge_workbench_runtime_retrieval_entries AS entry
-    JOIN knowledge_workbench_canonical_facts AS fact
-      ON fact.fact_id = entry.fact_id
+    JOIN knowledge_workbench_runtime_retrieval_entry_embeddings AS emb
+      ON emb.runtime_entry_id = entry.runtime_entry_id
     LEFT JOIN LATERAL (
         SELECT string_agg(question_text.value, ' ') AS value
         FROM jsonb_array_elements_text(entry.possible_questions) AS question_text(value)
-    ) AS questions_text ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT string_agg(NULLIF(mention.evidence_block, ''), E'\\n') AS evidence_block
-        FROM knowledge_workbench_fact_mentions AS mention
-        WHERE mention.fact_id = entry.fact_id
-    ) AS evidence ON TRUE,
+    ) AS questions_text ON TRUE,
     q
     WHERE entry.project_id = $2::uuid
       AND entry.visibility = 'published'
       AND entry.status = 'active'
-      AND fact.status = 'published'
+      AND emb.embedding_model_id IS NOT NULL
+      AND emb.embedding IS NOT NULL
       AND $4::text[] IS NOT NULL
 ),
 scored AS (
@@ -282,13 +334,21 @@ scored AS (
 )
 SELECT
     id,
+    project_id,
     content,
     document_id,
     source,
     document_status,
     entry_kind,
+    granularity,
+    curation_item_ref,
+    exclusion_scope,
+    evidence_block,
+    triples,
     title,
     source_refs,
+    raw_source_refs,
+    source_claim_refs,
     embedding_text,
     questions,
     synonyms,
