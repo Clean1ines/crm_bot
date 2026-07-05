@@ -237,6 +237,30 @@ async def test_publish_replay_returns_existing_result_without_reembedding() -> N
 
 
 @pytest.mark.asyncio
+async def test_publish_needs_republish_regenerates_runtime_entries() -> None:
+    publication_repo = FakePublicationRepository()
+    embedding_port = FakeEmbeddingPort()
+
+    result = await PublishDraftClaimCurationWorkspace(
+        curation_workspace_repository=FakeWorkspaceRepository(
+            snapshot=_snapshot(
+                items=(_item(),),
+                status=DraftClaimCurationWorkspaceStatus.NEEDS_REPUBLISH,
+            )
+        ),
+        curation_publication_repository=publication_repo,
+        embedding_generation_port=embedding_port,
+        embedding_model_id="test-model",
+        embedding_dimensions=384,
+    ).execute(workflow_run_id="workflow-1", published_at=_now())
+
+    assert result.status == "published"
+    assert publication_repo.candidate is not None
+    assert result.published_item_count == 1
+    assert len(embedding_port.requests) == 1
+
+
+@pytest.mark.asyncio
 async def test_publish_empty_workspace_raises() -> None:
     with pytest.raises(DraftClaimCurationPublicationEmptyError):
         await PublishDraftClaimCurationWorkspace(

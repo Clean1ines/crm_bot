@@ -195,6 +195,26 @@ class PostgresDraftClaimCurationWorkspaceRepository(
             raise ValueError("draft claim curation item was not found")
         return _item(row)
 
+    async def mark_workspace_needs_republish_if_published(
+        self,
+        *,
+        workspace_ref: str,
+        updated_at: datetime,
+    ) -> None:
+        await self._connection.execute(
+            """
+            UPDATE draft_claim_curation_workspaces
+            SET status = $2,
+                updated_at = $3
+            WHERE workspace_ref = $1
+              AND status = $4
+            """,
+            workspace_ref,
+            DraftClaimCurationWorkspaceStatus.NEEDS_REPUBLISH.value,
+            updated_at,
+            DraftClaimCurationWorkspaceStatus.PUBLISHED.value,
+        )
+
 
 _ITEM_SELECT = """
 SELECT item_ref, workspace_ref, workflow_run_id, group_ref, compacted_node_ref,

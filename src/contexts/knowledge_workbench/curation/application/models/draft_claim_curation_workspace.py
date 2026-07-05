@@ -16,6 +16,7 @@ from src.domain.project_plane.json_types import JsonObject, JsonValue
 
 class DraftClaimCurationWorkspaceStatus(StrEnum):
     DRAFT = "draft"
+    NEEDS_REPUBLISH = "needs_republish"
     PUBLISHED = "published"
 
 

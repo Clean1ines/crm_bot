@@ -53,3 +53,10 @@ class DraftClaimCurationWorkspaceRepositoryPort(Protocol):
         exclusion_reason: str | None,
         updated_at: datetime,
     ) -> DraftClaimCurationWorkspaceItem: ...
+
+    async def mark_workspace_needs_republish_if_published(
+        self,
+        *,
+        workspace_ref: str,
+        updated_at: datetime,
+    ) -> None: ...

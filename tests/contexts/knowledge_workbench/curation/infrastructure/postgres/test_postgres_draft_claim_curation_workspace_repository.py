@@ -115,6 +115,17 @@ class FakeConnection:
             row["exclusion_reason"] = args[2]
             row["updated_at"] = args[3]
             return "UPDATE 1"
+        if "UPDATE draft_claim_curation_workspaces" in query:
+            row = next(
+                item
+                for item in self.workspaces.values()
+                if item["workspace_ref"] == _str(args[0])
+            )
+            if row["status"] == args[3]:
+                row["status"] = args[1]
+                row["updated_at"] = args[2]
+                return "UPDATE 1"
+            return "UPDATE 0"
         raise AssertionError(query)
 
     async def fetchrow(self, query: str, *args: object) -> Mapping[str, object] | None:
@@ -186,3 +197,25 @@ async def test_update_payload_and_exclusion_return_current_item() -> None:
     )
     assert excluded.excluded is True
     assert excluded.exclusion_reason == "duplicate"
+
+
+@pytest.mark.asyncio
+async def test_mark_workspace_needs_republish_only_when_published() -> None:
+    connection = FakeConnection()
+    repository = PostgresDraftClaimCurationWorkspaceRepository(connection)
+    await repository.create_workspace(workspace=_workspace(), items=(_item(),))
+
+    await repository.mark_workspace_needs_republish_if_published(
+        workspace_ref="workspace-1",
+        updated_at=_now(),
+    )
+    workspace_row = next(iter(connection.workspaces.values()))
+    assert workspace_row["status"] == "draft"
+
+    workspace_row["status"] = "published"
+    await repository.mark_workspace_needs_republish_if_published(
+        workspace_ref="workspace-1",
+        updated_at=_now(),
+    )
+
+    assert workspace_row["status"] == "needs_republish"

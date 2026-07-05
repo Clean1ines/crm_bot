@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
+    DraftClaimCurationWorkspaceStatus,
     DraftClaimCurationWorkspaceItem,
 )
 from src.contexts.knowledge_workbench.curation.application.ports.draft_claim_curation_workspace_repository_port import (
@@ -44,9 +45,15 @@ class SetDraftClaimCurationItemExcluded:
         reason = exclusion_reason.strip() if isinstance(exclusion_reason, str) else None
         if reason == "":
             reason = None
-        return await self.curation_workspace_repository.set_item_excluded(
+        updated_item = await self.curation_workspace_repository.set_item_excluded(
             item_ref=item_ref,
             excluded=excluded,
             exclusion_reason=reason,
             updated_at=updated_at,
         )
+        if snapshot.workspace.status is DraftClaimCurationWorkspaceStatus.PUBLISHED:
+            await self.curation_workspace_repository.mark_workspace_needs_republish_if_published(
+                workspace_ref=snapshot.workspace.workspace_ref,
+                updated_at=updated_at,
+            )
+        return updated_item

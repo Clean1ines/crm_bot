@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -1929,6 +1929,35 @@ class _FakeCurationWorkspaceRepository:
         )
         return updated
 
+    async def mark_workspace_needs_republish_if_published(
+        self,
+        *,
+        workspace_ref: str,
+        updated_at: datetime,
+    ) -> None:
+        snapshot = _FakeCurationWorkspaceRepository.snapshot
+        assert snapshot is not None
+        if snapshot.workspace.workspace_ref != workspace_ref:
+            return
+        if snapshot.workspace.status.value != "published":
+            return
+
+        from dataclasses import replace
+
+        from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
+            DraftClaimCurationWorkspaceSnapshot,
+            DraftClaimCurationWorkspaceStatus,
+        )
+
+        _FakeCurationWorkspaceRepository.snapshot = DraftClaimCurationWorkspaceSnapshot(
+            workspace=replace(
+                snapshot.workspace,
+                status=DraftClaimCurationWorkspaceStatus.NEEDS_REPUBLISH,
+                updated_at=updated_at,
+            ),
+            items=snapshot.items,
+        )
+
 
 @dataclass(slots=True)
 class _FakeCompactionReductionRepository:
@@ -2139,6 +2168,60 @@ async def test_update_curation_item_rejects_source_claim_refs_edit(
         )
 
     assert exc_info.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_update_published_curation_workspace_marks_needs_republish_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_current_user_id(authorization: str | None) -> str:
+        return "user-1"
+
+    monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
+    _patch_curation_http_repositories(monkeypatch)
+    await knowledge.open_draft_claim_curation_workspace(
+        project_id="project-1",
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+    snapshot = _FakeCurationWorkspaceRepository.snapshot
+    assert snapshot is not None
+    from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
+        DraftClaimCurationWorkspaceSnapshot,
+        DraftClaimCurationWorkspaceStatus,
+    )
+
+    _FakeCurationWorkspaceRepository.snapshot = DraftClaimCurationWorkspaceSnapshot(
+        workspace=replace(
+            snapshot.workspace,
+            status=DraftClaimCurationWorkspaceStatus.PUBLISHED,
+        ),
+        items=snapshot.items,
+    )
+    item_ref = snapshot.items[0].item_ref
+
+    response = await knowledge.update_draft_claim_curation_item(
+        project_id="project-1",
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        item_ref=item_ref,
+        updates={"claim": "Product supports managed refunds."},
+        authorization="Bearer valid-token",
+        pool=object(),
+        project_repo=_FakeProjectRepo(),
+        user_repo=_user_repo(),
+    )
+
+    assert response["item"]["editable_payload"]["claim"] == (
+        "Product supports managed refunds."
+    )
+    assert _FakeCurationWorkspaceRepository.snapshot is not None
+    assert (
+        _FakeCurationWorkspaceRepository.snapshot.workspace.status
+        is DraftClaimCurationWorkspaceStatus.NEEDS_REPUBLISH
+    )
 
 
 @pytest.mark.asyncio

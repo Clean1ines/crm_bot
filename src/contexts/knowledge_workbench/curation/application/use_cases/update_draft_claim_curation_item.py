@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
+    DraftClaimCurationWorkspaceStatus,
     DraftClaimCurationWorkspaceItem,
 )
 from src.contexts.knowledge_workbench.curation.application.ports.draft_claim_curation_workspace_repository_port import (
@@ -37,11 +38,17 @@ class UpdateDraftClaimCurationItem:
             raise DraftClaimCurationItemUpdateError("curation workspace was not found")
         item = _item_from_snapshot(snapshot.items, item_ref)
         editable_payload = item.editable_payload.with_editable_updates(updates)
-        return await self.curation_workspace_repository.replace_item_editable_payload(
+        updated_item = await self.curation_workspace_repository.replace_item_editable_payload(
             item_ref=item_ref,
             editable_payload=editable_payload,
             updated_at=updated_at,
         )
+        if snapshot.workspace.status is DraftClaimCurationWorkspaceStatus.PUBLISHED:
+            await self.curation_workspace_repository.mark_workspace_needs_republish_if_published(
+                workspace_ref=snapshot.workspace.workspace_ref,
+                updated_at=updated_at,
+            )
+        return updated_item
 
 
 def _item_from_snapshot(

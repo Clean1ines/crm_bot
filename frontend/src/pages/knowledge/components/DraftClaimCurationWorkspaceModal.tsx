@@ -254,6 +254,8 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
   const itemCount = items.length;
   const excludedCount = items.filter((item) => item.excluded).length;
   const publishableCount = itemCount - excludedCount;
+  const workspaceStatus = workspace?.workspace.status;
+  const needsRepublish = workspaceStatus === 'needs_republish';
   const isMutating =
     saveMutation.isPending ||
     excludeMutation.isPending ||
@@ -261,7 +263,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
     publishMutation.isPending;
   const publishDisabled =
     !workspace ||
-    workspace.workspace.status === 'published' ||
+    workspaceStatus === 'published' ||
     publishableCount <= 0 ||
     publishMutation.isPending;
 
@@ -286,6 +288,11 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
               <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
                 workspace: {workspace.workspace.status}
               </span>
+              {needsRepublish && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
+                  изменено после публикации
+                </span>
+              )}
               <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
                 всего знаний: {formatNumber(itemCount)}
               </span>
@@ -301,11 +308,13 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
             type="button"
             disabled={publishDisabled}
             title={
-              workspace?.workspace.status === 'published'
+              workspaceStatus === 'published'
                 ? 'Workspace уже опубликован'
                 : publishableCount <= 0
                   ? 'Нет знаний для публикации'
-                  : 'Опубликовать curated compacted claims в runtime retrieval'
+                  : needsRepublish
+                    ? 'Переопубликовать изменённые curated claims'
+                    : 'Опубликовать curated compacted claims в runtime retrieval'
             }
             onClick={() => publishMutation.mutate()}
             className="mt-3 rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-medium text-white disabled:bg-[var(--control-bg)] disabled:text-[var(--text-muted)] disabled:opacity-60"

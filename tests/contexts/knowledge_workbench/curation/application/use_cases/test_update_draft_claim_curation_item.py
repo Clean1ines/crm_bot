@@ -66,6 +66,8 @@ def _item() -> DraftClaimCurationWorkspaceItem:
 
 def _snapshot(
     item: DraftClaimCurationWorkspaceItem,
+    *,
+    status: DraftClaimCurationWorkspaceStatus = DraftClaimCurationWorkspaceStatus.DRAFT,
 ) -> DraftClaimCurationWorkspaceSnapshot:
     return DraftClaimCurationWorkspaceSnapshot(
         workspace=DraftClaimCurationWorkspace(
@@ -73,7 +75,7 @@ def _snapshot(
             workflow_run_id="workflow-1",
             project_id="project-1",
             source_document_ref=None,
-            status=DraftClaimCurationWorkspaceStatus.DRAFT,
+            status=status,
             created_at=_now(),
             updated_at=_now(),
         ),
@@ -84,6 +86,8 @@ def _snapshot(
 @dataclass(slots=True)
 class FakeRepository:
     item: DraftClaimCurationWorkspaceItem
+    status: DraftClaimCurationWorkspaceStatus = DraftClaimCurationWorkspaceStatus.DRAFT
+    marked_needs_republish: bool = False
 
     async def get_workspace_by_workflow_run_id(
         self,
@@ -91,7 +95,7 @@ class FakeRepository:
         workflow_run_id: str,
     ) -> DraftClaimCurationWorkspaceSnapshot | None:
         del workflow_run_id
-        return _snapshot(self.item)
+        return _snapshot(self.item, status=self.status)
 
     async def replace_item_editable_payload(
         self,
@@ -116,6 +120,18 @@ class FakeRepository:
             updated_at=updated_at,
         )
         return self.item
+
+    async def mark_workspace_needs_republish_if_published(
+        self,
+        *,
+        workspace_ref: str,
+        updated_at: datetime,
+    ) -> None:
+        assert workspace_ref == self.item.workspace_ref
+        assert updated_at == _now()
+        if self.status is DraftClaimCurationWorkspaceStatus.PUBLISHED:
+            self.status = DraftClaimCurationWorkspaceStatus.NEEDS_REPUBLISH
+            self.marked_needs_republish = True
 
     async def set_item_excluded(
         self,
@@ -145,7 +161,8 @@ class FakeRepository:
 
 @pytest.mark.asyncio
 async def test_update_item_allows_only_editable_publishable_fields() -> None:
-    updated = await UpdateDraftClaimCurationItem(FakeRepository(item=_item())).execute(
+    repository = FakeRepository(item=_item())
+    updated = await UpdateDraftClaimCurationItem(repository).execute(
         workflow_run_id="workflow-1",
         item_ref="item-1",
         updates={
@@ -164,6 +181,7 @@ async def test_update_item_allows_only_editable_publishable_fields() -> None:
     assert payload["evidence_block"] == "Updated evidence"
     assert payload["source_claim_refs"] == ["claim-a"]
     assert payload["merge_decision"] == "merged"
+    assert repository.marked_needs_republish is False
 
 
 @pytest.mark.asyncio
@@ -200,3 +218,59 @@ async def test_exclude_and_include_item() -> None:
     )
     assert included.excluded is False
     assert included.exclusion_reason is None
+
+
+@pytest.mark.asyncio
+async def test_update_published_workspace_marks_needs_republish() -> None:
+    repository = FakeRepository(
+        item=_item(),
+        status=DraftClaimCurationWorkspaceStatus.PUBLISHED,
+    )
+
+    await UpdateDraftClaimCurationItem(repository).execute(
+        workflow_run_id="workflow-1",
+        item_ref="item-1",
+        updates={"claim": "Product supports managed refunds."},
+        updated_at=_now(),
+    )
+
+    assert repository.status is DraftClaimCurationWorkspaceStatus.NEEDS_REPUBLISH
+    assert repository.marked_needs_republish is True
+
+
+@pytest.mark.asyncio
+async def test_exclude_published_workspace_marks_needs_republish() -> None:
+    repository = FakeRepository(
+        item=_item(),
+        status=DraftClaimCurationWorkspaceStatus.PUBLISHED,
+    )
+
+    await SetDraftClaimCurationItemExcluded(repository).execute(
+        workflow_run_id="workflow-1",
+        item_ref="item-1",
+        excluded=True,
+        exclusion_reason="duplicate",
+        updated_at=_now(),
+    )
+
+    assert repository.status is DraftClaimCurationWorkspaceStatus.NEEDS_REPUBLISH
+    assert repository.marked_needs_republish is True
+
+
+@pytest.mark.asyncio
+async def test_include_published_workspace_marks_needs_republish() -> None:
+    repository = FakeRepository(
+        item=_item(),
+        status=DraftClaimCurationWorkspaceStatus.PUBLISHED,
+    )
+
+    await SetDraftClaimCurationItemExcluded(repository).execute(
+        workflow_run_id="workflow-1",
+        item_ref="item-1",
+        excluded=False,
+        exclusion_reason=None,
+        updated_at=_now(),
+    )
+
+    assert repository.status is DraftClaimCurationWorkspaceStatus.NEEDS_REPUBLISH
+    assert repository.marked_needs_republish is True
