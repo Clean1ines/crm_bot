@@ -50,7 +50,8 @@ def _row(
         "curation_item_ref": "item-1",
         "source_claim_refs": ["raw-1", "raw-2"],
         "exclusion_scope": "Not for internal policy",
-        "evidence_block": None,
+        "evidence_block": "Runtime evidence block",
+        "triples": [{"subject": "A", "predicate": "is", "object": "B"}],
         "score": 0.875,
         "rank": 1,
     }
@@ -82,8 +83,12 @@ async def test_postgres_adapter_fetches_new_published_projection_only() -> None:
     assert results[0].publication_id == "draft-claim-curation-publication:workflow-1"
     assert results[0].fact_id == "fact-1"
     assert results[0].possible_questions == ("Question one?", "Question two?")
+    assert results[0].exclusion_scope == "Not for internal policy"
+    assert results[0].evidence_block == "Runtime evidence block"
     assert results[0].source_claim_refs == ("raw-1", "raw-2")
     assert results[0].source_ref.workflow_run_id == "workflow-1"
+    assert results[0].source_ref.source_document_ref == "source-document-1"
+    assert results[0].source_ref.curation_item_ref == "item-1"
 
 
 def test_sql_uses_runtime_entry_embeddings_and_filters_runtime_visibility() -> None:
@@ -91,16 +96,24 @@ def test_sql_uses_runtime_entry_embeddings_and_filters_runtime_visibility() -> N
 
     assert "knowledge_workbench_runtime_retrieval_entry_embeddings" in sql
     assert "knowledge_workbench_runtime_retrieval_entries" in sql
-    assert "knowledge_workbench_canonical_facts" in sql
+    assert "knowledge_workbench_canonical_facts" not in sql
+    assert "fact.status" not in sql
+    assert "JOIN knowledge_workbench_canonical_facts" not in sql
+    assert "fact.fact_id" not in sql
     assert "knowledge_" + "retrieval_" + "surface" not in sql
     assert "knowledge_workbench_surfaces" not in sql
     assert "entry.project_id = $1::uuid" in sql
     assert "entry.visibility = 'published'" in sql
     assert "entry.status = 'active'" in sql
-    assert "fact.status = 'published'" in sql
     assert "emb.embedding_model_id = $2" in sql
     assert "emb.dimensions = $3" in sql
     assert "emb.embedding <=> $4::vector" in sql
+    assert "entry.exclusion_scope" in sql
+    assert "entry.evidence_block" in sql
+    assert "entry.source_claim_refs" in sql
+    assert "entry.source_document_ref" in sql
+    assert "entry.curation_item_ref" in sql
+    assert "entry.triples" in sql
 
 
 def test_adapter_source_does_not_import_old_runtime_repository() -> None:

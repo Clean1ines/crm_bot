@@ -17,34 +17,28 @@ from src.contexts.knowledge_workbench.retrieval.application.ports.published_work
 PUBLISHED_WORKBENCH_VECTOR_SEARCH_SQL = """
 SELECT
     entry.runtime_entry_id,
-    CASE
-        WHEN entry.source_refs ? 'workflow_run_id'
-        THEN 'draft-claim-curation-publication:' || (entry.source_refs->>'workflow_run_id')
-        ELSE NULL
-    END AS publication_id,
+    entry.publication_id,
     entry.project_id::text AS project_id,
-    entry.fact_id,
+    COALESCE(NULLIF(entry.fact_id, ''), entry.runtime_entry_id) AS fact_id,
     entry.claim,
     entry.possible_questions,
     entry.embedding_text,
     entry.source_refs,
-    entry.source_refs->>'workflow_run_id' AS workflow_run_id,
-    entry.source_refs->>'source_document_ref' AS source_document_ref,
-    entry.source_refs->>'curation_item_ref' AS curation_item_ref,
-    entry.source_refs->'source_claim_refs' AS source_claim_refs,
-    fact.exclusion_scope,
-    NULL::text AS evidence_block,
+    entry.workflow_run_id,
+    entry.source_document_ref,
+    entry.curation_item_ref,
+    entry.source_claim_refs,
+    entry.exclusion_scope,
+    entry.evidence_block,
+    entry.triples,
     (1 - (emb.embedding <=> $4::vector)) AS score,
     row_number() OVER (ORDER BY emb.embedding <=> $4::vector) AS rank
 FROM knowledge_workbench_runtime_retrieval_entry_embeddings AS emb
 JOIN knowledge_workbench_runtime_retrieval_entries AS entry
   ON entry.runtime_entry_id = emb.runtime_entry_id
-JOIN knowledge_workbench_canonical_facts AS fact
-  ON fact.fact_id = entry.fact_id
 WHERE entry.project_id = $1::uuid
   AND entry.visibility = 'published'
   AND entry.status = 'active'
-  AND fact.status = 'published'
   AND emb.embedding_model_id = $2
   AND emb.dimensions = $3
 ORDER BY emb.embedding <=> $4::vector
