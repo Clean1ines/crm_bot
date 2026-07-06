@@ -37,32 +37,26 @@ export type KnowledgeSearchTrace = {
   is_production_safe: boolean;
 };
 
-export type KnowledgePreviewResult = {
+export type KnowledgePreviewDebugFact = {
   id: string;
   content: string;
-  answer: string;
   score: number;
   method: string;
   source: string | null;
-  document_id: string | null;
-  document_status: string | null;
   entry_kind?: string | null;
   title?: string | null;
-  source_excerpt?: string | null;
-  questions?: unknown;
-  synonyms?: unknown;
-  tags?: unknown;
-  trace?: KnowledgeSearchTrace | null;
 };
 
 export type KnowledgePreviewResponse = {
   query: string;
-  best_result: KnowledgePreviewResult | null;
-  top_results: KnowledgePreviewResult[];
+  answer: string;
   is_empty: boolean;
   retrieval_mode: KnowledgePreviewRetrievalMode;
   method: string;
-  trace: Record<string, unknown>;
+  debug_context?: {
+    facts: KnowledgePreviewDebugFact[];
+  };
+  facts?: KnowledgePreviewDebugFact[];
 };
 
 

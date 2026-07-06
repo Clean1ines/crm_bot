@@ -10,8 +10,8 @@ import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
   knowledgeApi,
   type KnowledgePreprocessingMode,
+  type KnowledgePreviewDebugFact,
   type KnowledgePreviewResponse,
-  type KnowledgePreviewResult,
   type KnowledgeProcessingReport,
   type KnowledgeSourceUnitsResponse,
   type WorkbenchDocumentCardView,
@@ -88,25 +88,6 @@ const confidenceLabel = (score: number): string => {
   if (score >= 0.45) return t("knowledge.confidence.medium");
   return t("knowledge.confidence.low");
 };
-
-const previewTraceLabel = (value: string): string => {
-  const labels: Record<string, string> = {
-    title: t("knowledge.preview.trace.field.title"),
-    questions: t("knowledge.preview.trace.field.questions"),
-    synonyms: t("knowledge.preview.trace.field.synonyms"),
-    tags: t("knowledge.preview.trace.field.tags"),
-    answer: t("knowledge.preview.trace.field.answer"),
-    search_text: t("knowledge.preview.trace.field.searchText"),
-    embedding_text: t("knowledge.preview.trace.field.embeddingText"),
-    exact: t("knowledge.preview.trace.field.exact"),
-    embedding: t("knowledge.preview.trace.field.embedding"),
-  };
-
-  return labels[value] || value;
-};
-
-const formatPreviewScore = (value: number): string =>
-  Number.isFinite(value) ? value.toFixed(3) : "0.000";
 
 const SOURCE_UNIT_FETCH_LIMIT = 1000;
 
@@ -288,68 +269,33 @@ const shouldUseWorkflowProjectionForDocument = (doc: Document): boolean => {
   );
 };
 
-const PreviewResultCard: React.FC<{
-  title: string;
-  result: KnowledgePreviewResult;
+const PreviewFactCard: React.FC<{
+  fact: KnowledgePreviewDebugFact;
   compact?: boolean;
   isDebugMode?: boolean;
-}> = ({ title, result, compact = false, isDebugMode = false }) => (
+}> = ({ fact, compact = false, isDebugMode = false }) => (
   <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
     <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
       <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-        {title}
+        {fact.title || t("knowledge.preview.additionalMatch")}
       </h3>
       <span className="inline-flex w-fit items-center rounded-full bg-[var(--accent-muted)] px-2.5 py-1 text-xs font-medium text-[var(--accent-primary)]">
-        {confidenceLabel(result.score)}
+        {confidenceLabel(fact.score)}
       </span>
     </div>
     <p
       className={`text-sm leading-relaxed text-[var(--text-primary)] ${compact ? "line-clamp-3" : ""}`}
     >
-      {result.answer || result.content}
+      {fact.content}
     </p>
     <div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
       <span>{t("knowledge.preview.matchFound")}</span>
-      {result.source && (
+      {fact.source && (
         <span>
-          {t("knowledge.preview.sourcePrefix")} {result.source}
+          {t("knowledge.preview.sourcePrefix")} {fact.source}
         </span>
       )}
-      {result.document_status && (
-        <span>
-          {t("knowledge.preview.documentPrefix")}{" "}
-          {knowledgeDocumentStatusLabel(result.document_status)}
-        </span>
-      )}
-      {isDebugMode && result.entry_kind && (
-        <span>entry: {result.entry_kind}</span>
-      )}
-      {isDebugMode && result.trace && (
-        <span>
-          {t("knowledge.preview.trace.summary", {
-            fields:
-              result.trace.matched_fields.map(previewTraceLabel).join(", ") ||
-              t("knowledge.preview.trace.none"),
-            lexical: formatPreviewScore(result.trace.lexical_score),
-            vector: formatPreviewScore(result.trace.vector_score),
-            final: formatPreviewScore(result.trace.final_score),
-            field: previewTraceLabel(result.trace.displayed_field),
-          })}
-          {" · "}
-          {result.trace.is_production_safe
-            ? t("knowledge.preview.trace.productionSafe")
-            : t("knowledge.preview.trace.notProductionSafe")}
-          {result.trace.title_match
-            ? ` · ${t("knowledge.preview.trace.titleMatch")}`
-            : ""}
-          {result.trace.exact_question_match
-            ? ` · ${t("knowledge.preview.trace.questionMatch")}`
-            : ""}
-          {result.trace.length_penalty > 0
-            ? ` · ${t("knowledge.preview.trace.penalty", { penalty: formatPreviewScore(result.trace.length_penalty) })}`
-            : ""}
-        </span>
-      )}
+      {isDebugMode && fact.entry_kind && <span>entry: {fact.entry_kind}</span>}
     </div>
   </div>
 );
@@ -1099,6 +1045,8 @@ export const KnowledgePage: React.FC = () => {
     normalizedSearchQuery.length > 0 ? filteredDocuments.slice(0, 8) : [];
 
   const previewResult = previewMutation.data;
+  const previewFacts =
+    previewResult?.debug_context?.facts ?? previewResult?.facts ?? [];
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8 animate-in fade-in duration-500">
@@ -1342,34 +1290,30 @@ export const KnowledgePage: React.FC = () => {
 
         {previewResult && (
           <div className="mt-5 space-y-4">
-            {previewResult.is_empty || !previewResult.best_result ? (
-              <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
-                {t("knowledge.preview.noResults")}
-              </div>
-            ) : (
-              <>
-                <PreviewResultCard
-                  title={t("knowledge.preview.bestAnswer")}
-                  result={previewResult.best_result}
-                  isDebugMode={isDebugMode}
-                />
-                {previewResult.top_results.length > 1 && (
-                  <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-                      {t("knowledge.preview.topMatches")}
-                    </h3>
-                    {previewResult.top_results.slice(1).map((result) => (
-                      <PreviewResultCard
-                        key={result.id}
-                        title={t("knowledge.preview.additionalMatch")}
-                        result={result}
-                        compact
-                        isDebugMode={isDebugMode}
-                      />
-                    ))}
-                  </div>
-                )}
-              </>
+            <div className="rounded-xl bg-[var(--surface-secondary)] p-4">
+              <h3 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">
+                {t("knowledge.preview.bestAnswer")}
+              </h3>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-primary)]">
+                {previewResult.answer || t("knowledge.preview.noResults")}
+              </p>
+            </div>
+            {isDebugMode && previewFacts.length > 0 && (
+              <details className="rounded-xl bg-[var(--surface-secondary)] p-4">
+                <summary className="cursor-pointer text-sm font-semibold text-[var(--text-primary)]">
+                  {t("knowledge.preview.topMatches")}
+                </summary>
+                <div className="mt-3 space-y-3">
+                  {previewFacts.map((fact) => (
+                    <PreviewFactCard
+                      key={fact.id}
+                      fact={fact}
+                      compact
+                      isDebugMode={isDebugMode}
+                    />
+                  ))}
+                </div>
+              </details>
             )}
           </div>
         )}

@@ -2629,11 +2629,41 @@ async def knowledge_processing_progress(
 
 
 @router.post("/preview")
-async def preview_knowledge():
-    _legacy_endpoint_gone(
-        capability="retrieval preview",
-        target="WorkbenchRetrievalPreviewService or RuntimeRetrievalPreviewService",
+async def preview_knowledge(
+    project_id: str,
+    payload: Mapping[str, object] = Body(default_factory=dict),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
     )
+    question = _payload_text(payload, "question")
+    limit = _payload_int(payload, "limit", default=5)
+    if limit < 1 or limit > 10:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 10")
+
+    from src.application.services.project_answer_preview_service import (
+        ProjectAnswerPreviewValidationError,
+    )
+    from src.interfaces.composition.project_answer_preview import (
+        make_project_answer_preview_service,
+    )
+
+    try:
+        result = await make_project_answer_preview_service(pool).execute(
+            project_id=project_id,
+            question=question,
+            limit=limit,
+        )
+    except ProjectAnswerPreviewValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result.to_dict()
 
 
 @router.get("/usage")

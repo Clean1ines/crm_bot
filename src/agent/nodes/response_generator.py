@@ -19,7 +19,11 @@ from src.domain.runtime.response_generation import (
     ResponseGenerationContext,
     ResponseGenerationResult,
 )
-from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
+from src.domain.runtime.state_contracts import (
+    ProjectRuntimeConfigurationState,
+    RuntimeHistoryMessage,
+    RuntimeStateInput,
+)
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
@@ -244,6 +248,73 @@ def _language_mismatch_fallback(target_language: str) -> str:
     if target_language == "es":
         return LANGUAGE_MISMATCH_FALLBACK_ES
     return LANGUAGE_MISMATCH_FALLBACK_RU
+
+
+def build_answer_preview_prompt(
+    *,
+    user_input: str,
+    knowledge_chunks: list[object],
+    project_configuration: Mapping[str, object] | None,
+    target_language: str,
+) -> str:
+    resolved_target_language: str = normalize_project_language(target_language)
+    if resolved_target_language == "unknown":
+        resolved_target_language = _project_target_language(
+            cast(
+                AgentState,
+                {
+                    "user_input": user_input,
+                    "project_configuration": project_configuration or {},
+                },
+            )
+        )
+    return build_response_prompt(
+        decision="LLM_GENERATE",
+        user_input=user_input,
+        conversation_summary="",
+        history=[],
+        knowledge_chunks=knowledge_chunks,
+        commercial_context=None,
+        user_memory=None,
+        features=None,
+        project_configuration=cast(
+            ProjectRuntimeConfigurationState | None,
+            project_configuration,
+        ),
+        target_language=resolved_target_language,
+    )
+
+
+async def complete_response_prompt(
+    prompt: str,
+    *,
+    project_configuration: Mapping[str, object] | None = None,
+    llm: ChatGroqClient | None = None,
+    model_name: str | None = None,
+) -> str:
+    base_model = model_name or settings.GROQ_MODEL
+    selected_model = _resolve_response_model_name(
+        cast(AgentState, {"project_configuration": project_configuration or {}}),
+        base_model,
+    )
+    messages = [("human", prompt)]
+    if llm is not None and selected_model == base_model:
+        response = await llm.ainvoke(messages)
+    else:
+
+        def _make_client(*, api_key: str) -> ChatGroqClient:
+            return _chat_groq_class()(
+                model=selected_model,
+                temperature=0.3,
+                max_tokens=500,
+                api_key=api_key,
+            )
+
+        response = await _ainvoke_chat_once(
+            make_client=_make_client,
+            messages=messages,
+        )
+    return (response.content or "").strip()
 
 
 def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, object]:

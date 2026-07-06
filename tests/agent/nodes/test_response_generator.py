@@ -5,6 +5,7 @@ import pytest
 
 from src.agent.nodes.response_generator import (
     _resolve_response_model_name,
+    build_answer_preview_prompt,
     create_response_generator_node,
 )
 
@@ -20,6 +21,40 @@ def test_resolve_response_model_name_prefers_project_fallback():
     )
 
     assert model == "llama-3.1-8b-instant"
+
+
+def test_answer_preview_prompt_includes_clean_fact_without_internal_metadata() -> None:
+    prompt = build_answer_preview_prompt(
+        user_input="Когда доставка?",
+        knowledge_chunks=[
+            {
+                "id": "runtime-entry-1",
+                "content": "Доставка занимает два дня после оплаты.",
+                "score": 0.91,
+                "method": "runtime_hybrid",
+                "runtime_entry_id": "runtime-entry-1",
+                "workflow_run_id": "workflow-run-1",
+                "source_document_ref": "source-doc-1",
+                "source_claim_refs": [{"claim": "claim-1"}],
+                "raw_source_refs": [{"source_unit_ref": "unit-1"}],
+                "trace": {"vector_score": 0.9},
+                "embedding_text": "embedding-only text",
+                "triples": [{"subject": "delivery"}],
+            }
+        ],
+        project_configuration={"settings": {}},
+        target_language="ru",
+    )
+
+    assert "Доставка занимает два дня после оплаты." in prompt
+    assert "runtime-entry-1" not in prompt
+    assert "workflow-run-1" not in prompt
+    assert "source-doc-1" not in prompt
+    assert "source_claim_refs" not in prompt
+    assert "raw_source_refs" not in prompt
+    assert "trace" not in prompt
+    assert "embedding-only text" not in prompt
+    assert "subject" not in prompt
 
 
 @pytest.mark.asyncio
