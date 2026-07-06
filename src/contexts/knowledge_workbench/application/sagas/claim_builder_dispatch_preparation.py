@@ -110,10 +110,11 @@ class ClaimBuilderDispatchPreparationBuilder:
         return LlmTaskCapacityProfile(
             profile_id=CLAIM_BUILDER_DISPATCH_PROFILE_ID,
             estimated_prompt_tokens=max(
-                estimate.estimated_input_tokens for estimate in estimates
+                estimate.input_tokens for estimate in estimates
             ),
             estimated_completion_tokens=max(
-                estimate.reserved_output_tokens for estimate in estimates
+                estimate.required_window_tokens - estimate.input_tokens
+                for estimate in estimates
             ),
             estimated_requests=1,
         )
@@ -186,8 +187,8 @@ class ClaimBuilderDispatchPreparationBuilder:
 
 @dataclass(frozen=True, slots=True)
 class _CapacityEstimate:
-    estimated_input_tokens: int
-    reserved_output_tokens: int
+    input_tokens: int
+    required_window_tokens: int
 
 
 def _capacity_estimate_from_schedule_payload(
@@ -198,13 +199,13 @@ def _capacity_estimate_from_schedule_payload(
         raise ValueError("schedule_payload.llm_capacity_estimate is required")
 
     return _CapacityEstimate(
-        estimated_input_tokens=_mapping_positive_int(
+        input_tokens=_mapping_positive_int(
             estimate_payload,
-            "estimated_input_tokens",
+            "input_tokens",
         ),
-        reserved_output_tokens=_mapping_non_negative_int(
+        required_window_tokens=_mapping_positive_int(
             estimate_payload,
-            "reserved_output_tokens",
+            "required_window_tokens",
         ),
     )
 

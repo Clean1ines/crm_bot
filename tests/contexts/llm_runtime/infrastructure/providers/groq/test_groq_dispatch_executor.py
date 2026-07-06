@@ -77,9 +77,20 @@ def _dispatch_payload(
                 },
             ],
             "llm_capacity_estimate": {
-                "estimated_input_tokens": 1000,
-                "reserved_output_tokens": 1000,
-                "estimated_total_tokens": 2000,
+                "budget_contract_version": "v3",
+                "estimator": "test_budget",
+                "provider": "groq",
+                "model_ref": "qwen/qwen3-32b",
+                "model_tpm_limit": 6000,
+                "model_char_to_token_multiplier": "3.3",
+                "phase": "test",
+                "operation": "dispatch",
+                "prompt_tokens": 500,
+                "artifact_tokens": 500,
+                "input_tokens": 1000,
+                "planned_output_tokens": 1000,
+                "safety_gap_tokens": 300,
+                "required_window_tokens": 2300,
             },
         },
         "llm_allocation": {
@@ -144,6 +155,7 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
         },
     ]
     assert "reasoning_effort" not in request_payload
+    assert request_payload["max_completion_tokens"] == 4700
 
 
 @pytest.mark.asyncio
@@ -154,6 +166,33 @@ async def test_invalid_dispatch_missing_provider_messages_returns_terminal_faile
 
     result = await _executor(transport).execute_dispatch(
         _execution_input(dispatch_payload=_dispatch_payload(schedule_payload={})),
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.TERMINAL_FAILED
+    assert result.error_kind == "invalid_dispatch_payload"
+    assert transport.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_dispatch_missing_required_window_tokens_returns_terminal_failed() -> (
+    None
+):
+    transport = FakeGroqTransport(response=_success_response())
+    schedule_payload = {
+        "provider_messages": [{"role": "user", "content": "Extract claims"}],
+        "llm_capacity_estimate": {
+            "budget_contract_version": "v3",
+            "input_tokens": 1000,
+            "planned_output_tokens": 1000,
+            "safety_gap_tokens": 300,
+            "model_tpm_limit": 6000,
+        },
+    }
+
+    result = await _executor(transport).execute_dispatch(
+        _execution_input(
+            dispatch_payload=_dispatch_payload(schedule_payload=schedule_payload)
+        ),
     )
 
     assert result.status is LlmDispatchExecutionStatus.TERMINAL_FAILED

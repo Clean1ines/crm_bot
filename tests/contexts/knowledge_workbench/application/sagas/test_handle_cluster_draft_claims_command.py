@@ -507,11 +507,10 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
     assert prepare_command.payload["work_kind"] == (
         "knowledge_workbench.draft_claim_compaction"
     )
-    dispatch_preparation = prepare_command.payload["llm_dispatch_preparation"]
-    assert isinstance(dispatch_preparation, dict)
-    assert dispatch_preparation["active_model_ref"] == "openai/gpt-oss-120b"
-    assert dispatch_preparation["requested_items"] == len(scheduling.saved_payloads)
-    assert "account_capacities" not in dispatch_preparation
+    assert prepare_command.payload["active_model_ref"] == "openai/gpt-oss-120b"
+    assert prepare_command.payload["scheduled_work_item_count"] == len(
+        scheduling.saved_payloads
+    )
     for payload in scheduling.saved_payloads:
         provider_messages = payload["provider_messages"]
         assert isinstance(provider_messages, list)
@@ -519,6 +518,20 @@ async def test_builds_persists_schedules_events_progress_and_completion() -> Non
             "system",
             "user",
         ]
+        estimate = payload["llm_capacity_estimate"]
+        assert estimate["budget_contract_version"] == "v3"
+        assert estimate["model_ref"] == "openai/gpt-oss-120b"
+        assert estimate["model_tpm_limit"] == 8_000
+        assert estimate["model_char_to_token_multiplier"] == "3.7"
+        assert estimate["input_tokens"] == (
+            estimate["prompt_tokens"] + estimate["artifact_tokens"]
+        )
+        assert estimate["planned_output_tokens"] == estimate["artifact_tokens"]
+        assert estimate["required_window_tokens"] == (
+            estimate["input_tokens"]
+            + estimate["planned_output_tokens"]
+            + estimate["safety_gap_tokens"]
+        )
     assert workflow_uow.command_log.completed == [
         WorkflowCommandId(
             "workflow-command:"

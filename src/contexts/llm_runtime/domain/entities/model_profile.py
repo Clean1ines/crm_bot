@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 from src.contexts.llm_runtime.domain.value_objects.model_id import ModelId
 from src.contexts.llm_runtime.domain.value_objects.model_lifecycle import ModelLifecycle
@@ -25,6 +26,7 @@ class ModelProfile:
     rate_limits: RateLimitProfile
     token_price: TokenPrice
     reasoning_profile: ReasoningProfile
+    model_char_to_token_multiplier: Decimal = Decimal("4.0")
     supports_json_object: bool = True
     supports_json_schema: bool = False
     enabled: bool = True
@@ -40,6 +42,10 @@ class ModelProfile:
             )
         if self.model_rank < 0:
             raise ValueError("ModelProfile.model_rank must be >= 0")
+        if self.model_char_to_token_multiplier <= 0:
+            raise ValueError(
+                "ModelProfile.model_char_to_token_multiplier must be > 0"
+            )
 
     @property
     def can_disable_reasoning(self) -> bool:

@@ -790,8 +790,20 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     ]
     assert scheduled_payload["request_count"] == 1
     assert scheduled_payload["llm_capacity_estimate"] == {
-        "estimated_input_tokens": 1,
-        "reserved_output_tokens": 4000,
+        "budget_contract_version": "v3",
+        "estimator": "draft_claim_compaction_next_work_budget_policy",
+        "provider": "groq",
+        "model_ref": "openai/gpt-oss-120b",
+        "model_tpm_limit": 8_000,
+        "model_char_to_token_multiplier": "3.7",
+        "phase": "draft_claim_compaction",
+        "operation": "compacted_vs_compacted",
+        "prompt_tokens": 1,
+        "artifact_tokens": 4000,
+        "input_tokens": 4001,
+        "planned_output_tokens": 4000,
+        "safety_gap_tokens": 256,
+        "required_window_tokens": 8257,
     }
 
 
@@ -880,8 +892,20 @@ def _expected_next_work_schedule_payload(
         "required_window_tokens": 8257,
         "request_count": 1,
         "llm_capacity_estimate": {
-            "estimated_input_tokens": 1,
-            "reserved_output_tokens": 4000,
+            "budget_contract_version": "v3",
+            "estimator": "draft_claim_compaction_next_work_budget_policy",
+            "provider": "groq",
+            "model_ref": "openai/gpt-oss-120b",
+            "model_tpm_limit": 8_000,
+            "model_char_to_token_multiplier": "3.7",
+            "phase": "draft_claim_compaction",
+            "operation": work_type.value,
+            "prompt_tokens": 1,
+            "artifact_tokens": 4000,
+            "input_tokens": 4001,
+            "planned_output_tokens": 4000,
+            "safety_gap_tokens": 256,
+            "required_window_tokens": 8257,
         },
     }
 

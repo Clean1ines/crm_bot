@@ -180,17 +180,29 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
 
     capacity_estimate = schedule.payload["llm_capacity_estimate"]
     assert isinstance(capacity_estimate, dict)
-    assert capacity_estimate["prompt_message_tokens"] == (1953,)
-    assert capacity_estimate["estimated_input_tokens"] == (
-        1953 + capacity_estimate["source_unit_token_count"]
+    assert capacity_estimate["budget_contract_version"] == "v3"
+    assert capacity_estimate["phase"] == "claim_builder_section_extraction"
+    assert capacity_estimate["model_ref"] == "qwen/qwen3-32b"
+    assert capacity_estimate["model_tpm_limit"] == 6_000
+    assert capacity_estimate["model_char_to_token_multiplier"] == "3.3"
+    assert capacity_estimate["prompt_tokens"] == 1953
+    assert capacity_estimate["input_tokens"] == (
+        1953 + capacity_estimate["artifact_tokens"]
     )
-    assert (
-        capacity_estimate["reserved_output_tokens"]
-        == capacity_estimate["source_unit_token_count"]
+    assert capacity_estimate["planned_output_tokens"] == (
+        capacity_estimate["artifact_tokens"]
     )
-    assert capacity_estimate["estimated_total_tokens"] == (
-        1953 + capacity_estimate["source_unit_token_count"] * 2
+    assert capacity_estimate["required_window_tokens"] == (
+        capacity_estimate["input_tokens"]
+        + capacity_estimate["planned_output_tokens"]
+        + capacity_estimate["safety_gap_tokens"]
     )
+    forbidden_keys = (
+        "estimated_" + "input_tokens",
+        "reserved_" + "output_tokens",
+        "estimated_" + "total_tokens",
+    )
+    assert not set(forbidden_keys) & set(capacity_estimate)
 
 
 def test_prompt_token_count_can_be_overridden_from_env(
@@ -208,12 +220,14 @@ def test_prompt_token_count_can_be_overridden_from_env(
     )
 
     capacity_estimate = schedule.payload["llm_capacity_estimate"]
-    assert capacity_estimate["prompt_message_tokens"] == (4200,)
-    assert capacity_estimate["estimated_input_tokens"] == (
-        4200 + capacity_estimate["source_unit_token_count"]
+    assert capacity_estimate["prompt_tokens"] == 4200
+    assert capacity_estimate["input_tokens"] == (
+        4200 + capacity_estimate["artifact_tokens"]
     )
-    assert capacity_estimate["estimated_total_tokens"] == (
-        4200 + capacity_estimate["source_unit_token_count"] * 2
+    assert capacity_estimate["required_window_tokens"] == (
+        capacity_estimate["input_tokens"]
+        + capacity_estimate["planned_output_tokens"]
+        + capacity_estimate["safety_gap_tokens"]
     )
     assert capacity_estimate["estimator"].startswith("measured_prompt_4200_")
 
@@ -258,7 +272,6 @@ def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() ->
         "Use prompt_id faq_claim_observations",
         'prompt_version = "v1"',
         "Groq",
-        "qwen",
     )
 
     for marker in required_markers:

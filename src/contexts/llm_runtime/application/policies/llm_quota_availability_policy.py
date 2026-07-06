@@ -14,17 +14,22 @@ from src.contexts.llm_runtime.domain.value_objects.llm_route import LlmRoute
 @dataclass(frozen=True, slots=True)
 class LlmEstimatedTokenNeed:
     input_tokens: int
-    reserved_output_tokens: int
+    planned_output_tokens: int
+    required_window_tokens: int
 
     def __post_init__(self) -> None:
         if self.input_tokens < 0:
             raise ValueError("input_tokens must be >= 0")
-        if self.reserved_output_tokens < 0:
-            raise ValueError("reserved_output_tokens must be >= 0")
-
-    @property
-    def total_tokens(self) -> int:
-        return self.input_tokens + self.reserved_output_tokens
+        if self.planned_output_tokens < 0:
+            raise ValueError("planned_output_tokens must be >= 0")
+        if self.required_window_tokens <= 0:
+            raise ValueError("required_window_tokens must be > 0")
+        if self.required_window_tokens < (
+            self.input_tokens + self.planned_output_tokens
+        ):
+            raise ValueError(
+                "required_window_tokens must be >= input_tokens + planned_output_tokens"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,7 +127,8 @@ class LlmQuotaAvailabilityPolicy:
 
         if (
             snapshot.remaining_tokens_minute is not None
-            and snapshot.remaining_tokens_minute < estimated_need.total_tokens
+            and snapshot.remaining_tokens_minute
+            < estimated_need.required_window_tokens
         ):
             return False
 
@@ -135,7 +141,7 @@ class LlmQuotaAvailabilityPolicy:
         if (
             snapshot.remaining_output_tokens_minute is not None
             and snapshot.remaining_output_tokens_minute
-            < estimated_need.reserved_output_tokens
+            < estimated_need.planned_output_tokens
         ):
             return False
 
@@ -155,7 +161,7 @@ class LlmQuotaAvailabilityPolicy:
 
         if (
             snapshot.remaining_tokens_day is not None
-            and snapshot.remaining_tokens_day < estimated_need.total_tokens
+            and snapshot.remaining_tokens_day < estimated_need.required_window_tokens
         ):
             return False
 

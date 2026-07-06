@@ -76,6 +76,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
                 ),
                 default_effort=ReasoningEffort.NONE,
             ),
+            model_char_to_token_multiplier=Decimal("3.3"),
             supports_json_object=True,
             supports_json_schema=False,
         ),
@@ -167,10 +168,21 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
                 ),
                 default_effort=ReasoningEffort.MEDIUM,
             ),
+            model_char_to_token_multiplier=Decimal("3.7"),
             supports_json_object=True,
             supports_json_schema=False,
         ),
     )
+
+
+def model_budget_profile_for_ref(model_ref: str) -> ModelProfile:
+    normalized_ref = model_ref.strip()
+    if not normalized_ref:
+        raise ValueError("model_ref must be non-empty")
+    for profile in build_groq_free_plan_model_profiles():
+        if profile.model_id.value == normalized_ref:
+            return profile
+    raise ValueError(f"unknown Groq model_ref: {model_ref}")
 
 
 def build_groq_provider_accounts(

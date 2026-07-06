@@ -43,6 +43,9 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_output_validator import (
     DraftClaimCompactionOutputValidator,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_budget_profile import (
+    draft_claim_compaction_request_safety_gap_tokens,
+)
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
@@ -54,6 +57,9 @@ from src.contexts.knowledge_workbench.extraction.application.use_cases.apply_dra
 )
 from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_provider_messages import (
     build_draft_claim_compaction_provider_messages,
+)
+from src.contexts.knowledge_workbench.application.sagas.model_budget_profile import (
+    model_budget_profile_for_ref,
 )
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
@@ -374,15 +380,37 @@ async def _schedule_next_work(
             "input_tokens": next_work_item.input_tokens,
             "required_window_tokens": next_work_item.required_window_tokens,
             "request_count": next_work_item.request_count,
-            "llm_capacity_estimate": {
-                "estimated_input_tokens": next_work_item.prompt_tokens,
-                "reserved_output_tokens": next_work_item.artifact_tokens,
-            },
+            "llm_capacity_estimate": _next_work_capacity_estimate(next_work_item),
         },
     )
     return await EnsureWorkItemsScheduled(work_item_scheduling_repository).execute(
         EnsureWorkItemsScheduledCommand(plans=(plan,))
     )
+
+
+def _next_work_capacity_estimate(
+    next_work_item: DraftClaimCompactionNextWorkItem,
+) -> dict[str, object]:
+    safety_gap_tokens = draft_claim_compaction_request_safety_gap_tokens()
+    model_profile = model_budget_profile_for_ref(next_work_item.primary_model_id)
+    return {
+        "budget_contract_version": "v3",
+        "estimator": "draft_claim_compaction_next_work_budget_policy",
+        "provider": "groq",
+        "model_ref": next_work_item.primary_model_id,
+        "model_tpm_limit": model_profile.rate_limits.tokens_per_minute,
+        "model_char_to_token_multiplier": str(
+            model_profile.model_char_to_token_multiplier
+        ),
+        "phase": "draft_claim_compaction",
+        "operation": next_work_item.work_type.value,
+        "prompt_tokens": next_work_item.prompt_tokens,
+        "artifact_tokens": next_work_item.artifact_tokens,
+        "input_tokens": next_work_item.input_tokens,
+        "planned_output_tokens": next_work_item.artifact_tokens,
+        "safety_gap_tokens": safety_gap_tokens,
+        "required_window_tokens": next_work_item.required_window_tokens,
+    }
 
 
 async def _provider_messages_for_next_work_item(

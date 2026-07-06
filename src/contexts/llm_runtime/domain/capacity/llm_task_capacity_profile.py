@@ -26,7 +26,7 @@ class LlmTaskCapacityProfile:
             raise ValueError("estimated_requests must be > 0")
 
     @property
-    def estimated_total_tokens(self) -> int:
+    def required_window_tokens(self) -> int:
         return self.estimated_prompt_tokens + self.estimated_completion_tokens
 
 

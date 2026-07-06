@@ -29,6 +29,12 @@ from src.contexts.knowledge_workbench.extraction.application.models.draft_claim_
     DraftClaimCompactionNextWorkItem,
     DraftClaimCompactionNextWorkItemType,
 )
+from src.contexts.knowledge_workbench.extraction.application.policies.draft_claim_compaction_budget_profile import (
+    draft_claim_compaction_request_safety_gap_tokens,
+)
+from src.contexts.knowledge_workbench.application.sagas.model_budget_profile import (
+    model_budget_profile_for_ref,
+)
 from src.contexts.knowledge_workbench.extraction.infrastructure.postgres.postgres_draft_claim_compaction_reduction_state_repository import (
     PostgresDraftClaimCompactionReductionStateRepository,
 )
@@ -113,7 +119,9 @@ class _PostgresDegradedFallbackScheduler:
         prompt_tokens = decision.estimated_prompt_tokens
         artifact_tokens = decision.estimated_completion_tokens
         input_tokens = prompt_tokens + artifact_tokens
-        required_window_tokens = input_tokens + artifact_tokens
+        safety_gap_tokens = draft_claim_compaction_request_safety_gap_tokens()
+        required_window_tokens = input_tokens + artifact_tokens + safety_gap_tokens
+        model_profile = model_budget_profile_for_ref(decision.degraded_model_ref)
 
         next_work_item = DraftClaimCompactionNextWorkItem(
             work_type=resume_work_type,
@@ -163,16 +171,24 @@ class _PostgresDegradedFallbackScheduler:
                             "node_refs": list(decision.node_refs),
                             "provider_messages": list(provider_messages),
                             "llm_capacity_estimate": {
-                                "estimated_input_tokens": (
-                                    decision.estimated_prompt_tokens
+                                "budget_contract_version": "v3",
+                                "estimator": "draft_claim_compaction_degraded_fallback_budget",
+                                "provider": "groq",
+                                "model_ref": decision.degraded_model_ref,
+                                "model_tpm_limit": (
+                                    model_profile.rate_limits.tokens_per_minute
                                 ),
-                                "reserved_output_tokens": (
-                                    decision.estimated_completion_tokens
+                                "model_char_to_token_multiplier": str(
+                                    model_profile.model_char_to_token_multiplier
                                 ),
-                                "estimated_total_tokens": (
-                                    decision.estimated_prompt_tokens
-                                    + decision.estimated_completion_tokens
-                                ),
+                                "phase": "draft_claim_compaction",
+                                "operation": resume_work_type.value,
+                                "prompt_tokens": prompt_tokens,
+                                "artifact_tokens": artifact_tokens,
+                                "input_tokens": input_tokens,
+                                "planned_output_tokens": artifact_tokens,
+                                "safety_gap_tokens": safety_gap_tokens,
+                                "required_window_tokens": required_window_tokens,
                             },
                         },
                     ),

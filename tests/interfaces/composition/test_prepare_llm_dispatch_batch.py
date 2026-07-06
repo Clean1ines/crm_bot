@@ -396,8 +396,20 @@ def _schedule_payload(
     return {
         "source_unit_ref": source_unit_ref,
         "llm_capacity_estimate": {
-            "estimated_input_tokens": capacity_profile.estimated_prompt_tokens,
-            "reserved_output_tokens": capacity_profile.estimated_completion_tokens,
+            "budget_contract_version": "v3",
+            "estimator": "test_budget",
+            "provider": "groq",
+            "model_ref": "qwen/qwen3-32b",
+            "model_tpm_limit": 6_000,
+            "model_char_to_token_multiplier": "3.3",
+            "phase": "test",
+            "operation": "prepare",
+            "prompt_tokens": capacity_profile.estimated_prompt_tokens,
+            "artifact_tokens": 0,
+            "input_tokens": capacity_profile.estimated_prompt_tokens,
+            "planned_output_tokens": capacity_profile.estimated_completion_tokens,
+            "safety_gap_tokens": 0,
+            "required_window_tokens": capacity_profile.required_window_tokens,
         },
     }
 
@@ -1251,8 +1263,20 @@ async def test_source_split_required_raises_when_due_payload_has_no_source_unit_
     connection.schedules["work-1"] = {
         "not_source_unit_ref": "missing",
         "llm_capacity_estimate": {
-            "estimated_input_tokens": large_profile.estimated_prompt_tokens,
-            "reserved_output_tokens": large_profile.estimated_completion_tokens,
+            "budget_contract_version": "v3",
+            "estimator": "test_budget",
+            "provider": "groq",
+            "model_ref": "qwen/qwen3-32b",
+            "model_tpm_limit": 6_000,
+            "model_char_to_token_multiplier": "3.3",
+            "phase": "test",
+            "operation": "prepare",
+            "prompt_tokens": large_profile.estimated_prompt_tokens,
+            "artifact_tokens": 0,
+            "input_tokens": large_profile.estimated_prompt_tokens,
+            "planned_output_tokens": large_profile.estimated_completion_tokens,
+            "safety_gap_tokens": 0,
+            "required_window_tokens": large_profile.required_window_tokens,
         },
     }
     pool = FakePool(connection=connection)
@@ -1283,7 +1307,7 @@ async def test_source_split_required_raises_when_due_payload_has_no_source_unit_
         )
 
 
-def test_tpm_admission_uses_prompt_and_reserved_output_tokens() -> None:
+def test_tpm_admission_uses_required_window_tokens() -> None:
     profile = LlmTaskCapacityProfile(
         profile_id="prompt-a",
         estimated_prompt_tokens=3000,

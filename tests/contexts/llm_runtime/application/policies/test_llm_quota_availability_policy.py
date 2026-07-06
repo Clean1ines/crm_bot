@@ -33,7 +33,8 @@ def _route(model: str = "model-1", account: str = "account-1") -> LlmRoute:
 def _need() -> LlmEstimatedTokenNeed:
     return LlmEstimatedTokenNeed(
         input_tokens=1_000,
-        reserved_output_tokens=2_000,
+        planned_output_tokens=2_000,
+        required_window_tokens=3_000,
     )
 
 
@@ -185,7 +186,7 @@ def test_sufficient_limits_keep_route_available() -> None:
     assert availability[route].daily_capacity_available
 
 
-def test_combined_minute_token_budget_uses_input_and_reserved_output_tokens() -> None:
+def test_combined_minute_token_budget_uses_required_window_tokens() -> None:
     route = _route()
 
     availability = LlmQuotaAvailabilityPolicy(
@@ -204,10 +205,18 @@ def test_combined_minute_token_budget_uses_input_and_reserved_output_tokens() ->
 
 def test_estimated_token_need_validates_non_negative_values() -> None:
     with pytest.raises(ValueError):
-        LlmEstimatedTokenNeed(input_tokens=-1, reserved_output_tokens=0)
+        LlmEstimatedTokenNeed(
+            input_tokens=-1,
+            planned_output_tokens=0,
+            required_window_tokens=1,
+        )
 
     with pytest.raises(ValueError):
-        LlmEstimatedTokenNeed(input_tokens=0, reserved_output_tokens=-1)
+        LlmEstimatedTokenNeed(
+            input_tokens=0,
+            planned_output_tokens=-1,
+            required_window_tokens=1,
+        )
 
 
 def test_quota_snapshot_validates_values_and_timestamps() -> None:

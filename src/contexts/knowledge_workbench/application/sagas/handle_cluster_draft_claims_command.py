@@ -58,6 +58,9 @@ from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_c
 from src.contexts.knowledge_workbench.extraction.application.ports.draft_claim_compaction_reduction_state_repository_port import (
     DraftClaimCompactionReductionStateRepositoryPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.model_budget_profile import (
+    model_budget_profile_for_ref,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
 )
@@ -585,22 +588,31 @@ def _batch_capacity_estimate(batch) -> dict[str, object]:
     artifact_tokens = max(1, batch.artifact_tokens)
     prompt_tokens = draft_claim_compaction_prompt_tokens(batch.prompt_variant)
     input_tokens = prompt_tokens + artifact_tokens
+    planned_output_tokens = artifact_tokens
+    safety_gap_tokens = draft_claim_compaction_request_safety_gap_tokens()
     required_window_tokens = (
         input_tokens
-        + artifact_tokens
-        + draft_claim_compaction_request_safety_gap_tokens()
+        + planned_output_tokens
+        + safety_gap_tokens
     )
+    model_profile = model_budget_profile_for_ref(batch.model_id)
     return {
         "estimator": "draft_claim_compaction_batch_budget_policy",
-        "budget_contract_version": "v2",
+        "budget_contract_version": "v3",
+        "provider": "groq",
         "model_ref": batch.model_id,
+        "model_tpm_limit": model_profile.rate_limits.tokens_per_minute,
+        "model_char_to_token_multiplier": str(
+            model_profile.model_char_to_token_multiplier
+        ),
+        "phase": "draft_claim_compaction",
+        "operation": batch.prompt_variant,
         "prompt_variant": batch.prompt_variant,
-        "estimated_input_tokens": input_tokens,
-        "reserved_output_tokens": artifact_tokens,
-        "estimated_total_tokens": input_tokens + artifact_tokens,
         "prompt_tokens": prompt_tokens,
         "artifact_tokens": artifact_tokens,
         "input_tokens": input_tokens,
+        "planned_output_tokens": planned_output_tokens,
+        "safety_gap_tokens": safety_gap_tokens,
         "required_window_tokens": required_window_tokens,
     }
 

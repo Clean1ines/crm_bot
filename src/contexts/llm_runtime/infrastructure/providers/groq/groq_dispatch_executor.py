@@ -45,6 +45,7 @@ LOGGER = structlog.get_logger(__name__)
 
 
 DEFAULT_GROQ_MAX_COMPLETION_TOKEN_GAP = 300
+DEFAULT_GROQ_PROVIDER_COMPLETION_TOKENS = 2048
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,8 +103,9 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 payload_keys=sorted(request.payload.keys()),
                 has_max_completion_tokens="max_completion_tokens" in request.payload,
                 max_completion_tokens=request.payload.get("max_completion_tokens"),
-                estimated_input_tokens=parsed.estimated_input_tokens,
-                reserved_output_tokens=parsed.reserved_output_tokens,
+                input_tokens=parsed.input_tokens,
+                planned_output_tokens=parsed.planned_output_tokens,
+                required_window_tokens=parsed.required_window_tokens,
                 response_format=request.payload.get("response_format"),
                 temperature=request.payload.get("temperature"),
                 reasoning_effort=request.payload.get("reasoning_effort"),
@@ -306,8 +308,13 @@ class _ParsedGroqDispatchPayload:
     route: LlmRoute
     messages: tuple[GroqChatMessage, ...]
     execution_settings: LlmModelExecutionSettings
-    estimated_input_tokens: int
-    reserved_output_tokens: int
+    input_tokens: int
+    planned_output_tokens: int
+    safety_gap_tokens: int
+    model_tpm_limit: int
+    provider_default_completion_tokens: int
+    required_window_tokens: int
+    max_completion_tokens: int | None
 
     @classmethod
     def from_execution_input(
@@ -340,6 +347,24 @@ class _ParsedGroqDispatchPayload:
             account_ref=ProviderAccountRef(account_ref),
         )
 
+        estimate_payload = _require_mapping(
+            schedule_payload,
+            "llm_capacity_estimate",
+        )
+        input_tokens = _parse_input_tokens(estimate_payload)
+        planned_output_tokens = _parse_planned_output_tokens(estimate_payload)
+        safety_gap_tokens = _parse_safety_gap_tokens(estimate_payload)
+        model_tpm_limit = _parse_model_tpm_limit(estimate_payload)
+        provider_default_completion_tokens = _parse_provider_default_completion_tokens(
+            estimate_payload,
+        )
+        required_window_tokens = _parse_required_window_tokens(estimate_payload)
+        if required_window_tokens < input_tokens + planned_output_tokens:
+            raise ValueError(
+                "llm_capacity_estimate.required_window_tokens must be >= "
+                "input_tokens + planned_output_tokens"
+            )
+
         return cls(
             provider=provider,
             account_ref=account_ref,
@@ -349,8 +374,16 @@ class _ParsedGroqDispatchPayload:
             execution_settings=_parse_execution_settings(
                 execution_settings_payload,
             ),
-            estimated_input_tokens=_parse_estimated_input_tokens(schedule_payload),
-            reserved_output_tokens=_parse_reserved_output_tokens(schedule_payload),
+            input_tokens=input_tokens,
+            planned_output_tokens=planned_output_tokens,
+            safety_gap_tokens=safety_gap_tokens,
+            model_tpm_limit=model_tpm_limit,
+            provider_default_completion_tokens=provider_default_completion_tokens,
+            required_window_tokens=required_window_tokens,
+            max_completion_tokens=_parse_optional_positive_int(
+                estimate_payload,
+                "max_completion_tokens",
+            ),
         )
 
 
@@ -360,33 +393,91 @@ def _resolve_max_completion_tokens(
     model_profile: ModelProfile,
     completion_gap_tokens: int,
 ) -> int | None:
-    requested_output_tokens = parsed.reserved_output_tokens - completion_gap_tokens
-    requested_output_tokens = min(
-        requested_output_tokens,
-        model_profile.max_output_tokens,
+    if parsed.max_completion_tokens is not None:
+        return min(parsed.max_completion_tokens, model_profile.max_output_tokens)
+
+    safety_gap_tokens = max(parsed.safety_gap_tokens, completion_gap_tokens)
+    remaining_after_input_tokens = (
+        parsed.model_tpm_limit - parsed.input_tokens - safety_gap_tokens
     )
-    if requested_output_tokens <= 0:
+    if remaining_after_input_tokens <= parsed.provider_default_completion_tokens:
         return None
-    return requested_output_tokens
+    return min(remaining_after_input_tokens, model_profile.max_output_tokens)
 
 
-def _parse_estimated_input_tokens(schedule_payload: Mapping[str, object]) -> int:
-    estimate_payload = _require_mapping(schedule_payload, "llm_capacity_estimate")
-    value = estimate_payload.get("estimated_input_tokens")
+def _parse_input_tokens(estimate_payload: Mapping[str, object]) -> int:
+    value = estimate_payload.get("input_tokens")
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("llm_capacity_estimate.estimated_input_tokens must be int")
+        raise ValueError("llm_capacity_estimate.input_tokens must be int")
     if value <= 0:
-        raise ValueError("llm_capacity_estimate.estimated_input_tokens must be > 0")
+        raise ValueError("llm_capacity_estimate.input_tokens must be > 0")
     return value
 
 
-def _parse_reserved_output_tokens(schedule_payload: Mapping[str, object]) -> int:
-    estimate_payload = _require_mapping(schedule_payload, "llm_capacity_estimate")
-    value = estimate_payload.get("reserved_output_tokens")
+def _parse_planned_output_tokens(estimate_payload: Mapping[str, object]) -> int:
+    value = estimate_payload.get("planned_output_tokens")
     if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("llm_capacity_estimate.reserved_output_tokens must be int")
+        raise ValueError("llm_capacity_estimate.planned_output_tokens must be int")
     if value < 0:
-        raise ValueError("llm_capacity_estimate.reserved_output_tokens must be >= 0")
+        raise ValueError("llm_capacity_estimate.planned_output_tokens must be >= 0")
+    return value
+
+
+def _parse_safety_gap_tokens(estimate_payload: Mapping[str, object]) -> int:
+    value = estimate_payload.get("safety_gap_tokens")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("llm_capacity_estimate.safety_gap_tokens must be int")
+    if value < 0:
+        raise ValueError("llm_capacity_estimate.safety_gap_tokens must be >= 0")
+    return value
+
+
+def _parse_model_tpm_limit(estimate_payload: Mapping[str, object]) -> int:
+    value = estimate_payload.get("model_tpm_limit")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("llm_capacity_estimate.model_tpm_limit must be int")
+    if value <= 0:
+        raise ValueError("llm_capacity_estimate.model_tpm_limit must be > 0")
+    return value
+
+
+def _parse_provider_default_completion_tokens(
+    estimate_payload: Mapping[str, object],
+) -> int:
+    value = estimate_payload.get("provider_default_completion_tokens")
+    if value is None:
+        return DEFAULT_GROQ_PROVIDER_COMPLETION_TOKENS
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(
+            "llm_capacity_estimate.provider_default_completion_tokens must be int"
+        )
+    if value <= 0:
+        raise ValueError(
+            "llm_capacity_estimate.provider_default_completion_tokens must be > 0"
+        )
+    return value
+
+
+def _parse_required_window_tokens(estimate_payload: Mapping[str, object]) -> int:
+    value = estimate_payload.get("required_window_tokens")
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("llm_capacity_estimate.required_window_tokens must be int")
+    if value <= 0:
+        raise ValueError("llm_capacity_estimate.required_window_tokens must be > 0")
+    return value
+
+
+def _parse_optional_positive_int(
+    payload: Mapping[str, object],
+    key: str,
+) -> int | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"llm_capacity_estimate.{key} must be int")
+    if value <= 0:
+        raise ValueError(f"llm_capacity_estimate.{key} must be > 0")
     return value
 
 

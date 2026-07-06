@@ -94,7 +94,7 @@ def _draft_claim_compaction_dispatch_preparation_payload(
     _require_non_empty_text(workflow_run_id, "workflow_run_id")
     _require_positive_int(scheduled_work_item_count, "scheduled_work_item_count")
 
-    estimated_total_tokens = (
+    required_window_tokens = (
         DRAFT_CLAIM_COMPACTION_ESTIMATED_PROMPT_TOKENS
         + DRAFT_CLAIM_COMPACTION_ESTIMATED_COMPLETION_TOKENS
     )
@@ -114,11 +114,11 @@ def _draft_claim_compaction_dispatch_preparation_payload(
                 "model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
                 "remaining_minute_requests": scheduled_work_item_count,
                 "remaining_minute_tokens": (
-                    estimated_total_tokens * scheduled_work_item_count
+                    required_window_tokens * scheduled_work_item_count
                 ),
                 "remaining_daily_requests": scheduled_work_item_count,
                 "remaining_daily_tokens": (
-                    estimated_total_tokens * scheduled_work_item_count
+                    required_window_tokens * scheduled_work_item_count
                 ),
             }
         ],

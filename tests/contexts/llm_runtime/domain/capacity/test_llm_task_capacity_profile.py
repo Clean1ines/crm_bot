@@ -5,14 +5,14 @@ from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
 )
 
 
-def test_total_tokens_is_prompt_plus_completion() -> None:
+def test_required_window_tokens_is_prompt_plus_completion() -> None:
     profile = LlmTaskCapacityProfile(
         profile_id="prompt-a",
         estimated_prompt_tokens=3000,
         estimated_completion_tokens=500,
     )
 
-    assert profile.estimated_total_tokens == 3500
+    assert profile.required_window_tokens == 3500
     assert profile.estimated_requests == 1
 
 

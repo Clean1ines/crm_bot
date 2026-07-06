@@ -1027,7 +1027,7 @@ export type DraftClaimClusterBatchSummary = {
   workflow_run_id: string;
   prompt_variant: string;
   model_id: string;
-  estimated_input_tokens: number;
+  input_tokens: number;
   batch_status: string;
   member_count: number;
   derived_work_item_id: string;
@@ -1042,7 +1042,7 @@ export type DraftClaimClusterGroupSummary = {
   group_algorithm: string;
   group_threshold: number;
   member_count: number;
-  estimated_input_tokens: number;
+  input_tokens: number;
   requires_split: boolean;
   created_at: string;
   batches: DraftClaimClusterBatchSummary[];
@@ -1058,7 +1058,7 @@ export type DraftClaimCompactionNodeSummary = {
   supersedes_node_refs: string[];
   source_claim_count?: number;
   supersedes_node_count?: number;
-  estimated_input_tokens: number;
+  input_tokens: number;
   compacted_key: string | null;
   compacted_claim: string | null;
   compacted_claim_kind: string | null;

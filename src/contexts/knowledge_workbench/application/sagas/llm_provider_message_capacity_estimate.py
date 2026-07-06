@@ -10,36 +10,43 @@ from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_
 
 @dataclass(frozen=True, slots=True)
 class ProviderMessageCapacityEstimate:
-    estimated_input_tokens: int
-    reserved_output_tokens: int
-    estimated_total_tokens: int
+    input_tokens: int
+    planned_output_tokens: int
+    safety_gap_tokens: int
+    required_window_tokens: int
 
     def __post_init__(self) -> None:
         _require_positive_int(
-            self.estimated_input_tokens,
-            field_name="estimated_input_tokens",
+            self.input_tokens,
+            field_name="input_tokens",
         )
         _require_non_negative_int(
-            self.reserved_output_tokens,
-            field_name="reserved_output_tokens",
+            self.planned_output_tokens,
+            field_name="planned_output_tokens",
+        )
+        _require_non_negative_int(
+            self.safety_gap_tokens,
+            field_name="safety_gap_tokens",
         )
         _require_positive_int(
-            self.estimated_total_tokens,
-            field_name="estimated_total_tokens",
+            self.required_window_tokens,
+            field_name="required_window_tokens",
         )
-        if self.estimated_total_tokens != (
-            self.estimated_input_tokens + self.reserved_output_tokens
+        if self.required_window_tokens != (
+            self.input_tokens + self.planned_output_tokens + self.safety_gap_tokens
         ):
             raise ValueError(
-                "estimated_total_tokens must equal input plus reserved output",
+                "required_window_tokens must equal input plus planned output plus safety gap",
             )
 
     def to_payload(self) -> dict[str, object]:
         return {
+            "budget_contract_version": "v3",
             "estimator": "rough_char_div_4_actual_provider_messages",
-            "estimated_input_tokens": self.estimated_input_tokens,
-            "reserved_output_tokens": self.reserved_output_tokens,
-            "estimated_total_tokens": self.estimated_total_tokens,
+            "input_tokens": self.input_tokens,
+            "planned_output_tokens": self.planned_output_tokens,
+            "safety_gap_tokens": self.safety_gap_tokens,
+            "required_window_tokens": self.required_window_tokens,
         }
 
 
@@ -50,20 +57,22 @@ def estimate_provider_message_capacity(
     if not isinstance(provider_messages, tuple) or not provider_messages:
         raise ValueError("provider_messages must be non-empty tuple")
 
-    estimated_input_tokens = 0
+    input_tokens = 0
     for message in provider_messages:
         if not isinstance(message, Mapping):
             raise TypeError("provider_messages must contain mappings")
         content = message.get("content")
         if not isinstance(content, str) or not content.strip():
             raise ValueError("provider message content must be non-empty")
-        estimated_input_tokens += max(1, estimate_tokens_roughly(content))
+        input_tokens += max(1, estimate_tokens_roughly(content))
 
-    reserved_output_tokens = max(1024, min(4096, estimated_input_tokens))
+    planned_output_tokens = max(1024, min(4096, input_tokens))
+    safety_gap_tokens = 300
     return ProviderMessageCapacityEstimate(
-        estimated_input_tokens=estimated_input_tokens,
-        reserved_output_tokens=reserved_output_tokens,
-        estimated_total_tokens=estimated_input_tokens + reserved_output_tokens,
+        input_tokens=input_tokens,
+        planned_output_tokens=planned_output_tokens,
+        safety_gap_tokens=safety_gap_tokens,
+        required_window_tokens=input_tokens + planned_output_tokens + safety_gap_tokens,
     )
 
 
