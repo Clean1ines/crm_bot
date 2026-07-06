@@ -130,7 +130,9 @@ def test_repository_reads_published_workbench_runtime_entries_not_legacy_tables(
 
 
 @pytest.mark.asyncio
-async def test_get_run_summary_sql_casts_project_id_and_does_not_select_run_star() -> None:
+async def test_get_run_summary_sql_casts_project_id_and_does_not_select_run_star() -> (
+    None
+):
     connection = FakeConnection(fetchrow_result=_summary_row())
 
     summary = await PostgresWorkbenchRagEvalRepository(connection).get_run(
@@ -149,7 +151,9 @@ async def test_get_run_summary_sql_casts_project_id_and_does_not_select_run_star
 
 
 @pytest.mark.asyncio
-async def test_get_latest_run_summary_sql_casts_project_id_and_does_not_select_run_star() -> None:
+async def test_get_latest_run_summary_sql_casts_project_id_and_does_not_select_run_star() -> (
+    None
+):
     connection = FakeConnection(fetchrow_result=_summary_row())
 
     summary = await PostgresWorkbenchRagEvalRepository(connection).get_latest_run(
@@ -363,7 +367,9 @@ async def test_list_run_promotion_candidates_maps_candidates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_apply_promotion_candidate_updates_runtime_entry_and_embedding_only() -> None:
+async def test_apply_promotion_candidate_updates_runtime_entry_and_embedding_only() -> (
+    None
+):
     connection = FakeConnection(fetchrow_result=_promotion_target_row())
 
     result = await PostgresWorkbenchRagEvalRepository(

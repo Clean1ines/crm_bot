@@ -38,10 +38,12 @@ class UpdateDraftClaimCurationItem:
             raise DraftClaimCurationItemUpdateError("curation workspace was not found")
         item = _item_from_snapshot(snapshot.items, item_ref)
         editable_payload = item.editable_payload.with_editable_updates(updates)
-        updated_item = await self.curation_workspace_repository.replace_item_editable_payload(
-            item_ref=item_ref,
-            editable_payload=editable_payload,
-            updated_at=updated_at,
+        updated_item = (
+            await self.curation_workspace_repository.replace_item_editable_payload(
+                item_ref=item_ref,
+                editable_payload=editable_payload,
+                updated_at=updated_at,
+            )
         )
         if snapshot.workspace.status is DraftClaimCurationWorkspaceStatus.PUBLISHED:
             await self.curation_workspace_repository.mark_workspace_needs_republish_if_published(

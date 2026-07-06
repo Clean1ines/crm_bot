@@ -11,5 +11,7 @@ def test_curation_workspace_status_migration_allows_needs_republish() -> None:
         .split()
     )
 
-    assert "drop constraint if exists draft_claim_curation_workspaces_status_check" in sql
+    assert (
+        "drop constraint if exists draft_claim_curation_workspaces_status_check" in sql
+    )
     assert "status in ('draft', 'needs_republish', 'published')" in sql

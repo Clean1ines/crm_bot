@@ -46,7 +46,5 @@ def test_knowledge_search_result_preserves_full_curated_claim_text():
     )
 
     assert result.to_state_patch() == {
-        "knowledge_chunks": [
-            {"id": "runtime-entry-1", "score": 0.91, "content": claim}
-        ]
+        "knowledge_chunks": [{"id": "runtime-entry-1", "score": 0.91, "content": claim}]
     }

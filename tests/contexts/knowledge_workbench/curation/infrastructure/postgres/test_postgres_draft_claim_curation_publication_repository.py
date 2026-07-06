@@ -32,7 +32,9 @@ def test_postgres_publication_repository_materializes_runtime_before_workspace_p
 
     runtime_upsert = publish_method.index("_upsert_runtime_entry")
     runtime_embedding_upsert = publish_method.index("_replace_runtime_embedding")
-    runtime_projection_reset = publish_method.index("_deactivate_existing_runtime_projection")
+    runtime_projection_reset = publish_method.index(
+        "_deactivate_existing_runtime_projection"
+    )
     workspace_publish = publish_method.index("UPDATE draft_claim_curation_workspaces")
 
     assert runtime_projection_reset < runtime_upsert
@@ -155,15 +157,18 @@ async def test_republication_deactivates_stale_runtime_entries_and_embeddings() 
     assert stale["status"] == "inactive"
     assert ("runtime:item-b", "embedding-model") not in connection.runtime_embeddings
     assert set(connection.runtime_embeddings) == {("runtime:item-a", "embedding-model")}
-    assert connection.runtime_embeddings[("runtime:item-a", "embedding-model")][
-        "embedding"
-    ] == "[0.3,0.4]"
+    assert (
+        connection.runtime_embeddings[("runtime:item-a", "embedding-model")][
+            "embedding"
+        ]
+        == "[0.3,0.4]"
+    )
 
 
 def test_runtime_search_sql_does_not_use_draft_embeddings_or_observations() -> None:
-    source = Path("src/infrastructure/db/repositories/knowledge_search_queries.py").read_text(
-        encoding="utf-8"
-    )
+    source = Path(
+        "src/infrastructure/db/repositories/knowledge_search_queries.py"
+    ).read_text(encoding="utf-8")
 
     assert "draft_claim_embeddings" not in source
     assert "draft_claim_observations" not in source
@@ -212,7 +217,8 @@ class _FakePublicationConnection:
 
     async def execute(self, query: str, *args: object) -> str:
         if (
-            "DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings" in query
+            "DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings"
+            in query
             and "ANY" in query
         ):
             runtime_entry_ids = set(args[0])
@@ -267,14 +273,18 @@ class _FakePublicationConnection:
             }
             return "INSERT 0 1"
         if (
-            "DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings" in query
+            "DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings"
+            in query
             and "runtime_entry_id = $1" in query
         ):
             key = (str(args[0]), str(args[1]))
             existed = key in self.runtime_embeddings
             self.runtime_embeddings.pop(key, None)
             return f"DELETE {1 if existed else 0}"
-        if "INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings" in query:
+        if (
+            "INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings"
+            in query
+        ):
             key = (str(args[0]), str(args[1]))
             self.runtime_embeddings[key] = {
                 "runtime_entry_id": args[0],

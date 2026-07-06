@@ -66,6 +66,14 @@ const hitLabel = (result: WorkbenchRagEvalRetrievalResultDetails): string => {
   return 'miss';
 };
 
+const friendlyHitLabel = (result: WorkbenchRagEvalRetrievalResultDetails | null): string => {
+  if (!result) return 'Ответ не найден';
+  if (result.top1_hit) return 'Точный ответ найден';
+  if (result.top3_hit) return 'Ответ найден в топ-3';
+  if (result.top5_hit) return 'Ответ найден в топ-5';
+  return 'Ответ не найден';
+};
+
 const expectedRank = (question: WorkbenchRagEvalQuestionDetails): number | null => {
   const expected = question.results.find(
     (result) => result.matched_runtime_entry_id === question.expected_runtime_entry_id,
@@ -81,7 +89,8 @@ const QuestionsPanel: React.FC<{
   questions: WorkbenchRagEvalQuestionDetails[];
   loading: boolean;
   error: unknown;
-}> = ({ questions, loading, error }) => (
+  onRetry: () => void;
+}> = ({ questions, loading, error, onRetry }) => (
   <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
     <div className="mb-4 flex items-start gap-3">
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--control-bg)] text-[var(--text-secondary)]">
@@ -89,10 +98,10 @@ const QuestionsPanel: React.FC<{
       </div>
       <div>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-          Questions & retrieval results
+          Проверочные вопросы
         </h2>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
-          Read-only: показаны generated/baseline questions и top-k matches. Никакие candidates здесь не применяются.
+          Список вопросов, на которых проверяется опубликованная база знаний.
         </p>
       </div>
     </div>
@@ -100,19 +109,32 @@ const QuestionsPanel: React.FC<{
     {loading && (
       <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
         <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-        Загружаю вопросы и retrieval results…
+        Загружаю проверочные вопросы…
       </div>
     )}
 
     {Boolean(error) && !loading && (
       <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-500">
-        Не удалось загрузить questions: {getErrorMessage(error, 'unknown error')}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span>Не удалось загрузить проверочные вопросы.</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold"
+          >
+            Повторить
+          </button>
+        </div>
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer font-medium">Технические детали</summary>
+          <div className="mt-2 break-words">{getErrorMessage(error, 'unknown error')}</div>
+        </details>
       </div>
     )}
 
     {!loading && !error && questions.length === 0 && (
       <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
-        Для этого run пока нет сохранённых questions.
+        Проверка завершилась без вопросов.
       </div>
     )}
 
@@ -132,29 +154,46 @@ const QuestionsPanel: React.FC<{
                     {question.question}
                   </div>
                   <div className="mt-1 flex flex-wrap gap-2 text-xs text-[var(--text-muted)]">
-                    <span>{question.question_kind}</span>
-                    <span>source: {question.source}</span>
-                    <span>status: {question.status}</span>
+                    <span>{friendlyHitLabel(best)}</span>
+                    <span>{rank === null ? 'ожидаемый факт не найден' : `ожидаемый факт: место ${rank}`}</span>
                   </div>
                 </div>
                 <div className="grid gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-3 lg:min-w-[420px]">
                   <div>
-                    <div className="text-[var(--text-muted)]">Expected</div>
-                    <div className="font-mono">{shortId(question.expected_runtime_entry_id)}</div>
+                    <div className="text-[var(--text-muted)]">Тип вопроса</div>
+                    <div>{question.question_kind}</div>
                   </div>
                   <div>
-                    <div className="text-[var(--text-muted)]">Expected rank</div>
-                    <div>{rank === null ? 'not in top-k' : rank}</div>
+                    <div className="text-[var(--text-muted)]">Источник</div>
+                    <div>{question.source}</div>
                   </div>
                   <div>
-                    <div className="text-[var(--text-muted)]">Best match</div>
-                    <div>{best ? `${shortId(best.matched_runtime_entry_id)} · ${hitLabel(best)}` : '—'}</div>
+                    <div className="text-[var(--text-muted)]">Статус</div>
+                    <div>{question.status}</div>
                   </div>
                 </div>
               </div>
             </summary>
 
-            <div className="mt-4 overflow-x-auto">
+            <details className="mt-4 rounded-xl border border-[var(--border-primary)] p-3">
+              <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">
+                Технические детали
+              </summary>
+              <div className="mt-3 grid gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-3">
+                <div>
+                  <div className="text-[var(--text-muted)]">Expected runtime entry</div>
+                  <div className="break-all font-mono">{question.expected_runtime_entry_id}</div>
+                </div>
+                <div>
+                  <div className="text-[var(--text-muted)]">Expected rank</div>
+                  <div>{rank === null ? 'not in top-k' : rank}</div>
+                </div>
+                <div>
+                  <div className="text-[var(--text-muted)]">Best match</div>
+                  <div>{best ? `${shortId(best.matched_runtime_entry_id)} · ${hitLabel(best)}` : '—'}</div>
+                </div>
+              </div>
+              <div className="mt-4 overflow-x-auto">
               <table className="min-w-full text-left text-xs">
                 <thead className="text-[var(--text-muted)]">
                   <tr>
@@ -187,6 +226,7 @@ const QuestionsPanel: React.FC<{
                 </tbody>
               </table>
             </div>
+            </details>
           </details>
         );
       })}
@@ -206,6 +246,7 @@ const CandidatesPanel: React.FC<{
   onSelectAllVisible: () => void;
   onApplySelected: () => void;
   onApplyAllForRun: () => void;
+  onRetry: () => void;
 }> = ({
   candidates,
   loading,
@@ -218,31 +259,45 @@ const CandidatesPanel: React.FC<{
   onSelectAllVisible,
   onApplySelected,
   onApplyAllForRun,
+  onRetry,
 }) => (
   <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
     <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-      Promotion candidates
+      Вопросы для улучшения поиска
     </h2>
     <p className="mt-1 text-sm text-[var(--text-muted)]">
-      Apply добавляет questions в published search surface; bulk apply пересчитывает runtime embeddings только для изменённых surfaces.
+      Эти вопросы можно добавить к опубликованным фактам, чтобы клиентам было проще найти правильный ответ.
     </p>
 
     {loading && (
       <div className="mt-4 rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
         <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-        Загружаю candidates…
+        Загружаю предложения…
       </div>
     )}
 
     {Boolean(error) && !loading && (
       <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-500">
-        Не удалось загрузить candidates: {getErrorMessage(error, 'unknown error')}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span>Не удалось загрузить предложения для улучшения поиска.</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold"
+          >
+            Повторить
+          </button>
+        </div>
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer font-medium">Технические детали</summary>
+          <div className="mt-2 break-words">{getErrorMessage(error, 'unknown error')}</div>
+        </details>
       </div>
     )}
 
     {!loading && !error && candidates.length === 0 && (
       <div className="mt-4 rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
-        Candidate questions для этого run не созданы.
+        Сейчас нет вопросов, которые требуют улучшения поиска.
       </div>
     )}
 
@@ -255,7 +310,7 @@ const CandidatesPanel: React.FC<{
             disabled={bulkApplying}
             className="rounded-lg border border-[var(--border-primary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Select all visible
+            Выбрать все
           </button>
           <button
             type="button"
@@ -263,7 +318,7 @@ const CandidatesPanel: React.FC<{
             disabled={bulkApplying || selectedPromotionIds.length === 0}
             className="rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {bulkApplying ? 'Applying…' : `Apply selected (${selectedPromotionIds.length})`}
+            {bulkApplying ? 'Применяю…' : `Применить выбранные (${selectedPromotionIds.length})`}
           </button>
           <button
             type="button"
@@ -271,43 +326,38 @@ const CandidatesPanel: React.FC<{
             disabled={bulkApplying}
             className="rounded-lg bg-[var(--control-bg-strong)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Apply all candidates for this run
+            Применить все
           </button>
           <span className="text-xs text-[var(--text-muted)]">
-            Bulk apply добавляет выбранные failed questions в published search surface и пересчитывает runtime embeddings только для изменённых surfaces.
+            Применение добавит вопросы к опубликованным фактам и обновит поиск.
           </span>
         </div>
-        <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-xs">
-          <thead className="text-[var(--text-muted)]">
-            <tr>
-              <th className="px-2 py-2">Select</th>
-              <th className="px-2 py-2">Question</th>
-              <th className="px-2 py-2">Target runtime entry</th>
-              <th className="px-2 py-2">Target fact</th>
-              <th className="px-2 py-2">Status</th>
-              <th className="px-2 py-2">Created</th>
-              <th className="px-2 py-2">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {candidates.map((candidate) => (
-              <tr key={candidate.promotion_id} className="border-t border-[var(--border-primary)]">
-                <td className="px-2 py-2">
+        <div className="space-y-3">
+          {candidates.map((candidate) => (
+            <div
+              key={candidate.promotion_id}
+              className="rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-4"
+            >
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <label className="flex min-w-0 items-start gap-3">
                   <input
                     type="checkbox"
                     checked={selectedPromotionIds.includes(candidate.promotion_id)}
                     disabled={!isApplyableCandidate(candidate) || bulkApplying}
                     onChange={() => onToggleSelected(candidate)}
-                    aria-label={`Select promotion ${candidate.promotion_id}`}
+                    aria-label={`Выбрать вопрос ${candidate.question}`}
+                    className="mt-1"
                   />
-                </td>
-                <td className="max-w-xl px-2 py-2 text-[var(--text-primary)]">{candidate.question}</td>
-                <td className="px-2 py-2 font-mono">{candidate.target_runtime_entry_id}</td>
-                <td className="px-2 py-2 font-mono">{candidate.target_fact_id}</td>
-                <td className="px-2 py-2">{candidate.status}</td>
-                <td className="px-2 py-2">{formatDateTime(candidate.created_at)}</td>
-                <td className="px-2 py-2">
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-[var(--text-primary)]">
+                      {candidate.question}
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--text-muted)]">
+                      Статус: {candidate.status} · создано {formatDateTime(candidate.created_at)}
+                    </span>
+                  </span>
+                </label>
+                <div className="shrink-0">
                   <button
                     type="button"
                     disabled={
@@ -318,13 +368,31 @@ const CandidatesPanel: React.FC<{
                     onClick={() => onApply(candidate)}
                     className="rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {applyingPromotionId === candidate.promotion_id ? 'Applying…' : 'Apply'}
+                    {applyingPromotionId === candidate.promotion_id ? 'Применяю…' : 'Применить'}
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+              </div>
+              <details className="mt-3 text-xs text-[var(--text-secondary)]">
+                <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                  Технические детали
+                </summary>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <div className="text-[var(--text-muted)]">promotion_id</div>
+                    <div className="break-all font-mono">{candidate.promotion_id}</div>
+                  </div>
+                  <div>
+                    <div className="text-[var(--text-muted)]">target_runtime_entry_id</div>
+                    <div className="break-all font-mono">{candidate.target_runtime_entry_id}</div>
+                  </div>
+                  <div>
+                    <div className="text-[var(--text-muted)]">target_fact_id</div>
+                    <div className="break-all font-mono">{candidate.target_fact_id}</div>
+                  </div>
+                </div>
+              </details>
+            </div>
+          ))}
         </div>
       </div>
     )}
@@ -351,7 +419,7 @@ const SummaryPanel: React.FC<{ run: WorkbenchRagEvalRunSummary | null; loading?:
     return (
       <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 text-sm text-[var(--text-muted)] shadow-[var(--shadow-card)]">
         <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
-        Загружаю последний Workbench RAG Eval run…
+        Загружаю результаты проверки…
       </section>
     );
   }
@@ -365,11 +433,11 @@ const SummaryPanel: React.FC<{ run: WorkbenchRagEvalRunSummary | null; loading?:
           </div>
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-              Workbench RAG Eval ещё не запускался
+              Проверка ещё не запускалась
             </h2>
             <p className="mt-1 max-w-3xl text-sm text-[var(--text-muted)]">
-              Backend уже умеет запускать retrieval-only проверку published compacted claims.
-              После запуска здесь появится summary без таблицы вопросов/results: details endpoints будут отдельным patch.
+              Запустите проверку, чтобы увидеть, на какие вопросы база знаний отвечает уверенно,
+              а какие стоит добавить к опубликованным фактам.
             </p>
           </div>
         </div>
@@ -380,6 +448,10 @@ const SummaryPanel: React.FC<{ run: WorkbenchRagEvalRunSummary | null; loading?:
   const completed = run.completed_questions;
   const promptVersion = run.question_generation_prompt_version ?? '—';
   const generationModel = run.question_generation_model ?? '—';
+  const hasNoMetrics = run.total_entries === 0
+    && run.total_questions === 0
+    && run.completed_questions === 0
+    && (run.promotion_candidate_count ?? 0) === 0;
 
   return (
     <section className="space-y-5 rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
@@ -389,84 +461,92 @@ const SummaryPanel: React.FC<{ run: WorkbenchRagEvalRunSummary | null; loading?:
             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(run.status)}`}>
               {statusLabel(run.status)}
             </span>
-            <span className="rounded-full bg-[var(--control-bg)] px-3 py-1 text-xs font-semibold text-[var(--text-secondary)]">
-              run: {run.run_id.slice(0, 12)}
-            </span>
           </div>
           <h2 className="mt-3 text-xl font-semibold text-[var(--text-primary)]">
-            Последний Workbench RAG Eval
+            Последняя проверка
           </h2>
           <p className="mt-1 max-w-3xl text-sm text-[var(--text-muted)]">
-            Summary-only: backend пока отдаёт агрегированные метрики, без списка questions/results/promotions.
+            Итоги последнего запуска проверки опубликованной базы знаний.
           </p>
         </div>
         <div className="rounded-2xl bg-[var(--control-bg)] px-4 py-3 text-sm text-[var(--text-secondary)]">
-          <div>Created: {formatDateTime(run.created_at)}</div>
-          <div>Completed: {formatDateTime(run.completed_at)}</div>
+          <div>Создана: {formatDateTime(run.created_at)}</div>
+          <div>Завершена: {formatDateTime(run.completed_at)}</div>
         </div>
       </div>
 
       {run.error_message && (
-        <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">
-          <XCircle className="h-4 w-4" />
-          {run.error_message}
+        <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">
+          <div className="flex items-center gap-2">
+            <XCircle className="h-4 w-4" />
+            Проверка завершилась с ошибкой.
+          </div>
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer font-medium">Технические детали</summary>
+            <div className="mt-2 break-words">{run.error_message}</div>
+          </details>
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard label="Entries" value={formatNumber(run.total_entries)} />
-        <MetricCard label="Questions" value={formatNumber(run.total_questions)} />
-        <MetricCard label="Checked" value={formatNumber(run.completed_questions)} />
-        <MetricCard
-          label="Promotion candidates"
-          value={formatNumber(run.promotion_candidate_count ?? 0)}
-          hint="Не применяются автоматически"
-        />
-        <MetricCard
-          label="Top-1 hit"
-          value={formatRate(run.top1_hits, completed)}
-          hint={`${formatNumber(run.top1_hits)} / ${formatNumber(completed)}`}
-        />
-        <MetricCard
-          label="Top-3 hit"
-          value={formatRate(run.top3_hits, completed)}
-          hint={`${formatNumber(run.top3_hits)} / ${formatNumber(completed)}`}
-        />
-        <MetricCard
-          label="Top-5 hit"
-          value={formatRate(run.top5_hits, completed)}
-          hint={`${formatNumber(run.top5_hits)} / ${formatNumber(completed)}`}
-        />
-        <MetricCard
-          label="Miss rate"
-          value={formatRate(run.misses, completed)}
-          hint={`${formatNumber(run.misses)} misses`}
-        />
-      </div>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <div className="rounded-xl bg-[var(--control-bg)] p-4">
-          <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
-            Prompt version
-          </div>
-          <div className="mt-1 break-all text-sm font-medium text-[var(--text-primary)]">
-            {promptVersion}
-          </div>
+      {hasNoMetrics ? (
+        <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+          Пока нет результатов проверки.
         </div>
-        <div className="rounded-xl bg-[var(--control-bg)] p-4">
-          <div className="text-xs uppercase tracking-wide text-[var(--text-muted)]">
-            Generation model
-          </div>
-          <div className="mt-1 break-all text-sm font-medium text-[var(--text-primary)]">
-            {generationModel}
-          </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <MetricCard label="Проверено фактов" value={formatNumber(run.total_entries)} />
+          <MetricCard label="Сгенерировано вопросов" value={formatNumber(run.total_questions)} />
+          <MetricCard label="Проверено вопросов" value={formatNumber(run.completed_questions)} />
+          <MetricCard
+            label="Нужно улучшить"
+            value={formatNumber(run.promotion_candidate_count ?? 0)}
+            hint="Не применяется автоматически"
+          />
+          <MetricCard
+            label="Точный ответ найден"
+            value={formatRate(run.top1_hits, completed)}
+            hint={`${formatNumber(run.top1_hits)} / ${formatNumber(completed)}`}
+          />
+          <MetricCard
+            label="Ответ найден в топ-3"
+            value={formatRate(run.top3_hits, completed)}
+            hint={`${formatNumber(run.top3_hits)} / ${formatNumber(completed)}`}
+          />
+          <MetricCard
+            label="Ответ найден в топ-5"
+            value={formatRate(run.top5_hits, completed)}
+            hint={`${formatNumber(run.top5_hits)} / ${formatNumber(completed)}`}
+          />
+          <MetricCard
+            label="Не найдено ответов"
+            value={formatRate(run.misses, completed)}
+            hint={`${formatNumber(run.misses)} / ${formatNumber(completed)}`}
+          />
         </div>
-      </div>
+      )}
 
       <details className="rounded-xl border border-[var(--border-primary)] p-3">
         <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">
-          Технический JSON summary
+          Технические детали
         </summary>
+        <div className="mt-3 grid gap-3 text-xs text-[var(--text-secondary)] lg:grid-cols-2">
+          <div className="rounded-xl bg-[var(--control-bg)] p-3">
+            <div className="text-[var(--text-muted)]">run_id</div>
+            <div className="mt-1 break-all font-mono">{run.run_id}</div>
+          </div>
+          <div className="rounded-xl bg-[var(--control-bg)] p-3">
+            <div className="text-[var(--text-muted)]">publication_id</div>
+            <div className="mt-1 break-all font-mono">{run.publication_id ?? '—'}</div>
+          </div>
+          <div className="rounded-xl bg-[var(--control-bg)] p-3">
+            <div className="text-[var(--text-muted)]">Prompt version</div>
+            <div className="mt-1 break-all font-mono">{promptVersion}</div>
+          </div>
+          <div className="rounded-xl bg-[var(--control-bg)] p-3">
+            <div className="text-[var(--text-muted)]">Generation model</div>
+            <div className="mt-1 break-all font-mono">{generationModel}</div>
+          </div>
+        </div>
         <pre className="mt-3 max-h-[420px] overflow-auto rounded-xl bg-[var(--control-bg)] p-4 text-xs leading-relaxed text-[var(--text-secondary)]">
           {JSON.stringify(run, null, 2)}
         </pre>
@@ -519,8 +599,8 @@ export const RagEvalPage: React.FC = () => {
   });
 
   const validationError = useMemo(() => {
-    if (topK < 5) return 'top_k должен быть не меньше 5';
-    if (maxEntries < 1 || maxEntries > 50) return 'max_entries должен быть от 1 до 50';
+    if (topK < 5) return 'Количество результатов должно быть не меньше 5';
+    if (maxEntries < 1 || maxEntries > 50) return 'Количество фактов должно быть от 1 до 50';
     return null;
   }, [topK, maxEntries]);
 
@@ -531,7 +611,7 @@ export const RagEvalPage: React.FC = () => {
     },
     onSuccess: async (result) => {
       toast.success(
-        `Question added, embeddings recalculated: ${result.result.possible_question_count} possible questions`,
+        `Вопрос добавлен. Всего формулировок: ${result.result.possible_question_count}`,
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-promotion-candidates', projectId, visibleRun?.run_id] }),
@@ -540,7 +620,7 @@ export const RagEvalPage: React.FC = () => {
       ]);
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Promotion candidate не применился'));
+      toast.error(getErrorMessage(error, 'Не удалось применить предложение'));
     },
   });
 
@@ -553,10 +633,10 @@ export const RagEvalPage: React.FC = () => {
       setSelectedPromotionIds([]);
       const result = response.result;
       toast.success(
-        `Bulk apply: applied ${result.applied_count}, skipped ${result.skipped_count}, embeddings ${result.embedding_recalculation_count}`,
+        `Применено: ${result.applied_count}, пропущено: ${result.skipped_count}, обновлено: ${result.embedding_recalculation_count}`,
       );
       if (result.errors.length > 0) {
-        toast.error(`Bulk apply errors: ${result.errors.length}`);
+        toast.error(`Ошибки применения: ${result.errors.length}`);
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-promotion-candidates', projectId, visibleRun?.run_id] }),
@@ -565,7 +645,7 @@ export const RagEvalPage: React.FC = () => {
       ]);
     },
     onError: (error) => {
-      toast.error(getErrorMessage(error, 'Bulk promotion apply не выполнился'));
+      toast.error(getErrorMessage(error, 'Не удалось применить выбранные предложения'));
     },
   });
 
@@ -585,14 +665,14 @@ export const RagEvalPage: React.FC = () => {
     },
     onSuccess: async (result) => {
       setLastRun(result.run);
-      toast.success('Workbench RAG Eval завершён');
+      toast.success('Проверка базы знаний завершена');
       await queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-latest', projectId] });
     },
     onError: (error) => {
-      const fallback = 'Workbench RAG Eval не запустился';
+      const fallback = 'Проверка базы знаний не запустилась';
       const detail = getErrorMessage(error, fallback);
       const message = detail.includes('Question generation')
-        ? `${detail}. Генерация вариантов вопросов не удалась. Проверь LLM runtime/provider limits.`
+        ? 'Не удалось сгенерировать проверочные вопросы. Технические детали доступны в логах сервера.'
         : detail;
       toast.error(message);
     },
@@ -625,7 +705,7 @@ export const RagEvalPage: React.FC = () => {
   const applyAllPromotionsForRun = (): void => {
     if (!visibleRun) return;
     const confirmed = window.confirm(
-      'Apply all candidate/accepted promotion candidates for this run? Runtime embeddings will be recalculated only for changed published surfaces.',
+      'Применить все предложения для этой проверки? Поиск будет обновлён только для изменённых опубликованных фактов.',
     );
     if (!confirmed) return;
     applyBatchMutation.mutate({
@@ -638,14 +718,14 @@ export const RagEvalPage: React.FC = () => {
     <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
       <header>
         <p className="text-sm font-medium text-[var(--accent-primary)]">
-          Старый RAG Eval retired; используется Workbench RAG Eval
+          База знаний
         </p>
         <h1 className="mt-2 text-2xl font-semibold leading-tight text-[var(--text-primary)] sm:text-3xl">
-          Workbench RAG Eval
+          Проверка базы знаний
         </h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--text-muted)]">
-          Проверяет published compacted claims через новый Workbench runtime retrieval.
-          Frontend не вызывает legacy RAG Eval API; promotion candidates применяются только через Workbench bulk/single apply.
+          Проверьте, насколько опубликованная база знаний отвечает на вопросы клиентов,
+          и добавьте недостающие формулировки к уже опубликованным фактам.
         </p>
       </header>
 
@@ -656,67 +736,72 @@ export const RagEvalPage: React.FC = () => {
           </div>
           <div>
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-              Запустить retrieval-only eval
+              Запустить проверку
             </h2>
             <p className="mt-1 max-w-3xl text-sm text-[var(--text-muted)]">
-              Backend сгенерирует question variants через LLM Runtime, затем прогонит каждый вопрос через
-              SearchPublishedWorkbenchRuntime без answer service.
+              Система сгенерирует проверочные вопросы и проверит, находятся ли ответы
+              в опубликованной базе знаний.
             </p>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
-              publication_id optional
-            </span>
-            <input
-              value={publicationId}
-              onChange={(event) => setPublicationId(event.target.value)}
-              placeholder="draft-claim-curation-publication:..."
-              className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-            />
-          </label>
+        <details className="rounded-xl border border-[var(--border-primary)] p-3">
+          <summary className="cursor-pointer text-sm font-medium text-[var(--text-primary)]">
+            Дополнительные настройки
+          </summary>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
+                publication_id
+              </span>
+              <input
+                value={publicationId}
+                onChange={(event) => setPublicationId(event.target.value)}
+                placeholder="draft-claim-curation-publication:..."
+                className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+              />
+            </label>
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
-              source_document_ref optional
-            </span>
-            <input
-              value={sourceDocumentRef}
-              onChange={(event) => setSourceDocumentRef(event.target.value)}
-              placeholder="source-document:..."
-              className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-            />
-          </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
+                source_document_ref
+              </span>
+              <input
+                value={sourceDocumentRef}
+                onChange={(event) => setSourceDocumentRef(event.target.value)}
+                placeholder="source-document:..."
+                className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+              />
+            </label>
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
-              top_k
-            </span>
-            <input
-              type="number"
-              min={5}
-              value={topK}
-              onChange={(event) => setTopK(Number(event.target.value))}
-              className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-            />
-          </label>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
+                top_k
+              </span>
+              <input
+                type="number"
+                min={5}
+                value={topK}
+                onChange={(event) => setTopK(Number(event.target.value))}
+                className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+              />
+            </label>
 
-          <label className="block">
-            <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
-              max_entries
-            </span>
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={maxEntries}
-              onChange={(event) => setMaxEntries(Number(event.target.value))}
-              className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-            />
-          </label>
-        </div>
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
+                max_entries
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={maxEntries}
+                onChange={(event) => setMaxEntries(Number(event.target.value))}
+                className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
+              />
+            </label>
+          </div>
+        </details>
 
         {validationError && (
           <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">
@@ -732,18 +817,31 @@ export const RagEvalPage: React.FC = () => {
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-[var(--accent-primary)] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             {runMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            {runMutation.isPending ? 'Запускаю…' : 'Запустить Workbench RAG Eval'}
+            {runMutation.isPending ? 'Запускаю…' : 'Запустить проверку'}
           </button>
 
           <span className="text-sm text-[var(--text-muted)]">
-            Single/bulk apply обновляет published search surface и пересчитывает runtime embeddings.
+            Результаты появятся ниже после завершения проверки.
           </span>
         </div>
       </section>
 
       {latestQuery.error && !visibleRun && (
         <section className="rounded-2xl border border-red-500/30 bg-red-500/5 p-5 text-sm text-red-500 shadow-[var(--shadow-card)]">
-          Не удалось загрузить последний Workbench RAG Eval: {getErrorMessage(latestQuery.error, 'unknown error')}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>Не удалось загрузить результаты проверки.</span>
+            <button
+              type="button"
+              onClick={() => { void latestQuery.refetch(); }}
+              className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold"
+            >
+              Повторить
+            </button>
+          </div>
+          <details className="mt-3 text-xs">
+            <summary className="cursor-pointer font-medium">Технические детали</summary>
+            <div className="mt-2 break-words">{getErrorMessage(latestQuery.error, 'unknown error')}</div>
+          </details>
         </section>
       )}
 
@@ -755,6 +853,7 @@ export const RagEvalPage: React.FC = () => {
             questions={questionsQuery.data?.questions ?? []}
             loading={questionsQuery.isLoading}
             error={questionsQuery.error}
+            onRetry={() => { void questionsQuery.refetch(); }}
           />
           <CandidatesPanel
             candidates={candidatesQuery.data?.candidates ?? []}
@@ -772,6 +871,7 @@ export const RagEvalPage: React.FC = () => {
             onSelectAllVisible={selectAllVisiblePromotions}
             onApplySelected={applySelectedPromotions}
             onApplyAllForRun={applyAllPromotionsForRun}
+            onRetry={() => { void candidatesQuery.refetch(); }}
           />
         </>
       )}

@@ -61,7 +61,9 @@ async def test_kb_search_keeps_full_curated_claim_text():
     )
     tool_registry = MagicMock()
     tool_registry.execute = AsyncMock(
-        return_value={"results": [{"id": "runtime-entry-1", "score": 0.93, "content": claim}]}
+        return_value={
+            "results": [{"id": "runtime-entry-1", "score": 0.93, "content": claim}]
+        }
     )
     node = create_kb_search_node(tool_registry=tool_registry)
 
@@ -75,7 +77,5 @@ async def test_kb_search_keeps_full_curated_claim_text():
         result = await node({"project_id": "project-1", "user_input": "hello"})
 
     assert result == {
-        "knowledge_chunks": [
-            {"id": "runtime-entry-1", "score": 0.93, "content": claim}
-        ]
+        "knowledge_chunks": [{"id": "runtime-entry-1", "score": 0.93, "content": claim}]
     }
