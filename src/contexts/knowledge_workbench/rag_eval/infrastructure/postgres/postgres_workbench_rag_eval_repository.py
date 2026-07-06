@@ -438,7 +438,24 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
             row = await connection.fetchrow(
                 """
                 SELECT
-                    run.*,
+                    run.run_id,
+                    run.project_id::text AS project_id,
+                    run.publication_id,
+                    run.source_document_ref,
+                    run.status,
+                    run.question_generation_model,
+                    run.question_generation_prompt_version,
+                    run.total_entries,
+                    run.total_questions,
+                    run.completed_questions,
+                    run.top1_hits,
+                    run.top3_hits,
+                    run.top5_hits,
+                    run.misses,
+                    run.created_at,
+                    run.started_at,
+                    run.completed_at,
+                    run.error_message,
                     (
                         SELECT count(*)
                         FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
@@ -464,7 +481,24 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
             row = await connection.fetchrow(
                 """
                 SELECT
-                    run.*,
+                    run.run_id,
+                    run.project_id::text AS project_id,
+                    run.publication_id,
+                    run.source_document_ref,
+                    run.status,
+                    run.question_generation_model,
+                    run.question_generation_prompt_version,
+                    run.total_entries,
+                    run.total_questions,
+                    run.completed_questions,
+                    run.top1_hits,
+                    run.top3_hits,
+                    run.top5_hits,
+                    run.misses,
+                    run.created_at,
+                    run.started_at,
+                    run.completed_at,
+                    run.error_message,
                     (
                         SELECT count(*)
                         FROM knowledge_workbench_rag_eval_promoted_questions AS promotion

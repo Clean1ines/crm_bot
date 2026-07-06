@@ -80,6 +80,30 @@ def _promotion_target_row() -> Mapping[str, object]:
     }
 
 
+def _summary_row() -> Mapping[str, object]:
+    return {
+        "run_id": "run-1",
+        "project_id": "11111111-1111-1111-1111-111111111111",
+        "publication_id": "publication-1",
+        "source_document_ref": "source-document-1",
+        "status": "completed",
+        "question_generation_model": "model-1",
+        "question_generation_prompt_version": "prompt-v1",
+        "total_entries": 2,
+        "total_questions": 4,
+        "completed_questions": 4,
+        "top1_hits": 1,
+        "top3_hits": 3,
+        "top5_hits": 4,
+        "misses": 0,
+        "created_at": _now(),
+        "started_at": _now(),
+        "completed_at": _now(),
+        "error_message": None,
+        "promotion_candidate_count": 2,
+    }
+
+
 def test_repository_reads_published_workbench_runtime_entries_not_legacy_tables() -> (
     None
 ):
@@ -103,6 +127,43 @@ def test_repository_reads_published_workbench_runtime_entries_not_legacy_tables(
     assert "entry.source_document_ref" in sql
     assert "entry.curation_item_ref" in sql
     assert "emb.runtime_entry_id = entry.runtime_entry_id" in sql
+
+
+@pytest.mark.asyncio
+async def test_get_run_summary_sql_casts_project_id_and_does_not_select_run_star() -> None:
+    connection = FakeConnection(fetchrow_result=_summary_row())
+
+    summary = await PostgresWorkbenchRagEvalRepository(connection).get_run(
+        run_id="run-1",
+        project_id="11111111-1111-1111-1111-111111111111",
+    )
+
+    sql = connection.fetchrow_calls[0][0]
+    assert "run.project_id::text AS project_id" in sql
+    assert "run.*" not in sql
+    assert "WHERE run.run_id = $1" in sql
+    assert "AND run.project_id = $2::uuid" in sql
+    assert summary is not None
+    assert summary.project_id == "11111111-1111-1111-1111-111111111111"
+    assert summary.promotion_candidate_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_latest_run_summary_sql_casts_project_id_and_does_not_select_run_star() -> None:
+    connection = FakeConnection(fetchrow_result=_summary_row())
+
+    summary = await PostgresWorkbenchRagEvalRepository(connection).get_latest_run(
+        project_id="11111111-1111-1111-1111-111111111111",
+    )
+
+    sql = connection.fetchrow_calls[0][0]
+    assert "run.project_id::text AS project_id" in sql
+    assert "run.*" not in sql
+    assert "WHERE run.project_id = $1::uuid" in sql
+    assert "ORDER BY run.created_at DESC" in sql
+    assert summary is not None
+    assert summary.project_id == "11111111-1111-1111-1111-111111111111"
+    assert summary.promotion_candidate_count == 2
 
 
 def test_details_sql_reads_questions_results_and_candidates_without_legacy_tables() -> (
