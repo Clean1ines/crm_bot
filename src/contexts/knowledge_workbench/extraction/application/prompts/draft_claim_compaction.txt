@@ -110,7 +110,7 @@ VALID_OUTPUT:
 {
   "compacted_claims": [
     {
-      "key": "product_ai_knowledge_base_platform",
+      "key": "product_ai_runtime_platform",
       "claim": "The product is a knowledge-base platform for creating a verified AI knowledge base and using it in a Telegram assistant.",
       "claim_kind": "definition",
       "source_claim_refs": ["claim_1", "claim_2"],

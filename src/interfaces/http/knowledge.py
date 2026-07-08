@@ -29,7 +29,6 @@ from fastapi import (
 from starlette.responses import StreamingResponse
 
 
-from src.domain.commercial.commercial_truth import CommercialTruthResolutionPolicy
 from src.domain.project_plane.json_types import JsonObject
 from src.contexts.knowledge_workbench.application.sagas.run_source_ingestion_first_phase import (
     RunSourceIngestionFirstPhaseCommand,
@@ -1179,7 +1178,7 @@ def _payload_bool(payload: Mapping[str, object], key: str, *, default: bool) -> 
 
 
 @router.get("")
-async def list_knowledge_documents(
+async def list_workbench_documents(
     project_id: str,
     authorization: str | None = Header(default=None),
     limit: int = Query(50, ge=1, le=200),
@@ -2860,146 +2859,6 @@ async def knowledge_import_quality_report(
             "continue_processing" if safe_to_compile else "wait_for_source_units"
         ),
     }
-
-
-@router.get("/{document_id}/price-facts")
-async def knowledge_price_facts(
-    project_id: str,
-    document_id: str,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    await _require_project_access(
-        project_id=project_id,
-        authorization=authorization,
-        project_repo=project_repo,
-        user_repo=user_repo,
-    )
-    from src.interfaces.composition.commercial_price_review import (
-        make_commercial_price_review_service,
-    )
-
-    service = make_commercial_price_review_service(pool)
-    return await service.price_facts(document_id=document_id)
-
-
-@router.get("/commercial-truth-review")
-async def project_commercial_truth_review(
-    project_id: str,
-    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    await _require_project_access(
-        project_id=project_id,
-        authorization=authorization,
-        project_repo=project_repo,
-        user_repo=user_repo,
-    )
-    from src.interfaces.composition.commercial_price_review import (
-        make_commercial_price_review_service,
-    )
-
-    service = make_commercial_price_review_service(pool)
-    return await service.project_commercial_truth_review(
-        project_id=project_id,
-        policy=policy,
-    )
-
-
-@router.get("/{document_id}/commercial-truth-review")
-async def knowledge_commercial_truth_review(
-    project_id: str,
-    document_id: str,
-    policy: CommercialTruthResolutionPolicy = CommercialTruthResolutionPolicy.MANUAL_REVIEW,
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    await _require_project_access(
-        project_id=project_id,
-        authorization=authorization,
-        project_repo=project_repo,
-        user_repo=user_repo,
-    )
-    from src.interfaces.composition.commercial_price_review import (
-        make_commercial_price_review_service,
-    )
-
-    service = make_commercial_price_review_service(pool)
-    return await service.commercial_truth_review(
-        document_id=document_id,
-        policy=policy,
-    )
-
-
-@router.post("/{document_id}/price-facts/publish")
-async def publish_knowledge_price_facts(
-    project_id: str,
-    document_id: str,
-    fact_ids: list[str] | None = Query(default=None),
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    await _require_project_access(
-        project_id=project_id,
-        authorization=authorization,
-        project_repo=project_repo,
-        user_repo=user_repo,
-    )
-    from src.interfaces.composition.commercial_price_review import (
-        make_commercial_price_review_service,
-    )
-
-    service = make_commercial_price_review_service(pool)
-    try:
-        return await service.publish_price_facts(
-            document_id=document_id,
-            fact_ids=tuple(fact_ids or ()),
-            reviewed_by="http_api",
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.post("/{document_id}/price-facts/reject")
-async def reject_knowledge_price_facts(
-    project_id: str,
-    document_id: str,
-    fact_ids: list[str] | None = Query(default=None),
-    reason: str = "",
-    authorization: str | None = Header(default=None),
-    pool=Depends(get_pool),
-    project_repo=Depends(get_project_repo),
-    user_repo: UserRepository = Depends(get_user_repository),
-):
-    await _require_project_access(
-        project_id=project_id,
-        authorization=authorization,
-        project_repo=project_repo,
-        user_repo=user_repo,
-    )
-    from src.interfaces.composition.commercial_price_review import (
-        make_commercial_price_review_service,
-    )
-
-    service = make_commercial_price_review_service(pool)
-    try:
-        return await service.reject_price_facts(
-            document_id=document_id,
-            fact_ids=tuple(fact_ids or ()),
-            reviewed_by="http_api",
-            reason=reason,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/{document_id}/retighten")

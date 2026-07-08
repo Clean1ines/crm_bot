@@ -920,7 +920,7 @@ export interface WorkbenchEvidenceTraceFinding {
   created_at?: string | null;
 }
 
-export interface WorkbenchEvidenceTraceCanonicalFact {
+export interface WorkbenchEvidenceTracePublishedFact {
   fact_id: string;
   fact_key: string;
   claim: string;
@@ -968,7 +968,7 @@ export interface WorkbenchEvidenceTraceSourceUnit {
   text_excerpt: string;
   raw_text_excerpt: string;
   findings: WorkbenchEvidenceTraceFinding[];
-  canonical_facts: WorkbenchEvidenceTraceCanonicalFact[];
+  published_facts: WorkbenchEvidenceTracePublishedFact[];
   surfaces: WorkbenchEvidenceTraceSurface[];
   created_at?: string | null;
   updated_at?: string | null;
@@ -979,7 +979,7 @@ export interface WorkbenchEvidenceTraceResponse {
   source_units: WorkbenchEvidenceTraceSourceUnit[];
   items: WorkbenchEvidenceTraceSourceUnit[];
   findings: WorkbenchEvidenceTraceFinding[];
-  canonical_facts: WorkbenchEvidenceTraceCanonicalFact[];
+  published_facts: WorkbenchEvidenceTracePublishedFact[];
   surfaces: WorkbenchEvidenceTraceSurface[];
   coverage: Record<string, number>;
   gaps: Record<string, unknown>;

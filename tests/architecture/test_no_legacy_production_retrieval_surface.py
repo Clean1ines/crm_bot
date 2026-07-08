@@ -42,7 +42,6 @@ def test_production_search_sql_uses_workbench_runtime_tables() -> None:
 
     assert "knowledge_workbench_runtime_retrieval_entries" in source
     assert "knowledge_workbench_runtime_retrieval_entry_embeddings" in source
-    assert "knowledge_workbench_canonical_facts" in source
     assert "entry.claim AS content" in source
     assert "entry.possible_questions AS questions" in source
     assert "entry.source_refs->'source_claim_refs' AS source_refs" in source

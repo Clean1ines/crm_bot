@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import datetime
 import json
 from typing import Protocol, cast
@@ -93,11 +92,8 @@ class PostgresDraftClaimCurationPublicationRepository(
         async with connection.transaction():
             await _deactivate_existing_runtime_projection(connection, publication)
             await _upsert_publication(connection, publication)
-            await _upsert_fact_registry(connection, publication)
 
             for item in publication.items:
-                await _upsert_fact(connection, publication, item)
-                await _replace_fact_triples(connection, publication, item)
                 await _upsert_runtime_entry(connection, publication, item)
                 await _replace_runtime_embedding(
                     connection, item, publication.published_at
@@ -192,98 +188,6 @@ async def _upsert_publication(
         "draft_claim_curation_workspace",
         publication.published_at,
     )
-
-
-async def _upsert_fact_registry(
-    connection: DraftClaimCurationPublicationConnectionLike,
-    publication: DraftClaimCurationPublicationCandidate,
-) -> None:
-    await connection.execute(
-        """
-        INSERT INTO knowledge_workbench_fact_registries (
-            registry_id, project_id, document_id, processing_run_id,
-            status, version, retention_state, created_at, updated_at
-        )
-        VALUES ($1, $2::uuid, $3, NULL, 'published', 1, 'runtime_published', $4, $4)
-        ON CONFLICT (registry_id) DO UPDATE
-        SET status = 'published',
-            retention_state = 'runtime_published',
-            updated_at = EXCLUDED.updated_at
-        """,
-        publication.fact_registry_id,
-        publication.project_id,
-        publication.source_document_ref,
-        publication.published_at,
-    )
-
-
-async def _upsert_fact(
-    connection: DraftClaimCurationPublicationConnectionLike,
-    publication: DraftClaimCurationPublicationCandidate,
-    item: DraftClaimCurationPublicationItem,
-) -> None:
-    await connection.execute(
-        """
-        INSERT INTO knowledge_workbench_canonical_facts (
-            fact_id, registry_id, project_id, document_id, processing_run_id,
-            claim, claim_kind, granularity, possible_questions, scope,
-            exclusion_scope, derived_fact_notes, status, retention_state,
-            created_at, updated_at
-        )
-        VALUES (
-            $1, $2, $3::uuid, $4, NULL, $5, $6, $7, $8::jsonb, '',
-            $9, '[]'::jsonb, 'published', 'runtime_published', $10, $10
-        )
-        ON CONFLICT (fact_id) DO UPDATE
-        SET claim = EXCLUDED.claim,
-            claim_kind = EXCLUDED.claim_kind,
-            granularity = EXCLUDED.granularity,
-            possible_questions = EXCLUDED.possible_questions,
-            exclusion_scope = EXCLUDED.exclusion_scope,
-            status = 'published',
-            retention_state = 'runtime_published',
-            updated_at = EXCLUDED.updated_at
-        """,
-        item.fact_id,
-        publication.fact_registry_id,
-        publication.project_id,
-        publication.source_document_ref,
-        item.claim,
-        item.claim_kind,
-        item.granularity,
-        json.dumps(list(item.possible_questions), ensure_ascii=False),
-        item.exclusion_scope,
-        publication.published_at,
-    )
-
-
-async def _replace_fact_triples(
-    connection: DraftClaimCurationPublicationConnectionLike,
-    publication: DraftClaimCurationPublicationCandidate,
-    item: DraftClaimCurationPublicationItem,
-) -> None:
-    await connection.execute(
-        "DELETE FROM knowledge_workbench_fact_triples WHERE fact_id = $1",
-        item.fact_id,
-    )
-    for index, triple in enumerate(item.triples):
-        await connection.execute(
-            """
-            INSERT INTO knowledge_workbench_fact_triples (
-                triple_id, fact_id, registry_id, subject,
-                predicate, object, qualifiers, created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-            """,
-            f"{item.fact_id}:triple:{index}",
-            item.fact_id,
-            publication.fact_registry_id,
-            _triple_text(triple, "subject"),
-            _triple_text(triple, "predicate"),
-            _triple_text(triple, "object"),
-            json.dumps(_triple_qualifiers(triple), ensure_ascii=False),
-            publication.published_at,
-        )
 
 
 async def _upsert_runtime_entry(
@@ -405,19 +309,3 @@ def _affected_count(status: object) -> int:
 
 def _pg_vector_text(vector: tuple[float, ...]) -> str:
     return "[" + ",".join(str(float(value)) for value in vector) + "]"
-
-
-def _triple_text(triple: Mapping[str, object], key: str) -> str:
-    value = triple.get(key)
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"triple {key} must be non-empty")
-    return value.strip()
-
-
-def _triple_qualifiers(triple: Mapping[str, object]) -> list[object]:
-    value = triple.get("qualifiers")
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise TypeError("triple qualifiers must be list")
-    return list(value)

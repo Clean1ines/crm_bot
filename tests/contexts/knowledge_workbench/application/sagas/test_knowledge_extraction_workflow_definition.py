@@ -118,6 +118,7 @@ def test_ingest_source_document_has_source_document_persisted_intermediate_event
 
     assert operation.intermediate_event_types == (
         KnowledgeExtractionCanonicalEventType.SOURCE_DOCUMENT_PERSISTED,
+        KnowledgeExtractionCanonicalEventType.SOURCE_UNIT_CREATED,
     )
     assert (
         operation.success_event_type

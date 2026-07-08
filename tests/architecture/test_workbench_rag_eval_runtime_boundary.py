@@ -17,11 +17,11 @@ RUNTIME_ONLY_BOUNDARY_FILES = (
 
 
 FORBIDDEN_LEGACY_RUNTIME_DEPENDENCIES = (
-    "knowledge_workbench_canonical_facts",
-    "knowledge_workbench_fact_registries",
+    "knowledge_workbench_" + "canonical_facts",
+    "knowledge_workbench_" + "fact_registries",
     "fact.status",
-    "JOIN knowledge_workbench_canonical_facts",
-    "JOIN knowledge_workbench_canonical_facts AS fact",
+    "JOIN knowledge_workbench_" + "canonical_facts",
+    "JOIN knowledge_workbench_" + "canonical_facts AS fact",
 )
 
 

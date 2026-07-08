@@ -100,7 +100,7 @@ export interface paths {
          * List Knowledge Documents
          * @description Lists FAQ Workbench documents for a project.
          */
-        get: operations["list_knowledge_documents_api_projects__project_id__knowledge_get"];
+        get: operations["list_workbench_documents_api_projects__project_id__knowledge_get"];
         put?: never;
         /**
          * Upload Knowledge
@@ -506,91 +506,6 @@ export interface paths {
         get: operations["knowledge_import_quality_report_api_projects__project_id__knowledge__document_id__import_quality_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/price-facts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Knowledge Price Facts */
-        get: operations["knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/commercial-truth-review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Project Commercial Truth Review */
-        get: operations["project_commercial_truth_review_api_projects__project_id__knowledge_commercial_truth_review_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/commercial-truth-review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Knowledge Commercial Truth Review */
-        get: operations["knowledge_commercial_truth_review_api_projects__project_id__knowledge__document_id__commercial_truth_review_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/price-facts/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Publish Knowledge Price Facts */
-        post: operations["publish_knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_publish_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/knowledge/{document_id}/price-facts/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reject Knowledge Price Facts */
-        post: operations["reject_knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_reject_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1880,11 +1795,6 @@ export interface components {
             /** Full Name */
             full_name?: string | null;
         };
-        /**
-         * CommercialTruthResolutionPolicy
-         * @enum {string}
-         */
-        CommercialTruthResolutionPolicy: "manual_review" | "higher_authority_wins" | "newer_source_wins";
         /** EmailLoginRequest */
         EmailLoginRequest: {
             /** Email */
@@ -2424,7 +2334,7 @@ export interface operations {
             };
         };
     };
-    list_knowledge_documents_api_projects__project_id__knowledge_get: {
+    list_workbench_documents_api_projects__project_id__knowledge_get: {
         parameters: {
             query?: {
                 limit?: number;
@@ -3262,184 +3172,6 @@ export interface operations {
     knowledge_import_quality_report_api_projects__project_id__knowledge__document_id__import_quality_get: {
         parameters: {
             query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    project_commercial_truth_review_api_projects__project_id__knowledge_commercial_truth_review_get: {
-        parameters: {
-            query?: {
-                policy?: components["schemas"]["CommercialTruthResolutionPolicy"];
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    knowledge_commercial_truth_review_api_projects__project_id__knowledge__document_id__commercial_truth_review_get: {
-        parameters: {
-            query?: {
-                policy?: components["schemas"]["CommercialTruthResolutionPolicy"];
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    publish_knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_publish_post: {
-        parameters: {
-            query?: {
-                fact_ids?: string[] | null;
-            };
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                project_id: string;
-                document_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reject_knowledge_price_facts_api_projects__project_id__knowledge__document_id__price_facts_reject_post: {
-        parameters: {
-            query?: {
-                fact_ids?: string[] | null;
-                reason?: string;
-            };
             header?: {
                 authorization?: string | null;
             };

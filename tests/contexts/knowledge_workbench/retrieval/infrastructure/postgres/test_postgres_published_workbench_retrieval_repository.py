@@ -96,9 +96,9 @@ def test_sql_uses_runtime_entry_embeddings_and_filters_runtime_visibility() -> N
 
     assert "knowledge_workbench_runtime_retrieval_entry_embeddings" in sql
     assert "knowledge_workbench_runtime_retrieval_entries" in sql
-    assert "knowledge_workbench_canonical_facts" not in sql
+    assert "knowledge_workbench_" + "canonical_facts" not in sql
     assert "fact.status" not in sql
-    assert "JOIN knowledge_workbench_canonical_facts" not in sql
+    assert "JOIN knowledge_workbench_" + "canonical_facts" not in sql
     assert "fact.fact_id" not in sql
     assert "knowledge_" + "retrieval_" + "surface" not in sql
     assert "knowledge_workbench_surfaces" not in sql

@@ -14,22 +14,13 @@ from src.domain.project_plane.knowledge_entry_kind import (
 
 import json
 from datetime import datetime
-from typing import NoReturn
 
 import asyncpg
 
-from src.application.errors import (
-    KnowledgeDocumentDeletedDuringProcessingError,
-)
-
 from src.domain.project_plane.knowledge_views import (
-    KnowledgeDocumentDetailView,
-    KnowledgeDocumentView,
     KnowledgeSearchResultView,
 )
 
-from src.domain.project_plane.json_types import JsonObject
-from src.domain.project_plane.knowledge_processing_modes import KnowledgeProcessingMode
 from src.infrastructure.db.repositories.knowledge_search_ranking import (
     optional_row_text,
     optional_row_value,
@@ -60,41 +51,11 @@ from src.infrastructure.db.repositories.knowledge_db_codecs import (
     pg_vector_text,
     source_ref_views_from_payload,
 )
-from src.infrastructure.db.repositories.knowledge_document_queries import (
-    get_document_detail as query_document_detail,
-    is_document_processing_cancelled as query_document_processing_cancelled,
-    list_project_documents,
-)
-from src.infrastructure.db.repositories.knowledge_document_persistence import (
-    create_document as persist_create_document,
-    resume_document_processing as persist_resume_document_processing,
-    update_document_preprocessing_status as persist_update_document_preprocessing_status,
-    update_document_status as persist_update_document_status,
-)
 
 
 logger = get_logger(__name__)
 
 
-def _raise_document_deleted_during_processing(
-    exc: asyncpg.ForeignKeyViolationError,
-) -> NoReturn:
-    raise KnowledgeDocumentDeletedDuringProcessingError(
-        "Knowledge document was deleted or reset during processing"
-    ) from exc
-
-
-CANCELLABLE_KNOWLEDGE_JOB_TYPES = (
-    "process_knowledge_upload",
-    "run_full_rag_eval",
-)
-TERMINAL_QUEUE_STATUSES = (
-    "completed",
-    "failed",
-    "cancelled",
-    "succeeded",
-    "done",
-)
 ANSWERABLE_KNOWLEDGE_ENTRY_KINDS = tuple(sorted(RUNTIME_ENTRY_KIND_VALUES))
 
 
@@ -132,35 +93,6 @@ class KnowledgeRepository:
         self._embedding_generation_port = (
             embedding_generation_port or make_embedding_generation_port()
         )
-
-    async def resume_document_processing(
-        self,
-        *,
-        project_id: str,
-        document_id: str,
-        mode: KnowledgeProcessingMode,
-        model: str | None = None,
-        prompt_version: str | None = None,
-        metrics: JsonObject | None = None,
-    ) -> bool:
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                return await persist_resume_document_processing(
-                    conn,
-                    project_id=project_id,
-                    document_id=document_id,
-                    mode=mode,
-                    model=model,
-                    prompt_version=prompt_version,
-                    metrics=metrics,
-                )
-
-    async def is_document_processing_cancelled(self, document_id: str) -> bool:
-        async with self.pool.acquire() as conn:
-            return await query_document_processing_cancelled(
-                conn,
-                document_id=document_id,
-            )
 
     async def cleanup_document_artifacts(
         self, *args: object, **kwargs: object
@@ -337,148 +269,6 @@ class KnowledgeRepository:
 
         results.sort(key=lambda item: item.score, reverse=True)
         return results[:limit]
-
-    async def create_document(
-        self,
-        project_id: str,
-        file_name: str,
-        file_size: int | None = None,
-        uploaded_by: str | None = None,
-    ) -> str:
-        logger.info(
-            "Creating knowledge document",
-            extra={"project_id": project_id, "file_name": file_name},
-        )
-
-        async with self.pool.acquire() as conn:
-            document_id = await persist_create_document(
-                conn,
-                project_id=project_id,
-                file_name=file_name,
-                file_size=file_size,
-                uploaded_by=uploaded_by,
-            )
-
-        logger.info("Document created", extra={"document_id": document_id})
-        return document_id
-
-    async def get_documents(
-        self,
-        project_id: str,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> list[KnowledgeDocumentView]:
-        logger.debug(
-            "Fetching knowledge documents",
-            extra={"project_id": project_id, "limit": limit, "offset": offset},
-        )
-
-        async with self.pool.acquire() as conn:
-            documents = await list_project_documents(
-                conn,
-                project_id=project_id,
-                limit=limit,
-                offset=offset,
-            )
-
-        logger.debug("Retrieved knowledge documents", extra={"count": len(documents)})
-        return documents
-
-    async def get_document(
-        self, document_id: str
-    ) -> KnowledgeDocumentDetailView | None:
-        logger.debug("Fetching knowledge document", extra={"document_id": document_id})
-
-        async with self.pool.acquire() as conn:
-            return await query_document_detail(conn, document_id=document_id)
-
-    async def update_document_status(
-        self,
-        document_id: str,
-        status: str,
-        error: str | None = None,
-    ) -> None:
-        logger.info(
-            "Updating document status",
-            extra={"document_id": document_id, "status": status},
-        )
-
-        async with self.pool.acquire() as conn:
-            await persist_update_document_status(
-                conn,
-                document_id=document_id,
-                status=status,
-                error=error,
-            )
-
-    async def update_document_preprocessing_status(
-        self,
-        document_id: str,
-        *,
-        mode: KnowledgeProcessingMode,
-        status: str,
-        error: str | None = None,
-        model: str | None = None,
-        prompt_version: str | None = None,
-        metrics: JsonObject | None = None,
-    ) -> None:
-        async with self.pool.acquire() as conn:
-            await persist_update_document_preprocessing_status(
-                conn,
-                document_id=document_id,
-                mode=mode,
-                status=status,
-                error=error,
-                model=model,
-                prompt_version=prompt_version,
-                metrics=metrics,
-            )
-
-    async def _cancel_document_jobs(
-        self,
-        conn: asyncpg.Connection,
-        document_id: str,
-    ) -> None:
-        await conn.execute(
-            """
-            UPDATE execution_queue
-            SET status = 'cancelled',
-                error = COALESCE(
-                    error,
-                    'Cancelled because source knowledge document was deleted'
-                ),
-                updated_at = NOW()
-            WHERE task_type = ANY($1::text[])
-              AND COALESCE(status, '') <> ALL($2::text[])
-              AND payload::jsonb ->> 'document_id' = $3
-            """,
-            list(CANCELLABLE_KNOWLEDGE_JOB_TYPES),
-            list(TERMINAL_QUEUE_STATUSES),
-            document_id,
-        )
-
-    async def _cancel_project_knowledge_jobs(
-        self,
-        conn: asyncpg.Connection,
-        project_id: str,
-    ) -> None:
-        await conn.execute(
-            """
-            UPDATE execution_queue
-            SET status = 'cancelled',
-                error = COALESCE(
-                    error,
-                    'Cancelled because project knowledge base was cleared'
-                ),
-                updated_at = NOW()
-            WHERE task_type = ANY($1::text[])
-              AND COALESCE(status, '') <> ALL($2::text[])
-              AND payload::jsonb ->> 'project_id' = $3
-            """,
-            list(CANCELLABLE_KNOWLEDGE_JOB_TYPES),
-            list(TERMINAL_QUEUE_STATUSES),
-            project_id,
-        )
 
     async def delete_document_chunks(self, *args: object, **kwargs: object) -> object:
         raise RuntimeError(

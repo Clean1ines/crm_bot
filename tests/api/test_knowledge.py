@@ -1261,14 +1261,7 @@ def test_upload_response_source_units_url_source_guard() -> None:
 def test_knowledge_http_routes_are_not_duplicated() -> None:
     source = _source()
 
-    duplicated_route_markers = (
-        '@router.get("/usage")',
-        '@router.get("/{document_id}/price-facts")',
-        '@router.get("/commercial-truth-review")',
-        '@router.get("/{document_id}/commercial-truth-review")',
-        '@router.post("/{document_id}/price-facts/publish")',
-        '@router.post("/{document_id}/price-facts/reject")',
-    )
+    duplicated_route_markers = ('@router.get("/usage")',)
 
     for marker in duplicated_route_markers:
         assert source.count(marker) == 1
@@ -2415,7 +2408,7 @@ def test_curation_open_does_not_parse_source_document_ref_from_workflow_run_id()
 
 
 @pytest.mark.asyncio
-async def test_list_knowledge_documents_returns_fallback_documents(
+async def test_list_workbench_documents_returns_fallback_documents(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def fake_current_user_id(authorization: str | None) -> str:
@@ -2458,7 +2451,7 @@ async def test_list_knowledge_documents_returns_fallback_documents(
 
     monkeypatch.setattr(dependencies, "get_current_user_id", fake_current_user_id)
 
-    response = await knowledge.list_knowledge_documents(
+    response = await knowledge.list_workbench_documents(
         project_id="project-1",
         authorization="Bearer valid-token",
         limit=25,

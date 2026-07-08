@@ -111,8 +111,8 @@ def test_repository_reads_published_workbench_runtime_entries_not_legacy_tables(
 
     assert "knowledge_workbench_runtime_retrieval_entries" in sql
     assert "knowledge_workbench_runtime_retrieval_entry_embeddings" in sql
-    assert "knowledge_workbench_canonical_facts" not in sql
-    assert "JOIN knowledge_workbench_canonical_facts" not in sql
+    assert "knowledge_workbench_" + "canonical_facts" not in sql
+    assert "JOIN knowledge_workbench_" + "canonical_facts" not in sql
     assert "fact.status" not in sql
     assert "fact.fact_id" not in sql
     assert "knowledge_" + "retrieval_" + "surface" not in sql
@@ -203,8 +203,8 @@ def test_promotion_application_target_sql_reads_runtime_entries_only() -> None:
     for sql in target_sqls:
         assert "knowledge_workbench_rag_eval_promoted_questions" in sql
         assert "knowledge_workbench_runtime_retrieval_entries" in sql
-        assert "knowledge_workbench_canonical_facts" not in sql
-        assert "JOIN knowledge_workbench_canonical_facts" not in sql
+        assert "knowledge_workbench_" + "canonical_facts" not in sql
+        assert "JOIN knowledge_workbench_" + "canonical_facts" not in sql
         assert "fact.status" not in sql
         assert "fact.fact_id" not in sql
         assert "entry.visibility = 'published'" in sql
@@ -388,7 +388,7 @@ async def test_apply_promotion_candidate_updates_runtime_entry_and_embedding_onl
     executed_sql = "\n".join(query for query, _ in connection.execute_calls)
     assert result.status.value == "applied"
     assert result.possible_question_count == 2
-    assert "UPDATE knowledge_workbench_canonical_facts" not in executed_sql
+    assert "UPDATE knowledge_workbench_" + "canonical_facts" not in executed_sql
     assert "UPDATE knowledge_workbench_runtime_retrieval_entries" in executed_sql
     assert "possible_questions = $3::jsonb" in executed_sql
     assert "embedding_text = $4" in executed_sql

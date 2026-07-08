@@ -815,41 +815,44 @@ async def _delete_runtime_embeddings(
     columns: Mapping[str, frozenset[str]],
     refs: DocumentRunRefs,
 ) -> int:
-    if (
-        not _has(
-            columns,
-            "knowledge_workbench_runtime_retrieval_entry_embeddings",
-            "runtime_entry_id",
-        )
-        or not _has(
-            columns,
-            "knowledge_workbench_runtime_retrieval_entries",
-            "runtime_entry_id",
-            "fact_id",
-        )
-        or not _has(
-            columns,
-            "knowledge_workbench_canonical_facts",
-            "fact_id",
-            "project_id",
-            "document_id",
-        )
+    if not _has(
+        columns,
+        "knowledge_workbench_runtime_retrieval_entry_embeddings",
+        "runtime_entry_id",
+    ) or not _has(
+        columns,
+        "knowledge_workbench_runtime_retrieval_entries",
+        "runtime_entry_id",
     ):
         return 0
+    clauses: list[str] = []
+    args: list[object] = []
+    if _has(
+        columns,
+        "knowledge_workbench_runtime_retrieval_entries",
+        "source_document_ref",
+    ):
+        clauses.append(f"re.source_document_ref = ${len(args) + 1}")
+        args.append(refs.source_document_ref)
+    if refs.workflow_run_ids and _has(
+        columns,
+        "knowledge_workbench_runtime_retrieval_entries",
+        "workflow_run_id",
+    ):
+        clauses.append(f"re.workflow_run_id = ANY(${len(args) + 1}::text[])")
+        args.append(refs.workflow_run_ids)
+    if not clauses:
+        return 0
     status = await connection.execute(
-        """
+        f"""
         DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings
         WHERE runtime_entry_id IN (
             SELECT re.runtime_entry_id
             FROM knowledge_workbench_runtime_retrieval_entries AS re
-            JOIN knowledge_workbench_canonical_facts AS f
-              ON f.fact_id = re.fact_id
-            WHERE f.project_id = $1::uuid
-              AND f.document_id = $2
+            WHERE {" OR ".join(clauses)}
         )
         """,
-        refs.project_id,
-        refs.source_document_ref,
+        *args,
     )
     return _delete_count(status)
 
@@ -859,32 +862,13 @@ async def _delete_runtime_entries(
     columns: Mapping[str, frozenset[str]],
     refs: DocumentRunRefs,
 ) -> int:
-    if not _has(
+    return await _delete_by_source_or_workflow(
+        connection,
         columns,
-        "knowledge_workbench_runtime_retrieval_entries",
-        "fact_id",
-    ) or not _has(
-        columns,
-        "knowledge_workbench_canonical_facts",
-        "fact_id",
-        "project_id",
-        "document_id",
-    ):
-        return 0
-    status = await connection.execute(
-        """
-        DELETE FROM knowledge_workbench_runtime_retrieval_entries
-        WHERE fact_id IN (
-            SELECT fact_id
-            FROM knowledge_workbench_canonical_facts
-            WHERE project_id = $1::uuid
-              AND document_id = $2
-        )
-        """,
-        refs.project_id,
-        refs.source_document_ref,
+        table_name="knowledge_workbench_runtime_retrieval_entries",
+        source_document_ref=refs.source_document_ref,
+        workflow_run_ids=refs.workflow_run_ids,
     )
-    return _delete_count(status)
 
 
 async def _delete_runtime_publications(
@@ -1331,18 +1315,8 @@ async def _delete_workbench_children(
     ordered_tables = (
         "knowledge_workbench_runtime_retrieval_entry_embeddings",
         "knowledge_workbench_runtime_retrieval_entries",
-        "knowledge_workbench_registry_update_applications",
-        "knowledge_workbench_fact_registry_applications",
-        "knowledge_workbench_fact_relations",
-        "knowledge_workbench_fact_mentions",
-        "knowledge_workbench_fact_triples",
-        "knowledge_workbench_canonical_facts",
-        "knowledge_workbench_registry_snapshots",
-        "knowledge_workbench_fact_registries",
         "knowledge_workbench_processing_node_artifacts",
         "knowledge_workbench_processing_node_runs",
-        "knowledge_workbench_registry_application_queue",
-        "knowledge_workbench_fact_registry_application_queue",
         "knowledge_workbench_section_batch_queue_items",
         "knowledge_workbench_parallel_section_batch_plans",
         "knowledge_workbench_processing_runs",

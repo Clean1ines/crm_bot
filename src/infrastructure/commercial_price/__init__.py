@@ -1,1 +1,0 @@
-"""Commercial price infrastructure adapters."""

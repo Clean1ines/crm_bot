@@ -274,7 +274,6 @@ def build_answer_preview_prompt(
         conversation_summary="",
         history=[],
         knowledge_chunks=knowledge_chunks,
-        commercial_context=None,
         user_memory=None,
         features=None,
         project_configuration=cast(
@@ -384,7 +383,6 @@ def create_response_generator_node(
                 "decision": context.decision,
                 "history_count": len(context.history),
                 "knowledge_chunk_count": len(context.knowledge_chunks),
-                "commercial_context_status": context.commercial_context_status,
                 "has_dialog_state": bool(context.dialog_state),
             },
         )
@@ -395,7 +393,6 @@ def create_response_generator_node(
             conversation_summary=context.conversation_summary,
             history=_prompt_history(context.history),
             knowledge_chunks=context.knowledge_chunks,
-            commercial_context=context.commercial_context,
             user_memory=merged_memory,
             features=_prompt_features(context.features),
             project_configuration=context.project_configuration,
@@ -480,7 +477,6 @@ def create_response_generator_node(
             + len(context.conversation_summary or "")
             + len(str(context.history))
             + len(str(context.knowledge_chunks))
-            + len(str(context.commercial_context or {}))
             + len(str(context.user_memory or {}))
             + len(str(context.project_configuration or {}))
             + len(str(context.dialog_state or {}))

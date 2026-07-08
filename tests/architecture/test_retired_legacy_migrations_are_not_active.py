@@ -29,7 +29,7 @@ def test_retired_legacy_migrations_are_not_in_active_root() -> None:
 def test_mixed_migration_originals_are_retired_but_active_replacements_remain() -> None:
     root = Path("migrations")
     mixed = {
-        "035_create_knowledge_documents.sql",
+        "035_create_" + "knowledge_" + "documents.sql",
         "036_knowledge_preprocessing_mvp.sql",
         "050_optimize_knowledge_query_paths.sql",
     }

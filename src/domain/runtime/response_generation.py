@@ -19,9 +19,6 @@ class ResponseGenerationContext:
     conversation_summary: str | None = None
     history: list[Mapping[str, object]] = field(default_factory=list)
     knowledge_chunks: list[KnowledgeChunkPayload] = field(default_factory=list)
-    commercial_context: Mapping[str, object] | None = None
-    commercial_context_status: str | None = None
-    commercial_context_sources: list[Mapping[str, object]] = field(default_factory=list)
     user_memory: RuntimeMemory | None = None
     dialog_state: DialogState | None = None
     features: RuntimeFeatures | Mapping[str, object] | None = None
@@ -38,13 +35,6 @@ class ResponseGenerationContext:
             conversation_summary=state.get("conversation_summary"),
             history=list(state.get("history") or []),
             knowledge_chunks=list(state.get("knowledge_chunks") or []),
-            commercial_context=_mapping_or_none(state.get("commercial_context")),
-            commercial_context_status=_text_or_none(
-                state.get("commercial_context_status")
-            ),
-            commercial_context_sources=_mapping_list_or_empty(
-                state.get("commercial_context_sources")
-            ),
             user_memory=state.get("user_memory"),
             dialog_state=_dialog_state_or_none(state.get("dialog_state")),
             features=_mapping_or_none(state.get("features")),
@@ -63,9 +53,6 @@ class ResponseGenerationContext:
             "conversation_summary": self.conversation_summary,
             "history": self.history,
             "knowledge_chunks": self.knowledge_chunks,
-            "commercial_context": self.commercial_context,
-            "commercial_context_status": self.commercial_context_status,
-            "commercial_context_sources": self.commercial_context_sources,
             "user_memory": self.user_memory,
             "features": self.features,
             "project_configuration": self.project_configuration,

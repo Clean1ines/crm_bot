@@ -123,7 +123,6 @@ class PublishDraftClaimCurationWorkspace:
             workflow_run_id=workflow_run_id,
             project_id=project_id,
             source_document_ref=source_document_ref,
-            fact_registry_id=_fact_registry_id(workflow_run_id),
             items=publication_items,
             excluded_item_count=len(snapshot.items) - len(publishable_items),
             published_at=published_at,
@@ -221,10 +220,6 @@ def _published_replay_result(
         automatic_processing_elapsed_seconds=None,
         published_at=snapshot.workspace.updated_at,
     )
-
-
-def _fact_registry_id(workflow_run_id: str) -> str:
-    return f"draft-claim-curation-fact-registry:{workflow_run_id}"
 
 
 def _fact_id(workflow_run_id: str, item_ref: str) -> str:

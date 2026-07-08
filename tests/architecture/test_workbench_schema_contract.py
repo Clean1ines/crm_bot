@@ -24,26 +24,10 @@ class RequiredTable:
     table_name: str
 
 
-REQUIRED_TABLES: tuple[RequiredTable, ...] = (
-    RequiredTable("knowledge_workbench_registry_update_applications"),
-)
+REQUIRED_TABLES: tuple[RequiredTable, ...] = ()
 
 
 REQUIRED_COLUMNS: tuple[RequiredColumn, ...] = (
-    RequiredColumn("knowledge_workbench_fact_registries", "registry_id"),
-    RequiredColumn("knowledge_workbench_registry_snapshots", "registry_id"),
-    RequiredColumn("knowledge_workbench_registry_snapshots", "entries_payload"),
-    RequiredColumn("knowledge_workbench_registry_snapshots", "relations_payload"),
-    RequiredColumn("knowledge_workbench_registry_snapshots", "entry_count"),
-    RequiredColumn("knowledge_workbench_registry_snapshots", "relation_count"),
-    RequiredColumn("knowledge_workbench_canonical_facts", "registry_id"),
-    RequiredColumn("knowledge_workbench_fact_triples", "registry_id"),
-    RequiredColumn("knowledge_workbench_fact_mentions", "registry_id"),
-    RequiredColumn("knowledge_workbench_fact_relations", "registry_id"),
-    RequiredColumn(
-        "knowledge_workbench_fact_registry_application_queue",
-        "source_node_run_id",
-    ),
     RequiredColumn(
         "knowledge_workbench_section_batch_queue_items",
         "registry_application_queue_item_id",
@@ -57,19 +41,6 @@ REQUIRED_COLUMNS: tuple[RequiredColumn, ...] = (
 
 
 FORBIDDEN_COLUMNS: tuple[ForbiddenColumn, ...] = (
-    ForbiddenColumn("knowledge_workbench_fact_registries", "fact_registry_id"),
-    ForbiddenColumn("knowledge_workbench_registry_snapshots", "fact_registry_id"),
-    ForbiddenColumn("knowledge_workbench_registry_snapshots", "fact_registry_payload"),
-    ForbiddenColumn("knowledge_workbench_registry_snapshots", "canonical_fact_count"),
-    ForbiddenColumn("knowledge_workbench_registry_snapshots", "fact_relation_count"),
-    ForbiddenColumn("knowledge_workbench_canonical_facts", "fact_registry_id"),
-    ForbiddenColumn("knowledge_workbench_fact_triples", "fact_registry_id"),
-    ForbiddenColumn("knowledge_workbench_fact_mentions", "fact_registry_id"),
-    ForbiddenColumn("knowledge_workbench_fact_relations", "fact_registry_id"),
-    ForbiddenColumn(
-        "knowledge_workbench_fact_registry_application_queue",
-        "fact_registry_node_run_id",
-    ),
     ForbiddenColumn(
         "knowledge_workbench_section_batch_queue_items",
         "fact_registry_application_queue_item_id",

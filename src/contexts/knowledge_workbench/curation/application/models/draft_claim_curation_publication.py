@@ -58,7 +58,6 @@ class DraftClaimCurationPublicationCandidate:
     workflow_run_id: str
     project_id: str
     source_document_ref: str
-    fact_registry_id: str
     items: tuple[DraftClaimCurationPublicationItem, ...]
     excluded_item_count: int
     published_at: datetime
@@ -68,7 +67,6 @@ class DraftClaimCurationPublicationCandidate:
         _require_text(self.workflow_run_id, "workflow_run_id")
         _require_text(self.project_id, "project_id")
         _require_text(self.source_document_ref, "source_document_ref")
-        _require_text(self.fact_registry_id, "fact_registry_id")
         if not self.items:
             raise ValueError("items must be non-empty")
         if self.excluded_item_count < 0:

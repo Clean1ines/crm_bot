@@ -99,23 +99,6 @@ def test_publish_repository_populates_runtime_entry_canonical_fields() -> None:
         assert expression in runtime_upsert
 
 
-def test_publish_repository_uses_current_registry_id_sql_columns() -> None:
-    source = Path(
-        "src/contexts/knowledge_workbench/curation/infrastructure/postgres/"
-        "postgres_draft_claim_curation_publication_repository.py"
-    ).read_text(encoding="utf-8")
-
-    for section_name in (
-        "async def _upsert_fact_registry",
-        "async def _upsert_fact",
-        "async def _replace_fact_triples",
-    ):
-        section = source[source.index(section_name) :]
-        section = section[: section.index("\n\nasync def ", 1)]
-        assert "registry_id" in section
-        assert "fact_registry_id" not in _sql_text_only(section)
-
-
 @pytest.mark.asyncio
 async def test_republication_deactivates_stale_runtime_entries_and_embeddings() -> None:
     connection = _FakePublicationConnection()
@@ -311,7 +294,6 @@ def _publication(
         workflow_run_id=workflow_run_id,
         project_id="11111111-1111-1111-1111-111111111111",
         source_document_ref="source-document-1",
-        fact_registry_id="registry-1",
         items=items,
         excluded_item_count=0,
         published_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),

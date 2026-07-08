@@ -35,19 +35,6 @@ FORBIDDEN_DEAD_SEMANTIC_TOKENS = (
     "registry_updates",
 )
 
-REQUIRED_WORKBENCH_FACT_REGISTRY_TOKENS = (
-    "claim_observations_node_run_id",
-    "knowledge_workbench_documents",
-    "knowledge_workbench_document_sections",
-    "knowledge_workbench_fact_registries",
-    "knowledge_workbench_canonical_facts",
-    "knowledge_workbench_fact_triples",
-    "knowledge_workbench_fact_mentions",
-    "knowledge_workbench_fact_relations",
-    "knowledge_workbench_fact_registry_application_queue",
-    "claim_input_refs",
-)
-
 
 def _active_migration_text() -> str:
     return "\n".join(
@@ -70,18 +57,6 @@ def test_active_migrations_do_not_resurrect_deleted_surface_semantics() -> None:
     offenders = [token for token in FORBIDDEN_DEAD_SEMANTIC_TOKENS if token in source]
 
     assert not offenders, "\n".join(offenders)
-
-
-def test_active_migrations_define_current_workbench_fact_registry_schema() -> None:
-    source = _active_migration_text()
-
-    missing = [
-        token
-        for token in REQUIRED_WORKBENCH_FACT_REGISTRY_TOKENS
-        if token not in source
-    ]
-
-    assert not missing, "\n".join(missing)
 
 
 def test_retired_legacy_migrations_are_not_in_active_runner_glob() -> None:

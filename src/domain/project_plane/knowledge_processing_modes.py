@@ -18,7 +18,7 @@ def normalize_knowledge_processing_mode(value: object) -> KnowledgeProcessingMod
 
     if raw in {"", MODE_FAQ, "faq_workbench", "faq_section_registry_v1"}:
         return MODE_FAQ
-    if raw in {MODE_PRICE_LIST, "price", "prices", "commercial_price"}:
+    if raw in {MODE_PRICE_LIST, "price", "prices"}:
         return MODE_PRICE_LIST
 
     raise KnowledgeProcessingModeValidationError(

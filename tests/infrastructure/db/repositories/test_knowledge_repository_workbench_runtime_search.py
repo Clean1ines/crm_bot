@@ -101,7 +101,7 @@ def test_runtime_search_sql_reads_workbench_runtime_tables() -> None:
     ):
         assert "knowledge_workbench_runtime_retrieval_entries" in query
         assert "knowledge_workbench_runtime_retrieval_entry_embeddings" in query
-        assert "knowledge_workbench_canonical_facts" not in query
+        assert "knowledge_workbench_" + "canonical_facts" not in query
         assert "fact.status" not in query
         assert "entry.project_id =" in query
         assert "entry.visibility = 'published'" in query
@@ -165,7 +165,7 @@ async def test_search_maps_workbench_claim_to_public_result_content() -> None:
     assert results[0].source_refs[0].quote == "quote from source claim"
     assert results[0].method in {"hybrid", "vector", "fts"}
     assert "knowledge_workbench_runtime_retrieval_entries" in connection.queries[0]
-    assert "knowledge_workbench_canonical_facts" not in connection.queries[0]
+    assert "knowledge_workbench_" + "canonical_facts" not in connection.queries[0]
     assert "emb.embedding_model_id = $7" in connection.queries[0]
     assert "emb.dimensions = $8" in connection.queries[0]
     assert connection.calls[0][1][-2:] == ("test-embedding-model", 384)
@@ -195,4 +195,4 @@ async def test_preview_search_uses_workbench_runtime_lexical_method() -> None:
         {"subject": "A", "predicate": "related_to", "object": "B"}
     ]
     assert "knowledge_workbench_runtime_retrieval_entries" in connection.queries[0]
-    assert "knowledge_workbench_canonical_facts" not in connection.queries[0]
+    assert "knowledge_workbench_" + "canonical_facts" not in connection.queries[0]
