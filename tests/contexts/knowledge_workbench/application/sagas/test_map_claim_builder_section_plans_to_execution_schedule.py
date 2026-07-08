@@ -189,8 +189,9 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
     assert capacity_estimate["input_tokens"] == (
         1953 + capacity_estimate["artifact_tokens"]
     )
-    assert capacity_estimate["planned_output_tokens"] == (
-        capacity_estimate["artifact_tokens"]
+    assert (
+        capacity_estimate["planned_output_tokens"]
+        == (capacity_estimate["artifact_tokens"])
     )
     assert capacity_estimate["required_window_tokens"] == (
         capacity_estimate["input_tokens"]

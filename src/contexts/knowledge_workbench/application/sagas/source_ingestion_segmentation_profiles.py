@@ -39,9 +39,7 @@ class WorkbenchModelRequestBudgetProfile:
         if self.planned_output_tokens < 0:
             raise ValueError("planned_output_tokens must be >= 0")
         if self.planned_output_tokens >= self.max_request_input_tokens:
-            raise ValueError(
-                "planned_output_tokens must be < max_request_input_tokens"
-            )
+            raise ValueError("planned_output_tokens must be < max_request_input_tokens")
 
 
 @dataclass(frozen=True, slots=True)

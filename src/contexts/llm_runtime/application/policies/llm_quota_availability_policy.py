@@ -127,8 +127,7 @@ class LlmQuotaAvailabilityPolicy:
 
         if (
             snapshot.remaining_tokens_minute is not None
-            and snapshot.remaining_tokens_minute
-            < estimated_need.required_window_tokens
+            and snapshot.remaining_tokens_minute < estimated_need.required_window_tokens
         ):
             return False
 

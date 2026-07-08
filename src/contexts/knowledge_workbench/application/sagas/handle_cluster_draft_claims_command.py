@@ -590,11 +590,7 @@ def _batch_capacity_estimate(batch) -> dict[str, object]:
     input_tokens = prompt_tokens + artifact_tokens
     planned_output_tokens = artifact_tokens
     safety_gap_tokens = draft_claim_compaction_request_safety_gap_tokens()
-    required_window_tokens = (
-        input_tokens
-        + planned_output_tokens
-        + safety_gap_tokens
-    )
+    required_window_tokens = input_tokens + planned_output_tokens + safety_gap_tokens
     model_profile = model_budget_profile_for_ref(batch.model_id)
     return {
         "estimator": "draft_claim_compaction_batch_budget_policy",

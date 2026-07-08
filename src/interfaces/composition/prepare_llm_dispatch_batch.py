@@ -758,12 +758,12 @@ async def _lease_input_admitted_work_items(
         )
         allocations.append(allocation)
         leased_items.append(
-                LlmAdmittedLeasedWorkItem(
-                    leased=leased_record,
-                    allocation=allocation,
-                    execution_settings=execution_settings,
-                ),
-            )
+            LlmAdmittedLeasedWorkItem(
+                leased=leased_record,
+                allocation=allocation,
+                execution_settings=execution_settings,
+            ),
+        )
 
     projection = _input_admitted_projection(
         requested_items=requested_items,
@@ -828,7 +828,7 @@ def _pop_first_record_that_fits(
     *,
     records: list[DueWorkItemRecord],
     account: _MutableInputCapacity,
-    ) -> _InputAdmittedCandidate | None:
+) -> _InputAdmittedCandidate | None:
     for index, record in enumerate(records):
         input_tokens = _input_tokens_from_due_record(record)
         required_window_tokens = _required_window_tokens_from_due_record(record)
