@@ -215,6 +215,18 @@ def _failure_patch(payload: Mapping[str, object]) -> dict[str, object]:
         "dispatch_attempt_id": _payload_text(payload, "dispatch_attempt_id"),
         "work_item_id": _payload_text(payload, "work_item_id"),
     }
+    for key in ("provider", "account_ref", "model_ref"):
+        value = _optional_payload_text(payload, key)
+        if value is not None:
+            patch[key] = value
+    for token_key in (
+        "actual_prompt_tokens",
+        "actual_completion_tokens",
+        "actual_total_tokens",
+    ):
+        token_value = payload.get(token_key)
+        if isinstance(token_value, int) and not isinstance(token_value, bool):
+            patch[token_key] = token_value
     for key in ("error_kind", "validation_failure_reason"):
         value = _optional_payload_text(payload, key)
         if value is not None:

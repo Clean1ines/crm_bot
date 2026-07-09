@@ -526,6 +526,38 @@ const upsertAttempt = (
   return attempt;
 };
 
+const findLiveAttemptIdForSection = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  sourceUnitRef: string,
+): string | null => {
+  const attempts = response.workflow.llm_attempts.filter(
+    (attempt) =>
+      attempt.section_id === sourceUnitRef &&
+      ["leased", "running"].includes(normalize(attempt.status)),
+  );
+  const latest = attempts.sort(
+    (left, right) =>
+      Date.parse(right.started_at || "") - Date.parse(left.started_at || ""),
+  )[0];
+  return latest?.node_run_id ?? null;
+};
+
+const resolveOutcomeAttemptId = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  sourceUnitRef: string,
+  dispatchAttemptId: string | null,
+): string | null => {
+  if (
+    dispatchAttemptId &&
+    response.workflow.llm_attempts.some(
+      (attempt) => attempt.node_run_id === dispatchAttemptId,
+    )
+  ) {
+    return dispatchAttemptId;
+  }
+  return findLiveAttemptIdForSection(response, sourceUnitRef) ?? dispatchAttemptId;
+};
+
 const appendTimeline = (
   response: WorkbenchWorkflowLiveStateResponse,
   event: FrontendWorkflowEventEnvelope,
@@ -854,9 +886,15 @@ const applySectionOutcome = (
     blockedReason: text(event.payload, "validation_failure_reason"),
   });
 
-  if (dispatchAttemptId) {
+  const outcomeAttemptId = resolveOutcomeAttemptId(
+    response,
+    sourceUnitRef,
+    dispatchAttemptId,
+  );
+
+  if (outcomeAttemptId) {
     upsertAttempt(response, {
-      dispatchAttemptId,
+      dispatchAttemptId: outcomeAttemptId,
       sourceUnitRef,
       status,
       provider: text(event.payload, "provider"),

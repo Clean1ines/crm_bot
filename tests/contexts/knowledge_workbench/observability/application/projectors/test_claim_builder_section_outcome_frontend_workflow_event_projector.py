@@ -86,6 +86,12 @@ def _item_owned_retryable_failed_payload() -> dict[str, object]:
         "dispatch_attempt_id": "work-1:attempt:1",
         "work_item_id": "work-1",
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+        "provider": "groq",
+        "account_ref": "groq_org_primary",
+        "model_ref": "qwen/qwen3-32b",
+        "actual_prompt_tokens": 10,
+        "actual_completion_tokens": 5,
+        "actual_total_tokens": 15,
         "error_kind": "provider_error",
         "claim_builder_attempt_next_action_kind": "RETRY_SAME_MODEL",
         "claim_builder_attempt_next_action_reason": "provider_error",
@@ -119,6 +125,12 @@ def _terminal_failed_payload() -> dict[str, object]:
         "dispatch_attempt_id": "work-1:attempt:1",
         "work_item_id": "work-1",
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+        "provider": "groq",
+        "account_ref": "groq_org_primary",
+        "model_ref": "qwen/qwen3-32b",
+        "actual_prompt_tokens": 10,
+        "actual_completion_tokens": 5,
+        "actual_total_tokens": 15,
         "error_kind": "claim_builder_output_validation_failed",
         "validation_failure_reason": "CLAIM_FIELD_SET_INVALID",
         "claim_builder_attempt_next_action_kind": "TERMINAL_FAILURE",
@@ -175,6 +187,9 @@ def test_projects_item_owned_retryable_failed_to_versioned_envelope() -> None:
     assert "DEFER_UNTIL_CAPACITY_RESET" not in projected.payload.values()
     assert projected.payload["work_item_state"] == "retryable_failed"
     assert projected.payload["retry_driver"] == "capacity_window_admission"
+    assert projected.payload["provider"] == "groq"
+    assert projected.payload["model_ref"] == "qwen/qwen3-32b"
+    assert projected.payload["actual_total_tokens"] == 15
 
 
 def test_capacity_owned_minute_limit_retryable_failed_is_not_projected() -> None:
@@ -225,6 +240,9 @@ def test_projects_terminal_failed_to_versioned_envelope() -> None:
     assert projected.payload["validation_failure_reason"] == "CLAIM_FIELD_SET_INVALID"
     assert projected.payload["work_item_state"] == "terminal_failed"
     assert projected.payload["retry_eligibility"] == "not_eligible"
+    assert projected.payload["provider"] == "groq"
+    assert projected.payload["model_ref"] == "qwen/qwen3-32b"
+    assert projected.payload["actual_total_tokens"] == 15
 
 
 def test_deferred_event_type_is_not_projected() -> None:

@@ -148,6 +148,113 @@ describe("workflowFrontendProjectionReducer", () => {
     expect(state.workflow.usage.total_tokens).toBe(30);
   });
 
+  it("closes an in-flight claim-builder attempt when outcome is scoped by section", () => {
+    let state = seed();
+
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_claim_builder_work_item_scheduled",
+        {
+          source_document_ref: "source-document:project-1:doc-1",
+          source_unit_ref: "source-unit-1",
+          source_unit_ordinal: 0,
+          work_item_id: "work-item-1",
+          schedule_status: "ready",
+        },
+        1,
+      ),
+    );
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_claim_builder_dispatch_attempt_prepared",
+        {
+          source_document_ref: "source-document:project-1:doc-1",
+          source_unit_ref: "source-unit-1",
+          work_item_id: "work-item-1",
+          dispatch_attempt_id: "prepared-attempt-id",
+          attempt_number: 2,
+          attempt_state: "leased",
+          provider: "groq",
+          model_ref: "qwen/qwen3-32b",
+        },
+        2,
+      ),
+    );
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_claim_builder_section_extracted",
+        {
+          source_document_ref: "source-document:project-1:doc-1",
+          source_unit_ref: "source-unit-1",
+          work_item_id: "work-item-1",
+          persisted_draft_claim_count: 1,
+          actual_prompt_tokens: 100,
+          actual_completion_tokens: 50,
+          actual_total_tokens: 150,
+        },
+        3,
+      ),
+    );
+
+    expect(state.workflow.llm_attempts).toHaveLength(1);
+    expect(state.workflow.llm_attempts[0]).toMatchObject({
+      node_run_id: "prepared-attempt-id",
+      status: "completed",
+      total_tokens: 150,
+    });
+  });
+
+  it("records token usage for retryable claim-builder attempts", () => {
+    let state = seed();
+
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_claim_builder_dispatch_attempt_prepared",
+        {
+          source_document_ref: "source-document:project-1:doc-1",
+          source_unit_ref: "source-unit-1",
+          work_item_id: "work-item-1",
+          dispatch_attempt_id: "attempt-1",
+          attempt_number: 1,
+          attempt_state: "leased",
+          provider: "groq",
+          model_ref: "qwen/qwen3-32b",
+        },
+        1,
+      ),
+    );
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_claim_builder_section_retryable_failed",
+        {
+          source_document_ref: "source-document:project-1:doc-1",
+          source_unit_ref: "source-unit-1",
+          work_item_id: "work-item-1",
+          dispatch_attempt_id: "attempt-1",
+          actual_prompt_tokens: 200,
+          actual_completion_tokens: 30,
+          actual_total_tokens: 230,
+          error_kind: "provider_error",
+        },
+        2,
+      ),
+    );
+
+    expect(state.workflow.llm_attempts).toHaveLength(1);
+    expect(state.workflow.llm_attempts[0]).toMatchObject({
+      status: "retryable_failed",
+      prompt_tokens: 200,
+      completion_tokens: 30,
+      total_tokens: 230,
+    });
+    expect(state.workflow.usage.total_tokens).toBe(230);
+  });
+
   const seed = () =>
     createInitialWorkflowLiveStateResponse({
       documentId: "source-document:project-1:doc-1",
