@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, Upload, Search, TestTube2, Loader2 } from "lucide-react";
+import { BookOpen, Upload, Search, TestTube2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { useParams } from "react-router-dom";
@@ -383,7 +383,6 @@ export const KnowledgePage: React.FC = () => {
     [baseDocumentIds, baseDocuments, optimisticDocuments],
   );
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
-  const hasProcessingDocuments = documents.some(isDocumentProcessing);
 
   useEffect(() => {
     if (baseDocuments.length === 0) return;
@@ -1233,24 +1232,6 @@ export const KnowledgePage: React.FC = () => {
             </span>
           </label>
         </div>
-
-        {hasProcessingDocuments && (
-          <div className="mb-4 rounded-2xl bg-[var(--accent-primary)]/10 p-4 text-sm text-[var(--text-primary)]">
-            <div className="flex items-start gap-3">
-              <Loader2 className="mt-0.5 h-5 w-5 shrink-0 animate-spin text-[var(--accent-primary)]" />
-              <div>
-                <div className="font-semibold">
-                  {t("knowledge.processing.title")}
-                </div>
-                <p className="mt-1 leading-relaxed text-[var(--text-muted)]">
-                  {t("knowledge.processing.descriptionLine1")}
-                  {t("knowledge.processing.descriptionLine2")}
-                  {t("knowledge.processing.descriptionLine3")}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
 
         <div
           onClick={triggerUpload}
