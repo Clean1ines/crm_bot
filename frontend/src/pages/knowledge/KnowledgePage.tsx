@@ -23,8 +23,8 @@ import { DraftClaimCurationWorkspaceModal } from "./components/DraftClaimCuratio
 import { AiPlaygroundPanel } from "./components/AiPlaygroundPanel";
 import {
   createInitialWorkflowLiveStateResponse,
-  reduceWorkflowFrontendProjectionEvent,
 } from "./shadow/workflowFrontendProjectionReducer";
+import { startWorkflowProjectionEventStream } from "./workflowProjectionHydration";
 import {
   createOptimisticUploadDocument,
   fileSha256Hex,
@@ -43,7 +43,7 @@ type KnowledgeSourceUnitsByDocument = Record<
   string,
   KnowledgeSourceUnitsResponse
 >;
-type KnowledgeWorkflowLiveStateByDocument = Record<
+type KnowledgeWorkflowProjectionStateByDocument = Record<
   string,
   WorkbenchWorkflowLiveStateResponse
 >;
@@ -427,8 +427,8 @@ export const KnowledgePage: React.FC = () => {
     .map((item) => `${item.documentId}:${item.workflowRunId}`)
     .join(",");
 
-  const [workflowLiveStates, setWorkflowLiveStates] =
-    useState<KnowledgeWorkflowLiveStateByDocument>({});
+  const [workflowProjectionStates, setWorkflowProjectionStates] =
+    useState<KnowledgeWorkflowProjectionStateByDocument>({});
   const [workflowProjectionErrors, setWorkflowProjectionErrors] = useState<
     Record<string, string | null>
   >({});
@@ -438,8 +438,8 @@ export const KnowledgePage: React.FC = () => {
     if (!projectId || curationTarget) return;
 
     for (const doc of documents) {
-      const liveState = workflowLiveStates[doc.id];
-      const workflow = liveState?.workflow;
+      const projectionState = workflowProjectionStates[doc.id];
+      const workflow = projectionState?.workflow;
       const curation = workflow?.curation;
       const workflowRunId =
         curation?.workflow_run_id ??
@@ -458,12 +458,12 @@ export const KnowledgePage: React.FC = () => {
             curation.workspace_status === "open" ||
             curation.workspace_status === "review_required" ||
             workflow?.workflow_status === "waiting_for_review" ||
-            liveState?.document_status === "waiting_for_review"),
+            projectionState?.document_status === "waiting_for_review"),
       );
       const alreadyPublished =
         curation?.workspace_status === "published" ||
         workflow?.workflow_status === "published" ||
-        liveState?.document_status === "published";
+        projectionState?.document_status === "published";
 
       if (!reviewGateOpen || alreadyPublished) {
         continue;
@@ -477,7 +477,7 @@ export const KnowledgePage: React.FC = () => {
       });
       return;
     }
-  }, [projectId, curationTarget, documents, workflowLiveStates]);
+  }, [projectId, curationTarget, documents, workflowProjectionStates]);
 
   useEffect(() => {
     if (!projectId || workflowProjectionTargets.length === 0) return undefined;
@@ -486,112 +486,75 @@ export const KnowledgePage: React.FC = () => {
       let disposed = false;
       let stopStream: (() => void) | null = null;
 
-      const fallbackLiveState = () =>
-        createInitialWorkflowLiveStateResponse({
-          documentId: target.documentId,
-          projectId,
-          fileName: target.fileName,
-          documentStatus: target.documentStatus,
-          workflowRunId: target.workflowRunId,
-        });
-
-      const openStream = (): void => {
-        stopStream = knowledgeApi.streamFrontendWorkflowEvents(
-          projectId,
-          target.documentId,
-          target.workflowRunId,
-          undefined,
-          (event) => {
-            setWorkflowProjectionErrors((previous) => ({
-              ...previous,
-              [target.documentId]: null,
-            }));
-
-            setWorkflowLiveStates((previous) => {
-              const current = previous[target.documentId] ?? fallbackLiveState();
-
-              return {
-                ...previous,
-                [target.documentId]: reduceWorkflowFrontendProjectionEvent(
-                  current,
-                  event,
-                ),
-              };
-            });
-
-            const shouldRefreshSourceUnits = [
-              "workflow_source_units_created",
-              "workflow_source_unit_created",
-              "workflow_work_items_scheduled",
-              "workflow_claim_builder_work_item_scheduled",
-              "workflow_dispatch_batch_prepared",
-              "workflow_claim_builder_dispatch_attempt_prepared",
-              "workflow_claim_builder_section_extracted",
-              "workflow_claim_builder_section_retryable_failed",
-              "workflow_claim_builder_section_terminal_failed",
-            ].includes(event.projection_type);
-
-            if (shouldRefreshSourceUnits) {
-              void queryClient.invalidateQueries({
-                queryKey: ["knowledge-source-units", projectId],
-              });
-              void queryClient.refetchQueries({
-                queryKey: ["knowledge-source-units", projectId],
-                type: "active",
-              });
-            }
-          },
-          (error) => {
-            setWorkflowProjectionErrors((previous) => ({
-              ...previous,
-              [target.documentId]: getErrorMessage(
-                error,
-                "Не удалось получить события обработки документа",
-              ),
-            }));
-          },
-        );
-      };
-
-      void (async () => {
-        try {
-          const { data } = await knowledgeApi.workflowLiveState(
-            projectId,
-            target.documentId,
-          );
+      void startWorkflowProjectionEventStream({
+        projectId,
+        target,
+        api: {
+          getFrontendWorkflowEvents: knowledgeApi.getFrontendWorkflowEvents,
+          streamFrontendWorkflowEvents: knowledgeApi.streamFrontendWorkflowEvents,
+        },
+        onState: (documentId, state) => {
           if (disposed) return;
-
-          setWorkflowLiveStates((previous) => ({
+          setWorkflowProjectionStates((previous) => ({
             ...previous,
-            [target.documentId]: data,
+            [documentId]: state,
           }));
           setWorkflowProjectionErrors((previous) => ({
             ...previous,
-            [target.documentId]: null,
+            [documentId]: null,
           }));
-        } catch (error) {
+        },
+        onError: (documentId, error) => {
           if (disposed) return;
+          setWorkflowProjectionErrors((previous) => ({
+            ...previous,
+            [documentId]: getErrorMessage(
+              error,
+              "Не удалось получить события обработки документа",
+            ),
+          }));
+        },
+        onEventApplied: (event) => {
+          const shouldRefreshSourceUnits = [
+            "workflow_source_units_created",
+            "workflow_source_unit_created",
+            "workflow_work_items_scheduled",
+            "workflow_claim_builder_work_item_scheduled",
+            "workflow_dispatch_batch_prepared",
+            "workflow_claim_builder_dispatch_attempt_prepared",
+            "workflow_claim_builder_section_extracted",
+            "workflow_claim_builder_section_retryable_failed",
+            "workflow_claim_builder_section_terminal_failed",
+          ].includes(event.projection_type);
 
-          setWorkflowLiveStates((previous) => {
-            if (previous[target.documentId]) return previous;
-            return {
-              ...previous,
-              [target.documentId]: fallbackLiveState(),
-            };
-          });
+          if (shouldRefreshSourceUnits) {
+            void queryClient.invalidateQueries({
+              queryKey: ["knowledge-source-units", projectId],
+            });
+            void queryClient.refetchQueries({
+              queryKey: ["knowledge-source-units", projectId],
+              type: "active",
+            });
+          }
+        },
+      })
+        .then((stop) => {
+          if (disposed) {
+            stop();
+            return;
+          }
+          stopStream = stop;
+        })
+        .catch((error) => {
+          if (disposed) return;
           setWorkflowProjectionErrors((previous) => ({
             ...previous,
             [target.documentId]: getErrorMessage(
               error,
-              "Не удалось загрузить состояние обработки документа",
+              "Не удалось загрузить события обработки документа",
             ),
           }));
-        }
-
-        if (!disposed) {
-          openStream();
-        }
-      })();
+        });
 
       return () => {
         disposed = true;
@@ -608,7 +571,6 @@ export const KnowledgePage: React.FC = () => {
     workflowProjectionTargets,
     workflowProjectionSubscriptionKey,
   ]);
-
 
   const reportableDocuments = documents.filter(
     (doc) =>
@@ -995,7 +957,7 @@ export const KnowledgePage: React.FC = () => {
         [documentId]: optimisticDocument,
       }));
 
-      setWorkflowLiveStates((current) => ({
+      setWorkflowProjectionStates((current) => ({
         ...current,
         [documentId]: createInitialWorkflowLiveStateResponse({
           documentId,
@@ -1374,12 +1336,12 @@ export const KnowledgePage: React.FC = () => {
                     }
                     toast.error("Не удалось открыть текущую рабочую область курации");
                   }}
-                  workflowLiveState={workflowLiveStates[doc.id] ?? null}
-                  workflowLiveStateLoading={
+                  workflowProjectionState={workflowProjectionStates[doc.id] ?? null}
+                  workflowProjectionStateLoading={
                     workflowProjectionDocumentIds.includes(doc.id) &&
-                    !(workflowLiveStates[doc.id] ?? null)
+                    !(workflowProjectionStates[doc.id] ?? null)
                   }
-                  workflowLiveStateError={workflowProjectionErrors[doc.id] ?? null}
+                  workflowProjectionStateError={workflowProjectionErrors[doc.id] ?? null}
                   sourceUnitsResponse={sourceUnits[doc.id] ?? null}
                   onCardAction={(actionId) => {
                     if (actionId === "pause_processing") {
@@ -1398,7 +1360,7 @@ export const KnowledgePage: React.FC = () => {
                     }
                     if (actionId === "confirm_degraded_fallback") {
                       const workflowRunId =
-                        workflowLiveStates[doc.id]?.workflow.workflow_run_id ??
+                        workflowProjectionStates[doc.id]?.workflow.workflow_run_id ??
                         null;
                       if (workflowRunId) {
                         confirmDegradedFallbackMutation.mutate(workflowRunId);
@@ -1413,8 +1375,8 @@ export const KnowledgePage: React.FC = () => {
                     }
                     if (actionId === "open_curation") {
                       const workflowRunId =
-                        workflowLiveStates[doc.id]?.workflow.curation.workflow_run_id ??
-                        workflowLiveStates[doc.id]?.workflow.workflow_run_id ??
+                        workflowProjectionStates[doc.id]?.workflow.curation.workflow_run_id ??
+                        workflowProjectionStates[doc.id]?.workflow.workflow_run_id ??
                         null;
                       if (workflowRunId) {
                         setDraftClaimCurationTarget({

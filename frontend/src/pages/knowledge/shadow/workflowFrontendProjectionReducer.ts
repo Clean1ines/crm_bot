@@ -33,14 +33,14 @@ const emptyUsage = () => ({
   model_summaries: [],
 });
 
-const emptyTimer = (startedAt: string) => ({
-  mode: "running",
+const emptyTimer = () => ({
+  mode: "stopped",
   active_elapsed_seconds: 0,
   wall_elapsed_seconds: 0,
-  current_active_started_at: startedAt,
-  started_at: startedAt,
+  current_active_started_at: null,
+  started_at: null,
   completed_at: null,
-  is_live: true,
+  is_live: false,
 });
 
 const stage = (
@@ -72,8 +72,6 @@ const defaultStages = (): WorkbenchWorkflowStageLiveState[] => [
 export const createInitialWorkflowLiveStateResponse = (
   document: InitialWorkflowProjectionDocument,
 ): WorkbenchWorkflowLiveStateResponse => {
-  const startedAt = nowIso();
-
   return {
     document_id: document.documentId,
     project_id: document.projectId,
@@ -83,9 +81,9 @@ export const createInitialWorkflowLiveStateResponse = (
     workflow: {
       workflow_run_id: document.workflowRunId,
       source_document_ref: document.documentId,
-      workflow_status: "running",
+      workflow_status: "pending",
       current_phase: "source_ingestion",
-      timer: emptyTimer(startedAt),
+      timer: emptyTimer(),
       usage: emptyUsage(),
       stages: defaultStages(),
       section_lanes: [
@@ -118,9 +116,9 @@ export const createInitialWorkflowLiveStateResponse = (
       actions: [
         {
           action_id: "pause_processing",
-          visible: true,
-          enabled: true,
-          reason_code: null,
+          visible: false,
+          enabled: false,
+          reason_code: "not_running",
         },
         {
           action_id: "resume_processing",
@@ -183,50 +181,9 @@ const recordArray = (
 const normalize = (value: string | null | undefined): string =>
   (value || "").trim().toLowerCase();
 
-const isStoppedWorkflowStatus = (status: string | null | undefined): boolean =>
-  [
-    "paused",
-    "pause",
-    "manual_paused",
-    "paused_manual",
-    "waiting_for_review",
-    "completed",
-    "done",
-    "published",
-    "failed",
-    "cancelled",
-    "canceled",
-    "stopped",
-  ].includes(normalize(status));
-
-const isStoppedTimerMode = (mode: string | null | undefined): boolean =>
-  [
-    "paused",
-    "completed",
-    "done",
-    "published",
-    "failed",
-    "cancelled",
-    "canceled",
-    "stopped",
-  ].includes(normalize(mode));
-
-const earliestIso = (
-  left: string | null | undefined,
-  right: string | null | undefined,
-): string | null => {
-  if (!left && !right) return null;
-  if (!left) return right ?? null;
-  if (!right) return left;
-
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-
-  if (!Number.isFinite(leftMs)) return right;
-  if (!Number.isFinite(rightMs)) return left;
-
-  return leftMs <= rightMs ? left : right;
-};
+const isPausedWorkflow = (response: WorkbenchWorkflowLiveStateResponse): boolean =>
+  normalize(response.workflow.workflow_status) === "paused" ||
+  normalize(response.workflow.timer.mode) === "paused";
 
 const secondsBetweenIso = (
   startedAt: string | null | undefined,
@@ -267,6 +224,59 @@ const freezeWorkflowTimer = (
   timer.current_active_started_at = null;
   timer.completed_at = timer.completed_at ?? occurredAt;
   timer.is_live = false;
+};
+
+const markWorkflowRunning = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  occurredAt: string,
+): void => {
+  response.document_status = "processing";
+  response.workflow.workflow_status = "running";
+  response.workflow.timer.mode = "running";
+  response.workflow.timer.started_at =
+    response.workflow.timer.started_at ?? occurredAt;
+  response.workflow.timer.current_active_started_at = occurredAt;
+  response.workflow.timer.completed_at = null;
+  response.workflow.timer.is_live = true;
+  setWorkflowActionState(response, "pause_processing", {
+    visible: true,
+    enabled: true,
+    reason_code: null,
+  });
+  setWorkflowActionState(response, "resume_processing", {
+    visible: false,
+    enabled: false,
+    reason_code: "not_paused",
+  });
+  setWorkflowActionState(response, "cancel_processing", {
+    visible: false,
+    enabled: false,
+    reason_code: "hidden_terminal_cancel",
+  });
+};
+
+const markWorkflowPaused = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  occurredAt: string,
+): void => {
+  response.document_status = "paused";
+  response.workflow.workflow_status = "paused";
+  freezeWorkflowTimer(response, occurredAt, "paused");
+  setWorkflowActionState(response, "pause_processing", {
+    visible: false,
+    enabled: false,
+    reason_code: "not_running",
+  });
+  setWorkflowActionState(response, "resume_processing", {
+    visible: true,
+    enabled: true,
+    reason_code: null,
+  });
+  setWorkflowActionState(response, "cancel_processing", {
+    visible: false,
+    enabled: false,
+    reason_code: "not_running",
+  });
 };
 
 const hideActiveProcessingActions = (
@@ -640,7 +650,9 @@ const syncStagesFromLanes = (
   }
 
   if (claimStage.status === "completed") {
-    response.document_status = "processing";
+    if (!isPausedWorkflow(response)) {
+      response.document_status = "processing";
+    }
     if (
       response.workflow.current_phase === "source_ingestion" ||
       response.workflow.current_phase === "claim_builder_work_scheduling" ||
@@ -649,7 +661,9 @@ const syncStagesFromLanes = (
       response.workflow.current_phase = "draft_claim_embeddings";
     }
   } else if (claimStage.status === "running") {
-    response.document_status = "processing";
+    if (!isPausedWorkflow(response)) {
+      response.document_status = "processing";
+    }
     response.workflow.current_phase = "claim_builder_section_extraction";
   }
 };
@@ -1285,40 +1299,24 @@ export const reduceWorkflowFrontendProjectionEvent = (
   next.workflow.source_document_ref =
     text(payload, "source_document_ref") || next.workflow.source_document_ref || next.document_id;
 
-  const freezesAutomaticProcessingTimer = [
-    "workflow_draft_claim_compaction_all_groups_compacted",
-    "workflow_draft_claim_curation_workspace_opened",
-    "workflow_draft_claim_curation_review_required",
-    "workflow_draft_claim_curation_workspace_published",
-  ].includes(normalizedEvent.projection_type);
-
-  const preservesRestoredStoppedState =
-    isStoppedWorkflowStatus(next.workflow.workflow_status) ||
-    isStoppedTimerMode(next.workflow.timer.mode);
-
-  if (!freezesAutomaticProcessingTimer && !preservesRestoredStoppedState) {
-    next.workflow.workflow_status = "running";
-    next.workflow.timer.mode = "running";
-    next.workflow.timer.is_live = true;
-    next.workflow.timer.current_active_started_at = earliestIso(
-      next.workflow.timer.current_active_started_at,
-      normalizedEvent.occurred_at,
-    );
-  }
-  next.workflow.timer.started_at = earliestIso(
-    next.workflow.timer.started_at,
-    normalizedEvent.occurred_at,
-  );
-
   if (normalizedEvent.canonical_phase) {
     next.workflow.current_phase = normalizedEvent.canonical_phase;
   }
 
   switch (normalizedEvent.projection_type) {
     case "workflow_source_document_persisted":
+      markWorkflowRunning(next, normalizedEvent.occurred_at);
       next.document_status = "processing";
       next.workflow.current_phase = "source_ingestion";
       appendTimeline(next, normalizedEvent, "Документ сохранён и принят в обработку");
+      break;
+    case "workflow_manually_paused":
+      markWorkflowPaused(next, normalizedEvent.occurred_at);
+      appendTimeline(next, normalizedEvent, "Обработка поставлена на паузу");
+      break;
+    case "workflow_manually_resumed":
+      markWorkflowRunning(next, normalizedEvent.occurred_at);
+      appendTimeline(next, normalizedEvent, "Обработка возобновлена");
       break;
     case "workflow_source_units_created":
       applySourceUnitsCreated(next, normalizedEvent);

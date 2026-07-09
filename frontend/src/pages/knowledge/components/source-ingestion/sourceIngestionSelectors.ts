@@ -23,9 +23,9 @@ const formatNumber = (value: number): string =>
   new Intl.NumberFormat('ru-RU').format(Math.max(0, Math.floor(value || 0)));
 
 export const selectSourceIngestionProgress = (
-  workflowLiveState: SourceIngestionWorkflowStateInput,
+  workflowProjectionState: SourceIngestionWorkflowStateInput,
 ): SourceIngestionProgressView => {
-  const workflow = workflowLiveState?.workflow ?? null;
+  const workflow = workflowProjectionState?.workflow ?? null;
   const stages = workflow?.stages ?? [];
   const lanes = workflow?.section_lanes ?? [];
 

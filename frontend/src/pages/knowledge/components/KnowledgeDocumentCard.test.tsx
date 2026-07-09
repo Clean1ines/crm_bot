@@ -5,7 +5,7 @@ import type { WorkbenchWorkflowLiveStateResponse } from '@shared/api/modules/kno
 
 import { KnowledgeDocumentCard } from './KnowledgeDocumentCard';
 
-const workflowLiveState: WorkbenchWorkflowLiveStateResponse = {
+const workflowProjectionState: WorkbenchWorkflowLiveStateResponse = {
   document_id: 'document-1',
   project_id: 'project-1',
   file_name: 'knowledge.md',
@@ -224,7 +224,7 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
         onRequestDelete={vi.fn()}
         onCardAction={vi.fn()}
         onOpenCuration={vi.fn()}
-        workflowLiveState={workflowLiveState}
+        workflowProjectionState={workflowProjectionState}
         formatSize={() => '1 КБ'}
         knowledgeProcessingModeLabel={() => 'FAQ'}
       />,
@@ -266,16 +266,16 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
 
   it('shows a clear review-ready completion state', () => {
     const completedState: WorkbenchWorkflowLiveStateResponse = {
-      ...workflowLiveState,
+      ...workflowProjectionState,
       workflow: {
-        ...workflowLiveState.workflow,
+        ...workflowProjectionState.workflow,
         current_phase: 'WAITING_FOR_REVIEW',
-        stages: workflowLiveState.workflow.stages.map((stage) =>
+        stages: workflowProjectionState.workflow.stages.map((stage) =>
           stage.id === 'draft_claim_compaction'
             ? { ...stage, status: 'completed', current: 1, total: 1 }
             : stage,
         ),
-        claim_clusters: workflowLiveState.workflow.claim_clusters?.map((cluster) => ({
+        claim_clusters: workflowProjectionState.workflow.claim_clusters?.map((cluster) => ({
           ...cluster,
           status: 'compacted',
           active_compacted_node_count: 2,
@@ -326,7 +326,7 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
         onRequestDelete={vi.fn()}
         onCardAction={vi.fn()}
         onOpenCuration={vi.fn()}
-        workflowLiveState={completedState}
+        workflowProjectionState={completedState}
         formatSize={() => '1 КБ'}
         knowledgeProcessingModeLabel={() => 'FAQ'}
       />,

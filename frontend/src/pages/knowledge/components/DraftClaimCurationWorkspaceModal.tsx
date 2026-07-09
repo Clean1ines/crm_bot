@@ -175,7 +175,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
   const refreshWorkspace = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey });
     await queryClient.invalidateQueries({
-      queryKey: ['knowledge-workflow-live-state', projectId],
+      queryKey: ['knowledge-workflow-projection', projectId],
     });
     await queryClient.invalidateQueries({ queryKey: ['knowledge-documents', projectId] });
   };

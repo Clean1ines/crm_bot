@@ -541,14 +541,6 @@ export type FrontendWorkflowEventStreamMessageHandler = (
 
 export type FrontendWorkflowEventStreamErrorHandler = (error: unknown) => void;
 
-export type WorkflowLiveStateStreamStop = () => void;
-
-export type WorkflowLiveStateStreamMessageHandler = (
-  payload: WorkbenchWorkflowLiveStateResponse,
-) => void;
-
-export type WorkflowLiveStateStreamErrorHandler = (error: unknown) => void;
-
 const parseSsePayloads = (buffer: string): { payloads: string[]; rest: string } => {
   const chunks = buffer.split("\n\n");
   const rest = chunks.pop() || "";
@@ -622,55 +614,6 @@ const streamFrontendWorkflowEvents = (
 
         for (const payload of parsed.payloads) {
           onMessage(JSON.parse(payload) as FrontendWorkflowEventEnvelope);
-        }
-      }
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        onError?.(error);
-      }
-    }
-  })();
-
-  return () => controller.abort();
-};
-
-const streamWorkflowLiveState = (
-  projectId: string,
-  documentId: string,
-  onMessage: WorkflowLiveStateStreamMessageHandler,
-  onError?: WorkflowLiveStateStreamErrorHandler,
-): WorkflowLiveStateStreamStop => {
-  const controller = new AbortController();
-
-  void (async () => {
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/projects/${projectId}/knowledge/${encodeURIComponent(documentId)}/workflow-live-state/events`,
-        {
-          method: "GET",
-          headers: createAuthHeaders(null),
-          signal: controller.signal,
-        },
-      );
-
-      if (!response.ok || !response.body) {
-        throw new Error(`Workflow live-state stream failed: ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parsed = parseSsePayloads(buffer);
-        buffer = parsed.rest;
-
-        for (const payload of parsed.payloads) {
-          onMessage(JSON.parse(payload) as WorkbenchWorkflowLiveStateResponse);
         }
       }
     } catch (error) {
@@ -1476,16 +1419,6 @@ export const knowledgeApi = {
     ),
 
   streamFrontendWorkflowEvents,
-
-  workflowLiveState: (projectId: string, documentId: string) =>
-    authedJsonRequest<WorkbenchWorkflowLiveStateResponse>(
-      `/api/projects/${projectId}/knowledge/${encodeURIComponent(documentId)}/workflow-live-state`,
-      {
-        method: 'GET',
-      },
-    ),
-
-  streamWorkflowLiveState,
 
   progress: (projectId: string, documentId: string) =>
     authedJsonRequest<KnowledgeProcessingReport>(

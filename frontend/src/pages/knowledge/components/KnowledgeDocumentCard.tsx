@@ -41,9 +41,9 @@ type KnowledgeDocumentCardProps = {
   onRequestDelete: () => void;
   onCardAction: (actionId: string) => Promise<void> | void;
   onOpenCuration: (workflowRunId?: string | null) => void;
-  workflowLiveState?: WorkbenchWorkflowLiveStateResponse | null;
-  workflowLiveStateLoading?: boolean;
-  workflowLiveStateError?: string | null;
+  workflowProjectionState?: WorkbenchWorkflowLiveStateResponse | null;
+  workflowProjectionStateLoading?: boolean;
+  workflowProjectionStateError?: string | null;
   sourceUnitsResponse?: KnowledgeSourceUnitsResponse | null;
   formatSize: (bytes: number) => string;
   knowledgeProcessingModeLabel: (value: string) => string;
@@ -64,14 +64,14 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   onRequestDelete,
   onCardAction,
   onOpenCuration,
-  workflowLiveState,
-  workflowLiveStateLoading = false,
-  workflowLiveStateError = null,
+  workflowProjectionState,
+  workflowProjectionStateLoading = false,
+  workflowProjectionStateError = null,
   sourceUnitsResponse = null,
   formatSize,
   knowledgeProcessingModeLabel,
 }) => {
-  const workflow = workflowLiveState?.workflow ?? null;
+  const workflow = workflowProjectionState?.workflow ?? null;
   const timer = workflow?.timer ?? null;
   const [processingControlOverride, setProcessingControlOverride] =
     useState<ProcessingControlOverride | null>(null);
@@ -146,8 +146,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     (backendOpenCurationAction !== undefined || canShowPrimaryProcessingControl);
   const usage = workflow?.usage ?? null;
   const claimBuilderSectionRows = useMemo(
-    () => selectClaimBuilderSectionRows(workflowLiveState, sourceUnitsResponse),
-    [workflowLiveState, sourceUnitsResponse],
+    () => selectClaimBuilderSectionRows(workflowProjectionState, sourceUnitsResponse),
+    [workflowProjectionState, sourceUnitsResponse],
   );
   const claimBuilderDraftArtifacts = useMemo(
     () =>
@@ -162,8 +162,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   );
 
   const sourceIngestionProgress = useMemo(
-    () => selectSourceIngestionProgress(workflowLiveState),
-    [workflowLiveState],
+    () => selectSourceIngestionProgress(workflowProjectionState),
+    [workflowProjectionState],
   );
   const sourceStage = stages.find((stage) => stage.id === 'source_ingestion') ?? null;
   const claimStage =
@@ -270,7 +270,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
   const headline = workflow
     ? workflowStatusLabel(workflowStatus)
-    : workflowLiveStateLoading
+    : workflowProjectionStateLoading
       ? 'Загружаем состояние обработки'
       : 'Состояние обработки пока недоступно';
 
@@ -436,10 +436,10 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
       />
 
       <div className="mb-4 space-y-3">
-        {workflowLiveStateError && (
+        {workflowProjectionStateError && (
           <div className="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-none" />
-            <span>{workflowLiveStateError}</span>
+            <span>{workflowProjectionStateError}</span>
           </div>
         )}
 

@@ -119,10 +119,10 @@ const attemptsForSection = (
     }));
 
 export const selectClaimBuilderSectionRows = (
-  workflowLiveState: ClaimBuilderWorkflowStateInput,
+  workflowProjectionState: ClaimBuilderWorkflowStateInput,
   sourceUnitsResponse: ClaimBuilderSourceUnitsInput,
 ): ClaimBuilderSectionRowView[] => {
-  const workflow = workflowLiveState?.workflow ?? null;
+  const workflow = workflowProjectionState?.workflow ?? null;
   const sourceUnits = sourceUnitsResponse?.source_units ?? [];
   const sourceUnitById = new Map(sourceUnits.map((unit) => [unit.id, unit]));
   const sourceUnitByIndex = new Map(sourceUnits.map((unit) => [unit.source_index, unit]));
