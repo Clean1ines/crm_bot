@@ -226,6 +226,61 @@ def test_workflow_composite_routes_curation_review_required_event() -> None:
     assert projected.canonical_phase == "DRAFT_CLAIM_CURATION"
 
 
+def test_workflow_composite_routes_manual_pause_event() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:manual-pause"),
+        event_type=KnowledgeExtractionCanonicalEventType.WORKFLOW_MANUALLY_PAUSED.value,
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "project_id": "project-1",
+            "source_document_ref": "source-document:project-1:abc",
+            "actor_user_id": "owner-1",
+            "reason": "manual_pause",
+        },
+        occurred_at=_now(),
+        sequence_number=17,
+    )
+
+    projected = KnowledgeExtractionFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_manually_paused"
+    assert projected.event_type == "WorkflowManuallyPaused"
+    assert projected.project_id == "project-1"
+    assert projected.document_id == "source-document:project-1:abc"
+    assert projected.payload["workflow_status"] == "paused"
+    assert projected.payload["timer_mode"] == "paused"
+    assert projected.payload["timer_is_live"] is False
+
+
+def test_workflow_composite_routes_manual_resume_event() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:manual-resume"),
+        event_type=KnowledgeExtractionCanonicalEventType.WORKFLOW_MANUALLY_RESUMED.value,
+        workflow_run_id="knowledge-extraction:source-document:project-1:abc",
+        payload={
+            "workflow_run_id": "knowledge-extraction:source-document:project-1:abc",
+            "project_id": "project-1",
+            "source_document_ref": "source-document:project-1:abc",
+            "actor_user_id": "owner-1",
+        },
+        occurred_at=_now(),
+        sequence_number=18,
+    )
+
+    projected = KnowledgeExtractionFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert projected.projection_type == "workflow_manually_resumed"
+    assert projected.event_type == "WorkflowManuallyResumed"
+    assert projected.project_id == "project-1"
+    assert projected.document_id == "source-document:project-1:abc"
+    assert projected.payload["workflow_status"] == "running"
+    assert projected.payload["timer_mode"] == "running"
+    assert projected.payload["timer_is_live"] is True
+
+
 def test_curation_projector_is_curation_scoped() -> None:
     event = WorkflowEvent(
         event_id=WorkflowEventId("workflow-event:clusters-built-for-curation-scope"),

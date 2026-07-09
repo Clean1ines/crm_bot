@@ -18,6 +18,9 @@ from src.contexts.knowledge_workbench.observability.application.projectors.draft
 from src.contexts.knowledge_workbench.observability.application.projectors.draft_claim_embedding_frontend_workflow_event_projector import (
     DraftClaimEmbeddingFrontendWorkflowEventProjector,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.route_activation_frontend_workflow_event_projector import (
+    RouteActivationFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.source_ingestion_frontend_workflow_event_projector import (
     SourceIngestionFrontendWorkflowEventProjector,
 )
@@ -28,6 +31,7 @@ class KnowledgeExtractionFrontendWorkflowEventProjector:
     """Routes knowledge-extraction canonical events to bounded frontend projectors."""
 
     def __init__(self) -> None:
+        self._route_activation = RouteActivationFrontendWorkflowEventProjector()
         self._source_ingestion = SourceIngestionFrontendWorkflowEventProjector()
         self._claim_builder = ClaimBuilderFrontendWorkflowEventProjector()
         self._draft_claim_embedding = (
@@ -40,6 +44,9 @@ class KnowledgeExtractionFrontendWorkflowEventProjector:
         self._draft_claim_curation = DraftClaimCurationFrontendWorkflowEventProjector()
 
     def project(self, event: WorkflowEvent) -> FrontendWorkflowEvent | None:
+        projected = self._route_activation.project(event)
+        if projected is not None:
+            return projected
         projected = self._source_ingestion.project(event)
         if projected is not None:
             return projected

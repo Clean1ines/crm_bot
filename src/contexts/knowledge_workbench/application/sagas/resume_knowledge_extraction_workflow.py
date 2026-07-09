@@ -17,6 +17,9 @@ from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_wor
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_event import WorkflowEvent
 from src.contexts.workflow_runtime.domain.entities.workflow_timeline_entry import (
     WorkflowTimelineEntry,
@@ -81,6 +84,7 @@ class ResumeKnowledgeExtractionWorkflowResult:
 class ResumeKnowledgeExtractionWorkflow:
     state_repository: KnowledgeExtractionSagaStateRepositoryPort
     workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort
+    frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None
 
     async def execute(
         self,
@@ -118,7 +122,7 @@ class ResumeKnowledgeExtractionWorkflow:
             updated_at=command.occurred_at,
         )
         await self.state_repository.save_workflow_state(resumed_state)
-        await self.workflow_unit_of_work.outbox.append_event(
+        persisted_resumed_event = await self.workflow_unit_of_work.outbox.append_event(
             _workflow_event(
                 state=resumed_state,
                 actor_user_id=command.actor_user_id,
@@ -128,6 +132,8 @@ class ResumeKnowledgeExtractionWorkflow:
                 occurred_at=command.occurred_at,
             )
         )
+        if self.frontend_event_projection_writer is not None:
+            await self.frontend_event_projection_writer.execute(persisted_resumed_event)
         await self.workflow_unit_of_work.timeline.append_entry(
             _timeline_entry(
                 state=resumed_state,
