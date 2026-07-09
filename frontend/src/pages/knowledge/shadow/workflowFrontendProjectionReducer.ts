@@ -183,6 +183,34 @@ const recordArray = (
 const normalize = (value: string | null | undefined): string =>
   (value || "").trim().toLowerCase();
 
+const isStoppedWorkflowStatus = (status: string | null | undefined): boolean =>
+  [
+    "paused",
+    "pause",
+    "manual_paused",
+    "paused_manual",
+    "waiting_for_review",
+    "completed",
+    "done",
+    "published",
+    "failed",
+    "cancelled",
+    "canceled",
+    "stopped",
+  ].includes(normalize(status));
+
+const isStoppedTimerMode = (mode: string | null | undefined): boolean =>
+  [
+    "paused",
+    "completed",
+    "done",
+    "published",
+    "failed",
+    "cancelled",
+    "canceled",
+    "stopped",
+  ].includes(normalize(mode));
+
 const earliestIso = (
   left: string | null | undefined,
   right: string | null | undefined,
@@ -1264,7 +1292,11 @@ export const reduceWorkflowFrontendProjectionEvent = (
     "workflow_draft_claim_curation_workspace_published",
   ].includes(normalizedEvent.projection_type);
 
-  if (!freezesAutomaticProcessingTimer) {
+  const preservesRestoredStoppedState =
+    isStoppedWorkflowStatus(next.workflow.workflow_status) ||
+    isStoppedTimerMode(next.workflow.timer.mode);
+
+  if (!freezesAutomaticProcessingTimer && !preservesRestoredStoppedState) {
     next.workflow.workflow_status = "running";
     next.workflow.timer.mode = "running";
     next.workflow.timer.is_live = true;

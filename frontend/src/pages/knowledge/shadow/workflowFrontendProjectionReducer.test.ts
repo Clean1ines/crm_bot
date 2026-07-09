@@ -147,4 +147,67 @@ describe("workflowFrontendProjectionReducer", () => {
     expect(state.workflow.llm_attempts[0].model_name).toBe("llama-test");
     expect(state.workflow.usage.total_tokens).toBe(30);
   });
+
+  it("keeps a restored paused workflow paused when ordinary replay events arrive", () => {
+    const state = createInitialWorkflowLiveStateResponse({
+      documentId: "source-document:project-1:doc-1",
+      projectId: "project-1",
+      fileName: "doc.md",
+      documentStatus: "processing",
+      workflowRunId: "knowledge-extraction:source-document:project-1:doc-1",
+    });
+    state.workflow.workflow_status = "PAUSED";
+    state.workflow.timer = {
+      ...state.workflow.timer,
+      mode: "paused",
+      active_elapsed_seconds: 42,
+      wall_elapsed_seconds: 90,
+      current_active_started_at: null,
+      is_live: false,
+    };
+    state.workflow.actions = [
+      {
+        action_id: "pause_processing",
+        visible: false,
+        enabled: false,
+        reason_code: "not_running",
+      },
+      {
+        action_id: "resume_processing",
+        visible: true,
+        enabled: true,
+        reason_code: null,
+      },
+    ];
+
+    const next = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_claim_builder_section_extracted",
+        {
+          workflow_run_id: "knowledge-extraction:source-document:project-1:doc-1",
+          source_document_ref: "source-document:project-1:doc-1",
+          source_unit_ref: "source-unit-1",
+          work_item_id: "work-item-1",
+          dispatch_attempt_id: "attempt-1",
+          persisted_draft_claim_count: 3,
+        },
+        4,
+      ),
+    );
+
+    expect(next.workflow.workflow_status).toBe("PAUSED");
+    expect(next.workflow.timer.mode).toBe("paused");
+    expect(next.workflow.timer.active_elapsed_seconds).toBe(42);
+    expect(next.workflow.timer.current_active_started_at).toBeNull();
+    expect(next.workflow.timer.is_live).toBe(false);
+    expect(next.workflow.actions.find((item) => item.action_id === "pause_processing")).toMatchObject({
+      visible: false,
+      enabled: false,
+    });
+    expect(next.workflow.actions.find((item) => item.action_id === "resume_processing")).toMatchObject({
+      visible: true,
+      enabled: true,
+    });
+  });
 });

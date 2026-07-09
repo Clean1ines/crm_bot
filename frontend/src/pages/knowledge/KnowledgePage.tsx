@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpen, Upload, Search, TestTube2, Loader2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import toast from "react-hot-toast";
 import { useParams } from "react-router-dom";
 import { getErrorMessage } from "@shared/api/core/errors";
-import { knowledgeDocumentStatusLabel } from "@shared/lib/uiLabels";
 
 import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
@@ -96,9 +95,6 @@ const SOURCE_UNIT_FETCH_LIMIT = 1000;
 // the primary source for resume/retry/publish/stop action availability.
 const STOPPED_BY_USER_ISSUE_NEEDLE =
   "\u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u0435\u043b\u0435\u043c";
-
-const formatNumber = (value: number): string =>
-  new Intl.NumberFormat("ru-RU").format(value);
 
 const metricNumber = (
   metrics: KnowledgeProcessingMetrics | null | undefined,
@@ -363,19 +359,29 @@ export const KnowledgePage: React.FC = () => {
     staleTime: 30_000,
   });
 
-  const baseDocuments = Array.isArray(documentsQuery.data)
-    ? documentsQuery.data
-    : [];
-  const optimisticDocuments = Object.values(optimisticUploadDocuments);
+  const baseDocuments = useMemo(
+    () => (Array.isArray(documentsQuery.data) ? documentsQuery.data : []),
+    [documentsQuery.data],
+  );
+  const optimisticDocuments = useMemo(
+    () => Object.values(optimisticUploadDocuments),
+    [optimisticUploadDocuments],
+  );
   const baseDocumentIdKey = baseDocuments
     .map((doc) => doc.id)
     .sort()
     .join(",");
-  const baseDocumentIds = new Set(baseDocuments.map((doc) => doc.id));
-  const documents = [
-    ...optimisticDocuments.filter((doc) => !baseDocumentIds.has(doc.id)),
-    ...baseDocuments,
-  ];
+  const baseDocumentIds = useMemo(
+    () => new Set(baseDocuments.map((doc) => doc.id)),
+    [baseDocuments],
+  );
+  const documents = useMemo(
+    () => [
+      ...optimisticDocuments.filter((doc) => !baseDocumentIds.has(doc.id)),
+      ...baseDocuments,
+    ],
+    [baseDocumentIds, baseDocuments, optimisticDocuments],
+  );
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
   const hasProcessingDocuments = documents.some(isDocumentProcessing);
 
@@ -395,21 +401,25 @@ export const KnowledgePage: React.FC = () => {
 
       return changed ? next : current;
     });
-  }, [baseDocuments, baseDocumentIdKey]);
-  const workflowProjectionTargets = documents
-    .filter(
-      (doc) =>
-        Boolean(doc.current_processing_run_id) &&
-        shouldUseWorkflowProjectionForDocument(doc),
-    )
-    .map((doc) => ({
-      documentId: doc.id,
-      workflowRunId: doc.current_processing_run_id || "",
-      fileName: doc.file_name,
-      documentStatus: doc.status,
-    }))
-    .filter((item) => item.workflowRunId.trim().length > 0)
-    .sort((left, right) => left.documentId.localeCompare(right.documentId));
+  }, [baseDocumentIds, baseDocuments, baseDocumentIdKey]);
+  const workflowProjectionTargets = useMemo(
+    () =>
+      documents
+        .filter(
+          (doc) =>
+            Boolean(doc.current_processing_run_id) &&
+            shouldUseWorkflowProjectionForDocument(doc),
+        )
+        .map((doc) => ({
+          documentId: doc.id,
+          workflowRunId: doc.current_processing_run_id || "",
+          fileName: doc.file_name,
+          documentStatus: doc.status,
+        }))
+        .filter((item) => item.workflowRunId.trim().length > 0)
+        .sort((left, right) => left.documentId.localeCompare(right.documentId)),
+    [documents],
+  );
 
   const workflowProjectionDocumentIds = workflowProjectionTargets.map(
     (item) => item.documentId,
@@ -474,84 +484,120 @@ export const KnowledgePage: React.FC = () => {
     if (!projectId || workflowProjectionTargets.length === 0) return undefined;
 
     const stops = workflowProjectionTargets.map((target) => {
-      setWorkflowLiveStates((previous) => {
-        if (previous[target.documentId]) return previous;
+      let disposed = false;
+      let stopStream: (() => void) | null = null;
 
-        return {
-          ...previous,
-          [target.documentId]: createInitialWorkflowLiveStateResponse({
-            documentId: target.documentId,
+      const fallbackLiveState = () =>
+        createInitialWorkflowLiveStateResponse({
+          documentId: target.documentId,
+          projectId,
+          fileName: target.fileName,
+          documentStatus: target.documentStatus,
+          workflowRunId: target.workflowRunId,
+        });
+
+      const openStream = (): void => {
+        stopStream = knowledgeApi.streamFrontendWorkflowEvents(
+          projectId,
+          target.documentId,
+          target.workflowRunId,
+          undefined,
+          (event) => {
+            setWorkflowProjectionErrors((previous) => ({
+              ...previous,
+              [target.documentId]: null,
+            }));
+
+            setWorkflowLiveStates((previous) => {
+              const current = previous[target.documentId] ?? fallbackLiveState();
+
+              return {
+                ...previous,
+                [target.documentId]: reduceWorkflowFrontendProjectionEvent(
+                  current,
+                  event,
+                ),
+              };
+            });
+
+            const shouldRefreshSourceUnits = [
+              "workflow_source_units_created",
+              "workflow_source_unit_created",
+              "workflow_work_items_scheduled",
+              "workflow_claim_builder_work_item_scheduled",
+              "workflow_dispatch_batch_prepared",
+              "workflow_claim_builder_dispatch_attempt_prepared",
+              "workflow_claim_builder_section_extracted",
+              "workflow_claim_builder_section_retryable_failed",
+              "workflow_claim_builder_section_terminal_failed",
+            ].includes(event.projection_type);
+
+            if (shouldRefreshSourceUnits) {
+              void queryClient.invalidateQueries({
+                queryKey: ["knowledge-source-units", projectId],
+              });
+              void queryClient.refetchQueries({
+                queryKey: ["knowledge-source-units", projectId],
+                type: "active",
+              });
+            }
+          },
+          (error) => {
+            setWorkflowProjectionErrors((previous) => ({
+              ...previous,
+              [target.documentId]: getErrorMessage(
+                error,
+                "Не удалось получить события обработки документа",
+              ),
+            }));
+          },
+        );
+      };
+
+      void (async () => {
+        try {
+          const { data } = await knowledgeApi.workflowLiveState(
             projectId,
-            fileName: target.fileName,
-            documentStatus: target.documentStatus,
-            workflowRunId: target.workflowRunId,
-          }),
-        };
-      });
+            target.documentId,
+          );
+          if (disposed) return;
 
-      return knowledgeApi.streamFrontendWorkflowEvents(
-        projectId,
-        target.documentId,
-        target.workflowRunId,
-        undefined,
-        (event) => {
+          setWorkflowLiveStates((previous) => ({
+            ...previous,
+            [target.documentId]: data,
+          }));
           setWorkflowProjectionErrors((previous) => ({
             ...previous,
             [target.documentId]: null,
           }));
+        } catch (error) {
+          if (disposed) return;
 
           setWorkflowLiveStates((previous) => {
-            const current =
-              previous[target.documentId] ??
-              createInitialWorkflowLiveStateResponse({
-                documentId: target.documentId,
-                projectId,
-                fileName: target.fileName,
-                documentStatus: target.documentStatus,
-                workflowRunId: target.workflowRunId,
-              });
-
+            if (previous[target.documentId]) return previous;
             return {
               ...previous,
-              [target.documentId]: reduceWorkflowFrontendProjectionEvent(
-                current,
-                event,
-              ),
+              [target.documentId]: fallbackLiveState(),
             };
           });
-
-          const shouldRefreshSourceUnits = [
-            "workflow_source_units_created",
-            "workflow_source_unit_created",
-            "workflow_work_items_scheduled",
-            "workflow_claim_builder_work_item_scheduled",
-            "workflow_dispatch_batch_prepared",
-            "workflow_claim_builder_dispatch_attempt_prepared",
-            "workflow_claim_builder_section_extracted",
-            "workflow_claim_builder_section_retryable_failed",
-            "workflow_claim_builder_section_terminal_failed",
-          ].includes(event.projection_type);
-
-          if (shouldRefreshSourceUnits) {
-            void queryClient.invalidateQueries({
-              queryKey: ["knowledge-source-units", projectId],
-            });
-            void queryClient.refetchQueries({
-              queryKey: ["knowledge-source-units", projectId],
-              type: "active",
-            });
-          }
-        },
-        (error) => {
           setWorkflowProjectionErrors((previous) => ({
             ...previous,
             [target.documentId]: getErrorMessage(
               error,
-              "Не удалось получить события обработки документа",
+              "Не удалось загрузить состояние обработки документа",
             ),
           }));
-        },
-      );
+        }
+
+        if (!disposed) {
+          openStream();
+        }
+      })();
+
+      return () => {
+        disposed = true;
+        stopStream?.();
+      };
     });
 
     return () => {
@@ -560,6 +606,7 @@ export const KnowledgePage: React.FC = () => {
   }, [
     projectId,
     queryClient,
+    workflowProjectionTargets,
     workflowProjectionSubscriptionKey,
   ]);
 
@@ -684,17 +731,6 @@ export const KnowledgePage: React.FC = () => {
   };
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const [processingNowMs, setProcessingNowMs] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!hasProcessingDocuments) return undefined;
-
-    const timer = window.setInterval(() => {
-      setProcessingNowMs(Date.now());
-    }, 1000);
-
-    return () => window.clearInterval(timer);
-  }, [hasProcessingDocuments]);
 
   const uploadMutation = useMutation<unknown, unknown, UploadKnowledgeVariables>({
     mutationFn: async ({ file }: UploadKnowledgeVariables) => {
