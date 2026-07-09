@@ -341,6 +341,14 @@ class FakeFrontendWorkflowEventRepository:
         return event
 
 
+class FakeFrontendWorkflowEventPublisher:
+    published_batches: list[tuple[FrontendWorkflowEvent, ...]] = []
+
+    @classmethod
+    async def publish(cls, events: tuple[FrontendWorkflowEvent, ...]) -> None:
+        cls.published_batches.append(events)
+
+
 class FakeDocumentPersister:
     constructed_uows: list[_SourceIngestionFirstPhaseUnitOfWork] = []
 
@@ -441,6 +449,7 @@ def _reset_fake_classes() -> None:
     FakeWorkflowResourceUsageRepository.constructed_with = []
     FakeFrontendWorkflowEventRepository.constructed_with = []
     FakeFrontendWorkflowEventRepository.events = {}
+    FakeFrontendWorkflowEventPublisher.published_batches = []
     FakeDocumentPersister.constructed_uows = []
     FakeSourceUnitCreator.constructed_uows = []
     FakeInnerRunner.should_fail = False
@@ -529,6 +538,11 @@ def _patch_transactional_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         composition,
         "RunSourceIngestionFirstPhase",
         FakeInnerRunner,
+    )
+    monkeypatch.setattr(
+        composition,
+        "publish_frontend_workflow_events",
+        FakeFrontendWorkflowEventPublisher.publish,
     )
 
 
@@ -1077,6 +1091,14 @@ async def test_completed_source_ingestion_applies_workflow_runtime_effects(
         "SourceDocumentPersisted",
         "SourceUnitsCreated",
     )
+    assert [
+        event.event_type
+        for batch in FakeFrontendWorkflowEventPublisher.published_batches
+        for event in batch
+    ] == [
+        "SourceDocumentPersisted",
+        "SourceUnitsCreated",
+    ]
 
 
 @pytest.mark.asyncio
