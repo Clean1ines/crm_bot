@@ -3,14 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 import structlog
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservation,
-)
-from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
-    KnowledgeExtractionCanonicalCommandType,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -29,6 +27,11 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 LOGGER = structlog.get_logger(__name__)
 
 
+class WorkflowPrepareCommandType(Protocol):
+    @property
+    def value(self) -> str: ...
+
+
 @dataclass(frozen=True, slots=True)
 class CapacityWindowPrepareWakeup:
     provider: str
@@ -43,7 +46,7 @@ async def append_capacity_window_prepare_wakeup(
     workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
     source_command: WorkflowCommand,
     workflow_run_id: str,
-    prepare_command_type: KnowledgeExtractionCanonicalCommandType,
+    prepare_command_type: WorkflowPrepareCommandType,
     capacity_observation: LlmAttemptCapacityObservation | None,
     occurred_at: datetime,
 ) -> CapacityWindowPrepareWakeup | None:

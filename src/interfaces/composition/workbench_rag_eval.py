@@ -9,6 +9,9 @@ import asyncpg
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
     PostgresWorkItemSchedulingRepository,
 )
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_command_log_repository import (
+    PostgresCommandLogRepository,
+)
 from src.contexts.embedding_runtime.infrastructure.config.embedding_runtime_settings import (
     load_embedding_runtime_settings,
 )
@@ -71,6 +74,9 @@ class StartWorkbenchRagEvalV2Composition:
                     ),
                     work_item_scheduling_repository=(
                         PostgresWorkItemSchedulingRepository(asyncpg_connection)
+                    ),
+                    workflow_command_log=PostgresCommandLogRepository(
+                        asyncpg_connection
                     ),
                     question_generator=(
                         WorkbenchRagEvalQuestionGenerator.from_prompt_file()

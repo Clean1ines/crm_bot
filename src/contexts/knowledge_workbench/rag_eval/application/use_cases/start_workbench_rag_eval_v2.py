@@ -11,6 +11,19 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
     EnsureWorkItemsScheduled,
     EnsureWorkItemsScheduledCommand,
 )
+from src.contexts.workflow_runtime.application.ports.command_log_repository_port import (
+    CommandLogRepositoryPort,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_command import (
+    WorkflowCommand,
+    WorkflowCommandStatus,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+    WorkflowCommandId,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
+    WorkflowIdempotencyKey,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalRun,
     WorkbenchRagEvalRunStatus,
@@ -25,6 +38,13 @@ from src.contexts.knowledge_workbench.rag_eval.application.use_cases.run_workben
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_question_generation_work import (
     WorkbenchRagEvalQuestionGenerationWorkPlanner,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_work_kinds import (
+    WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
+    WorkbenchRagEvalWorkflowCommandType,
+    WorkbenchRagEvalWorkflowPhase,
+)
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION,
     WorkbenchRagEvalQuestionGenerator,
@@ -35,6 +55,7 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_
 class StartWorkbenchRagEvalV2:
     rag_eval_repository: WorkbenchRagEvalRepositoryPort
     work_item_scheduling_repository: WorkItemSchedulingRepositoryPort
+    workflow_command_log: CommandLogRepositoryPort
     question_generator: WorkbenchRagEvalQuestionGenerator
     question_generation_prompt_version: str = WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION
 
@@ -117,6 +138,19 @@ class StartWorkbenchRagEvalV2:
         if schedule.conflict_count:
             raise RuntimeError("RAG Eval V2 question-generation schedule conflict")
 
+        await self.workflow_command_log.append_pending_command(
+            _initial_question_generation_prepare_command(
+                run_id=run_id,
+                project_id=project_id,
+                publication_id=publication_id,
+                source_document_ref=source_document_ref,
+                scheduled_work_item_count=len(plans),
+                active_model_ref=self.question_generator.generation_model,
+                prompt_version=self.question_generation_prompt_version,
+                occurred_at=now,
+            )
+        )
+
         return WorkbenchRagEvalSummary(
             run_id=run_id,
             project_id=project_id,
@@ -135,6 +169,53 @@ class StartWorkbenchRagEvalV2:
             completed_at=None,
             error_message=None,
         )
+
+
+def _initial_question_generation_prepare_command(
+    *,
+    run_id: str,
+    project_id: str,
+    publication_id: str | None,
+    source_document_ref: str | None,
+    scheduled_work_item_count: int,
+    active_model_ref: str,
+    prompt_version: str,
+    occurred_at: datetime,
+) -> WorkflowCommand:
+    if scheduled_work_item_count <= 0:
+        raise ValueError("scheduled_work_item_count must be positive")
+
+    idempotency_key = f"prepare-rag-eval-question-generation:{run_id}:initial"
+    payload: dict[str, object] = {
+        "workflow_family": "workbench_rag_eval",
+        "workflow_run_id": run_id,
+        "rag_eval_run_id": run_id,
+        "project_id": project_id,
+        "publication_id": publication_id,
+        "source_document_ref": source_document_ref,
+        "work_kind": (WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND.value),
+        "scheduled_work_item_count": scheduled_work_item_count,
+        "active_model_ref": active_model_ref,
+        "prompt_version": prompt_version,
+        "current_phase": (WorkbenchRagEvalWorkflowPhase.QUESTION_GENERATION.value),
+        "causation": {
+            "kind": "rag_eval_start",
+            "run_id": run_id,
+        },
+    }
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
+        command_type=(
+            WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH.value
+        ),
+        workflow_run_id=run_id,
+        idempotency_key=WorkflowIdempotencyKey(idempotency_key),
+        payload=payload,
+        status=WorkflowCommandStatus.PENDING,
+        run_after=occurred_at,
+        created_at=occurred_at,
+        updated_at=occurred_at,
+    )
 
 
 def _id(*parts: str) -> str:

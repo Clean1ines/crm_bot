@@ -19,6 +19,12 @@ from src.contexts.knowledge_workbench.rag_eval.application.use_cases.start_workb
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_work_kinds import (
     WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
+    WorkbenchRagEvalWorkflowCommandType,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_command import (
+    WorkflowCommand,
+)
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WorkbenchRagEvalQuestionGenerator,
 )
@@ -82,6 +88,18 @@ class FakeSchedulingRepository:
         self.payload_hashes[item.work_item_id] = payload_hash
 
 
+@dataclass(slots=True)
+class FakeCommandLog:
+    commands: list[WorkflowCommand] = field(default_factory=list)
+
+    async def append_pending_command(
+        self,
+        command: WorkflowCommand,
+    ) -> WorkflowCommand:
+        self.commands.append(command)
+        return command
+
+
 def _entry(index: int) -> PublishedWorkbenchRetrievalResult:
     return PublishedWorkbenchRetrievalResult(
         runtime_entry_id=f"runtime-entry-{index}",
@@ -112,11 +130,13 @@ async def test_start_v2_creates_running_run_and_schedules_one_qgen_item_per_entr
 ):
     rag_eval_repository = FakeRagEvalRepository(entries=(_entry(1), _entry(2)))
     scheduling_repository = FakeSchedulingRepository()
+    command_log = FakeCommandLog()
     now = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
 
     summary = await StartWorkbenchRagEvalV2(
         rag_eval_repository=rag_eval_repository,
         work_item_scheduling_repository=scheduling_repository,
+        workflow_command_log=command_log,
         question_generator=WorkbenchRagEvalQuestionGenerator.from_prompt_file(),
     ).execute(
         project_id="project-1",
@@ -141,3 +161,19 @@ async def test_start_v2_creates_running_run_and_schedules_one_qgen_item_per_entr
         plan.payload["expected_question_count"] == 10
         for plan in scheduling_repository.plans
     )
+
+    assert len(command_log.commands) == 1
+    initial_command = command_log.commands[0]
+    assert initial_command.workflow_run_id == summary.run_id
+    assert initial_command.command_type == (
+        WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH.value
+    )
+    assert initial_command.payload["workflow_family"] == "workbench_rag_eval"
+    assert initial_command.payload["project_id"] == "project-1"
+    assert initial_command.payload["publication_id"] == "pub-1"
+    assert initial_command.payload["source_document_ref"] is None
+    assert initial_command.payload["scheduled_work_item_count"] == 2
+    assert initial_command.payload["work_kind"] == (
+        WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND.value
+    )
+    assert initial_command.payload["active_model_ref"] == "qwen/qwen3-32b"

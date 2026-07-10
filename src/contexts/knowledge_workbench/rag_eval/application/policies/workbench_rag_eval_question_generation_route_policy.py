@@ -2,18 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
+    WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,
+    WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF,
+    workbench_rag_eval_route_catalog,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     LlmModelExecutionSettings,
     LlmModelRoute,
     LlmModelRouteCatalog,
     LlmModelRouteRole,
-    default_groq_llm_model_route_catalog,
 )
 
 
-WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF = "qwen/qwen3-32b"
-WORKBENCH_RAG_EVAL_DEGRADED_MODEL_REF = "llama-3.1-8b-instant"
-WORKBENCH_RAG_EVAL_FORBIDDEN_AUTOMATIC_MODEL_REFS = ("openai/gpt-oss-120b",)
 WORKBENCH_RAG_EVAL_ACCOUNT_REFS = (
     "groq_org_primary",
     "groq_org_secondary",
@@ -48,10 +49,6 @@ class WorkbenchRagEvalQuestionGenerationRouteCandidate:
         _require_positive_int(self.input_token_limit, "input_token_limit")
         _require_positive_int(self.output_token_limit, "output_token_limit")
 
-    @property
-    def degraded(self) -> bool:
-        return self.role is LlmModelRouteRole.DEGRADED_USER_CHOICE
-
 
 @dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalQuestionGenerationRoutePolicy:
@@ -61,7 +58,7 @@ class WorkbenchRagEvalQuestionGenerationRoutePolicy:
 
     @classmethod
     def default(cls) -> "WorkbenchRagEvalQuestionGenerationRoutePolicy":
-        return cls(route_catalog=default_groq_llm_model_route_catalog())
+        return cls(route_catalog=workbench_rag_eval_route_catalog())
 
     def __post_init__(self) -> None:
         if not isinstance(self.route_catalog, LlmModelRouteCatalog):
@@ -73,11 +70,26 @@ class WorkbenchRagEvalQuestionGenerationRoutePolicy:
         for account_ref in self.account_refs:
             _require_non_empty_text(account_ref, "account_ref")
         _require_non_empty_text(self.provider, "provider")
+
         if (
             self.route_catalog.primary_model_ref()
             != WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF
         ):
             raise ValueError("Workbench RAG Eval primary model must be qwen/qwen3-32b")
+
+        automatic_fallbacks = self.route_catalog.automatic_fallback_model_refs()
+        if automatic_fallbacks != (WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,):
+            raise ValueError(
+                "Workbench RAG Eval automatic fallback must be openai/gpt-oss-120b"
+            )
+
+        if any(
+            route.role is LlmModelRouteRole.DEGRADED_USER_CHOICE
+            for route in self.route_catalog.routes
+        ):
+            raise ValueError(
+                "Workbench RAG Eval must not expose a degraded user-choice route"
+            )
 
     @property
     def max_parallel_lanes(self) -> int:
@@ -87,48 +99,30 @@ class WorkbenchRagEvalQuestionGenerationRoutePolicy:
     def primary_model_ref(self) -> str:
         return WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF
 
+    @property
+    def automatic_fallback_model_ref(self) -> str:
+        return WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF
+
     def automatic_model_refs(self) -> tuple[str, ...]:
-        refs = (
-            self.route_catalog.primary_model_ref(),
-            *self.route_catalog.automatic_fallback_model_refs(),
+        return (
+            self.primary_model_ref,
+            self.automatic_fallback_model_ref,
         )
-        return tuple(ref for ref in refs if self._is_allowed_automatic_ref(ref))
 
     def candidate_chain(
         self,
         *,
         entry_index: int,
-        allow_degraded_llama_instant: bool,
     ) -> tuple[WorkbenchRagEvalQuestionGenerationRouteCandidate, ...]:
         _require_non_negative_int(entry_index, "entry_index")
-        automatic = tuple(
+
+        return tuple(
             self._candidate_for_route(
                 route=self._require_route(model_ref),
                 entry_index=entry_index,
                 attempt_index=attempt_index,
             )
             for attempt_index, model_ref in enumerate(self.automatic_model_refs())
-        )
-        if not allow_degraded_llama_instant:
-            return automatic
-
-        degraded = self._candidate_for_route(
-            route=self._require_route(
-                self.route_catalog.degraded_user_choice_model_ref()
-            ),
-            entry_index=entry_index,
-            attempt_index=len(automatic),
-        )
-        if degraded.model_ref != WORKBENCH_RAG_EVAL_DEGRADED_MODEL_REF:
-            raise ValueError(
-                "Workbench RAG Eval degraded model must be llama-3.1-8b-instant"
-            )
-        return (*automatic, degraded)
-
-    def requires_degraded_confirmation_after_automatic_chain(self) -> bool:
-        return (
-            self.route_catalog.degraded_user_choice_model_ref()
-            == WORKBENCH_RAG_EVAL_DEGRADED_MODEL_REF
         )
 
     def _candidate_for_route(
@@ -155,17 +149,6 @@ class WorkbenchRagEvalQuestionGenerationRoutePolicy:
         if route is None:
             raise ValueError(f"model_ref is not in route catalog: {model_ref}")
         return route
-
-    def _is_allowed_automatic_ref(self, model_ref: str) -> bool:
-        if model_ref in WORKBENCH_RAG_EVAL_FORBIDDEN_AUTOMATIC_MODEL_REFS:
-            return False
-        route = self.route_catalog.route_for_model_ref(model_ref)
-        if route is None:
-            return False
-        return route.role in (
-            LlmModelRouteRole.PRIMARY,
-            LlmModelRouteRole.AUTOMATIC_FALLBACK,
-        )
 
 
 def _require_non_empty_text(value: str, field_name: str) -> None:

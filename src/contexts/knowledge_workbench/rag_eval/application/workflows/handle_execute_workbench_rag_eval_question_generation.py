@@ -96,6 +96,10 @@ class ExecuteWorkbenchRagEvalQuestionGenerationResult:
     work_item_id: str
     saved_question_count: int
     outcome_status: str
+    finished_at: datetime
+    capacity_observation: Mapping[str, object] | None
+    error_kind: str | None
+    next_attempt_at: datetime | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +132,10 @@ class ExecuteWorkbenchRagEvalQuestionGeneration:
                 work_item_id=execution_result.dispatch.work_item_id,
                 saved_question_count=0,
                 outcome_status=execution_result.llm_result.status.value,
+                finished_at=execution_result.llm_result.finished_at,
+                capacity_observation=(execution_result.llm_result.capacity_observation),
+                error_kind=execution_result.llm_result.error_kind,
+                next_attempt_at=execution_result.llm_result.next_attempt_at,
             )
 
         questions = _questions_from_execution_result(
@@ -140,6 +148,10 @@ class ExecuteWorkbenchRagEvalQuestionGeneration:
             work_item_id=execution_result.dispatch.work_item_id,
             saved_question_count=len(questions),
             outcome_status=execution_result.llm_result.status.value,
+            finished_at=execution_result.llm_result.finished_at,
+            capacity_observation=(execution_result.llm_result.capacity_observation),
+            error_kind=execution_result.llm_result.error_kind,
+            next_attempt_at=execution_result.llm_result.next_attempt_at,
         )
 
 
