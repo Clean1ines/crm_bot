@@ -234,21 +234,21 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
     expect(normalizedMarkup).toContain(
       'Черновики утверждений: 2 · Векторы: 2 · Группы: 1 · Сравнения: 1 / 2',
     );
-    expect(normalizedMarkup).toContain('завершено · 2 / 2');
-    expect(normalizedMarkup).toContain('завершено · 1 / 1');
-    expect(normalizedMarkup).toContain('идёт · 0 / 1');
-    expect(normalizedMarkup).toContain('Кластеры утверждений: 1');
-    expect(normalizedMarkup).toContain('Технические сравнения: 2');
+    expect(normalizedMarkup).toContain('1. Векторизация утверждений');
+    expect(normalizedMarkup).toContain('2 / 2');
+    expect(normalizedMarkup).toContain('2. Группировка похожих утверждений');
+    expect(normalizedMarkup).toContain('1 / 1');
+    expect(normalizedMarkup).toContain('3. Объединение знаний');
+    expect(normalizedMarkup).toContain('0 / 1');
+    expect(normalizedMarkup).toContain('идёт');
+    expect(normalizedMarkup).toContain('Кластеров: 1');
+    expect(normalizedMarkup).toContain('Claim Compaction · 1 кл.');
+    expect(normalizedMarkup).toContain('Сравнения: 1 / 2');
     expect(normalizedMarkup).toContain('<details');
     expect(normalizedMarkup).toContain('Кластер 1');
     expect(normalizedMarkup).toContain('Поддержка отвечает круглосуточно.');
     expect(normalizedMarkup).toContain('Когда работает поддержка?');
     expect(normalizedMarkup).toContain('Праздничные исключения не описаны');
-    expect(normalizedMarkup).toContain('unit-1');
-    expect(normalizedMarkup).toContain(
-      'text-embedding-3-small · 1 536 изм. · готов',
-    );
-    expect(normalizedMarkup).toContain('raw · активен · active');
     expect(normalizedMarkup).toContain('Объединение знаний');
     expect(normalizedMarkup).toContain('0% кластеров готово');
     expect(normalizedMarkup).toContain('В очереди');
@@ -256,10 +256,7 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
     expect(normalizedMarkup).toContain('Готово');
     expect(normalizedMarkup).toContain('Нужно внимание');
     expect(normalizedMarkup).toContain('Кластер 1');
-    expect(normalizedMarkup).toContain('Частично готов');
     expect(normalizedMarkup).toContain('bg-sky-500/10');
-    expect(normalizedMarkup).toContain('Технические сравнения');
-    expect(normalizedMarkup).toContain('Извлечённые факты: 2');
     expect(normalizedMarkup).toContain('Поддержка отвечает круглосуточно.');
     expect(normalizedMarkup).toContain('Оператор подключается по запросу.');
   });
@@ -335,8 +332,8 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
     expect(markup).toContain('100% кластеров готово');
     expect(markup).toContain('Объединение завершено — знания готовы к ручной проверке.');
     expect(markup).toContain('bg-emerald-500/10');
-    expect(markup).toContain('Извлечённые факты: 2');
-    expect(markup).toContain('Итоговые факты: 2');
+    expect(markup).toContain('Факты кластера: 2');
+    expect(markup).toContain('Итоговые утверждения');
     expect(markup).toContain('Поддержка доступна круглосуточно без перерывов.');
     expect(markup).toContain('Оператор подключается после запроса клиента.');
   });

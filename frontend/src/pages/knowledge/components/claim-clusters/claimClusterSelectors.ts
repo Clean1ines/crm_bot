@@ -69,10 +69,17 @@ export const selectClaimClustersView = (
   const clusters = workflow?.claim_clusters ?? [];
   const hasClusters = clusters.length > 0;
   const nestedComparisons = clusters.flatMap((cluster) => cluster.comparisons ?? []);
-  const comparisons = [
-    ...(workflow?.claim_compaction_comparisons ?? []),
-    ...nestedComparisons,
-  ];
+  const comparisons = Array.from(
+    new Map(
+      [
+        ...(workflow?.claim_compaction_comparisons ?? []),
+        ...nestedComparisons,
+      ].map((comparison, index) => [
+        comparison.comparison_ref || `${comparison.cluster_ref}:${index}`,
+        comparison,
+      ]),
+    ).values(),
+  );
   const hasComparisons = comparisons.length > 0;
   const clusteredClaims = clusters.flatMap((cluster) => cluster.claims ?? cluster.members);
   const clusteredClaimCount = clusters.reduce(
@@ -143,6 +150,11 @@ export const selectClaimClustersView = (
         cluster_ref: cluster.cluster_ref,
       })),
   );
+  const compactionWorkItemIds = new Set(
+    clusters.flatMap((cluster) =>
+      (cluster.batches ?? []).map((batch) => batch.work_item_id).filter(Boolean),
+    ),
+  );
   const progressPercent =
     clusters.length > 0
       ? Math.round((compactedClusterCount / clusters.length) * 100)
@@ -150,15 +162,13 @@ export const selectClaimClustersView = (
   const attention = retry + failed + needsDecision;
   const isComplete = clusters.length > 0 && compactedClusterCount === clusters.length;
   const panelTone =
-    workflow?.curation.available || isComplete
-      ? 'border-emerald-500/30 bg-emerald-500/10'
-      : failed > 0
-        ? 'border-rose-500/30 bg-rose-500/10'
-        : attention > 0
-          ? 'border-amber-500/30 bg-amber-500/10'
-          : leased > 0
-            ? 'border-sky-500/30 bg-sky-500/10'
-            : 'border-[var(--border-strong)] bg-[var(--surface-secondary)]';
+    failed > 0
+      ? 'border-rose-500/30 bg-rose-500/10'
+      : attention > 0
+        ? 'border-amber-500/30 bg-amber-500/10'
+        : leased > 0
+          ? 'border-sky-500/30 bg-sky-500/10'
+          : 'border-[var(--border-subtle)] bg-[var(--surface-secondary)]';
   const summaryText =
     leased > 0
       ? `Сейчас ИИ объединяет ${formatViewNumber(leased)} кластер(а).`
@@ -180,9 +190,12 @@ export const selectClaimClustersView = (
             : isComplete
               ? 'Все кластеры объединены.'
               : summaryText;
-  const llmAttempts = (workflow?.llm_attempts ?? []).filter(
-    (attempt) => attempt.node_name === 'knowledge_workbench.draft_claim_compaction',
-  );
+  const llmAttempts = (workflow?.llm_attempts ?? []).filter((attempt) => {
+    const nodeName = normalize(attempt.node_name);
+    if (nodeName.includes('draft_claim_compaction')) return true;
+    if (attempt.section_id && compactionWorkItemIds.has(attempt.section_id)) return true;
+    return normalize(attempt.node_run_id).includes('draft_claim_compaction');
+  });
   const compactionAttempts: ClaimClusterCompactionAttemptView[] = llmAttempts
     .map((attempt, index) => ({
       key: attempt.node_run_id || `draft-compaction-attempt-${index}`,
