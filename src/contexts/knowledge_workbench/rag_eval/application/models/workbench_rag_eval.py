@@ -158,6 +158,10 @@ class WorkbenchRagEvalQuestion:
     source: WorkbenchRagEvalQuestionSource
     generation_model: str | None
     prompt_version: str | None
+    contract_version: str | None
+    promotion_eligible: bool
+    ambiguity_risk: WorkbenchRagEvalQuestionAmbiguityRisk | None
+    generation_rationale: str | None
     generation_account_ref: str | None
     generation_slot_index: int | None
     status: WorkbenchRagEvalQuestionStatus
@@ -174,6 +178,21 @@ class WorkbenchRagEvalQuestion:
         _require_enum(self.source, WorkbenchRagEvalQuestionSource, "source")
         _require_optional_text(self.generation_model, "generation_model")
         _require_optional_text(self.prompt_version, "prompt_version")
+        _require_optional_text(self.contract_version, "contract_version")
+        if not isinstance(self.promotion_eligible, bool):
+            raise TypeError("promotion_eligible must be bool")
+        if self.ambiguity_risk is not None:
+            _require_enum(
+                self.ambiguity_risk,
+                WorkbenchRagEvalQuestionAmbiguityRisk,
+                "ambiguity_risk",
+            )
+        _require_optional_text(self.generation_rationale, "generation_rationale")
+        if (
+            self.promotion_eligible
+            and self.ambiguity_risk is not WorkbenchRagEvalQuestionAmbiguityRisk.LOW
+        ):
+            raise ValueError("promotion_eligible requires ambiguity_risk=low")
         _require_optional_text(self.generation_account_ref, "generation_account_ref")
         _require_optional_non_negative_int(
             self.generation_slot_index, "generation_slot_index"
@@ -299,6 +318,10 @@ class WorkbenchRagEvalQuestionDetails:
     source: WorkbenchRagEvalQuestionSource
     generation_model: str | None
     prompt_version: str | None
+    contract_version: str | None
+    promotion_eligible: bool
+    ambiguity_risk: WorkbenchRagEvalQuestionAmbiguityRisk | None
+    generation_rationale: str | None
     status: WorkbenchRagEvalQuestionStatus
     created_at: datetime
     results: tuple[WorkbenchRagEvalRetrievalResultDetails, ...]
@@ -316,6 +339,21 @@ class WorkbenchRagEvalQuestionDetails:
         _require_enum(self.source, WorkbenchRagEvalQuestionSource, "source")
         _require_optional_text(self.generation_model, "generation_model")
         _require_optional_text(self.prompt_version, "prompt_version")
+        _require_optional_text(self.contract_version, "contract_version")
+        if not isinstance(self.promotion_eligible, bool):
+            raise TypeError("promotion_eligible must be bool")
+        if self.ambiguity_risk is not None:
+            _require_enum(
+                self.ambiguity_risk,
+                WorkbenchRagEvalQuestionAmbiguityRisk,
+                "ambiguity_risk",
+            )
+        _require_optional_text(self.generation_rationale, "generation_rationale")
+        if (
+            self.promotion_eligible
+            and self.ambiguity_risk is not WorkbenchRagEvalQuestionAmbiguityRisk.LOW
+        ):
+            raise ValueError("promotion_eligible requires ambiguity_risk=low")
         _require_enum(self.status, WorkbenchRagEvalQuestionStatus, "status")
         _require_datetime(self.created_at, "created_at")
         _require_optional_text(self.generation_account_ref, "generation_account_ref")
@@ -337,6 +375,12 @@ class WorkbenchRagEvalQuestionDetails:
             "source": self.source.value,
             "generation_model": self.generation_model,
             "prompt_version": self.prompt_version,
+            "contract_version": self.contract_version,
+            "promotion_eligible": self.promotion_eligible,
+            "ambiguity_risk": (
+                self.ambiguity_risk.value if self.ambiguity_risk is not None else None
+            ),
+            "generation_rationale": self.generation_rationale,
             "generation_account_ref": self.generation_account_ref,
             "generation_slot_index": self.generation_slot_index,
             "status": self.status.value,

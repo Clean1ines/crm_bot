@@ -23,6 +23,7 @@ WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION = (
     "workbench_rag_eval_question_variants.ru.v2"
 )
 WORKBENCH_RAG_EVAL_QUESTION_CONTRACT_VERSION = "workbench_rag_eval_questions.v2"
+WORKBENCH_RAG_EVAL_QUESTION_GENERATION_MODEL_REF = "qwen/qwen3-32b"
 
 _REQUIRED_DISTRIBUTION = {
     WorkbenchRagEvalQuestionKind.DIRECT_PARAPHRASE: 2,
@@ -40,7 +41,15 @@ _ALLOWED_GENERATED_KINDS = frozenset(_REQUIRED_DISTRIBUTION)
 class WorkbenchRagEvalQuestionGenerator:
     prompt_template: str
     prompt_version: str = WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION
+    generation_model: str = WORKBENCH_RAG_EVAL_QUESTION_GENERATION_MODEL_REF
     questions_per_entry: int = 10
+
+    def __post_init__(self) -> None:
+        _require_text(self.prompt_template, "prompt_template")
+        _require_text(self.prompt_version, "prompt_version")
+        _require_text(self.generation_model, "generation_model")
+        if self.questions_per_entry != 10:
+            raise ValueError("questions_per_entry must be exactly 10")
 
     @classmethod
     def from_prompt_file(

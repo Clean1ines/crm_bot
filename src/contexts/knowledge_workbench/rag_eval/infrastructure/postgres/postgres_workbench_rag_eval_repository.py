@@ -15,6 +15,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalPromotionCandidateDetails,
     WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestion,
+    WorkbenchRagEvalQuestionAmbiguityRisk,
     WorkbenchRagEvalQuestionKind,
     WorkbenchRagEvalQuestionSource,
     WorkbenchRagEvalQuestionStatus,
@@ -77,6 +78,10 @@ SELECT
     question.source,
     question.generation_model,
     question.prompt_version,
+    question.contract_version,
+    question.promotion_eligible,
+    question.ambiguity_risk,
+    question.generation_rationale,
     question.generation_account_ref,
     question.generation_slot_index,
     question.status,
@@ -305,11 +310,13 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                         question_id, run_id, project_id,
                         expected_runtime_entry_id, expected_fact_id, question,
                         question_kind, source, generation_model, prompt_version,
-                        generation_account_ref, generation_slot_index, status, created_at
+                        contract_version, promotion_eligible, ambiguity_risk,
+                        generation_rationale, generation_account_ref,
+                        generation_slot_index, status, created_at
                     )
                     VALUES (
                         $1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
-                        $11, $12, $13, $14
+                        $11, $12, $13, $14, $15, $16, $17, $18
                     )
                     ON CONFLICT (question_id) DO NOTHING
                     """,
@@ -323,6 +330,14 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     question.source.value,
                     question.generation_model,
                     question.prompt_version,
+                    question.contract_version,
+                    question.promotion_eligible,
+                    (
+                        question.ambiguity_risk.value
+                        if question.ambiguity_risk is not None
+                        else None
+                    ),
+                    question.generation_rationale,
                     question.generation_account_ref,
                     question.generation_slot_index,
                     question.status.value,
@@ -859,6 +874,10 @@ class _QuestionDetailsDraft:
     source: WorkbenchRagEvalQuestionSource
     generation_model: str | None
     prompt_version: str | None
+    contract_version: str | None
+    promotion_eligible: bool
+    ambiguity_risk: WorkbenchRagEvalQuestionAmbiguityRisk | None
+    generation_rationale: str | None
     generation_account_ref: str | None
     generation_slot_index: int | None
     status: WorkbenchRagEvalQuestionStatus
@@ -877,6 +896,10 @@ class _QuestionDetailsDraft:
             source=self.source,
             generation_model=self.generation_model,
             prompt_version=self.prompt_version,
+            contract_version=self.contract_version,
+            promotion_eligible=self.promotion_eligible,
+            ambiguity_risk=self.ambiguity_risk,
+            generation_rationale=self.generation_rationale,
             generation_account_ref=self.generation_account_ref,
             generation_slot_index=self.generation_slot_index,
             status=self.status,
@@ -909,6 +932,29 @@ def _question_details_from_rows(
                 source=WorkbenchRagEvalQuestionSource(_text_from_row(row, "source")),
                 generation_model=_optional_text_from_row(row, "generation_model"),
                 prompt_version=_optional_text_from_row(row, "prompt_version"),
+                contract_version=_optional_text_from_row(
+                    row,
+                    "contract_version",
+                ),
+                promotion_eligible=_bool_from_row(
+                    row,
+                    "promotion_eligible",
+                ),
+                ambiguity_risk=(
+                    WorkbenchRagEvalQuestionAmbiguityRisk(ambiguity_risk)
+                    if (
+                        ambiguity_risk := _optional_text_from_row(
+                            row,
+                            "ambiguity_risk",
+                        )
+                    )
+                    is not None
+                    else None
+                ),
+                generation_rationale=_optional_text_from_row(
+                    row,
+                    "generation_rationale",
+                ),
                 generation_account_ref=_optional_text_from_row(
                     row, "generation_account_ref"
                 ),

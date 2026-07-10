@@ -13,6 +13,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalPromotionBatchApplyResult,
     WorkbenchRagEvalPromotionCandidateDetails,
     WorkbenchRagEvalPromotionStatus,
+    WorkbenchRagEvalQuestionAmbiguityRisk,
     WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestionKind,
     WorkbenchRagEvalQuestionSource,
@@ -199,7 +200,13 @@ class FakeWorkbenchRagEvalRepository:
                 question_kind=WorkbenchRagEvalQuestionKind.PARAPHRASE,
                 source=WorkbenchRagEvalQuestionSource.GENERATED,
                 generation_model="model-1",
-                prompt_version="prompt-v1",
+                prompt_version="workbench_rag_eval_question_variants.ru.v2",
+                contract_version="workbench_rag_eval_questions.v2",
+                promotion_eligible=True,
+                ambiguity_risk=WorkbenchRagEvalQuestionAmbiguityRisk.LOW,
+                generation_rationale="Однозначный retrieval alias",
+                generation_account_ref="groq_org_primary",
+                generation_slot_index=0,
                 status=WorkbenchRagEvalQuestionStatus.CREATED,
                 created_at=now,
                 results=(
@@ -256,6 +263,16 @@ def test_workbench_rag_eval_questions_endpoint_returns_questions(monkeypatch) ->
     assert response.status_code == 200
     payload = response.json()
     assert payload["questions"][0]["question_id"] == "question-1"
+    assert (
+        payload["questions"][0]["contract_version"] == "workbench_rag_eval_questions.v2"
+    )
+    assert payload["questions"][0]["promotion_eligible"] is True
+    assert payload["questions"][0]["ambiguity_risk"] == "low"
+    assert (
+        payload["questions"][0]["generation_rationale"] == "Однозначный retrieval alias"
+    )
+    assert payload["questions"][0]["generation_account_ref"] == "groq_org_primary"
+    assert payload["questions"][0]["generation_slot_index"] == 0
     assert (
         payload["questions"][0]["results"][0]["matched_runtime_entry_id"]
         == "entry-expected"

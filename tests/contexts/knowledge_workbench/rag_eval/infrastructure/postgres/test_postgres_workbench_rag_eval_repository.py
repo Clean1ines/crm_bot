@@ -283,7 +283,13 @@ async def test_list_run_questions_maps_questions_with_retrieval_results() -> Non
                 "question_kind": "paraphrase",
                 "source": "generated",
                 "generation_model": "model-1",
-                "prompt_version": "prompt-v1",
+                "prompt_version": "workbench_rag_eval_question_variants.ru.v2",
+                "contract_version": "workbench_rag_eval_questions.v2",
+                "promotion_eligible": True,
+                "ambiguity_risk": "low",
+                "generation_rationale": "Однозначный retrieval alias",
+                "generation_account_ref": "groq_org_primary",
+                "generation_slot_index": 0,
                 "status": "created",
                 "created_at": _now(),
                 "result_id": "result-1",
@@ -306,7 +312,13 @@ async def test_list_run_questions_maps_questions_with_retrieval_results() -> Non
                 "question_kind": "paraphrase",
                 "source": "generated",
                 "generation_model": "model-1",
-                "prompt_version": "prompt-v1",
+                "prompt_version": "workbench_rag_eval_question_variants.ru.v2",
+                "contract_version": "workbench_rag_eval_questions.v2",
+                "promotion_eligible": True,
+                "ambiguity_risk": "low",
+                "generation_rationale": "Однозначный retrieval alias",
+                "generation_account_ref": "groq_org_primary",
+                "generation_slot_index": 0,
                 "status": "created",
                 "created_at": _now(),
                 "result_id": "result-2",
@@ -329,6 +341,12 @@ async def test_list_run_questions_maps_questions_with_retrieval_results() -> Non
 
     assert connection.fetch_calls[0][0] == WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL
     assert questions[0].question_id == "question-1"
+    assert questions[0].contract_version == "workbench_rag_eval_questions.v2"
+    assert questions[0].promotion_eligible is True
+    assert questions[0].ambiguity_risk.value == "low"
+    assert questions[0].generation_rationale == "Однозначный retrieval alias"
+    assert questions[0].generation_account_ref == "groq_org_primary"
+    assert questions[0].generation_slot_index == 0
     assert questions[0].results[0].matched_runtime_entry_id == "expected-entry"
     assert questions[0].results[1].rank == 2
     assert "answer_text" not in str(questions[0].to_json_dict())
