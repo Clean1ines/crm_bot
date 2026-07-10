@@ -350,6 +350,41 @@ describe("workflowFrontendProjectionReducer", () => {
     });
   });
 
+  it("freezes only accumulated active time when pause is replayed after refresh", () => {
+    let state = seed();
+
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent("workflow_source_document_persisted", {}, 1),
+    );
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent("workflow_manually_paused", { pause_reason: "manual_stop" }, 4),
+    );
+
+    expect(state.workflow.timer.active_elapsed_seconds).toBe(180);
+    expect(state.workflow.timer.wall_elapsed_seconds).toBe(180);
+    expect(state.workflow.timer.current_active_started_at).toBeNull();
+    expect(state.workflow.timer.is_live).toBe(false);
+
+    const afterLateEvent = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_claim_builder_section_extracted",
+        {
+          source_unit_ref: "source-unit-1",
+          work_item_id: "work-item-1",
+          actual_total_tokens: 10,
+        },
+        7,
+      ),
+    );
+
+    expect(afterLateEvent.workflow.timer.active_elapsed_seconds).toBe(180);
+    expect(afterLateEvent.workflow.timer.wall_elapsed_seconds).toBe(180);
+    expect(afterLateEvent.workflow.timer.is_live).toBe(false);
+  });
+
   it("keeps workflow paused when late claim builder outcome arrives", () => {
     const paused = reduceWorkflowFrontendProjectionEvent(
       seed(),

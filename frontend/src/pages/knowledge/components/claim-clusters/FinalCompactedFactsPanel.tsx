@@ -26,7 +26,7 @@ const EnrichedCompactedArtifact = ({
   return (
     <details className="mt-2 rounded bg-[var(--control-bg)] p-2" open>
       <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
-        Enriched artifact
+        Детали знания
       </summary>
       <div className="mt-2 space-y-3 text-[var(--text-secondary)]">
         <div>
@@ -36,8 +36,7 @@ const EnrichedCompactedArtifact = ({
 
         <div className="grid gap-1 text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
           <div>Тип: {artifact?.claim_kind || compactedClaim.claim_kind || '—'}</div>
-          <div>Гранулярность: {artifact?.granularity || compactedClaim.granularity || '—'}</div>
-          <div>Решение: {artifact?.merge_decision || compactedClaim.merge_decision || '—'}</div>
+          <div>Детализация: {artifact?.granularity || compactedClaim.granularity || '—'}</div>
         </div>
 
         {possibleQuestions.length > 0 && (
@@ -64,7 +63,7 @@ const EnrichedCompactedArtifact = ({
 
         {triples.length > 0 && (
           <div>
-            <div className="font-medium text-[var(--text-primary)]">Тройки</div>
+            <div className="font-medium text-[var(--text-primary)]">Связанные факты</div>
             <ul className="mt-1 list-disc pl-5">
               {triples.map((triple: CompactedPayloadTriple, index: number) => (
                 <li key={`${triple.subject ?? 's'}-${triple.predicate ?? 'p'}-${triple.object ?? 'o'}-${index}`}>

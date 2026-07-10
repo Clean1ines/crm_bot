@@ -42,6 +42,29 @@ const recordText = (value: Record<string, unknown>, key: string): string | null 
   return typeof field === 'string' && field.trim() ? field.trim() : null;
 };
 
+const humanText = (value: string | null | undefined): string => {
+  const normalized = (value || '').trim().toLowerCase();
+  const labels: Record<string, string> = {
+    property: 'Свойство',
+    process: 'Процесс',
+    fact: 'Факт',
+    rule: 'Правило',
+    answer: 'Ответ',
+    atomic: 'Короткое',
+    composite: 'Составное',
+    detailed: 'Подробное',
+    unmerged: 'Отдельное знание',
+    merged: 'Объединённое знание',
+  };
+  if (labels[normalized]) return labels[normalized];
+  if (!value?.trim()) return 'Не указано';
+  return value
+    .trim()
+    .replaceAll('_', ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^./, (letter) => letter.toUpperCase());
+};
+
 const draftFromPayload = (payload: DraftClaimCurationEditablePayload): EditableDraft => ({
   key: payload.key,
   claim: payload.claim,
@@ -56,11 +79,11 @@ const draftFromPayload = (payload: DraftClaimCurationEditablePayload): EditableD
 const parseTriples = (value: string): Record<string, unknown>[] => {
   const parsed: unknown = JSON.parse(value);
   if (!Array.isArray(parsed)) {
-    throw new Error('triples должен быть JSON-массивом объектов');
+    throw new Error('Связанные факты должны быть списком объектов');
   }
   return parsed.map((item, index) => {
     if (!isRecord(item)) {
-      throw new Error(`triples[${index}] должен быть объектом`);
+      throw new Error(`Связанный факт ${index + 1} должен быть объектом`);
     }
     return item;
   });
@@ -71,10 +94,10 @@ const updatePayloadFromDraft = (draft: EditableDraft): DraftClaimCurationItemUpd
   const claim = draft.claim.trim();
 
   if (!key) {
-    throw new Error('key не может быть пустым');
+    throw new Error('Название знания не может быть пустым');
   }
   if (!claim) {
-    throw new Error('claim не может быть пустым');
+    throw new Error('Текст знания не может быть пустым');
   }
 
   return {
@@ -182,7 +205,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
 
   const saveMutation = useMutation({
     mutationFn: async (item: DraftClaimCurationItem) => {
-      if (!draft) throw new Error('Нет выбранного claim для сохранения');
+      if (!draft) throw new Error('Нет выбранного знания для сохранения');
       const payload = updatePayloadFromDraft(draft);
       await knowledgeApi.updateCurationItem(
         projectId,
@@ -196,7 +219,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
       await refreshWorkspace();
     },
     onError: (error: unknown) => {
-      toast.error(getErrorMessage(error, 'Не удалось сохранить claim'));
+      toast.error(getErrorMessage(error, 'Не удалось сохранить знание'));
     },
   });
 
@@ -210,12 +233,12 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
       );
     },
     onSuccess: async () => {
-      toast.success('Claim исключён из публикации');
+      toast.success('Знание исключено из публикации');
       setExcludeReason('');
       await refreshWorkspace();
     },
     onError: (error: unknown) => {
-      toast.error(getErrorMessage(error, 'Не удалось исключить claim'));
+      toast.error(getErrorMessage(error, 'Не удалось исключить знание'));
     },
   });
 
@@ -229,12 +252,12 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
     },
     onSuccess: async (result) => {
       toast.success(
-        `Опубликовано знаний: ${formatNumber(result.published_item_count)}, embeddings: ${formatNumber(result.embedding_count)}, удалено черновых embeddings: ${formatNumber(result.deleted_draft_embedding_count)}`,
+	        `Опубликовано знаний: ${formatNumber(result.published_item_count)}, подготовлено для поиска: ${formatNumber(result.embedding_count)}`,
       );
       await refreshWorkspace();
     },
     onError: (error: unknown) => {
-      toast.error(getErrorMessage(error, 'Не удалось опубликовать curated claims'));
+	      toast.error(getErrorMessage(error, 'Не удалось опубликовать знания'));
     },
   });
 
@@ -243,11 +266,11 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
       await knowledgeApi.includeCurationItem(projectId, workflowRunId, item.item_ref);
     },
     onSuccess: async () => {
-      toast.success('Claim возвращён в публикацию');
+      toast.success('Знание возвращено в публикацию');
       await refreshWorkspace();
     },
     onError: (error: unknown) => {
-      toast.error(getErrorMessage(error, 'Не удалось вернуть claim'));
+      toast.error(getErrorMessage(error, 'Не удалось вернуть знание'));
     },
   });
 
@@ -280,13 +303,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
           <div className="font-semibold text-[var(--text-primary)]">
             Документ: {documentName}
           </div>
-          <div className="mt-1 break-all text-xs">
-            workflow_run_id: {workflowRunId}
-          </div>
-          {workspace && (
+	          {workspace && (
             <div className="mt-2 flex flex-wrap gap-2 text-xs">
               <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                workspace: {workspace.workspace.status}
+	                {workspaceStatus === 'published' ? 'опубликовано' : 'черновик проверки'}
               </span>
               {needsRepublish && (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-800">
@@ -309,12 +329,12 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
             disabled={publishDisabled}
             title={
               workspaceStatus === 'published'
-                ? 'Workspace уже опубликован'
+	                ? 'Проверка уже опубликована'
                 : publishableCount <= 0
                   ? 'Нет знаний для публикации'
                   : needsRepublish
-                    ? 'Переопубликовать изменённые curated claims'
-                    : 'Опубликовать curated compacted claims в runtime retrieval'
+	                    ? 'Переопубликовать изменённые знания'
+	                    : 'Опубликовать знания'
             }
             onClick={() => publishMutation.mutate()}
             className="mt-3 rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-medium text-white disabled:bg-[var(--control-bg)] disabled:text-[var(--text-muted)] disabled:opacity-60"
@@ -326,19 +346,19 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
         {workspaceQuery.isLoading && (
           <div className="flex items-center gap-2 rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Открываем workspace курации…
+	            Открываем проверку знаний…
           </div>
         )}
 
         {workspaceQuery.error && (
           <div className="rounded-xl border border-[var(--accent-danger)]/30 bg-[var(--accent-danger-bg)] p-4 text-sm text-[var(--accent-danger-text)]">
-            {getErrorMessage(workspaceQuery.error, 'Не удалось открыть workspace курации')}
+	            {getErrorMessage(workspaceQuery.error, 'Не удалось открыть проверку знаний')}
           </div>
         )}
 
         {workspace && itemCount === 0 && (
           <div className="rounded-xl bg-[var(--surface-secondary)] p-4 text-sm text-[var(--text-muted)]">
-            В workspace пока нет compacted claims.
+	            Пока нет знаний для проверки.
           </div>
         )}
 
@@ -348,7 +368,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Найти claim…"
+	                placeholder="Найти знание…"
                 className="w-full rounded-xl bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
               />
               <div className="max-h-[60vh] space-y-2 overflow-y-auto pr-1">
@@ -370,12 +390,12 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                       {shortClaim(item)}
                     </div>
                     <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[var(--text-muted)]">
-                      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                        {item.editable_payload.claim_kind}
-                      </span>
-                      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
-                        {item.editable_payload.granularity}
-                      </span>
+	                      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+	                        {humanText(item.editable_payload.claim_kind)}
+	                      </span>
+	                      <span className="rounded-full bg-[var(--control-bg)] px-2 py-0.5">
+	                        {humanText(item.editable_payload.granularity)}
+	                      </span>
                       {item.excluded && (
                         <span className="rounded-full bg-[var(--accent-danger-bg)] px-2 py-0.5 text-[var(--accent-danger-text)]">
                           исключён
@@ -392,11 +412,8 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <div className="text-sm font-semibold text-[var(--text-primary)]">
-                      Редактирование compacted claim
-                    </div>
-                    <div className="mt-1 break-all text-xs text-[var(--text-muted)]">
-                      {selectedItem.item_ref}
-                    </div>
+	                      Редактирование знания
+	                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -435,7 +452,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     <input
                       value={excludeReason}
                       onChange={(event) => setExcludeReason(event.target.value)}
-                      placeholder="например: дубль, слишком общий claim, неверная область"
+	                    placeholder="например: дубль, слишком общее знание, неверная область"
                       className="mt-1 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
                     />
                   </label>
@@ -443,7 +460,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
 
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <label className="block text-xs text-[var(--text-muted)]">
-                    key
+	                    Название
                     <input
                       value={draft.key}
                       onChange={(event) =>
@@ -455,7 +472,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     />
                   </label>
                   <label className="block text-xs text-[var(--text-muted)]">
-                    claim_kind
+	                    Тип
                     <input
                       value={draft.claimKind}
                       onChange={(event) =>
@@ -469,7 +486,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     />
                   </label>
                   <label className="block text-xs text-[var(--text-muted)]">
-                    granularity
+	                    Детализация
                     <input
                       value={draft.granularity}
                       onChange={(event) =>
@@ -483,7 +500,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     />
                   </label>
                   <label className="block text-xs text-[var(--text-muted)]">
-                    exclusion_scope
+	                    Когда не использовать
                     <input
                       value={draft.exclusionScope}
                       onChange={(event) =>
@@ -499,7 +516,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                 </div>
 
                 <label className="block text-xs text-[var(--text-muted)]">
-                  claim
+	                  Текст знания
                   <textarea
                     value={draft.claim}
                     onChange={(event) =>
@@ -513,7 +530,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                 </label>
 
                 <label className="block text-xs text-[var(--text-muted)]">
-                  possible_questions — по одному вопросу на строку
+	                  Возможные вопросы — по одному на строку
                   <textarea
                     value={draft.possibleQuestionsText}
                     onChange={(event) =>
@@ -529,7 +546,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                 </label>
 
                 <label className="block text-xs text-[var(--text-muted)]">
-                  evidence_block
+	                  Подтверждение из документа
                   <textarea
                     value={draft.evidenceBlock}
                     onChange={(event) =>
@@ -544,37 +561,12 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                   />
                 </label>
 
-                <label className="block text-xs text-[var(--text-muted)]">
-                  triples JSON
-                  <textarea
-                    value={draft.triplesText}
-                    onChange={(event) =>
-                      setDraft((current) =>
-                        current
-                          ? { ...current, triplesText: event.target.value }
-                          : current,
-                      )
-                    }
-                    rows={7}
-                    className="mt-1 w-full resize-y rounded-lg bg-[var(--control-bg)] px-3 py-2 font-mono text-xs text-[var(--text-primary)]"
-                  />
-                </label>
-
-                <details className="rounded-xl bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]">
-                  <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
-                    Машинные поля и provenance
-                  </summary>
-                  <div className="mt-3 space-y-3">
-                    <div className="break-all">
-                      <div>merge_decision: {selectedItem.editable_payload.merge_decision}</div>
-                      <div>group_ref: {selectedItem.group_ref}</div>
-                      <div>compacted_node_ref: {selectedItem.compacted_node_ref}</div>
-                      <div>
-                        source_claim_refs: {selectedItem.source_claim_refs.join(', ')}
-                      </div>
-                    </div>
-
-                    <div>
+	                <details className="rounded-xl bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]">
+	                  <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
+	                    Откуда взялось это знание
+	                  </summary>
+	                  <div className="mt-3 space-y-3">
+	                    <div>
                       <div className="font-semibold text-[var(--text-primary)]">
                         Исходные утверждения
                       </div>
@@ -600,7 +592,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
 
                     <div>
                       <div className="font-semibold text-[var(--text-primary)]">
-                        Source units
+	                        Фрагменты документа
                       </div>
                       <div className="mt-2 space-y-2">
                         {(selectedItem.provenance?.source_units ?? []).map(
@@ -609,10 +601,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                               key={`${recordText(sourceUnit, 'source_unit_ref') ?? index}`}
                               className="rounded-lg bg-[var(--control-bg)] p-2"
                             >
-                              <div className="break-all font-medium text-[var(--text-primary)]">
-                                {recordText(sourceUnit, 'source_unit_ref') ?? 'source unit'}
-                              </div>
-                              <div className="mt-1 text-[var(--text-muted)]">
+	                              <div className="mt-1 text-[var(--text-muted)]">
                                 {recordText(sourceUnit, 'source_unit_text') ?? '—'}
                               </div>
                             </div>

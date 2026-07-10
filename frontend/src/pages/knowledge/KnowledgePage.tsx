@@ -54,6 +54,21 @@ type DraftClaimCurationTarget = {
   documentName: string;
 };
 
+export const shouldAutoOpenCurationOnTransition = ({
+  wasReviewReady,
+  isReviewReady,
+  alreadyOpened,
+  alreadyPublished,
+}: {
+  wasReviewReady: boolean | undefined;
+  isReviewReady: boolean;
+  alreadyOpened: boolean;
+  alreadyPublished: boolean;
+}): boolean =>
+  wasReviewReady === false &&
+  isReviewReady &&
+  !alreadyOpened &&
+  !alreadyPublished;
 
 interface Document {
   id: string;
@@ -433,6 +448,7 @@ export const KnowledgePage: React.FC = () => {
     Record<string, string | null>
   >({});
   const autoOpenedCurationWorkflowsRef = useRef<Set<string>>(new Set());
+  const reviewReadyByWorkflowRef = useRef<Map<string, boolean>>(new Map());
 
   useEffect(() => {
     if (!projectId || curationTarget) return;
@@ -447,7 +463,7 @@ export const KnowledgePage: React.FC = () => {
         doc.current_processing_run_id ??
         null;
 
-      if (!workflowRunId || autoOpenedCurationWorkflowsRef.current.has(workflowRunId)) {
+      if (!workflowRunId) {
         continue;
       }
 
@@ -465,7 +481,17 @@ export const KnowledgePage: React.FC = () => {
         workflow?.workflow_status === "published" ||
         projectionState?.document_status === "published";
 
-      if (!reviewGateOpen || alreadyPublished) {
+      const wasReviewReady = reviewReadyByWorkflowRef.current.get(workflowRunId);
+      reviewReadyByWorkflowRef.current.set(workflowRunId, reviewGateOpen);
+
+      if (
+        !shouldAutoOpenCurationOnTransition({
+          wasReviewReady,
+          isReviewReady: reviewGateOpen,
+          alreadyOpened: autoOpenedCurationWorkflowsRef.current.has(workflowRunId),
+          alreadyPublished,
+        })
+      ) {
         continue;
       }
 

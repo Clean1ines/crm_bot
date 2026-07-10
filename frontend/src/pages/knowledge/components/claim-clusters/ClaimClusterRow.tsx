@@ -58,10 +58,13 @@ const batchAttempts = (
 const batchTitle = (
   batch: WorkbenchClaimClusterBatchLiveState,
   batchIndex: number,
-): string =>
-  batch.prompt_variant?.trim() ||
-  batch.batch_ref?.trim() ||
-  `Batch ${formatClaimBuilderNumber(batchIndex + 1)}`;
+): string => {
+  const variant = normalize(batch.prompt_variant);
+  if (variant === 'single_draft_claim_enrichment') return 'Уточнение одного факта';
+  if (variant === 'mixed_claim_compaction') return 'Объединение связанных фактов';
+  if (variant === 'reduced_claim_rewrite') return 'Переформулировка факта';
+  return `Задача ${formatClaimBuilderNumber(batchIndex + 1)}`;
+};
 
 const ClaimClusterBatchRow = ({
   batch,
@@ -83,7 +86,7 @@ const ClaimClusterBatchRow = ({
         <span className="flex min-w-0 flex-wrap items-center justify-between gap-2">
           <span className="min-w-0">
             <span className="font-medium text-[var(--text-primary)]">
-              Batch {formatClaimBuilderNumber(batchIndex + 1)}
+              Задача {formatClaimBuilderNumber(batchIndex + 1)}
             </span>
             <span className="ml-2 text-[var(--text-muted)]">
               {batchTitle(batch, batchIndex)}
@@ -118,7 +121,7 @@ const ClaimClusterBatchRow = ({
             ))
           ) : (
             <div className="rounded border border-dashed border-[var(--border-subtle)] px-2 py-1.5 text-xs text-[var(--text-muted)]">
-              Попытки обработки этого batch ещё не начались.
+	              Попытки обработки этой задачи ещё не начались.
             </div>
           )}
         </div>
@@ -175,7 +178,7 @@ export const ClaimClusterRow: React.FC<ClaimClusterRowProps> = ({
 
       <div className="mt-2 space-y-2">
         <div className="grid gap-2 text-xs text-[var(--text-muted)] [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]">
-          <div>batch: {formatNumber(batches.length)}</div>
+	          <div>задач: {formatNumber(batches.length)}</div>
           <div>готово: {formatNumber(cluster.completed_work_item_count ?? 0)}</div>
           <div>в работе: {formatNumber(cluster.leased_work_item_count ?? 0)}</div>
           <div>ожидает: {formatNumber(cluster.ready_work_item_count ?? 0)}</div>
@@ -209,7 +212,7 @@ export const ClaimClusterRow: React.FC<ClaimClusterRowProps> = ({
             ))
           ) : (
             <div className="rounded border border-dashed border-[var(--border-subtle)] px-2 py-1.5 text-xs text-[var(--text-muted)]">
-              Batch work items для этого кластера ещё не появились.
+	              Задачи обработки для этой группы ещё не появились.
             </div>
           )}
         </div>

@@ -50,9 +50,10 @@ export const WorkflowActionsPanel: React.FC<WorkflowActionsPanelProps> = ({
 }) => {
   const visibleActions = visibleWorkflowActions(actions).filter(
     (action) =>
-      normalize(action.action_id) !== 'pause_processing' &&
-      normalize(action.action_id) !== 'resume_processing',
-  );
+	      normalize(action.action_id) !== 'pause_processing' &&
+	      normalize(action.action_id) !== 'resume_processing' &&
+	      normalize(action.action_id) !== 'open_curation',
+	  );
 
   if (visibleActions.length === 0) return null;
 

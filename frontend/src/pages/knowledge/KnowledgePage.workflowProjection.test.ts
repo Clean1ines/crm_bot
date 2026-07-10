@@ -11,6 +11,7 @@ import {
   startWorkflowProjectionEventStream,
   type WorkflowProjectionTarget,
 } from "./workflowProjectionHydration";
+import { shouldAutoOpenCurationOnTransition } from "./KnowledgePage";
 
 const target: WorkflowProjectionTarget = {
   documentId: "source-document:project-1:doc-1",
@@ -54,6 +55,33 @@ const page = (
 });
 
 describe("KnowledgePage workflow projection hydration", () => {
+  it("auto-opens curation only on an in-session transition to review-ready", () => {
+    expect(
+      shouldAutoOpenCurationOnTransition({
+        wasReviewReady: undefined,
+        isReviewReady: true,
+        alreadyOpened: false,
+        alreadyPublished: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoOpenCurationOnTransition({
+        wasReviewReady: false,
+        isReviewReady: true,
+        alreadyOpened: false,
+        alreadyPublished: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoOpenCurationOnTransition({
+        wasReviewReady: false,
+        isReviewReady: true,
+        alreadyOpened: true,
+        alreadyPublished: false,
+      }),
+    ).toBe(false);
+  });
+
   it("hydrates from getFrontendWorkflowEvents and never calls a snapshot fetch", async () => {
     const getFrontendWorkflowEvents = vi
       .fn()

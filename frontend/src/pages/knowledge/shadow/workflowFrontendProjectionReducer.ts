@@ -204,21 +204,17 @@ const freezeWorkflowTimer = (
   mode: string,
 ): void => {
   const timer = response.workflow.timer;
-  const startedAt =
-    timer.started_at ??
-    timer.current_active_started_at ??
-    occurredAt;
+  const activeStartedAt = timer.current_active_started_at ?? occurredAt;
 
   const elapsedSeconds = Math.max(
     timer.active_elapsed_seconds ?? 0,
-    secondsBetweenIso(startedAt, occurredAt),
+    (timer.active_elapsed_seconds ?? 0) + secondsBetweenIso(activeStartedAt, occurredAt),
   );
 
   timer.mode = mode;
   timer.active_elapsed_seconds = elapsedSeconds;
   timer.wall_elapsed_seconds = Math.max(
     timer.wall_elapsed_seconds ?? 0,
-    secondsBetweenIso(timer.started_at ?? startedAt, occurredAt),
     elapsedSeconds,
   );
   timer.current_active_started_at = null;

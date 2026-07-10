@@ -8,7 +8,6 @@ import {
 } from './workflow-card/workflowCardLabels';
 import { ClaimBuilderPanel } from './claim-builder/ClaimBuilderPanel';
 import { selectClaimBuilderSectionRows } from './claim-builder/claimBuilderSelectors';
-import { SourceIngestionProgressPanel } from './source-ingestion/SourceIngestionProgressPanel';
 import { selectSourceIngestionProgress } from './source-ingestion/sourceIngestionSelectors';
 import { WorkflowStagesPanel } from './workflow-stages/WorkflowStagesPanel';
 import { selectWorkflowStageRows } from './workflow-stages/workflowStagesSelectors';
@@ -16,11 +15,9 @@ import { WorkflowTimerCard } from './workflow-timer/WorkflowTimerCard';
 import type { WorkflowTimerInput } from './workflow-timer/workflowTimerTypes';
 import { ClaimClustersPanel } from './claim-clusters/ClaimClustersPanel';
 import { selectClaimClustersView } from './claim-clusters/claimClusterSelectors';
-import { CurationNotice } from './document-card/CurationNotice';
 import { DocumentCardHeader } from './document-card/DocumentCardHeader';
 import { DocumentOverviewPanel } from './document-card/DocumentOverviewPanel';
 import { LlmUsageCard } from './document-card/LlmUsageCard';
-import { ResultSummaryCard } from './document-card/ResultSummaryCard';
 import { WorkflowActionsPanel } from './document-card/WorkflowActionsPanel';
 import {
   type KnowledgeSourceUnitsResponse,
@@ -174,7 +171,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     stages.find((stage) => stage.id === 'draft_claim_clustering') ?? null;
   const compactionStage =
     stages.find((stage) => stage.id === 'draft_claim_compaction') ?? null;
-  const previewStage = stages.find((stage) => stage.id === 'cluster_preview') ?? null;
   const startedStageIds = useMemo(() => {
     const ids: string[] = [];
     const hasStageProgress = (
@@ -250,12 +246,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     workflowStageHasStarted(embeddingStage) ||
     workflowStageHasStarted(clusterStage) ||
     workflowStageHasStarted(compactionStage);
-  const resultSummaryVisible =
-    workflowStageHasStarted(previewStage) ||
-    workflow?.curation.available ||
-    clustersView.hasClusters ||
-    clustersView.hasComparisons ||
-    clustersView.finalFacts.length > 0;
 
   const fileSizeText = doc.file_size > 0 ? formatSize(doc.file_size) : 'размер недоступен';
   const attemptPromptTokens = attempts.reduce(
@@ -300,32 +290,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const phaseText = workflow
     ? phaseLabel(currentPhase)
     : 'после загрузки здесь будет показан текущий этап';
-
-  const resultSummaryText = workflow
-    ? clustersView.hasClusters || clustersView.hasComparisons
-      ? `Черновики утверждений: ${formatNumber(
-          clustersView.hasClusters ? clustersView.clusteredClaimCount : claimStage?.current ?? 0,
-        )} · Векторы: ${formatNumber(
-          clustersView.hasClusters ? clustersView.embeddedClaimCount : embeddingStage?.current ?? 0,
-        )} · Группы: ${formatNumber(
-          clustersView.hasClusters ? clustersView.clusters.length : clusterStage?.current ?? 0,
-        )} · Сравнения: ${formatNumber(
-          clustersView.hasComparisons
-            ? clustersView.resolvedComparisonCount
-            : compactionStage?.current ?? 0,
-        )} / ${formatNumber(
-          clustersView.hasComparisons
-            ? clustersView.comparisons.length
-            : compactionStage?.total ?? 0,
-        )}`
-      : `Черновики утверждений: ${formatNumber(claimStage?.current ?? 0)} · Векторы: ${formatNumber(
-          embeddingStage?.current ?? 0,
-        )} · Группы: ${formatNumber(clusterStage?.current ?? 0)} · Объединённые знания: ${formatNumber(
-          compactionStage?.current ?? 0,
-        )} · Предпросмотр: ${
-          (previewStage?.current ?? 0) > 0 ? 'готов' : 'ещё не готов'
-        }`
-    : 'Нет данных обработки';
 
   const timerTimestampMs = (value: string | null | undefined): number | null => {
     if (!value) return null;
@@ -477,14 +441,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 
           <LlmUsageCard visible={llmUsageVisible} usageText={llmUsageText} />
 
-          <SourceIngestionProgressPanel
-            progress={sourceIngestionProgress}
-            formatNumber={formatNumber}
-          />
-
-          {summary}
-
-          <ResultSummaryCard visible={resultSummaryVisible} summaryText={resultSummaryText} />
               </div>
 
               {workflow && (
@@ -509,12 +465,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
               )}
 
 
-              <WorkflowActionsPanel actions={actions} onAction={handleLiveAction} />
-
-              <CurationNotice
-                available={workflow.curation.available}
-                workflowRunId={workflow.curation.workflow_run_id}
-              />
+	              <WorkflowActionsPanel actions={actions} onAction={handleLiveAction} />
             </div>
                 </details>
               )}
