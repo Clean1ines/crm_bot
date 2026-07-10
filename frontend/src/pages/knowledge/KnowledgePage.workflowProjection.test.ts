@@ -11,7 +11,7 @@ import {
   startWorkflowProjectionEventStream,
   type WorkflowProjectionTarget,
 } from "./workflowProjectionHydration";
-import { shouldAutoOpenCurationOnTransition } from "./KnowledgePage";
+import { isCurationReadyLiveEvent } from "./KnowledgePage";
 
 const target: WorkflowProjectionTarget = {
   documentId: "source-document:project-1:doc-1",
@@ -55,30 +55,23 @@ const page = (
 });
 
 describe("KnowledgePage workflow projection hydration", () => {
-  it("auto-opens curation only on an in-session transition to review-ready", () => {
+  it("recognizes only the exact live transition that makes curation ready", () => {
     expect(
-      shouldAutoOpenCurationOnTransition({
-        wasReviewReady: undefined,
-        isReviewReady: true,
-        alreadyOpened: false,
-        alreadyPublished: false,
-      }),
-    ).toBe(false);
-    expect(
-      shouldAutoOpenCurationOnTransition({
-        wasReviewReady: false,
-        isReviewReady: true,
-        alreadyOpened: false,
-        alreadyPublished: false,
-      }),
+      isCurationReadyLiveEvent(
+        event("workflow_draft_claim_compaction_all_groups_compacted", 1),
+      ),
     ).toBe(true);
+
     expect(
-      shouldAutoOpenCurationOnTransition({
-        wasReviewReady: false,
-        isReviewReady: true,
-        alreadyOpened: true,
-        alreadyPublished: false,
-      }),
+      isCurationReadyLiveEvent(
+        event("workflow_draft_claim_compaction_attempt_completed", 2),
+      ),
+    ).toBe(false);
+
+    expect(
+      isCurationReadyLiveEvent(
+        event("workflow_draft_claim_curation_workspace_opened", 3),
+      ),
     ).toBe(false);
   });
 

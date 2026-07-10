@@ -203,7 +203,9 @@ def test_capacity_owned_minute_limit_retryable_failed_is_projected() -> None:
     )
 
     assert projected is not None
-    assert projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    assert (
+        projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    )
     assert projected.payload["dispatch_attempt_id"] == "work-1:attempt:1"
     assert projected.payload["work_item_state"] == "retryable_failed"
     assert projected.payload["dispatch_attempt_state"] == "retryable_failed"
@@ -230,7 +232,9 @@ def test_capacity_owned_daily_reset_retryable_failed_is_projected() -> None:
     )
 
     assert projected is not None
-    assert projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    assert (
+        projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    )
     assert projected.payload["dispatch_attempt_id"] == "work-1:attempt:1"
     assert projected.payload["work_item_state"] == "retryable_failed"
     assert projected.payload["dispatch_attempt_state"] == "retryable_failed"
@@ -349,7 +353,9 @@ def test_capacity_wait_projects_item_outcome_without_capacity_timer_fields() -> 
     )
 
     assert projected is not None
-    assert projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    assert (
+        projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    )
     assert projected.payload["dispatch_attempt_id"] == "work-1:attempt:1"
     assert projected.payload["work_item_state"] == "retryable_failed"
     for forbidden_key in (

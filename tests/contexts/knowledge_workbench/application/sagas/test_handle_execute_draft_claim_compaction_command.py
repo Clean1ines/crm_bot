@@ -577,16 +577,13 @@ async def test_projects_compaction_attempt_outcome_to_frontend_events() -> None:
         frontend_event_projection_writer=projection_writer,
     )
 
-    projection_types = {
-        event.projection_type for event in repository.events.values()
-    }
+    projection_types = {event.projection_type for event in repository.events.values()}
     assert "workflow_capacity_window_observed" in projection_types
     assert "workflow_draft_claim_compaction_attempt_completed" in projection_types
     outcome_projection = next(
         event
         for event in repository.events.values()
-        if event.projection_type
-        == "workflow_draft_claim_compaction_attempt_completed"
+        if event.projection_type == "workflow_draft_claim_compaction_attempt_completed"
     )
     assert outcome_projection.payload["dispatch_attempt_id"] == "attempt-1"
     assert outcome_projection.payload["work_item_id"] == "work-item-1"
