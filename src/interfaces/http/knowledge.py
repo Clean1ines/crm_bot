@@ -209,6 +209,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_
     WorkbenchRagEvalDegradedFallbackRequiredError,
     WorkbenchRagEvalQuestionGenerationError,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.run_workbench_rag_eval import (
+    WorkbenchRagEvalNoPublishedEntriesError,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
     WorkbenchRagEvalPromotionConflictError,
     WorkbenchRagEvalPromotionEmbeddingError,
@@ -2321,6 +2324,8 @@ async def run_workbench_rag_eval(
         ) from exc
     except WorkbenchRagEvalQuestionGenerationError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except WorkbenchRagEvalNoPublishedEntriesError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

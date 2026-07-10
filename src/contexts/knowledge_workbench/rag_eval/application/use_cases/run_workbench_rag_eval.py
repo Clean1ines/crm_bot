@@ -32,6 +32,10 @@ from src.contexts.knowledge_workbench.retrieval.application.use_cases.search_pub
 )
 
 
+class WorkbenchRagEvalNoPublishedEntriesError(LookupError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class RunWorkbenchRagEval:
     rag_eval_repository: WorkbenchRagEvalRepositoryPort
@@ -86,14 +90,20 @@ class RunWorkbenchRagEval:
             completed_at=None,
             error_message=None,
         )
-        await self.rag_eval_repository.create_run(run=run)
-
         entries = await self.rag_eval_repository.list_published_entries_for_eval(
             project_id=project_id,
             publication_id=publication_id,
             source_document_ref=source_document_ref,
             limit=max_entries,
         )
+        if not entries:
+            raise WorkbenchRagEvalNoPublishedEntriesError(
+                "В выбранном документе нет активных опубликованных фактов для проверки."
+                if source_document_ref
+                else "В опубликованной базе знаний нет активных фактов для проверки."
+            )
+
+        await self.rag_eval_repository.create_run(run=run)
 
         generated_entries = (
             await self.question_generation_batch_executor.generate_for_entries(

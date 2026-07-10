@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useParams } from 'react-router-dom';
 import { getErrorMessage } from '@shared/api/core/errors';
+import { knowledgeApi } from '@shared/api/modules/knowledge';
 import {
   ragEvalApi,
   type RunWorkbenchRagEvalRequest,
@@ -50,9 +51,29 @@ const isApplyableCandidate = (candidate: WorkbenchRagEvalPromotionCandidateDetai
   candidate.status === 'candidate' || candidate.status === 'accepted'
 );
 
-const optionalTrimmed = (value: string): string | null => {
-  const trimmed = value.trim();
-  return trimmed ? trimmed : null;
+type RagEvalDocumentOption = {
+  sourceDocumentRef: string;
+  fileName: string;
+};
+
+const toDocumentOption = (
+  raw: Record<string, unknown>,
+): RagEvalDocumentOption | null => {
+  const sourceDocumentRef =
+    typeof raw.document_id === 'string'
+      ? raw.document_id
+      : typeof raw.id === 'string'
+        ? raw.id
+        : null;
+  const fileName =
+    typeof raw.file_name === 'string'
+      ? raw.file_name
+      : typeof raw.filename === 'string'
+        ? raw.filename
+        : null;
+
+  if (!sourceDocumentRef || !fileName) return null;
+  return { sourceDocumentRef, fileName };
 };
 
 const shortId = (value: string): string => (value.length > 14 ? `${value.slice(0, 14)}…` : value);
@@ -559,12 +580,27 @@ export const RagEvalPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
   const queryClient = useQueryClient();
 
-  const [publicationId, setPublicationId] = useState('');
-  const [sourceDocumentRef, setSourceDocumentRef] = useState('');
+  const [selectedSourceDocumentRef, setSelectedSourceDocumentRef] = useState('');
   const [topK, setTopK] = useState(5);
   const [maxEntries, setMaxEntries] = useState(20);
   const [lastRun, setLastRun] = useState<WorkbenchRagEvalRunSummary | null>(null);
   const [selectedPromotionIds, setSelectedPromotionIds] = useState<string[]>([]);
+
+  const documentsQuery = useQuery({
+    queryKey: ['workbench-rag-eval-documents', projectId],
+    queryFn: async (): Promise<RagEvalDocumentOption[]> => {
+      if (!projectId) return [];
+      const response = await knowledgeApi.list(projectId);
+      const rows = response.documents ?? response.items ?? [];
+
+      return rows
+        .map(toDocumentOption)
+        .filter((item): item is RagEvalDocumentOption => item !== null)
+        .sort((left, right) => left.fileName.localeCompare(right.fileName));
+    },
+    enabled: Boolean(projectId),
+    retry: false,
+  });
 
   const latestQuery = useQuery({
     queryKey: ['workbench-rag-eval-latest', projectId],
@@ -655,8 +691,8 @@ export const RagEvalPage: React.FC = () => {
       if (validationError) throw new Error(validationError);
 
       const payload: RunWorkbenchRagEvalRequest = {
-        publication_id: optionalTrimmed(publicationId),
-        source_document_ref: optionalTrimmed(sourceDocumentRef),
+        publication_id: null,
+        source_document_ref: selectedSourceDocumentRef || null,
         top_k: topK,
         max_entries: maxEntries,
       };
@@ -750,33 +786,36 @@ export const RagEvalPage: React.FC = () => {
             Дополнительные настройки
           </summary>
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <label className="block">
+            <label className="block lg:col-span-2">
               <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
-                publication_id
+                Что проверять
               </span>
-              <input
-                value={publicationId}
-                onChange={(event) => setPublicationId(event.target.value)}
-                placeholder="draft-claim-curation-publication:..."
-                className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-              />
+              <select
+                value={selectedSourceDocumentRef}
+                onChange={(event) => setSelectedSourceDocumentRef(event.target.value)}
+                disabled={documentsQuery.isLoading}
+                className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none disabled:opacity-60"
+              >
+                <option value="">Вся опубликованная база знаний</option>
+                {(documentsQuery.data ?? []).map((document) => (
+                  <option
+                    key={document.sourceDocumentRef}
+                    value={document.sourceDocumentRef}
+                  >
+                    {document.fileName}
+                  </option>
+                ))}
+              </select>
+              {documentsQuery.error && (
+                <div className="mt-2 text-xs text-red-500">
+                  Не удалось загрузить список документов.
+                </div>
+              )}
             </label>
 
             <label className="block">
               <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
-                source_document_ref
-              </span>
-              <input
-                value={sourceDocumentRef}
-                onChange={(event) => setSourceDocumentRef(event.target.value)}
-                placeholder="source-document:..."
-                className="w-full rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none"
-              />
-            </label>
-
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
-                top_k
+                Количество результатов поиска
               </span>
               <input
                 type="number"
@@ -789,7 +828,7 @@ export const RagEvalPage: React.FC = () => {
 
             <label className="block">
               <span className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
-                max_entries
+                Максимум проверяемых фактов
               </span>
               <input
                 type="number"

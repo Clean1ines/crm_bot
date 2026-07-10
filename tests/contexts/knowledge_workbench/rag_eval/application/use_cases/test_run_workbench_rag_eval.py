@@ -24,6 +24,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.use_cases.generate_wo
 )
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.run_workbench_rag_eval import (
     RunWorkbenchRagEval,
+    WorkbenchRagEvalNoPublishedEntriesError,
 )
 from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
     PublishedWorkbenchRetrievalResult,
@@ -65,6 +66,8 @@ def _entry(
 @dataclass(slots=True)
 class FakeRepository:
     entries: tuple[PublishedWorkbenchRetrievalResult, ...]
+    expected_publication_id: str | None = "publication-1"
+    expected_source_document_ref: str | None = None
     runs: list[WorkbenchRagEvalRun] = field(default_factory=list)
     questions: tuple[WorkbenchRagEvalQuestion, ...] = ()
     results: tuple[WorkbenchRagEvalRetrievalResult, ...] = ()
@@ -84,8 +87,8 @@ class FakeRepository:
         limit: int,
     ) -> tuple[PublishedWorkbenchRetrievalResult, ...]:
         assert project_id == "project-1"
-        assert publication_id == "publication-1"
-        assert source_document_ref is None
+        assert publication_id == self.expected_publication_id
+        assert source_document_ref == self.expected_source_document_ref
         return self.entries[:limit]
 
     async def save_generated_questions(
@@ -243,6 +246,43 @@ async def test_run_includes_baseline_generated_dedupes_and_metrics() -> None:
     assert generated_questions[0].generation_model == "qwen/qwen3-32b"
     assert generated_questions[0].generation_account_ref == "groq_org_primary"
     assert generated_questions[0].generation_slot_index == 0
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_selected_document_without_published_entries() -> None:
+    repository = FakeRepository(
+        entries=(),
+        expected_publication_id=None,
+        expected_source_document_ref="source-document-1",
+    )
+
+    with pytest.raises(
+        WorkbenchRagEvalNoPublishedEntriesError,
+        match="выбранном документе",
+    ):
+        await RunWorkbenchRagEval(
+            rag_eval_repository=repository,
+            question_generation_batch_executor=WorkbenchRagEvalQuestionGenerationBatchExecutor(
+                question_generator=FakeQuestionGenerator(),
+                route_policy=WorkbenchRagEvalQuestionGenerationRoutePolicy.default(),
+                max_parallel_jobs=4,
+            ),
+            search_published_workbench_runtime=FakeSearchPublishedWorkbenchRuntime(),
+            question_generation_prompt_version="test-v1",
+        ).execute(
+            project_id="project-1",
+            publication_id=None,
+            source_document_ref="source-document-1",
+            top_k=5,
+            max_entries=20,
+            now=_now(),
+        )
+
+    assert repository.runs == []
+    assert repository.summary is None
+    assert repository.questions == ()
+    assert repository.results == ()
+    assert repository.promotions == ()
 
 
 @pytest.mark.asyncio

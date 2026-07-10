@@ -316,7 +316,7 @@ export const KnowledgePage: React.FC = () => {
   const [deleteDocumentId, setDeleteDocumentId] = useState<string | null>(null);
   const [curationTarget, setDraftClaimCurationTarget] =
     useState<DraftClaimCurationTarget | null>(null);
-  const [isDebugMode, setIsDebugMode] = useState(false);
+  const isDebugMode = false;
   const [activeKnowledgeTab, setActiveKnowledgeTab] = useState<
     "documents" | "ai_playground"
   >("documents");
@@ -1045,17 +1045,19 @@ export const KnowledgePage: React.FC = () => {
         </div>
         <div className="flex w-full flex-col gap-3 sm:flex-row lg:w-auto">
           <div ref={searchBoxRef} className="relative">
-            <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
-              <Search className="h-4 w-4 text-[var(--text-muted)]" />
+            <div className="relative">
+              <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+                <Search className="h-4 w-4 text-[var(--text-muted)]" />
+              </div>
+              <input
+                type="text"
+                placeholder={t("knowledge.search.placeholder")}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onFocus={() => setIsSearchFocused(true)}
+                className="min-h-10 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
+              />
             </div>
-            <input
-              type="text"
-              placeholder={t("knowledge.search.placeholder")}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onFocus={() => setIsSearchFocused(true)}
-              className="min-h-10 w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--control-bg)] py-2 pl-10 pr-4 text-sm text-[var(--text-primary)] shadow-[var(--shadow-sm)] transition-all placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25 lg:w-64"
-            />
             {isSearchFocused && searchSuggestions.length > 0 && (
               <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] p-1 shadow-[var(--shadow-heavy)] lg:w-64">
                 {searchSuggestions.map((doc) => (
@@ -1080,17 +1082,6 @@ export const KnowledgePage: React.FC = () => {
               </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => setIsDebugMode((current) => !current)}
-            aria-pressed={isDebugMode}
-            title={t("knowledge.debugMode.toggleTitle")}
-            className="inline-flex min-h-10 items-center justify-center rounded-lg bg-[var(--surface-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-muted)] shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--control-bg)]"
-          >
-            {isDebugMode
-              ? t("knowledge.debugMode.on")
-              : t("knowledge.debugMode.off")}
-          </button>
           <button
             type="button"
             onClick={() => setIsClearModalOpen(true)}
