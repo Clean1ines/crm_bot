@@ -24,6 +24,7 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
 from starlette.responses import StreamingResponse
@@ -204,10 +205,6 @@ from src.contexts.knowledge_workbench.curation.application.use_cases.publish_dra
 )
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
-)
-from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_question_generation_errors import (
-    WorkbenchRagEvalDegradedFallbackRequiredError,
-    WorkbenchRagEvalQuestionGenerationError,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.run_workbench_rag_eval import (
     WorkbenchRagEvalNoPublishedEntriesError,
@@ -2266,12 +2263,12 @@ async def _enqueue_draft_claim_curation_publication(
 @router.post("/rag-eval/workbench/run")
 async def run_workbench_rag_eval(
     project_id: str,
+    response: Response,
     payload: dict[str, object] = Body(default_factory=dict),
     authorization: str | None = Header(default=None),
     pool=Depends(get_pool),
     project_repo=Depends(get_project_repo),
     user_repo: UserRepository = Depends(get_user_repository),
-    llm_executor: LlmDispatchExecutorPort = Depends(get_llm_dispatch_executor),
 ):
     await _require_project_access(
         project_id=project_id,
@@ -2286,11 +2283,11 @@ async def run_workbench_rag_eval(
     if top_k is not None and top_k < 5:
         raise HTTPException(status_code=400, detail="top_k must be at least 5")
     max_entries = _payload_int(payload, "max_entries", default=20)
-    allow_degraded_llama_instant = _payload_bool(
-        payload,
-        "allow_degraded_llama_instant",
-        default=False,
-    )
+    if "allow_degraded_llama_instant" in payload:
+        raise HTTPException(
+            status_code=400,
+            detail="allow_degraded_llama_instant is not supported by RAG Eval V2",
+        )
     if max_entries < 1 or max_entries > 50:
         raise HTTPException(
             status_code=400, detail="max_entries must be between 1 and 50"
@@ -2298,37 +2295,24 @@ async def run_workbench_rag_eval(
 
     try:
         from src.interfaces.composition.workbench_rag_eval import (
-            make_run_workbench_rag_eval,
+            make_start_workbench_rag_eval_v2,
         )
 
-        summary = await make_run_workbench_rag_eval(
+        summary = await make_start_workbench_rag_eval_v2(
             pool=pool,
-            llm_dispatch_executor=llm_executor,
         ).execute(
             project_id=project_id,
             publication_id=publication_id,
             source_document_ref=source_document_ref,
-            top_k=top_k,
             max_entries=max_entries,
             now=datetime.now(timezone.utc),
-            allow_degraded_llama_instant=allow_degraded_llama_instant,
         )
-    except WorkbenchRagEvalDegradedFallbackRequiredError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "status": "requires_degraded_fallback_confirmation",
-                "message": str(exc),
-                "degraded_model": "llama-3.1-8b-instant",
-            },
-        ) from exc
-    except WorkbenchRagEvalQuestionGenerationError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except WorkbenchRagEvalNoPublishedEntriesError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    response.status_code = 202
     return {"run": summary.to_json_dict()}
 
 

@@ -34,20 +34,25 @@ def test_legacy_rag_eval_router_file_is_deleted() -> None:
     assert not Path("src/interfaces/http/rag_eval.py").exists()
 
 
-def test_workbench_rag_eval_question_generator_uses_llm_dispatch_boundary_only() -> (
-    None
-):
-    source = Path(
-        "src/contexts/knowledge_workbench/rag_eval/infrastructure/llm/"
-        "workbench_rag_eval_question_generator.py"
-    ).read_text(encoding="utf-8")
+def test_workbench_rag_eval_runtime_does_not_execute_llm_directly() -> None:
+    root = Path("src/contexts/knowledge_workbench/rag_eval")
+    sources = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.py"))
 
-    assert "LlmDispatchExecutorPort" in source
-    assert "execute_dispatch" in source
-    assert "GroqDispatchExecutor" not in source
-    assert "OpenAI" not in source
-    assert "openai" not in source
-    assert "answer_text" not in source
+    forbidden = (
+        "LlmDispatchExecutorPort",
+        "execute_dispatch",
+        "GroqDispatchExecutor",
+        "asyncio.Semaphore",
+        "asyncio.gather",
+    )
+    for marker in forbidden:
+        assert marker not in sources
+
+    execute_handler = Path(
+        "src/contexts/knowledge_workbench/rag_eval/application/workflows/"
+        "handle_execute_workbench_rag_eval_question_generation.py"
+    ).read_text(encoding="utf-8")
+    assert "ExecutePreparedLlmDispatchAttemptCommand" in execute_handler
 
 
 def test_workbench_rag_eval_apply_does_not_mutate_draft_or_legacy_tables() -> None:
@@ -77,7 +82,7 @@ def test_workbench_rag_eval_capacity_routing_is_outside_generator() -> None:
         "workbench_rag_eval_question_generation_route_policy.py"
     ).read_text(encoding="utf-8")
 
-    assert "route_candidate" in generator_source
+    assert "route_candidate" not in generator_source
     assert "openai/gpt-oss-120b" not in generator_source
     assert "llama-3.1-8b-instant" not in generator_source
     assert "GroqDispatchExecutor" not in generator_source

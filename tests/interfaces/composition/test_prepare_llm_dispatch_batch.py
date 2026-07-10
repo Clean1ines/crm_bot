@@ -37,6 +37,7 @@ from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     default_groq_llm_model_route_catalog,
 )
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
+    DispatchPreparationBuilderRegistry,
     PrepareLlmDispatchBatch,
     PrepareLlmDispatchBatchCommand,
     _capacity_from_latest_observation,
@@ -435,6 +436,7 @@ def _connection_with_due_items(
 
 def _command(
     *,
+    work_kind: WorkKind | None = None,
     profile: LlmTaskCapacityProfile | None = None,
     account_capacities: tuple[LlmProviderAccountCapacity, ...] = (_account(),),
     active_model_ref: str = "qwen/qwen3-32b",
@@ -446,7 +448,7 @@ def _command(
     use_local_active_model_tpm_budget: bool = False,
 ) -> PrepareLlmDispatchBatchCommand:
     return PrepareLlmDispatchBatchCommand(
-        work_kind=_work_kind(),
+        work_kind=work_kind or _work_kind(),
         profile=profile or _profile(),
         account_capacities=account_capacities,
         active_model_ref=active_model_ref,
@@ -471,6 +473,31 @@ def _runner(pool: FakePool) -> PrepareLlmDispatchBatch:
         ),
         route_catalog=default_groq_llm_model_route_catalog(),
     )
+
+
+@dataclass(slots=True)
+class RecordingDispatchPreparationBuilder:
+    profile: LlmTaskCapacityProfile
+    account_capacities: tuple[LlmProviderAccountCapacity, ...]
+    profile_due_work_item_counts: list[int] = field(default_factory=list)
+    account_model_refs: list[str] = field(default_factory=list)
+
+    def build_profile_from_due_work_items(
+        self,
+        due_work_items: tuple[object, ...],
+    ) -> LlmTaskCapacityProfile:
+        self.profile_due_work_item_counts.append(len(due_work_items))
+        return self.profile
+
+    def build_account_capacities(
+        self,
+        *,
+        active_model_ref: str,
+        provider_account_refs: tuple[str, ...],
+        model_profiles: tuple[object, ...],
+    ) -> tuple[LlmProviderAccountCapacity, ...]:
+        self.account_model_refs.append(active_model_ref)
+        return self.account_capacities
 
 
 def _status_priority(status: str) -> int:
@@ -506,6 +533,62 @@ async def test_commits_lease_and_attempt_start_in_one_transaction() -> None:
     assert len(connection.dispatches) == 1
     assert len(result.lease_result.leased) == 1
     assert len(result.attempt_result.started_attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_uses_work_kind_specific_dispatch_preparation_builder() -> None:
+    rag_eval_work_kind = WorkKind("workbench_rag_eval.question_generation")
+    connection = _connection_with_due_items(1)
+    connection.work_items["work-1"]["work_kind"] = rag_eval_work_kind.value
+    pool = FakePool(connection=connection)
+    rag_eval_builder = RecordingDispatchPreparationBuilder(
+        profile=LlmTaskCapacityProfile(
+            profile_id="rag-eval-qgen",
+            estimated_prompt_tokens=1200,
+            estimated_completion_tokens=800,
+            estimated_requests=1,
+        ),
+        account_capacities=(
+            _account(
+                account_ref="rag-eval-org-1",
+                minute_requests=1,
+                minute_tokens=5000,
+                daily_requests=10,
+                daily_tokens=5000,
+            ),
+        ),
+    )
+    runner = PrepareLlmDispatchBatch(
+        pool=pool,
+        capacity_policy=CapacityAdmissionPolicy(),
+        active_model_capacity_selector=SelectActiveLlmModelCapacity(
+            projector=ProjectLlmCapacityToCapacityRuntime(),
+        ),
+        route_catalog=default_groq_llm_model_route_catalog(),
+        dispatch_preparation_builder_registry=DispatchPreparationBuilderRegistry(
+            builders_by_work_kind={rag_eval_work_kind: rag_eval_builder},
+        ),
+    )
+
+    result = await runner.execute(
+        _command(
+            work_kind=rag_eval_work_kind,
+            account_capacities=(),
+            requested_items=1,
+        ),
+    )
+
+    assert len(result.attempt_result.started_attempts) == 1
+    assert rag_eval_builder.profile_due_work_item_counts == [1]
+    assert rag_eval_builder.account_model_refs == ["qwen/qwen3-32b"]
+    dispatch = next(iter(connection.dispatches.values()))
+    assert dispatch["llm_allocation_payload"]["account_ref"] == "rag-eval-org-1"
+    assert (
+        dispatch["dispatch_payload"]["schedule_payload"]["llm_capacity_estimate"][
+            "required_window_tokens"
+        ]
+        == _profile().required_window_tokens
+    )
 
 
 @pytest.mark.asyncio

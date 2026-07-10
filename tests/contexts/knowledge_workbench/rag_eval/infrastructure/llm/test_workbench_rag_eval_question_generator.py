@@ -1,126 +1,89 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from collections.abc import Mapping
 import json
+from pathlib import Path
 
 import pytest
 
-from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
-    LlmDispatchExecutionInput,
-    LlmDispatchExecutionResult,
-    LlmDispatchExecutionStatus,
-)
 from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_question_generation_errors import (
     WorkbenchRagEvalQuestionGenerationError,
-)
-from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_generation_route_policy import (
-    WorkbenchRagEvalQuestionGenerationRoutePolicy,
 )
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WorkbenchRagEvalQuestionGenerator,
 )
 
 
-@dataclass(slots=True)
-class FakeLlmDispatchExecutor:
-    raw_text: str
-    status: LlmDispatchExecutionStatus = LlmDispatchExecutionStatus.SUCCEEDED
-    last_input: LlmDispatchExecutionInput | None = None
-
-    async def execute_dispatch(
-        self,
-        execution_input: LlmDispatchExecutionInput,
-    ) -> LlmDispatchExecutionResult:
-        self.last_input = execution_input
-        if self.status is not LlmDispatchExecutionStatus.SUCCEEDED:
-            return LlmDispatchExecutionResult(
-                status=self.status,
-                finished_at=datetime.now(timezone.utc),
-                error_kind="test_error",
-            )
-        return LlmDispatchExecutionResult(
-            status=LlmDispatchExecutionStatus.SUCCEEDED,
-            finished_at=datetime.now(timezone.utc),
-            output_payload={"raw_text": self.raw_text},
-        )
-
-
-def _route(entry_index: int = 0):
-    return WorkbenchRagEvalQuestionGenerationRoutePolicy.default().candidate_chain(
-        entry_index=entry_index,
-        allow_degraded_llama_instant=False,
-    )[0]
-
-
-@pytest.mark.asyncio
-async def test_question_generator_uses_supplied_route_candidate_and_metadata() -> None:
-    executor = FakeLlmDispatchExecutor(
-        raw_text=json.dumps(
-            {
-                "questions": [
-                    {
-                        "question": "Как спросит пользователь?",
-                        "question_kind": "paraphrase",
-                    }
-                ]
-            },
-            ensure_ascii=False,
-        )
-    )
-    route = _route(entry_index=1)
-    generator = WorkbenchRagEvalQuestionGenerator.from_prompt_file(
-        llm_dispatch_executor=executor,
+def _raw_questions(count: int = 10) -> str:
+    return json.dumps(
+        {
+            "questions": [
+                {
+                    "question": f"Как спросить про факт {index}?",
+                    "question_kind": "paraphrase",
+                }
+                for index in range(count)
+            ]
+        },
+        ensure_ascii=False,
     )
 
-    result = await generator.generate_questions_for_entry(
+
+def test_question_generator_builds_provider_messages_without_direct_dispatch() -> None:
+    generator = WorkbenchRagEvalQuestionGenerator.from_prompt_file()
+
+    messages = generator.build_provider_messages(
         claim="Claim text",
         possible_questions=("Existing?",),
         exclusion_scope="Not X",
         evidence_block="Evidence",
         triples=(),
-        route_candidate=route,
     )
 
+    assert messages[0]["role"] == "system"
+    assert messages[1]["role"] == "user"
+    user_payload = json.loads(messages[1]["content"])
+    assert user_payload["claim"] == "Claim text"
+    assert user_payload["expected_question_count"] == 10
+
+
+def test_question_generator_parses_exactly_ten_questions_with_route_metadata() -> None:
+    generator = WorkbenchRagEvalQuestionGenerator.from_prompt_file()
+
+    result = generator.parse_questions_from_raw_text(
+        raw_text=_raw_questions(),
+        generation_model="qwen/qwen3-32b",
+        generation_account_ref="groq_org_secondary",
+        generation_slot_index=1,
+    )
+
+    assert len(result) == 10
     assert result[0].generation_model == "qwen/qwen3-32b"
     assert result[0].generation_account_ref == "groq_org_secondary"
     assert result[0].generation_slot_index == 1
-    assert executor.last_input is not None
-    allocation = executor.last_input.dispatch_payload["llm_allocation"]
-    assert isinstance(allocation, Mapping)
-    assert allocation["account_ref"] == "groq_org_secondary"
-    assert allocation["slot_index"] == 1
 
 
-@pytest.mark.asyncio
-async def test_question_generator_failed_route_raises_generation_error() -> None:
-    generator = WorkbenchRagEvalQuestionGenerator.from_prompt_file(
-        llm_dispatch_executor=FakeLlmDispatchExecutor(
-            raw_text="{}",
-            status=LlmDispatchExecutionStatus.TERMINAL_FAILED,
-        ),
-    )
+def test_question_generator_rejects_non_ten_question_output() -> None:
+    generator = WorkbenchRagEvalQuestionGenerator.from_prompt_file()
 
-    with pytest.raises(WorkbenchRagEvalQuestionGenerationError):
-        await generator.generate_questions_for_entry(
-            claim="Claim",
-            possible_questions=(),
-            exclusion_scope=None,
-            evidence_block=None,
-            triples=(),
-            route_candidate=_route(),
+    with pytest.raises(
+        WorkbenchRagEvalQuestionGenerationError,
+        match="exactly 10",
+    ):
+        generator.parse_questions_from_raw_text(
+            raw_text=_raw_questions(9),
+            generation_model="qwen/qwen3-32b",
+            generation_account_ref="groq_org_primary",
+            generation_slot_index=0,
         )
 
 
 def test_question_generator_source_has_no_fallback_or_direct_provider_client() -> None:
-    from pathlib import Path
-
     source = Path(
         "src/contexts/knowledge_workbench/rag_eval/infrastructure/llm/"
         "workbench_rag_eval_question_generator.py"
     ).read_text(encoding="utf-8")
 
+    assert "execute_dispatch" not in source
     assert "GroqDispatchExecutor" not in source
     assert "openai/gpt-oss-120b" not in source
     assert "llama-3.1-8b-instant" not in source

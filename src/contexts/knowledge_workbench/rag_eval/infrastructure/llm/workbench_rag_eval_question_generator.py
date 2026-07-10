@@ -2,19 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from hashlib import sha256
 import json
 
-from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
-    LlmDispatchExecutionInput,
-    LlmDispatchExecutionStatus,
-    LlmDispatchExecutorPort,
-)
-from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
-    LlmModelExecutionSettings,
-)
 from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_question_generation_errors import (
     WorkbenchRagEvalQuestionGenerationError,
 )
@@ -22,13 +12,6 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     GeneratedWorkbenchRagEvalQuestion,
     WorkbenchRagEvalQuestionKind,
     WorkbenchRagEvalQuestionSource,
-)
-from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_generation_route_policy import (
-    WorkbenchRagEvalQuestionGenerationRouteCandidate,
-    WorkbenchRagEvalQuestionGenerationRoutePolicy,
-)
-from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_question_generator_port import (
-    WorkbenchRagEvalQuestionGeneratorPort,
 )
 
 
@@ -39,29 +22,26 @@ WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION = (
 
 
 @dataclass(frozen=True, slots=True)
-class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
-    llm_dispatch_executor: LlmDispatchExecutorPort
+class WorkbenchRagEvalQuestionGenerator:
     prompt_template: str
     prompt_version: str = WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION
-    max_questions_per_entry: int = 20
+    questions_per_entry: int = 10
 
     @classmethod
     def from_prompt_file(
         cls,
         *,
-        llm_dispatch_executor: LlmDispatchExecutorPort,
         prompt_path: Path = PROMPT_PATH,
     ) -> "WorkbenchRagEvalQuestionGenerator":
         return cls(
-            llm_dispatch_executor=llm_dispatch_executor,
             prompt_template=prompt_path.read_text(encoding="utf-8"),
         )
 
     @property
     def generation_model(self) -> str:
-        return WorkbenchRagEvalQuestionGenerationRoutePolicy.default().primary_model_ref
+        return "qwen/qwen3-32b"
 
-    async def generate_questions_for_entry(
+    def build_provider_messages(
         self,
         *,
         claim: str,
@@ -69,103 +49,39 @@ class WorkbenchRagEvalQuestionGenerator(WorkbenchRagEvalQuestionGeneratorPort):
         exclusion_scope: str | None,
         evidence_block: str | None,
         triples: tuple[Mapping[str, object], ...],
-        route_candidate: WorkbenchRagEvalQuestionGenerationRouteCandidate,
-    ) -> tuple[GeneratedWorkbenchRagEvalQuestion, ...]:
-        claim = _require_text(claim, "claim")
-        if self.max_questions_per_entry < 1:
-            raise ValueError("max_questions_per_entry must be positive")
-
-        result = await self.llm_dispatch_executor.execute_dispatch(
-            LlmDispatchExecutionInput(
-                attempt_id=_stable_id(
-                    "workbench-rag-eval-qgen-attempt",
-                    claim,
-                    route_candidate.model_ref,
-                    route_candidate.account_ref,
-                ),
-                work_item_id=_stable_id("workbench-rag-eval-qgen-work", claim),
-                attempt_number=1,
-                dispatch_payload=self._dispatch_payload(
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        _require_text(claim, "claim")
+        return (
+            {"role": "system", "content": self.prompt_template},
+            {
+                "role": "user",
+                "content": _input_payload_text(
                     claim=claim,
                     possible_questions=possible_questions,
                     exclusion_scope=exclusion_scope,
                     evidence_block=evidence_block,
                     triples=triples,
-                    route_candidate=route_candidate,
+                    expected_question_count=self.questions_per_entry,
                 ),
-                started_at=datetime.now(timezone.utc),
-            )
-        )
-        if result.status is not LlmDispatchExecutionStatus.SUCCEEDED:
-            raise WorkbenchRagEvalQuestionGenerationError(
-                f"Question generation failed on {route_candidate.model_ref}/"
-                f"{route_candidate.account_ref}: {result.error_kind or result.status.value}"
-            )
-        if result.output_payload is None:
-            raise WorkbenchRagEvalQuestionGenerationError(
-                "Question generation succeeded without output payload"
-            )
-
-        raw_text = result.output_payload.get("raw_text")
-        if not isinstance(raw_text, str):
-            raise WorkbenchRagEvalQuestionGenerationError(
-                "Question generation output payload missing raw_text"
-            )
-
-        return _parse_generated_questions(
-            raw_text=raw_text,
-            generation_model=route_candidate.model_ref,
-            prompt_version=self.prompt_version,
-            generation_account_ref=route_candidate.account_ref,
-            generation_slot_index=route_candidate.slot_index,
-            max_questions=self.max_questions_per_entry,
+            },
         )
 
-    def _dispatch_payload(
+    def parse_questions_from_raw_text(
         self,
         *,
-        claim: str,
-        possible_questions: tuple[str, ...],
-        exclusion_scope: str | None,
-        evidence_block: str | None,
-        triples: tuple[Mapping[str, object], ...],
-        route_candidate: WorkbenchRagEvalQuestionGenerationRouteCandidate,
-    ) -> Mapping[str, object]:
-        return {
-            "work_item_id": _stable_id("workbench-rag-eval-qgen-work", claim),
-            "schedule_payload": {
-                "provider_messages": [
-                    {
-                        "role": "system",
-                        "content": self.prompt_template,
-                    },
-                    {
-                        "role": "user",
-                        "content": _input_payload_text(
-                            claim=claim,
-                            possible_questions=possible_questions,
-                            exclusion_scope=exclusion_scope,
-                            evidence_block=evidence_block,
-                            triples=triples,
-                        ),
-                    },
-                ],
-            },
-            "llm_allocation": {
-                "provider": route_candidate.provider,
-                "account_ref": route_candidate.account_ref,
-                "model_ref": route_candidate.model_ref,
-                "slot_index": route_candidate.slot_index,
-            },
-            "llm_execution_settings": _execution_settings_payload(
-                route_candidate.execution_settings
-            ),
-            "capacity_metadata": {
-                "input_token_limit": route_candidate.input_token_limit,
-                "output_token_limit": route_candidate.output_token_limit,
-                "route_role": route_candidate.role.value,
-            },
-        }
+        raw_text: str,
+        generation_model: str,
+        generation_account_ref: str,
+        generation_slot_index: int,
+    ) -> tuple[GeneratedWorkbenchRagEvalQuestion, ...]:
+        return _parse_generated_questions(
+            raw_text=raw_text,
+            generation_model=generation_model,
+            prompt_version=self.prompt_version,
+            generation_account_ref=generation_account_ref,
+            generation_slot_index=generation_slot_index,
+            expected_question_count=self.questions_per_entry,
+        )
 
 
 def _parse_generated_questions(
@@ -175,7 +91,7 @@ def _parse_generated_questions(
     prompt_version: str,
     generation_account_ref: str,
     generation_slot_index: int,
-    max_questions: int,
+    expected_question_count: int,
 ) -> tuple[GeneratedWorkbenchRagEvalQuestion, ...]:
     try:
         payload = json.loads(raw_text)
@@ -197,8 +113,6 @@ def _parse_generated_questions(
     questions: list[GeneratedWorkbenchRagEvalQuestion] = []
     seen: set[str] = set()
     for index, item in enumerate(questions_value):
-        if len(questions) >= max_questions:
-            break
         if not isinstance(item, Mapping):
             raise WorkbenchRagEvalQuestionGenerationError(
                 f"questions[{index}] must be an object"
@@ -244,6 +158,12 @@ def _parse_generated_questions(
             )
         )
 
+    if len(questions) != expected_question_count:
+        raise WorkbenchRagEvalQuestionGenerationError(
+            "Question generation response must contain exactly "
+            f"{expected_question_count} unique generated questions"
+        )
+
     return tuple(questions)
 
 
@@ -254,6 +174,7 @@ def _input_payload_text(
     exclusion_scope: str | None,
     evidence_block: str | None,
     triples: tuple[Mapping[str, object], ...],
+    expected_question_count: int,
 ) -> str:
     payload = {
         "claim": claim,
@@ -261,21 +182,9 @@ def _input_payload_text(
         "exclusion_scope": exclusion_scope,
         "evidence_block": evidence_block,
         "triples": [dict(item) for item in triples],
+        "expected_question_count": expected_question_count,
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
-
-
-def _execution_settings_payload(
-    settings: LlmModelExecutionSettings,
-) -> Mapping[str, object]:
-    return {
-        "reasoning_enabled": settings.reasoning_enabled,
-        "reasoning_effort": settings.reasoning_effort,
-    }
-
-
-def _stable_id(*parts: str) -> str:
-    return sha256(":".join(parts).encode("utf-8")).hexdigest()
 
 
 def _require_text(value: str, field_name: str) -> str:

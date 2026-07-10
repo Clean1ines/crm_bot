@@ -123,6 +123,36 @@ class AsyncPool(Protocol):
     async def release(self, connection: AsyncConnection) -> None: ...
 
 
+class DispatchPreparationBuilder(Protocol):
+    def build_profile_from_due_work_items(
+        self,
+        due_work_items: tuple[DueWorkItemRecord, ...],
+    ) -> LlmTaskCapacityProfile: ...
+
+    def build_account_capacities(
+        self,
+        *,
+        active_model_ref: str,
+        provider_account_refs: tuple[str, ...],
+        model_profiles: tuple[ModelProfile, ...],
+    ) -> tuple[LlmProviderAccountCapacity, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchPreparationBuilderRegistry:
+    default_builder: DispatchPreparationBuilder = field(
+        default_factory=ClaimBuilderDispatchPreparationBuilder,
+    )
+    builders_by_work_kind: Mapping[WorkKind, DispatchPreparationBuilder] = field(
+        default_factory=dict,
+    )
+
+    def builder_for(self, work_kind: WorkKind) -> DispatchPreparationBuilder:
+        if not isinstance(work_kind, WorkKind):
+            raise TypeError("work_kind must be WorkKind")
+        return self.builders_by_work_kind.get(work_kind, self.default_builder)
+
+
 @dataclass(frozen=True, slots=True)
 class PrepareLlmDispatchBatchCommand:
     work_kind: WorkKind
@@ -272,20 +302,20 @@ class PrepareLlmDispatchBatch:
     route_catalog: LlmModelRouteCatalog
     provider_account_refs: tuple[str, ...] = ()
     model_profiles: tuple[ModelProfile, ...] = ()
-    dispatch_preparation_builder: ClaimBuilderDispatchPreparationBuilder = field(
-        default_factory=ClaimBuilderDispatchPreparationBuilder,
+    dispatch_preparation_builder_registry: DispatchPreparationBuilderRegistry = field(
+        default_factory=DispatchPreparationBuilderRegistry,
     )
 
     def __post_init__(self) -> None:
         if not isinstance(self.route_catalog, LlmModelRouteCatalog):
             raise TypeError("route_catalog must be LlmModelRouteCatalog")
         if not isinstance(
-            self.dispatch_preparation_builder,
-            ClaimBuilderDispatchPreparationBuilder,
+            self.dispatch_preparation_builder_registry,
+            DispatchPreparationBuilderRegistry,
         ):
             raise TypeError(
-                "dispatch_preparation_builder must be "
-                "ClaimBuilderDispatchPreparationBuilder",
+                "dispatch_preparation_builder_registry must be "
+                "DispatchPreparationBuilderRegistry",
             )
 
     async def execute(
@@ -343,10 +373,15 @@ class PrepareLlmDispatchBatch:
                         active_model_ref=initial_model_ref,
                     )
 
+                dispatch_preparation_builder = (
+                    self.dispatch_preparation_builder_registry.builder_for(
+                        command.work_kind,
+                    )
+                )
                 preparation_profile = _preparation_profile(
                     command=command,
                     due_records=admission_due_records,
-                    builder=self.dispatch_preparation_builder,
+                    builder=dispatch_preparation_builder,
                 )
 
                 strategy_result = ResolveLlmDispatchPreparationStrategy().execute(
@@ -419,7 +454,7 @@ class PrepareLlmDispatchBatch:
                 account_capacities = await _preparation_account_capacities(
                     command=command,
                     due_records=admission_due_records,
-                    builder=self.dispatch_preparation_builder,
+                    builder=dispatch_preparation_builder,
                     active_model_ref=resolved_active_model_ref,
                     provider_account_refs=provider_account_refs,
                     model_profiles=_resolved_model_profiles(self.model_profiles),
@@ -1117,7 +1152,7 @@ def _preparation_profile(
     *,
     command: PrepareLlmDispatchBatchCommand,
     due_records: tuple[DueWorkItemRecord, ...],
-    builder: ClaimBuilderDispatchPreparationBuilder,
+    builder: DispatchPreparationBuilder,
 ) -> LlmTaskCapacityProfile:
     if due_records:
         return builder.build_profile_from_due_work_items(due_records)
@@ -1130,7 +1165,7 @@ async def _preparation_account_capacities(
     *,
     command: PrepareLlmDispatchBatchCommand,
     due_records: tuple[DueWorkItemRecord, ...],
-    builder: ClaimBuilderDispatchPreparationBuilder,
+    builder: DispatchPreparationBuilder,
     active_model_ref: str,
     provider_account_refs: tuple[str, ...],
     model_profiles: tuple[ModelProfile, ...],

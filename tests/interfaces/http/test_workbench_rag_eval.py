@@ -50,7 +50,7 @@ def _summary() -> WorkbenchRagEvalSummary:
         project_id="11111111-1111-1111-1111-111111111111",
         publication_id=None,
         source_document_ref=None,
-        status=WorkbenchRagEvalRunStatus.COMPLETED,
+        status=WorkbenchRagEvalRunStatus.RUNNING,
         total_entries=1,
         total_questions=2,
         completed_questions=2,
@@ -60,7 +60,7 @@ def _summary() -> WorkbenchRagEvalSummary:
         misses=0,
         promotion_candidate_count=0,
         created_at=now,
-        completed_at=now,
+        completed_at=None,
         error_message=None,
     )
 
@@ -79,7 +79,9 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_workbench_rag_eval_run_endpoint_executes_use_case(monkeypatch) -> None:
+def test_workbench_rag_eval_run_endpoint_returns_202_and_starts_v2_workflow(
+    monkeypatch,
+) -> None:
     async def allow_access(**kwargs):
         del kwargs
         return None
@@ -89,21 +91,19 @@ def test_workbench_rag_eval_run_endpoint_executes_use_case(monkeypatch) -> None:
             assert kwargs["project_id"] == "11111111-1111-1111-1111-111111111111"
             assert kwargs["publication_id"] == "publication-1"
             assert kwargs["source_document_ref"] is None
-            assert kwargs["top_k"] == 5
             assert kwargs["max_entries"] == 20
-            assert kwargs["allow_degraded_llama_instant"] is False
             return _summary()
 
     def fake_factory(**kwargs):
         assert "pool" in kwargs
-        assert "llm_dispatch_executor" in kwargs
+        assert "llm_dispatch_executor" not in kwargs
         return FakeRunUseCase()
 
     monkeypatch.setattr(
         "src.interfaces.http.knowledge._require_project_access", allow_access
     )
     composition_module = ModuleType("src.interfaces.composition.workbench_rag_eval")
-    setattr(composition_module, "make_run_workbench_rag_eval", fake_factory)
+    setattr(composition_module, "make_start_workbench_rag_eval_v2", fake_factory)
     monkeypatch.setitem(
         sys.modules,
         "src.interfaces.composition.workbench_rag_eval",
@@ -115,8 +115,9 @@ def test_workbench_rag_eval_run_endpoint_executes_use_case(monkeypatch) -> None:
         json={"publication_id": "publication-1", "top_k": 5, "max_entries": 20},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.json()["run"]["run_id"] == "run-1"
+    assert response.json()["run"]["status"] == "running"
 
 
 def test_workbench_rag_eval_run_endpoint_validates_top_k(monkeypatch) -> None:
@@ -363,7 +364,7 @@ def test_workbench_rag_eval_apply_candidate_endpoint(monkeypatch) -> None:
     assert "answer_text" not in str(payload)
 
 
-def test_workbench_rag_eval_run_endpoint_rejects_non_bool_degraded_flag(
+def test_workbench_rag_eval_run_endpoint_rejects_legacy_degraded_flag(
     monkeypatch,
 ) -> None:
     async def allow_access(**kwargs):
@@ -380,7 +381,9 @@ def test_workbench_rag_eval_run_endpoint_rejects_non_bool_degraded_flag(
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "allow_degraded_llama_instant must be boolean"
+    assert response.json()["detail"] == (
+        "allow_degraded_llama_instant is not supported by RAG Eval V2"
+    )
 
 
 class FakeApplyPromotionsBatchUseCase:
