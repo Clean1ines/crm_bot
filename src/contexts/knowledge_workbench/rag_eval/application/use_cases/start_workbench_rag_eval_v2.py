@@ -27,6 +27,8 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalRun,
     WorkbenchRagEvalRunStatus,
+    WorkbenchRagEvalCurrentPhase,
+    WorkbenchRagEvalRunProgress,
     WorkbenchRagEvalSummary,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
@@ -95,6 +97,9 @@ class StartWorkbenchRagEvalV2:
                 publication_id=publication_id,
                 source_document_ref=source_document_ref,
                 status=WorkbenchRagEvalRunStatus.RUNNING,
+                current_phase=(
+                    WorkbenchRagEvalCurrentPhase.QUESTION_GENERATION_SCHEDULING
+                ),
                 question_generation_model=self.question_generator.generation_model,
                 question_generation_prompt_version=(
                     self.question_generation_prompt_version
@@ -110,6 +115,12 @@ class StartWorkbenchRagEvalV2:
                 started_at=now,
                 completed_at=None,
                 error_message=None,
+                updated_at=now,
+                progress=WorkbenchRagEvalRunProgress(
+                    selected_entries=len(entries),
+                    scheduled_generation_items=len(entries),
+                    waiting=len(entries),
+                ),
             )
         )
 
@@ -157,6 +168,7 @@ class StartWorkbenchRagEvalV2:
             publication_id=publication_id,
             source_document_ref=source_document_ref,
             status=WorkbenchRagEvalRunStatus.RUNNING,
+            current_phase=(WorkbenchRagEvalCurrentPhase.QUESTION_GENERATION_SCHEDULING),
             total_entries=len(entries),
             total_questions=0,
             completed_questions=0,
@@ -168,6 +180,12 @@ class StartWorkbenchRagEvalV2:
             created_at=now,
             completed_at=None,
             error_message=None,
+            updated_at=now,
+            progress=WorkbenchRagEvalRunProgress(
+                selected_entries=len(entries),
+                scheduled_generation_items=len(plans),
+                waiting=len(plans),
+            ),
         )
 
 

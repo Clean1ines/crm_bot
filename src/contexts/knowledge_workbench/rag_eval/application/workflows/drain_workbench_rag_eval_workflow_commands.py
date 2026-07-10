@@ -18,6 +18,15 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_prep
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressReadRepositoryPort,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reconcile_workbench_rag_eval_question_generation_progress_command import (
+    QuestionGenerationPersistenceCoveragePort,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
+    WorkbenchRagEvalRepositoryPort,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +71,11 @@ class DrainWorkbenchRagEvalWorkflowCommands:
         capacity_observation_repository: (
             LlmAttemptCapacityObservationRepositoryPort | None
         ) = None,
+        work_item_progress_read_repository: WorkItemProgressReadRepositoryPort
+        | None = None,
+        question_coverage_repository: QuestionGenerationPersistenceCoveragePort
+        | None = None,
+        rag_eval_repository: WorkbenchRagEvalRepositoryPort | None = None,
     ) -> DrainWorkbenchRagEvalWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -87,6 +101,9 @@ class DrainWorkbenchRagEvalWorkflowCommands:
                 prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
                 question_generation_executor=(question_generation_executor),
                 capacity_observation_repository=(capacity_observation_repository),
+                work_item_progress_read_repository=work_item_progress_read_repository,
+                question_coverage_repository=question_coverage_repository,
+                rag_eval_repository=rag_eval_repository,
             )
             if not result.dispatched:
                 blocked_count = 1

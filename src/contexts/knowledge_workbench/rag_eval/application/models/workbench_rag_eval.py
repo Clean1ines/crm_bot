@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
@@ -11,8 +11,61 @@ from src.domain.project_plane.json_types import JsonObject
 class WorkbenchRagEvalRunStatus(StrEnum):
     CREATED = "created"
     RUNNING = "running"
+    WAITING_CAPACITY = "waiting_capacity"
+    PROMOTION_REVIEW = "promotion_review"
+    VERIFYING = "verifying"
     COMPLETED = "completed"
+    BLOCKED = "blocked"
     FAILED = "failed"
+
+
+class WorkbenchRagEvalCurrentPhase(StrEnum):
+    SCOPE_RESOLUTION = "scope_resolution"
+    QUESTION_GENERATION_SCHEDULING = "question_generation_scheduling"
+    QUESTION_GENERATION = "question_generation"
+    RETRIEVAL_EVALUATION = "retrieval_evaluation"
+    ADJUDICATION_SCHEDULING = "adjudication_scheduling"
+    ADJUDICATION = "adjudication"
+    PROMOTION_REVIEW = "promotion_review"
+    PROMOTION_APPLICATION = "promotion_application"
+    POST_PROMOTION_VERIFICATION = "post_promotion_verification"
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalRunProgress:
+    selected_entries: int = 0
+    scheduled_generation_items: int = 0
+    waiting: int = 0
+    running: int = 0
+    completed: int = 0
+    failed: int = 0
+    generated_question_sets: int = 0
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "selected_entries",
+            "scheduled_generation_items",
+            "waiting",
+            "running",
+            "completed",
+            "failed",
+            "generated_question_sets",
+        ):
+            _require_non_negative_int(getattr(self, field_name), field_name)
+
+    def to_json_dict(self) -> JsonObject:
+        return {
+            "selected_entries": self.selected_entries,
+            "scheduled_generation_items": self.scheduled_generation_items,
+            "waiting": self.waiting,
+            "running": self.running,
+            "completed": self.completed,
+            "failed": self.failed,
+            "generated_question_sets": self.generated_question_sets,
+        }
 
 
 class WorkbenchRagEvalQuestionKind(StrEnum):
@@ -46,6 +99,20 @@ class WorkbenchRagEvalQuestionStatus(StrEnum):
 class WorkbenchRagEvalQuestionSource(StrEnum):
     PUBLISHED_POSSIBLE_QUESTION = "published_possible_question"
     GENERATED = "generated"
+
+
+class WorkbenchRagEvalQuestionRole(StrEnum):
+    BASELINE = "baseline"
+    PROMOTION_POOL = "promotion_pool"
+    HOLDOUT = "holdout"
+
+
+class WorkbenchRagEvalRetrievalClassification(StrEnum):
+    PASS_STRONG = "pass_strong"
+    PASS_WEAK = "pass_weak"
+    CONFUSION = "confusion"
+    MISS = "miss"
+    EXISTING_ALIAS_RETRIEVAL_FAILURE = "existing_alias_retrieval_failure"
 
 
 class WorkbenchRagEvalPromotionStatus(StrEnum):
@@ -115,6 +182,18 @@ class WorkbenchRagEvalRun:
     started_at: datetime | None
     completed_at: datetime | None
     error_message: str | None
+    current_phase: WorkbenchRagEvalCurrentPhase = (
+        WorkbenchRagEvalCurrentPhase.SCOPE_RESOLUTION
+    )
+    blocked_reason: str | None = None
+    failed_reason: str | None = None
+    updated_at: datetime | None = None
+    progress: WorkbenchRagEvalRunProgress = field(
+        default_factory=WorkbenchRagEvalRunProgress
+    )
+    capacity_next_due_at: datetime | None = None
+    capacity_model_ref: str | None = None
+    capacity_account_ref: str | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.run_id, "run_id")
@@ -122,6 +201,7 @@ class WorkbenchRagEvalRun:
         _require_optional_text(self.publication_id, "publication_id")
         _require_optional_text(self.source_document_ref, "source_document_ref")
         _require_enum(self.status, WorkbenchRagEvalRunStatus, "status")
+        _require_enum(self.current_phase, WorkbenchRagEvalCurrentPhase, "current_phase")
         _require_optional_text(
             self.question_generation_model,
             "question_generation_model",
@@ -144,6 +224,14 @@ class WorkbenchRagEvalRun:
         _require_optional_datetime(self.started_at, "started_at")
         _require_optional_datetime(self.completed_at, "completed_at")
         _require_optional_text(self.error_message, "error_message")
+        _require_optional_text(self.blocked_reason, "blocked_reason")
+        _require_optional_text(self.failed_reason, "failed_reason")
+        _require_optional_datetime(self.updated_at, "updated_at")
+        if not isinstance(self.progress, WorkbenchRagEvalRunProgress):
+            raise TypeError("progress must be WorkbenchRagEvalRunProgress")
+        _require_optional_datetime(self.capacity_next_due_at, "capacity_next_due_at")
+        _require_optional_text(self.capacity_model_ref, "capacity_model_ref")
+        _require_optional_text(self.capacity_account_ref, "capacity_account_ref")
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +323,71 @@ class WorkbenchRagEvalRetrievalResult:
             raise TypeError("top3_hit must be bool")
         if not isinstance(self.top5_hit, bool):
             raise TypeError("top5_hit must be bool")
+        _require_datetime(self.created_at, "created_at")
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalRetrievalOutcome:
+    outcome_id: str
+    run_id: str
+    question_id: str
+    project_id: str
+    evaluation_stage: str
+    expected_runtime_entry_id: str
+    expected_fact_id: str
+    expected_rank: int | None
+    expected_score: float | None
+    best_competitor_runtime_entry_id: str | None
+    best_competitor_fact_id: str | None
+    best_competitor_score: float | None
+    score_margin: float | None
+    classification: WorkbenchRagEvalRetrievalClassification
+    created_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_text(self.outcome_id, "outcome_id")
+        _require_text(self.run_id, "run_id")
+        _require_text(self.question_id, "question_id")
+        _require_text(self.project_id, "project_id")
+        _require_text(self.evaluation_stage, "evaluation_stage")
+        _require_text(
+            self.expected_runtime_entry_id,
+            "expected_runtime_entry_id",
+        )
+        _require_text(self.expected_fact_id, "expected_fact_id")
+
+        if self.expected_rank is not None:
+            if isinstance(self.expected_rank, bool) or not isinstance(
+                self.expected_rank, int
+            ):
+                raise TypeError("expected_rank must be int or None")
+            if self.expected_rank < 1:
+                raise ValueError("expected_rank must be positive")
+
+        for field_name in (
+            "expected_score",
+            "best_competitor_score",
+            "score_margin",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+            ):
+                raise TypeError(f"{field_name} must be numeric or None")
+
+        _require_optional_text(
+            self.best_competitor_runtime_entry_id,
+            "best_competitor_runtime_entry_id",
+        )
+        _require_optional_text(
+            self.best_competitor_fact_id,
+            "best_competitor_fact_id",
+        )
+        _require_enum(
+            self.classification,
+            WorkbenchRagEvalRetrievalClassification,
+            "classification",
+        )
         _require_datetime(self.created_at, "created_at")
 
 
@@ -562,6 +715,18 @@ class WorkbenchRagEvalSummary:
     created_at: datetime
     completed_at: datetime | None
     error_message: str | None
+    current_phase: WorkbenchRagEvalCurrentPhase = (
+        WorkbenchRagEvalCurrentPhase.SCOPE_RESOLUTION
+    )
+    blocked_reason: str | None = None
+    failed_reason: str | None = None
+    updated_at: datetime | None = None
+    progress: WorkbenchRagEvalRunProgress = field(
+        default_factory=WorkbenchRagEvalRunProgress
+    )
+    capacity_next_due_at: datetime | None = None
+    capacity_model_ref: str | None = None
+    capacity_account_ref: str | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.run_id, "run_id")
@@ -569,6 +734,7 @@ class WorkbenchRagEvalSummary:
         _require_optional_text(self.publication_id, "publication_id")
         _require_optional_text(self.source_document_ref, "source_document_ref")
         _require_enum(self.status, WorkbenchRagEvalRunStatus, "status")
+        _require_enum(self.current_phase, WorkbenchRagEvalCurrentPhase, "current_phase")
         for field_name in (
             "total_entries",
             "total_questions",
@@ -583,6 +749,14 @@ class WorkbenchRagEvalSummary:
         _require_datetime(self.created_at, "created_at")
         _require_optional_datetime(self.completed_at, "completed_at")
         _require_optional_text(self.error_message, "error_message")
+        _require_optional_text(self.blocked_reason, "blocked_reason")
+        _require_optional_text(self.failed_reason, "failed_reason")
+        _require_optional_datetime(self.updated_at, "updated_at")
+        if not isinstance(self.progress, WorkbenchRagEvalRunProgress):
+            raise TypeError("progress must be WorkbenchRagEvalRunProgress")
+        _require_optional_datetime(self.capacity_next_due_at, "capacity_next_due_at")
+        _require_optional_text(self.capacity_model_ref, "capacity_model_ref")
+        _require_optional_text(self.capacity_account_ref, "capacity_account_ref")
 
     def to_json_dict(self) -> JsonObject:
         return {
@@ -591,6 +765,21 @@ class WorkbenchRagEvalSummary:
             "publication_id": self.publication_id,
             "source_document_ref": self.source_document_ref,
             "status": self.status.value,
+            "current_phase": self.current_phase.value,
+            "scope": {
+                "publication_id": self.publication_id,
+                "source_document_ref": self.source_document_ref,
+            },
+            "progress": self.progress.to_json_dict(),
+            "capacity_wait": (
+                {
+                    "next_due_at": self.capacity_next_due_at.isoformat(),
+                    "model_ref": self.capacity_model_ref,
+                    "account_ref": self.capacity_account_ref,
+                }
+                if self.capacity_next_due_at is not None
+                else None
+            ),
             "total_entries": self.total_entries,
             "total_questions": self.total_questions,
             "completed_questions": self.completed_questions,
@@ -604,6 +793,11 @@ class WorkbenchRagEvalSummary:
                 self.completed_at.isoformat() if self.completed_at is not None else None
             ),
             "error_message": self.error_message,
+            "blocked_reason": self.blocked_reason,
+            "failed_reason": self.failed_reason,
+            "updated_at": (
+                self.updated_at.isoformat() if self.updated_at is not None else None
+            ),
         }
 
 

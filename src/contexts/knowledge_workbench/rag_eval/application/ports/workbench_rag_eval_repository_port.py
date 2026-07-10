@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
 
@@ -12,7 +12,12 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestion,
     WorkbenchRagEvalRetrievalResult,
+    WorkbenchRagEvalRetrievalOutcome,
+    WorkbenchRagEvalQuestionRole,
     WorkbenchRagEvalRun,
+    WorkbenchRagEvalCurrentPhase,
+    WorkbenchRagEvalRunProgress,
+    WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalSummary,
 )
 from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
@@ -22,6 +27,22 @@ from src.contexts.knowledge_workbench.retrieval.application.models.published_wor
 
 class WorkbenchRagEvalRepositoryPort(Protocol):
     async def create_run(self, *, run: WorkbenchRagEvalRun) -> WorkbenchRagEvalRun: ...
+
+    async def transition_run_progress(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        status: WorkbenchRagEvalRunStatus,
+        current_phase: WorkbenchRagEvalCurrentPhase,
+        progress: WorkbenchRagEvalRunProgress,
+        updated_at: datetime,
+        blocked_reason: str | None = None,
+        failed_reason: str | None = None,
+        capacity_next_due_at: datetime | None = None,
+        capacity_model_ref: str | None = None,
+        capacity_account_ref: str | None = None,
+    ) -> None: ...
 
     async def list_published_entries_for_eval(
         self,
@@ -43,6 +64,14 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         *,
         results: tuple[WorkbenchRagEvalRetrievalResult, ...],
     ) -> tuple[WorkbenchRagEvalRetrievalResult, ...]: ...
+
+    async def save_question_roles(
+        self, *, roles: Mapping[str, WorkbenchRagEvalQuestionRole]
+    ) -> None: ...
+
+    async def save_retrieval_outcomes(
+        self, *, outcomes: tuple[WorkbenchRagEvalRetrievalOutcome, ...]
+    ) -> tuple[WorkbenchRagEvalRetrievalOutcome, ...]: ...
 
     async def save_promoted_question_candidates(
         self,

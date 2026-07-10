@@ -19,9 +19,12 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalQuestionKind,
     WorkbenchRagEvalQuestionSource,
     WorkbenchRagEvalQuestionStatus,
+    WorkbenchRagEvalRetrievalOutcome,
     WorkbenchRagEvalRetrievalResult,
     WorkbenchRagEvalRetrievalResultDetails,
     WorkbenchRagEvalRun,
+    WorkbenchRagEvalCurrentPhase,
+    WorkbenchRagEvalRunProgress,
     WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalPromotionStatus,
     WorkbenchRagEvalSummary,
@@ -251,11 +254,18 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     question_generation_prompt_version, total_entries,
                     total_questions, completed_questions, top1_hits,
                     top3_hits, top5_hits, misses, created_at, started_at,
-                    completed_at, error_message
+                    completed_at, error_message, current_phase, blocked_reason,
+                    failed_reason, updated_at, selected_entries,
+                    scheduled_generation_items, waiting_work_items,
+                    running_work_items, completed_work_items, failed_work_items,
+                    generated_question_sets, capacity_next_due_at,
+                    capacity_model_ref, capacity_account_ref
                 )
                 VALUES (
                     $1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
-                    $11, $12, $13, $14, $15, $16, $17, $18
+                    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                    $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
+                    $31, $32, $33
                 )
                 """,
                 run.run_id,
@@ -276,8 +286,128 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 run.started_at,
                 run.completed_at,
                 run.error_message,
+                run.current_phase.value,
+                run.blocked_reason,
+                run.failed_reason,
+                run.updated_at or run.created_at,
+                run.progress.selected_entries,
+                run.progress.scheduled_generation_items,
+                run.progress.waiting,
+                run.progress.running,
+                run.progress.completed,
+                run.progress.failed,
+                run.progress.generated_question_sets,
+                run.capacity_next_due_at,
+                run.capacity_model_ref,
+                run.capacity_account_ref,
             )
         return run
+
+    async def has_complete_question_sets(
+        self,
+        *,
+        rag_eval_run_id: str,
+        expected_entry_count: int,
+        questions_per_entry: int,
+    ) -> bool:
+        if expected_entry_count <= 0 or questions_per_entry <= 0:
+            return False
+
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                """
+                WITH generated_per_entry AS (
+                    SELECT
+                        expected_runtime_entry_id,
+                        COUNT(*) AS question_count
+                    FROM knowledge_workbench_rag_eval_questions
+                    WHERE run_id = $1
+                      AND source = 'generated'
+                    GROUP BY expected_runtime_entry_id
+                )
+                SELECT
+                    COALESCE(
+                        SUM(question_count),
+                        0
+                    ) AS total_questions,
+                    COUNT(*) AS represented_entry_count,
+                    COUNT(*) FILTER (
+                        WHERE question_count = $2
+                    ) AS complete_entry_count,
+                    COUNT(*) FILTER (
+                        WHERE question_count <> $2
+                    ) AS incomplete_entry_count
+                FROM generated_per_entry
+                """,
+                rag_eval_run_id,
+                questions_per_entry,
+            )
+
+        if row is None:
+            return False
+
+        return (
+            _int_from_row(row, "total_questions")
+            == expected_entry_count * questions_per_entry
+            and _int_from_row(row, "represented_entry_count") == expected_entry_count
+            and _int_from_row(row, "complete_entry_count") == expected_entry_count
+            and _int_from_row(row, "incomplete_entry_count") == 0
+        )
+
+    async def transition_run_progress(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        status: WorkbenchRagEvalRunStatus,
+        current_phase: WorkbenchRagEvalCurrentPhase,
+        progress: WorkbenchRagEvalRunProgress,
+        updated_at: datetime,
+        blocked_reason: str | None = None,
+        failed_reason: str | None = None,
+        capacity_next_due_at: datetime | None = None,
+        capacity_model_ref: str | None = None,
+        capacity_account_ref: str | None = None,
+    ) -> None:
+        async with _connection(self._connection_or_pool) as connection:
+            await connection.execute(
+                """
+                UPDATE knowledge_workbench_rag_eval_runs
+                SET status = $3,
+                    current_phase = $4,
+                    blocked_reason = $5,
+                    failed_reason = $6,
+                    updated_at = $7,
+                    selected_entries = $8,
+                    scheduled_generation_items = $9,
+                    waiting_work_items = $10,
+                    running_work_items = $11,
+                    completed_work_items = $12,
+                    failed_work_items = $13,
+                    generated_question_sets = $14,
+                    capacity_next_due_at = $15,
+                    capacity_model_ref = $16,
+                    capacity_account_ref = $17
+                WHERE run_id = $1 AND project_id = $2::uuid
+                """,
+                run_id,
+                project_id,
+                status.value,
+                current_phase.value,
+                blocked_reason,
+                failed_reason,
+                updated_at,
+                progress.selected_entries,
+                progress.scheduled_generation_items,
+                progress.waiting,
+                progress.running,
+                progress.completed,
+                progress.failed,
+                progress.generated_question_sets,
+                capacity_next_due_at,
+                capacity_model_ref,
+                capacity_account_ref,
+            )
 
     async def list_published_entries_for_eval(
         self,
@@ -379,6 +509,107 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 )
         return results
 
+    async def save_question_roles(self, *, roles):
+        async with _connection(self._connection_or_pool) as connection:
+            for question_id, role in roles.items():
+                await connection.execute(
+                    """UPDATE knowledge_workbench_rag_eval_questions
+                    SET evaluation_role = $2,
+                        promotion_eligible = CASE WHEN $2 = 'holdout' THEN FALSE ELSE promotion_eligible END
+                    WHERE question_id = $1""",
+                    question_id,
+                    role.value,
+                )
+
+    async def save_retrieval_outcomes(
+        self,
+        *,
+        outcomes: tuple[WorkbenchRagEvalRetrievalOutcome, ...],
+    ) -> tuple[WorkbenchRagEvalRetrievalOutcome, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            for outcome in outcomes:
+                await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_rag_eval_retrieval_outcomes (
+                        outcome_id,
+                        run_id,
+                        question_id,
+                        project_id,
+                        evaluation_stage,
+                        expected_runtime_entry_id,
+                        expected_fact_id,
+                        expected_rank,
+                        expected_score,
+                        best_competitor_runtime_entry_id,
+                        best_competitor_fact_id,
+                        best_competitor_score,
+                        score_margin,
+                        classification,
+                        created_at
+                    )
+                    VALUES (
+                        $1,
+                        $2,
+                        $3,
+                        $4::uuid,
+                        $5,
+                        $6,
+                        $7,
+                        $8,
+                        $9,
+                        $10,
+                        $11,
+                        $12,
+                        $13,
+                        $14,
+                        $15
+                    )
+                    ON CONFLICT (
+                        run_id,
+                        question_id,
+                        evaluation_stage
+                    )
+                    DO UPDATE SET
+                        outcome_id = EXCLUDED.outcome_id,
+                        project_id = EXCLUDED.project_id,
+                        expected_runtime_entry_id = (
+                            EXCLUDED.expected_runtime_entry_id
+                        ),
+                        expected_fact_id = EXCLUDED.expected_fact_id,
+                        expected_rank = EXCLUDED.expected_rank,
+                        expected_score = EXCLUDED.expected_score,
+                        best_competitor_runtime_entry_id = (
+                            EXCLUDED.best_competitor_runtime_entry_id
+                        ),
+                        best_competitor_fact_id = (
+                            EXCLUDED.best_competitor_fact_id
+                        ),
+                        best_competitor_score = (
+                            EXCLUDED.best_competitor_score
+                        ),
+                        score_margin = EXCLUDED.score_margin,
+                        classification = EXCLUDED.classification,
+                        created_at = EXCLUDED.created_at
+                    """,
+                    outcome.outcome_id,
+                    outcome.run_id,
+                    outcome.question_id,
+                    outcome.project_id,
+                    outcome.evaluation_stage,
+                    outcome.expected_runtime_entry_id,
+                    outcome.expected_fact_id,
+                    outcome.expected_rank,
+                    outcome.expected_score,
+                    outcome.best_competitor_runtime_entry_id,
+                    outcome.best_competitor_fact_id,
+                    outcome.best_competitor_score,
+                    outcome.score_margin,
+                    outcome.classification.value,
+                    outcome.created_at,
+                )
+
+        return outcomes
+
     async def save_promoted_question_candidates(
         self,
         *,
@@ -458,6 +689,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     run.publication_id,
                     run.source_document_ref,
                     run.status,
+                    run.current_phase,
                     run.question_generation_model,
                     run.question_generation_prompt_version,
                     run.total_entries,
@@ -471,6 +703,19 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     run.started_at,
                     run.completed_at,
                     run.error_message,
+                    run.blocked_reason,
+                    run.failed_reason,
+                    run.updated_at,
+                    run.selected_entries,
+                    run.scheduled_generation_items,
+                    run.waiting_work_items,
+                    run.running_work_items,
+                    run.completed_work_items,
+                    run.failed_work_items,
+                    run.generated_question_sets,
+                    run.capacity_next_due_at,
+                    run.capacity_model_ref,
+                    run.capacity_account_ref,
                     (
                         SELECT count(*)
                         FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
@@ -501,6 +746,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     run.publication_id,
                     run.source_document_ref,
                     run.status,
+                    run.current_phase,
                     run.question_generation_model,
                     run.question_generation_prompt_version,
                     run.total_entries,
@@ -514,6 +760,19 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     run.started_at,
                     run.completed_at,
                     run.error_message,
+                    run.blocked_reason,
+                    run.failed_reason,
+                    run.updated_at,
+                    run.selected_entries,
+                    run.scheduled_generation_items,
+                    run.waiting_work_items,
+                    run.running_work_items,
+                    run.completed_work_items,
+                    run.failed_work_items,
+                    run.generated_question_sets,
+                    run.capacity_next_due_at,
+                    run.capacity_model_ref,
+                    run.capacity_account_ref,
                     (
                         SELECT count(*)
                         FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
@@ -1061,6 +1320,9 @@ def _summary_from_row(row: Mapping[str, object]) -> WorkbenchRagEvalSummary:
         publication_id=_optional_text_from_row(row, "publication_id"),
         source_document_ref=_optional_text_from_row(row, "source_document_ref"),
         status=WorkbenchRagEvalRunStatus(_text_from_row(row, "status")),
+        current_phase=WorkbenchRagEvalCurrentPhase(
+            _text_from_row(row, "current_phase")
+        ),
         total_entries=_int_from_row(row, "total_entries"),
         total_questions=_int_from_row(row, "total_questions"),
         completed_questions=_int_from_row(row, "completed_questions"),
@@ -1072,6 +1334,21 @@ def _summary_from_row(row: Mapping[str, object]) -> WorkbenchRagEvalSummary:
         created_at=_datetime_from_row(row, "created_at"),
         completed_at=_optional_datetime_from_row(row, "completed_at"),
         error_message=_optional_text_from_row(row, "error_message"),
+        blocked_reason=_optional_text_from_row(row, "blocked_reason"),
+        failed_reason=_optional_text_from_row(row, "failed_reason"),
+        updated_at=_optional_datetime_from_row(row, "updated_at"),
+        progress=WorkbenchRagEvalRunProgress(
+            selected_entries=_int_from_row(row, "selected_entries"),
+            scheduled_generation_items=_int_from_row(row, "scheduled_generation_items"),
+            waiting=_int_from_row(row, "waiting_work_items"),
+            running=_int_from_row(row, "running_work_items"),
+            completed=_int_from_row(row, "completed_work_items"),
+            failed=_int_from_row(row, "failed_work_items"),
+            generated_question_sets=_int_from_row(row, "generated_question_sets"),
+        ),
+        capacity_next_due_at=_optional_datetime_from_row(row, "capacity_next_due_at"),
+        capacity_model_ref=_optional_text_from_row(row, "capacity_model_ref"),
+        capacity_account_ref=_optional_text_from_row(row, "capacity_account_ref"),
     )
 
 

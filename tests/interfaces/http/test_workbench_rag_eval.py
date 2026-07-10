@@ -19,6 +19,8 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalQuestionSource,
     WorkbenchRagEvalQuestionStatus,
     WorkbenchRagEvalRetrievalResultDetails,
+    WorkbenchRagEvalCurrentPhase,
+    WorkbenchRagEvalRunProgress,
     WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalSummary,
 )
@@ -52,6 +54,7 @@ def _summary() -> WorkbenchRagEvalSummary:
         publication_id=None,
         source_document_ref=None,
         status=WorkbenchRagEvalRunStatus.RUNNING,
+        current_phase=WorkbenchRagEvalCurrentPhase.QUESTION_GENERATION_SCHEDULING,
         total_entries=1,
         total_questions=2,
         completed_questions=2,
@@ -63,6 +66,15 @@ def _summary() -> WorkbenchRagEvalSummary:
         created_at=now,
         completed_at=None,
         error_message=None,
+        updated_at=now,
+        progress=WorkbenchRagEvalRunProgress(
+            selected_entries=1,
+            scheduled_generation_items=1,
+            waiting=1,
+        ),
+        capacity_next_due_at=None,
+        capacity_model_ref=None,
+        capacity_account_ref=None,
     )
 
 
@@ -119,6 +131,12 @@ def test_workbench_rag_eval_run_endpoint_returns_202_and_starts_v2_workflow(
     assert response.status_code == 202
     assert response.json()["run"]["run_id"] == "run-1"
     assert response.json()["run"]["status"] == "running"
+    assert response.json()["run"]["current_phase"] == "question_generation_scheduling"
+    assert response.json()["run"]["scope"] == {
+        "publication_id": None,
+        "source_document_ref": None,
+    }
+    assert response.json()["run"]["progress"]["scheduled_generation_items"] == 1
 
 
 def test_workbench_rag_eval_run_endpoint_validates_top_k(monkeypatch) -> None:
@@ -241,6 +259,38 @@ class FakeWorkbenchRagEvalRepository:
                 applied_at=None,
             ),
         )
+
+
+def test_workbench_rag_eval_latest_serializes_persisted_progress(monkeypatch) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access", allow_access
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge.PostgresWorkbenchRagEvalRepository",
+        FakeWorkbenchRagEvalRepository,
+    )
+
+    response = _client().get(
+        "/api/projects/11111111-1111-1111-1111-111111111111/knowledge/rag-eval/workbench/latest"
+    )
+
+    assert response.status_code == 200
+    run = response.json()["run"]
+    assert run["current_phase"] == "question_generation_scheduling"
+    assert run["progress"] == {
+        "selected_entries": 1,
+        "scheduled_generation_items": 1,
+        "waiting": 1,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "generated_question_sets": 0,
+    }
+    assert run["capacity_wait"] is None
 
 
 def test_workbench_rag_eval_questions_endpoint_returns_questions(monkeypatch) -> None:

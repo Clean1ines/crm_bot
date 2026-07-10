@@ -14,6 +14,8 @@ import {
   type WorkbenchRagEvalRetrievalResultDetails,
   type WorkbenchRagEvalRunSummary,
 } from '@shared/api/modules/ragEval';
+import { ragEvalQueryKeys } from './ragEvalQueryKeys';
+import { acceptStartedRagEvalRun } from './ragEvalRunStart';
 
 const formatNumber = (value: number): string => new Intl.NumberFormat().format(value);
 
@@ -583,11 +585,10 @@ export const RagEvalPage: React.FC = () => {
   const [selectedSourceDocumentRef, setSelectedSourceDocumentRef] = useState('');
   const [topK, setTopK] = useState(5);
   const [maxEntries, setMaxEntries] = useState(20);
-  const [lastRun, setLastRun] = useState<WorkbenchRagEvalRunSummary | null>(null);
   const [selectedPromotionIds, setSelectedPromotionIds] = useState<string[]>([]);
 
   const documentsQuery = useQuery({
-    queryKey: ['workbench-rag-eval-documents', projectId],
+    queryKey: ragEvalQueryKeys.documents(projectId),
     queryFn: async (): Promise<RagEvalDocumentOption[]> => {
       if (!projectId) return [];
       const response = await knowledgeApi.list(projectId);
@@ -610,7 +611,7 @@ export const RagEvalPage: React.FC = () => {
   });
 
   const latestQuery = useQuery({
-    queryKey: ['workbench-rag-eval-latest', projectId],
+    queryKey: ragEvalQueryKeys.latest(projectId),
     queryFn: async () => {
       if (!projectId) return { run: null };
       return ragEvalApi.latestWorkbench(projectId);
@@ -619,10 +620,10 @@ export const RagEvalPage: React.FC = () => {
     retry: false,
   });
 
-  const visibleRun = lastRun ?? latestQuery.data?.run ?? null;
+  const visibleRun = latestQuery.data?.run ?? null;
 
   const questionsQuery = useQuery({
-    queryKey: ['workbench-rag-eval-questions', projectId, visibleRun?.run_id],
+    queryKey: ragEvalQueryKeys.questions(projectId, visibleRun?.run_id),
     queryFn: async () => {
       if (!projectId || !visibleRun) return { questions: [] };
       return ragEvalApi.listWorkbenchQuestions(projectId, visibleRun.run_id);
@@ -632,7 +633,7 @@ export const RagEvalPage: React.FC = () => {
   });
 
   const candidatesQuery = useQuery({
-    queryKey: ['workbench-rag-eval-promotion-candidates', projectId, visibleRun?.run_id],
+    queryKey: ragEvalQueryKeys.promotionCandidates(projectId, visibleRun?.run_id),
     queryFn: async () => {
       if (!projectId || !visibleRun) return { candidates: [] };
       return ragEvalApi.listWorkbenchPromotionCandidates(projectId, visibleRun.run_id);
@@ -657,9 +658,9 @@ export const RagEvalPage: React.FC = () => {
         `Вопрос добавлен. Всего формулировок: ${result.result.possible_question_count}`,
       );
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-promotion-candidates', projectId, visibleRun?.run_id] }),
-        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-questions', projectId, visibleRun?.run_id] }),
-        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-latest', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.promotionCandidates(projectId, visibleRun?.run_id) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.questions(projectId, visibleRun?.run_id) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.latest(projectId) }),
       ]);
     },
     onError: (error) => {
@@ -682,9 +683,9 @@ export const RagEvalPage: React.FC = () => {
         toast.error(`Ошибки применения: ${result.errors.length}`);
       }
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-promotion-candidates', projectId, visibleRun?.run_id] }),
-        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-questions', projectId, visibleRun?.run_id] }),
-        queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-latest', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.promotionCandidates(projectId, visibleRun?.run_id) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.questions(projectId, visibleRun?.run_id) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.latest(projectId) }),
       ]);
     },
     onError: (error) => {
@@ -707,9 +708,14 @@ export const RagEvalPage: React.FC = () => {
       return ragEvalApi.runWorkbench(projectId, payload);
     },
     onSuccess: async (result) => {
-      setLastRun(result.run);
-      toast.success('Проверка базы знаний завершена');
-      await queryClient.invalidateQueries({ queryKey: ['workbench-rag-eval-latest', projectId] });
+      if (!projectId) return;
+      acceptStartedRagEvalRun({
+        notifySuccess: toast.success,
+        projectId,
+        queryClient,
+        response: result,
+      });
+      await queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.latest(projectId) });
     },
     onError: (error) => {
       const fallback = 'Проверка базы знаний не запустилась';

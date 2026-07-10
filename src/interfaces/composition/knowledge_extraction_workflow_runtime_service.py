@@ -26,6 +26,9 @@ from src.interfaces.composition.knowledge_extraction_workflow_runtime_pump impor
     DueKnowledgeExtractionWorkflow,
     KnowledgeExtractionWorkflowRuntimePump,
 )
+from src.interfaces.composition.workbench_rag_eval_workflow_runtime import (
+    make_workbench_rag_eval_workflow_runtime,
+)
 
 
 LOGGER = structlog.get_logger(__name__)
@@ -79,6 +82,10 @@ async def run_knowledge_extraction_workflow_runtime_loop(
         llm_executor=llm_executor,
         max_drain_commands=max_drain_commands,
     )
+    rag_eval_runtime = make_workbench_rag_eval_workflow_runtime(
+        pool=pool,
+        llm_executor=llm_executor,
+    )
     LOGGER.info("knowledge_extraction_workflow_runtime_started")
 
     while not shutdown_event.is_set():
@@ -117,6 +124,14 @@ async def run_knowledge_extraction_workflow_runtime_loop(
                 due_workflow_reader=_StaticDueWorkflowReader(due_workflows),
                 workflow_runner=workflow_runner,
             ).run_once(limit=len(due_workflows))
+
+        try:
+            await rag_eval_runtime.run_due_once(
+                workflow_batch_size=workflow_batch_size,
+                max_commands=max_drain_commands,
+            )
+        except Exception:
+            LOGGER.exception("workbench_rag_eval_workflow_runtime_pump_failed")
 
         try:
             await asyncio.wait_for(

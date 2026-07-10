@@ -24,6 +24,12 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_httpx_client im
 
 def make_llm_dispatch_executor() -> LlmDispatchExecutorPort:
     runtime_settings = LlmRuntimeSettings.from_env_mapping(os.environ)
+    return make_llm_dispatch_executor_from_settings(runtime_settings)
+
+
+def make_llm_dispatch_executor_from_settings(
+    runtime_settings: LlmRuntimeSettings,
+) -> LlmDispatchExecutorPort:
     provider_components = LlmRuntimeProviderCompositionFactory(
         settings=runtime_settings,
     ).build()

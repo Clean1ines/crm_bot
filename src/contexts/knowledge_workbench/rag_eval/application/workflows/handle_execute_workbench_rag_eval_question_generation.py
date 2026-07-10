@@ -16,6 +16,16 @@ from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_e
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WorkbenchRagEvalQuestionGenerator,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_attempt_decision_policy import (
+    DecideWorkbenchRagEvalQuestionAttemptCommand,
+    WorkbenchRagEvalQuestionAttemptDecisionPolicy,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_attempt_next_action_policy import (
+    WorkbenchRagEvalQuestionAttemptNextActionPolicy,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
+    workbench_rag_eval_route_catalog,
+)
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutionStatus,
 )
@@ -46,7 +56,7 @@ class WorkbenchRagEvalQuestionGenerationOutputValidator:
         finished_at: datetime,
         attempt_number: int,
     ) -> LlmDispatchOutputValidationResult:
-        del finished_at, attempt_number
+        del finished_at
         if llm_status is not LlmDispatchExecutionStatus.SUCCEEDED:
             return LlmDispatchOutputValidationResult(
                 status=llm_status,
@@ -68,13 +78,44 @@ class WorkbenchRagEvalQuestionGenerationOutputValidator:
                 ),
             )
         except Exception as exc:
+            allocation = _mapping(dispatch_payload, "llm_allocation")
+            model_ref = _text(allocation, "model_ref")
+            catalog = workbench_rag_eval_route_catalog()
+            model_refs = (
+                catalog.primary_model_ref(),
+                *catalog.automatic_fallback_model_refs(),
+            )
+            route_index = model_refs.index(model_ref)
+            next_route = (
+                catalog.route_for_model_ref(model_refs[route_index + 1])
+                if route_index + 1 < len(model_refs)
+                else None
+            )
+            action = WorkbenchRagEvalQuestionAttemptNextActionPolicy().decide_next_action(
+                WorkbenchRagEvalQuestionAttemptDecisionPolicy().decide(
+                    DecideWorkbenchRagEvalQuestionAttemptCommand(
+                        error_kind="invalid_contract",
+                        same_route_attempt_number=attempt_number,
+                        same_route_retry_limit=2,
+                        current_route_index=route_index,
+                        route_count=len(model_refs),
+                        input_tokens=0,
+                        next_route_input_limit=next_route.capacity_limits.input_token_limit
+                        if next_route is not None
+                        else None,
+                    )
+                )
+            )
             return LlmDispatchOutputValidationResult(
-                status=LlmDispatchExecutionStatus.TERMINAL_FAILED,
+                status=LlmDispatchExecutionStatus.TERMINAL_FAILED
+                if action.terminal
+                else LlmDispatchExecutionStatus.RETRYABLE_FAILED,
                 error_kind="workbench_rag_eval_question_generation_validation_failed",
                 next_attempt_at=None,
                 metadata={
                     "validated_question_count": 0,
                     "validation_error": str(exc),
+                    "retry_plan": action.retry_plan.value,
                 },
             )
         return LlmDispatchOutputValidationResult(

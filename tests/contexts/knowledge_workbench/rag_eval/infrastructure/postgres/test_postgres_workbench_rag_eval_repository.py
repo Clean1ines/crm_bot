@@ -7,6 +7,15 @@ from pathlib import Path
 
 import pytest
 
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalCurrentPhase,
+    WorkbenchRagEvalRunProgress,
+    WorkbenchRagEvalRunStatus,
+    WorkbenchRagEvalQuestionRole,
+    WorkbenchRagEvalRetrievalClassification,
+    WorkbenchRagEvalRetrievalOutcome,
+)
+
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL,
     WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL,
@@ -87,6 +96,7 @@ def _summary_row() -> Mapping[str, object]:
         "publication_id": "publication-1",
         "source_document_ref": "source-document-1",
         "status": "completed",
+        "current_phase": "completed",
         "question_generation_model": "model-1",
         "question_generation_prompt_version": "prompt-v1",
         "total_entries": 2,
@@ -100,6 +110,19 @@ def _summary_row() -> Mapping[str, object]:
         "started_at": _now(),
         "completed_at": _now(),
         "error_message": None,
+        "blocked_reason": None,
+        "failed_reason": None,
+        "updated_at": _now(),
+        "selected_entries": 2,
+        "scheduled_generation_items": 2,
+        "waiting_work_items": 0,
+        "running_work_items": 0,
+        "completed_work_items": 2,
+        "failed_work_items": 0,
+        "generated_question_sets": 2,
+        "capacity_next_due_at": None,
+        "capacity_model_ref": None,
+        "capacity_account_ref": None,
         "promotion_candidate_count": 2,
     }
 
@@ -130,6 +153,39 @@ def test_repository_reads_published_workbench_runtime_entries_not_legacy_tables(
 
 
 @pytest.mark.asyncio
+async def test_transition_run_progress_updates_state_and_progress_atomically() -> None:
+    connection = FakeConnection()
+    progress = WorkbenchRagEvalRunProgress(
+        selected_entries=4,
+        scheduled_generation_items=4,
+        waiting=2,
+        running=1,
+        completed=1,
+        generated_question_sets=1,
+    )
+
+    await PostgresWorkbenchRagEvalRepository(connection).transition_run_progress(
+        run_id="run-1",
+        project_id="11111111-1111-1111-1111-111111111111",
+        status=WorkbenchRagEvalRunStatus.WAITING_CAPACITY,
+        current_phase=WorkbenchRagEvalCurrentPhase.QUESTION_GENERATION,
+        progress=progress,
+        updated_at=_now(),
+        capacity_next_due_at=_now(),
+        capacity_model_ref="qwen/qwen3-32b",
+        capacity_account_ref="groq_org_primary",
+    )
+
+    assert len(connection.execute_calls) == 1
+    sql, args = connection.execute_calls[0]
+    assert "SET status = $3" in sql
+    assert "current_phase = $4" in sql
+    assert "scheduled_generation_items = $9" in sql
+    assert args[2:4] == ("waiting_capacity", "question_generation")
+    assert args[8:14] == (4, 2, 1, 1, 0, 1)
+
+
+@pytest.mark.asyncio
 async def test_get_run_summary_sql_casts_project_id_and_does_not_select_run_star() -> (
     None
 ):
@@ -148,6 +204,8 @@ async def test_get_run_summary_sql_casts_project_id_and_does_not_select_run_star
     assert summary is not None
     assert summary.project_id == "11111111-1111-1111-1111-111111111111"
     assert summary.promotion_candidate_count == 2
+    assert summary.current_phase.value == "completed"
+    assert summary.progress.scheduled_generation_items == 2
 
 
 @pytest.mark.asyncio
@@ -168,6 +226,8 @@ async def test_get_latest_run_summary_sql_casts_project_id_and_does_not_select_r
     assert summary is not None
     assert summary.project_id == "11111111-1111-1111-1111-111111111111"
     assert summary.promotion_candidate_count == 2
+    assert "run.current_phase" in sql
+    assert summary.updated_at == _now()
 
 
 def test_details_sql_reads_questions_results_and_candidates_without_legacy_tables() -> (
@@ -181,6 +241,55 @@ def test_details_sql_reads_questions_results_and_candidates_without_legacy_table
     assert "knowledge_workbench_rag_eval_questions" in combined
     assert "knowledge_workbench_rag_eval_retrieval_results" in combined
     assert "knowledge_workbench_rag_eval_promoted_questions" in combined
+
+
+@pytest.mark.asyncio
+async def test_repository_persists_roles_and_canonical_outcome() -> None:
+    connection = FakeConnection()
+    repository = PostgresWorkbenchRagEvalRepository(connection)
+    await repository.save_question_roles(
+        roles={"question-1": WorkbenchRagEvalQuestionRole.HOLDOUT}
+    )
+    outcome = WorkbenchRagEvalRetrievalOutcome(
+        outcome_id="outcome-1",
+        run_id="run-1",
+        question_id="question-1",
+        project_id="11111111-1111-1111-1111-111111111111",
+        evaluation_stage="initial",
+        expected_runtime_entry_id="entry-1",
+        expected_fact_id="fact-1",
+        expected_rank=2,
+        expected_score=0.8,
+        best_competitor_runtime_entry_id="entry-2",
+        best_competitor_fact_id="fact-2",
+        best_competitor_score=0.5,
+        score_margin=0.3,
+        classification=(WorkbenchRagEvalRetrievalClassification.PASS_WEAK),
+        created_at=_now(),
+    )
+    assert await repository.save_retrieval_outcomes(outcomes=(outcome,)) == (outcome,)
+    assert "promotion_eligible = CASE" in connection.execute_calls[0][0]
+    assert (
+        "knowledge_workbench_rag_eval_retrieval_outcomes"
+        in connection.execute_calls[1][0]
+    )
+
+
+def test_role_and_outcome_migrations_enforce_canonical_contract() -> None:
+    combined = (
+        WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL
+        + WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL
+    )
+    root = Path(__file__).parents[6]
+    roles = (
+        root / "migrations/121_add_workbench_rag_eval_question_roles.sql"
+    ).read_text()
+    outcomes = (
+        root / "migrations/122_create_workbench_rag_eval_retrieval_outcomes.sql"
+    ).read_text()
+    assert "holdout_not_promotion_eligible" in roles
+    assert "existing_alias_retrieval_failure" in outcomes
+    assert "score_margin" in outcomes
     assert (
         "question.project_id = $1::uuid"
         in WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL

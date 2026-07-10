@@ -15,6 +15,17 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_prep
     HandlePrepareWorkbenchRagEvalQuestionGenerationDispatchBatchCommandHandler,
     PrepareLlmDispatchBatchPort,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reconcile_workbench_rag_eval_question_generation_progress_command import (
+    HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand,
+    HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler,
+    QuestionGenerationPersistenceCoveragePort,
+)
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressReadRepositoryPort,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
+    WorkbenchRagEvalRepositoryPort,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
     WorkbenchRagEvalWorkflowCommandType,
     command_type_from_value,
@@ -78,6 +89,11 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
         capacity_observation_repository: (
             LlmAttemptCapacityObservationRepositoryPort | None
         ) = None,
+        work_item_progress_read_repository: WorkItemProgressReadRepositoryPort
+        | None = None,
+        question_coverage_repository: QuestionGenerationPersistenceCoveragePort
+        | None = None,
+        rag_eval_repository: WorkbenchRagEvalRepositoryPort | None = None,
     ) -> DispatchWorkbenchRagEvalWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = command_type_from_value(workflow_command.command_type)
@@ -98,9 +114,8 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
                     phase=operation.phase.value,
                     handler_name=None,
                     dispatched=False,
-                    blocked_reason=(RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED),
+                    blocked_reason=RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED,
                 )
-
             await HandlePrepareWorkbenchRagEvalQuestionGenerationDispatchBatchCommandHandler().execute(
                 HandlePrepareWorkbenchRagEvalQuestionGenerationDispatchBatchCommand(
                     workflow_command=workflow_command,
@@ -114,6 +129,43 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
                 operation_key=operation.operation_key,
                 phase=operation.phase.value,
                 handler_name=handler_name,
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is WorkbenchRagEvalWorkflowCommandType.RECONCILE_QUESTION_GENERATION_PROGRESS
+        ):
+            if (
+                work_item_progress_read_repository is None
+                or question_coverage_repository is None
+                or rag_eval_repository is None
+            ):
+                return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler().execute(
+                HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand(
+                    workflow_command
+                ),
+                work_item_progress_read_repository=work_item_progress_read_repository,
+                question_coverage_repository=question_coverage_repository,
+                workflow_unit_of_work=workflow_unit_of_work,
+                rag_eval_repository=rag_eval_repository,
+            )
+            return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name="HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler",
                 dispatched=True,
                 blocked_reason=None,
             )

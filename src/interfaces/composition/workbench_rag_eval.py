@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from types import TracebackType
 from typing import Protocol, cast
 
@@ -21,6 +22,9 @@ from src.contexts.embedding_runtime.infrastructure.composition.embedding_generat
 from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_question_runtime_embedding_text_builder import (
     PromotedQuestionRuntimeEmbeddingTextBuilder,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalSummary,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotions_batch import (
     ApplyWorkbenchRagEvalPromotionsBatch,
 )
@@ -36,6 +40,15 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
 )
+from src.interfaces.composition.workbench_rag_eval_workflow_runtime import (
+    WorkbenchRagEvalWorkflowRuntimeComposition,
+    make_workbench_rag_eval_workflow_runtime,
+)
+
+__all__ = [
+    "WorkbenchRagEvalWorkflowRuntimeComposition",
+    "make_workbench_rag_eval_workflow_runtime",
+]
 
 
 class AsyncTransaction(Protocol):
@@ -63,7 +76,15 @@ class AsyncPool(Protocol):
 class StartWorkbenchRagEvalV2Composition:
     pool: AsyncPool
 
-    async def execute(self, **kwargs: object):
+    async def execute(
+        self,
+        *,
+        project_id: str,
+        publication_id: str | None,
+        source_document_ref: str | None,
+        max_entries: int,
+        now: datetime,
+    ) -> WorkbenchRagEvalSummary:
         connection = await self.pool.acquire()
         try:
             async with connection.transaction():
@@ -81,7 +102,13 @@ class StartWorkbenchRagEvalV2Composition:
                     question_generator=(
                         WorkbenchRagEvalQuestionGenerator.from_prompt_file()
                     ),
-                ).execute(**kwargs)
+                ).execute(
+                    project_id=project_id,
+                    publication_id=publication_id,
+                    source_document_ref=source_document_ref,
+                    max_entries=max_entries,
+                    now=now,
+                )
         finally:
             await self.pool.release(connection)
 
