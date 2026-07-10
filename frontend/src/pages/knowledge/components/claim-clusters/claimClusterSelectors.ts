@@ -200,9 +200,10 @@ export const selectClaimClustersView = (
     .map((attempt, index) => {
       const key = attempt.node_run_id || `draft-compaction-attempt-${index}`;
       const sectionId = attempt.section_id ?? null;
-      const matchingBatch = clusters
+      const matching = clusters
         .flatMap((cluster) =>
           (cluster.batches ?? []).map((batch) => ({
+            cluster,
             batch,
             clusterBatchCount: cluster.batches?.length ?? 0,
           })),
@@ -223,7 +224,23 @@ export const selectClaimClustersView = (
             key.includes(batch.work_item_id) ||
             key.includes(batch.batch_ref)
           );
-        })?.batch;
+        });
+      const matchingBatch = matching?.batch;
+      const compactedNodeRefs = new Set(matchingBatch?.compacted_node_refs ?? []);
+      const sourceClaimRefs = new Set(matchingBatch?.source_claim_refs ?? []);
+      const artifacts: FinalCompactedFact[] = matching
+        ? (matching.cluster.compacted_claims ?? [])
+            .filter(
+              (claim) =>
+                claim.active &&
+                (compactedNodeRefs.has(claim.node_ref) ||
+                  claim.source_claim_refs.some((ref) => sourceClaimRefs.has(ref))),
+            )
+            .map((claim) => ({
+              ...claim,
+              cluster_ref: matching.cluster.cluster_ref,
+            }))
+        : [];
 
       return {
         key,
@@ -241,6 +258,7 @@ export const selectClaimClustersView = (
         startedAt: attempt.started_at ?? null,
         completedAt: attempt.completed_at ?? null,
         errorMessage: compactionAttemptErrorMessage(attempt),
+        artifacts,
       };
     })
     .sort((left, right) => {

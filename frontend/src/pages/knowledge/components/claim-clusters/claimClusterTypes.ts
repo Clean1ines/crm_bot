@@ -34,6 +34,7 @@ export type ClaimClusterCompactionAttemptView = {
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;
+  artifacts: FinalCompactedFact[];
 };
 
 export type ClaimClusterCompactionView = {

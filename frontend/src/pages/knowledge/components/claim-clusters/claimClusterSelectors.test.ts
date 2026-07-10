@@ -81,7 +81,26 @@ describe('selectClaimClustersView', () => {
             members: [],
             claims: [],
             comparisons: [],
-            compacted_claims: [],
+            compacted_claims: [
+              {
+                node_ref: 'node-2',
+                claim: 'Axole помогает подготовить базу знаний.',
+                source_claim_refs: ['claim-1'],
+                active: true,
+                compacted_payload: {
+                  claim: 'Axole помогает подготовить базу знаний.',
+                  possible_questions: ['Как подготовить знания?'],
+                  exclusion_scope: 'Не описывает цены.',
+                  triples: [
+                    {
+                      subject: 'Axole',
+                      predicate: 'помогает',
+                      object: 'подготовить базу знаний',
+                    },
+                  ],
+                },
+              },
+            ],
           },
         ],
         llm_attempts: [
@@ -162,7 +181,26 @@ describe('selectClaimClustersView', () => {
             members: [],
             claims: [],
             comparisons: [],
-            compacted_claims: [],
+            compacted_claims: [
+              {
+                node_ref: 'node-2',
+                claim: 'Axole помогает подготовить базу знаний.',
+                source_claim_refs: ['claim-1'],
+                active: true,
+                compacted_payload: {
+                  claim: 'Axole помогает подготовить базу знаний.',
+                  possible_questions: ['Как подготовить знания?'],
+                  exclusion_scope: 'Не описывает цены.',
+                  triples: [
+                    {
+                      subject: 'Axole',
+                      predicate: 'помогает',
+                      object: 'подготовить базу знаний',
+                    },
+                  ],
+                },
+              },
+            ],
           },
         ],
         llm_attempts: [
@@ -218,6 +256,12 @@ describe('selectClaimClustersView', () => {
       'work-1',
     ]);
     expect(view.compaction.tokens).toBe(7600);
+    expect(view.compaction.attempts[1].artifacts).toHaveLength(1);
+    expect(view.compaction.attempts[1].artifacts[0]).toMatchObject({
+      node_ref: 'node-2',
+      claim: 'Axole помогает подготовить базу знаний.',
+      cluster_ref: 'cluster-1',
+    });
   });
 
   it('does not attach a group-scoped compaction attempt to every batch in a multi-batch cluster', () => {

@@ -37,11 +37,6 @@ const formatNumber = (value: number): string =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const recordText = (value: Record<string, unknown>, key: string): string | null => {
-  const field = value[key];
-  return typeof field === 'string' && field.trim() ? field.trim() : null;
-};
-
 const humanText = (value: string | null | undefined): string => {
   const normalized = (value || '').trim().toLowerCase();
   const labels: Record<string, string> = {
@@ -545,75 +540,6 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                   />
                 </label>
 
-                <label className="block text-xs text-[var(--text-muted)]">
-	                  Подтверждение из документа
-                  <textarea
-                    value={draft.evidenceBlock}
-                    onChange={(event) =>
-                      setDraft((current) =>
-                        current
-                          ? { ...current, evidenceBlock: event.target.value }
-                          : current,
-                      )
-                    }
-                    rows={4}
-                    className="mt-1 w-full resize-y rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
-                  />
-                </label>
-
-	                <details className="rounded-xl bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-secondary)]">
-	                  <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
-	                    Откуда взялось это знание
-	                  </summary>
-	                  <div className="mt-3 space-y-3">
-	                    <div>
-                      <div className="font-semibold text-[var(--text-primary)]">
-                        Исходные утверждения
-                      </div>
-                      <div className="mt-2 space-y-2">
-                        {(selectedItem.provenance?.raw_claims ?? []).map((rawClaim) => (
-                          <div
-                            key={rawClaim.raw_claim_ref}
-                            className="rounded-lg bg-[var(--control-bg)] p-2"
-                          >
-                            <div className="font-medium text-[var(--text-primary)]">
-                              {rawClaim.claim}
-                            </div>
-                            <div className="mt-1 text-[var(--text-muted)]">
-                              {rawClaim.evidence_block}
-                            </div>
-                          </div>
-                        ))}
-                        {(selectedItem.provenance?.raw_claims ?? []).length === 0 && (
-                          <div className="text-[var(--text-muted)]">—</div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="font-semibold text-[var(--text-primary)]">
-	                        Фрагменты документа
-                      </div>
-                      <div className="mt-2 space-y-2">
-                        {(selectedItem.provenance?.source_units ?? []).map(
-                          (sourceUnit, index) => (
-                            <div
-                              key={`${recordText(sourceUnit, 'source_unit_ref') ?? index}`}
-                              className="rounded-lg bg-[var(--control-bg)] p-2"
-                            >
-	                              <div className="mt-1 text-[var(--text-muted)]">
-                                {recordText(sourceUnit, 'source_unit_text') ?? '—'}
-                              </div>
-                            </div>
-                          ),
-                        )}
-                        {(selectedItem.provenance?.source_units ?? []).length === 0 && (
-                          <div className="text-[var(--text-muted)]">—</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </details>
               </div>
             )}
           </div>
