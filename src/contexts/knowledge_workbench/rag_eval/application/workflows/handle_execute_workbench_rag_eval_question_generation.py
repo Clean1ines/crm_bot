@@ -46,7 +46,7 @@ class WorkbenchRagEvalQuestionGenerationOutputValidator:
         finished_at: datetime,
         attempt_number: int,
     ) -> LlmDispatchOutputValidationResult:
-        del dispatch_payload, finished_at, attempt_number
+        del finished_at, attempt_number
         if llm_status is not LlmDispatchExecutionStatus.SUCCEEDED:
             return LlmDispatchOutputValidationResult(
                 status=llm_status,
@@ -56,11 +56,16 @@ class WorkbenchRagEvalQuestionGenerationOutputValidator:
             )
         try:
             raw_text = _raw_output_text(output_payload)
+            schedule_payload = _mapping(dispatch_payload, "schedule_payload")
             questions = self.question_generator.parse_questions_from_raw_text(
                 raw_text=raw_text,
                 generation_model="validation/model",
                 generation_account_ref="validation-account",
                 generation_slot_index=0,
+                existing_possible_questions=_string_tuple(
+                    schedule_payload,
+                    "possible_questions",
+                ),
             )
         except Exception as exc:
             return LlmDispatchOutputValidationResult(
@@ -159,6 +164,10 @@ def _questions_from_execution_result(
         generation_model=model_ref,
         generation_account_ref=account_ref,
         generation_slot_index=slot_index,
+        existing_possible_questions=_string_tuple(
+            schedule_payload,
+            "possible_questions",
+        ),
     )
     return tuple(
         WorkbenchRagEvalQuestion(
@@ -209,6 +218,21 @@ def _int(payload: Mapping[str, object], key: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{key} must be int")
     return value
+
+
+def _string_tuple(
+    payload: Mapping[str, object],
+    key: str,
+) -> tuple[str, ...]:
+    value = payload.get(key)
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{key} must be list or tuple")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{key} must contain non-empty strings")
+        result.append(item.strip())
+    return tuple(result)
 
 
 def _stable_id(*parts: str) -> str:

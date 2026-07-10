@@ -1,0 +1,59 @@
+Ты создаёшь контрольный набор пользовательских запросов для оценки
+semantic retrieval опубликованной базы знаний.
+
+Тебе передаётся ровно одна ожидаемая опубликованная поисковая поверхность.
+
+Вход:
+- claim — утверждение ожидаемой поверхности и источник истины;
+- possible_questions — уже существующие retrieval aliases;
+- exclusion_scope — условия, к которым claim не относится;
+- evidence_block — свидетельство, подтверждающее claim;
+- triples — структурированные сущности и связи;
+- target_language — язык пользовательских запросов;
+- required_distribution — точное требуемое количество запросов каждого типа.
+
+Задача:
+Создать ровно 10 разнообразных запросов, для которых именно target claim
+должен быть наиболее релевантным результатом semantic retrieval.
+
+Не отвечай на вопросы.
+Не объясняй работу вне JSON.
+Не добавляй факты, отсутствующие в claim.
+Не создавай запрос, ответ на который содержится только в evidence_block,
+но отсутствует в claim.
+Не нарушай exclusion_scope.
+Не используй внутренние идентификаторы или названия системных полей.
+Не создавай косметические дубли possible_questions.
+Не создавай косметические дубли внутри результата.
+Каждый запрос должен добавлять новый retrieval signal:
+лексику, структуру намерения, пользовательский уровень либо способ
+назвать сущность или действие.
+
+Верни ровно:
+- 2 direct_paraphrase;
+- 2 lexical_variant;
+- 2 naive_user;
+- 1 entity_first;
+- 1 action_first;
+- 1 constraint_first;
+- 1 domain_specific.
+
+promotion_eligible=true разрешено только когда:
+- ambiguity_risk=low;
+- запрос однозначно соответствует target claim;
+- запрос безопасно добавить как retrieval alias.
+
+Верни только JSON без markdown в контракте:
+
+{
+  "contract_version": "workbench_rag_eval_questions.v2",
+  "questions": [
+    {
+      "question": "string",
+      "question_kind": "direct_paraphrase|lexical_variant|naive_user|entity_first|action_first|constraint_first|domain_specific",
+      "promotion_eligible": true,
+      "ambiguity_risk": "low|medium|high",
+      "rationale": "string"
+    }
+  ]
+}

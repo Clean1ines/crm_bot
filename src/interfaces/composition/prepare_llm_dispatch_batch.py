@@ -50,6 +50,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_l
 from src.contexts.knowledge_workbench.application.sagas.claim_builder_dispatch_preparation import (
     ClaimBuilderDispatchPreparationBuilder,
 )
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    CLAIM_BUILDER_SECTION_WORK_KIND,
+)
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     LlmCapacityAllocationSlot,
     LlmCapacityProjectionResult,
@@ -138,19 +141,44 @@ class DispatchPreparationBuilder(Protocol):
     ) -> tuple[LlmProviderAccountCapacity, ...]: ...
 
 
+class DispatchPreparationBuilderConfigurationError(RuntimeError):
+    """Raised when an LLM work kind has no explicit preparation builder."""
+
+
 @dataclass(frozen=True, slots=True)
 class DispatchPreparationBuilderRegistry:
-    default_builder: DispatchPreparationBuilder = field(
+    claim_builder_builder: DispatchPreparationBuilder = field(
         default_factory=ClaimBuilderDispatchPreparationBuilder,
     )
     builders_by_work_kind: Mapping[WorkKind, DispatchPreparationBuilder] = field(
         default_factory=dict,
     )
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.builders_by_work_kind, Mapping):
+            raise TypeError("builders_by_work_kind must be Mapping")
+        for work_kind, builder in self.builders_by_work_kind.items():
+            if not isinstance(work_kind, WorkKind):
+                raise TypeError("builders_by_work_kind keys must be WorkKind")
+            if builder is None:
+                raise TypeError(
+                    "builders_by_work_kind values must be dispatch preparation builders"
+                )
+
     def builder_for(self, work_kind: WorkKind) -> DispatchPreparationBuilder:
         if not isinstance(work_kind, WorkKind):
             raise TypeError("work_kind must be WorkKind")
-        return self.builders_by_work_kind.get(work_kind, self.default_builder)
+
+        if work_kind == CLAIM_BUILDER_SECTION_WORK_KIND:
+            return self.claim_builder_builder
+
+        builder = self.builders_by_work_kind.get(work_kind)
+        if builder is None:
+            raise DispatchPreparationBuilderConfigurationError(
+                "No dispatch preparation builder registered for LLM work kind: "
+                f"{work_kind.value}"
+            )
+        return builder
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,9 +384,18 @@ class PrepareLlmDispatchBatch:
                     dispatch_preparation_strategy=dispatch_preparation_strategy,
                     retry_plan=command.retry_plan,
                 )
+                dispatch_preparation_builder = (
+                    self.dispatch_preparation_builder_registry.builder_for(
+                        command.work_kind,
+                    )
+                )
+                phase_route_catalog = _route_catalog_for_builder(
+                    builder=dispatch_preparation_builder,
+                    default_catalog=self.route_catalog,
+                )
                 initial_model_ref = command.active_model_ref
                 if initial_model_ref is None:
-                    initial_model_ref = self.route_catalog.primary_model_ref()
+                    initial_model_ref = phase_route_catalog.primary_model_ref()
 
                 if not admission_due_records:
                     LOGGER.info(
@@ -373,11 +410,6 @@ class PrepareLlmDispatchBatch:
                         active_model_ref=initial_model_ref,
                     )
 
-                dispatch_preparation_builder = (
-                    self.dispatch_preparation_builder_registry.builder_for(
-                        command.work_kind,
-                    )
-                )
                 preparation_profile = _preparation_profile(
                     command=command,
                     due_records=admission_due_records,
@@ -387,7 +419,7 @@ class PrepareLlmDispatchBatch:
                 strategy_result = ResolveLlmDispatchPreparationStrategy().execute(
                     ResolveLlmDispatchPreparationStrategyCommand(
                         current_active_model_ref=initial_model_ref,
-                        route_catalog=self.route_catalog,
+                        route_catalog=phase_route_catalog,
                         retry_plan=command.retry_plan,
                         strategy=dispatch_preparation_strategy,
                     )
@@ -396,7 +428,7 @@ class PrepareLlmDispatchBatch:
                     ResolveLlmDispatchInputSizePreflightCommand(
                         active_model_ref=strategy_result.active_model_ref,
                         profile=preparation_profile,
-                        route_catalog=self.route_catalog,
+                        route_catalog=phase_route_catalog,
                         allow_automatic_fallbacks=command.allow_automatic_fallbacks,
                     )
                 )
@@ -425,7 +457,7 @@ class PrepareLlmDispatchBatch:
                 use_local_active_model_tpm_budget = (
                     command.use_local_active_model_tpm_budget
                     or resolved_active_model_ref
-                    == self.route_catalog.primary_model_ref()
+                    == phase_route_catalog.primary_model_ref()
                 )
                 if (
                     preflight_result.decision
@@ -1146,6 +1178,23 @@ async def _source_split_required_result(
         affected_work_item_refs=affected_work_item_refs,
         source_unit_refs=source_unit_refs,
     )
+
+
+def _route_catalog_for_builder(
+    *,
+    builder: DispatchPreparationBuilder,
+    default_catalog: LlmModelRouteCatalog,
+) -> LlmModelRouteCatalog:
+    route_catalog_factory = getattr(builder, "route_catalog", None)
+    if route_catalog_factory is None:
+        return default_catalog
+    if not callable(route_catalog_factory):
+        raise TypeError("builder.route_catalog must be callable")
+
+    route_catalog = route_catalog_factory(default_catalog=default_catalog)
+    if not isinstance(route_catalog, LlmModelRouteCatalog):
+        raise TypeError("builder.route_catalog must return LlmModelRouteCatalog")
+    return route_catalog
 
 
 def _preparation_profile(

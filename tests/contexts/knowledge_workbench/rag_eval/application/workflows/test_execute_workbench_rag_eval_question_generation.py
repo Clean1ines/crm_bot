@@ -40,15 +40,31 @@ def _now() -> datetime:
 
 
 def _raw_questions() -> str:
+    kinds = (
+        "direct_paraphrase",
+        "direct_paraphrase",
+        "lexical_variant",
+        "lexical_variant",
+        "naive_user",
+        "naive_user",
+        "entity_first",
+        "action_first",
+        "constraint_first",
+        "domain_specific",
+    )
     return json.dumps(
         {
+            "contract_version": "workbench_rag_eval_questions.v2",
             "questions": [
                 {
-                    "question": f"Как спросить про факт {index}?",
-                    "question_kind": "paraphrase",
+                    "question": f"Как спросить про факт уникальным способом {index}?",
+                    "question_kind": kind,
+                    "promotion_eligible": index % 2 == 0,
+                    "ambiguity_risk": "low" if index % 2 == 0 else "medium",
+                    "rationale": f"Добавляет retrieval signal номер {index}",
                 }
-                for index in range(10)
-            ]
+                for index, kind in enumerate(kinds)
+            ],
         },
         ensure_ascii=False,
     )
@@ -77,7 +93,10 @@ class FakeExecutePreparedDispatch:
                     "project_id": "project-1",
                     "runtime_entry_id": "runtime-entry-1",
                     "expected_fact_id": "fact-1",
-                    "prompt_version": "prompt-v1",
+                    "possible_questions": [
+                        "Как сформулирован уже опубликованный alias?"
+                    ],
+                    "prompt_version": ("workbench_rag_eval_question_variants.ru.v2"),
                 },
                 "llm_allocation": {
                     "provider": "groq",

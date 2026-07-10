@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from src.contexts.execution_runtime.application.ports.work_item_lease_repository_port import (
     DueWorkItemRecord,
 )
+from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
+    LlmModelRouteCatalog,
+)
 from src.contexts.llm_runtime.domain.capacity.llm_provider_account_capacity import (
     LlmProviderAccountCapacity,
 )
@@ -68,6 +71,15 @@ class ClaimBuilderDispatchPreparation:
 
 @dataclass(frozen=True, slots=True)
 class ClaimBuilderDispatchPreparationBuilder:
+    def route_catalog(
+        self,
+        *,
+        default_catalog: LlmModelRouteCatalog,
+    ) -> LlmModelRouteCatalog:
+        if not isinstance(default_catalog, LlmModelRouteCatalog):
+            raise TypeError("default_catalog must be LlmModelRouteCatalog")
+        return default_catalog
+
     def build_from_due_work_items(
         self,
         *,

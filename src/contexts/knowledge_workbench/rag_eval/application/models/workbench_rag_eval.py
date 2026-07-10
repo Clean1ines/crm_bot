@@ -16,11 +16,25 @@ class WorkbenchRagEvalRunStatus(StrEnum):
 
 
 class WorkbenchRagEvalQuestionKind(StrEnum):
+    DIRECT_PARAPHRASE = "direct_paraphrase"
+    LEXICAL_VARIANT = "lexical_variant"
+    NAIVE_USER = "naive_user"
+    ENTITY_FIRST = "entity_first"
+    ACTION_FIRST = "action_first"
+    CONSTRAINT_FIRST = "constraint_first"
+    DOMAIN_SPECIFIC = "domain_specific"
+    EXISTING_POSSIBLE_QUESTION = "existing_possible_question"
+
+    # Persisted V1 compatibility only. Strict V2 generation rejects these values.
     PARAPHRASE = "paraphrase"
     SYNONYM = "synonym"
     NAIVE_USER_QUESTION = "naive_user_question"
-    DOMAIN_SPECIFIC = "domain_specific"
-    EXISTING_POSSIBLE_QUESTION = "existing_possible_question"
+
+
+class WorkbenchRagEvalQuestionAmbiguityRisk(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 class WorkbenchRagEvalQuestionStatus(StrEnum):
@@ -48,6 +62,10 @@ class GeneratedWorkbenchRagEvalQuestion:
     source: WorkbenchRagEvalQuestionSource
     generation_model: str | None
     prompt_version: str | None
+    contract_version: str
+    promotion_eligible: bool
+    ambiguity_risk: WorkbenchRagEvalQuestionAmbiguityRisk
+    generation_rationale: str
     generation_account_ref: str | None = None
     generation_slot_index: int | None = None
 
@@ -57,6 +75,20 @@ class GeneratedWorkbenchRagEvalQuestion:
         _require_enum(self.source, WorkbenchRagEvalQuestionSource, "source")
         _require_optional_text(self.generation_model, "generation_model")
         _require_optional_text(self.prompt_version, "prompt_version")
+        _require_text(self.contract_version, "contract_version")
+        if not isinstance(self.promotion_eligible, bool):
+            raise TypeError("promotion_eligible must be bool")
+        _require_enum(
+            self.ambiguity_risk,
+            WorkbenchRagEvalQuestionAmbiguityRisk,
+            "ambiguity_risk",
+        )
+        _require_text(self.generation_rationale, "generation_rationale")
+        if (
+            self.promotion_eligible
+            and self.ambiguity_risk is not WorkbenchRagEvalQuestionAmbiguityRisk.LOW
+        ):
+            raise ValueError("promotion_eligible requires ambiguity_risk=low")
         _require_optional_text(self.generation_account_ref, "generation_account_ref")
         _require_optional_non_negative_int(
             self.generation_slot_index, "generation_slot_index"

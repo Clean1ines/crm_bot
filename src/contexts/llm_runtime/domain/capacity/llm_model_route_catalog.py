@@ -82,6 +82,7 @@ class LlmModelRoute:
 @dataclass(frozen=True, slots=True)
 class LlmModelRouteCatalog:
     routes: tuple[LlmModelRoute, ...]
+    require_degraded_user_choice: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.routes, tuple):
@@ -104,11 +105,18 @@ class LlmModelRouteCatalog:
         if len(primary_routes) != 1:
             raise ValueError("routes must contain exactly one PRIMARY")
 
+        if not isinstance(self.require_degraded_user_choice, bool):
+            raise TypeError("require_degraded_user_choice must be bool")
+
         degraded_routes = self._routes_with_role(
             LlmModelRouteRole.DEGRADED_USER_CHOICE,
         )
-        if len(degraded_routes) != 1:
+        if self.require_degraded_user_choice and len(degraded_routes) != 1:
             raise ValueError("routes must contain exactly one DEGRADED_USER_CHOICE")
+        if not self.require_degraded_user_choice and degraded_routes:
+            raise ValueError(
+                "phase-specific route catalog must not contain DEGRADED_USER_CHOICE"
+            )
 
     def primary_model_ref(self) -> str:
         return self._ordered_routes_with_role(LlmModelRouteRole.PRIMARY)[0].model_ref
@@ -157,9 +165,12 @@ class LlmModelRouteCatalog:
         )
 
     def degraded_user_choice_model_ref(self) -> str:
-        return self._ordered_routes_with_role(
+        routes = self._ordered_routes_with_role(
             LlmModelRouteRole.DEGRADED_USER_CHOICE,
-        )[0].model_ref
+        )
+        if not routes:
+            raise ValueError("route catalog has no DEGRADED_USER_CHOICE route")
+        return routes[0].model_ref
 
     def route_for_model_ref(self, model_ref: str) -> LlmModelRoute | None:
         _require_non_empty_text(model_ref, field_name="model_ref")
