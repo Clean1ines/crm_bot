@@ -192,7 +192,7 @@ def test_projects_item_owned_retryable_failed_to_versioned_envelope() -> None:
     assert projected.payload["actual_total_tokens"] == 15
 
 
-def test_capacity_owned_minute_limit_retryable_failed_is_not_projected() -> None:
+def test_capacity_owned_minute_limit_retryable_failed_is_projected() -> None:
     projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
         _event(
             event_type=(
@@ -202,10 +202,17 @@ def test_capacity_owned_minute_limit_retryable_failed_is_not_projected() -> None
         )
     )
 
-    assert projected is None
+    assert projected is not None
+    assert projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    assert projected.payload["dispatch_attempt_id"] == "work-1:attempt:1"
+    assert projected.payload["work_item_state"] == "retryable_failed"
+    assert projected.payload["dispatch_attempt_state"] == "retryable_failed"
+    assert projected.payload["claim_builder_attempt_next_action_kind"] == (
+        "DEFER_UNTIL_CAPACITY_RESET"
+    )
 
 
-def test_capacity_owned_daily_reset_retryable_failed_is_not_projected() -> None:
+def test_capacity_owned_daily_reset_retryable_failed_is_projected() -> None:
     projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
         _event(
             event_type=(
@@ -222,7 +229,14 @@ def test_capacity_owned_daily_reset_retryable_failed_is_not_projected() -> None:
         )
     )
 
-    assert projected is None
+    assert projected is not None
+    assert projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    assert projected.payload["dispatch_attempt_id"] == "work-1:attempt:1"
+    assert projected.payload["work_item_state"] == "retryable_failed"
+    assert projected.payload["dispatch_attempt_state"] == "retryable_failed"
+    assert projected.payload["claim_builder_attempt_next_action_kind"] == (
+        "PAUSE_FOR_DAILY_LIMIT_RESET"
+    )
 
 
 def test_projects_terminal_failed_to_versioned_envelope() -> None:
@@ -324,7 +338,7 @@ def test_item_owned_retryable_projection_excludes_capacity_timer_fields() -> Non
         assert forbidden_key not in projected.payload
 
 
-def test_capacity_wait_belongs_to_capacity_window_not_item_projection() -> None:
+def test_capacity_wait_projects_item_outcome_without_capacity_timer_fields() -> None:
     projected = ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector().project(
         _event(
             event_type=(
@@ -334,4 +348,16 @@ def test_capacity_wait_belongs_to_capacity_window_not_item_projection() -> None:
         )
     )
 
-    assert projected is None
+    assert projected is not None
+    assert projected.projection_type == "workflow_claim_builder_section_retryable_failed"
+    assert projected.payload["dispatch_attempt_id"] == "work-1:attempt:1"
+    assert projected.payload["work_item_state"] == "retryable_failed"
+    for forbidden_key in (
+        "next_attempt_at",
+        "claim_builder_next_run_after",
+        "minute_reset_at",
+        "daily_reset_at",
+        "remaining_minute_requests",
+        "remaining_minute_tokens",
+    ):
+        assert forbidden_key not in projected.payload

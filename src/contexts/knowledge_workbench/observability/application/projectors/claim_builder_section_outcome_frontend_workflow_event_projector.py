@@ -39,13 +39,6 @@ class ClaimBuilderSectionOutcomeFrontendWorkflowEventProjector:
             raise ValueError(
                 "event sequence_number is required for frontend projection"
             )
-        if (
-            event.event_type
-            == KnowledgeExtractionCanonicalEventType.CLAIM_BUILDER_SECTION_EXTRACTION_RETRYABLE_FAILED.value
-            and _is_capacity_owned_retryable_failure(event.payload)
-        ):
-            return None
-
         workflow_run_id = _payload_text(event.payload, "workflow_run_id")
         project_id, document_id = _document_scope_from_workflow_run_id(workflow_run_id)
         operation_key = _payload_text(event.payload, "operation_key")
@@ -251,22 +244,6 @@ def _failure_reason_category(payload: Mapping[str, object]) -> str:
     if error_kind is not None and "persist" in error_kind:
         return "persistence"
     return "workflow_policy"
-
-
-_CAPACITY_OWNED_RETRY_ACTION_KINDS = frozenset(
-    {
-        "DEFER_UNTIL_CAPACITY_RESET",
-        "PAUSE_FOR_DAILY_LIMIT_RESET",
-    }
-)
-
-
-def _is_capacity_owned_retryable_failure(payload: Mapping[str, object]) -> bool:
-    action_kind = _optional_payload_text(
-        payload,
-        "claim_builder_attempt_next_action_kind",
-    )
-    return action_kind in _CAPACITY_OWNED_RETRY_ACTION_KINDS
 
 
 def _document_scope_from_workflow_run_id(workflow_run_id: str) -> tuple[str, str]:

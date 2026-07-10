@@ -51,8 +51,9 @@ const batchAttempts = (
       attempt.workItemId === batch.work_item_id ||
       attempt.batchRef === batch.batch_ref ||
       attempt.workItemId === batch.batch_ref ||
-      attempt.groupRef === batch.group_ref ||
-      (clusterBatchCount === 1 && attempt.workItemId === batch.group_ref),
+      (clusterBatchCount === 1 &&
+        (attempt.groupRef === batch.group_ref ||
+          attempt.workItemId === batch.group_ref)),
   );
 
 const batchTitle = (

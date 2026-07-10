@@ -201,17 +201,29 @@ export const selectClaimClustersView = (
       const key = attempt.node_run_id || `draft-compaction-attempt-${index}`;
       const sectionId = attempt.section_id ?? null;
       const matchingBatch = clusters
-        .flatMap((cluster) => cluster.batches ?? [])
-        .find((batch) =>
-          Boolean(
+        .flatMap((cluster) =>
+          (cluster.batches ?? []).map((batch) => ({
+            batch,
+            clusterBatchCount: cluster.batches?.length ?? 0,
+          })),
+        )
+        .find(({ batch, clusterBatchCount }) => {
+          const matchesExactScope = Boolean(
             sectionId &&
-              (batch.work_item_id === sectionId ||
-                batch.batch_ref === sectionId ||
-                batch.group_ref === sectionId),
-          ) ||
-          key.includes(batch.work_item_id) ||
-          key.includes(batch.batch_ref),
-        );
+              (batch.work_item_id === sectionId || batch.batch_ref === sectionId),
+          );
+          const matchesSingleBatchGroupScope = Boolean(
+            sectionId &&
+              clusterBatchCount === 1 &&
+              batch.group_ref === sectionId,
+          );
+          return (
+            matchesExactScope ||
+            matchesSingleBatchGroupScope ||
+            key.includes(batch.work_item_id) ||
+            key.includes(batch.batch_ref)
+          );
+        })?.batch;
 
       return {
         key,

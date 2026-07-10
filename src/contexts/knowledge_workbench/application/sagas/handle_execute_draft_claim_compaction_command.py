@@ -289,7 +289,11 @@ class HandleExecuteDraftClaimCompactionCommandHandler:
             execution_result=execution_result,
             capacity_observation=capacity_observation,
         )
-        await workflow_unit_of_work.outbox.append_event(outcome_event)
+        persisted_outcome_event = await workflow_unit_of_work.outbox.append_event(
+            outcome_event
+        )
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(persisted_outcome_event)
         appended_event_count += 1
 
         next_command = _next_command(

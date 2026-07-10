@@ -774,9 +774,7 @@ async def test_projects_claim_builder_section_retryable_failed_event_once() -> N
 
 
 @pytest.mark.asyncio
-async def test_capacity_owned_minute_limit_does_not_project_item_retryable_failed() -> (
-    None
-):
+async def test_capacity_owned_minute_limit_projects_item_retryable_failed() -> None:
     execution_result = ExecutePreparedLlmDispatchAttemptResult(
         dispatch=_dispatch(),
         llm_result=LlmDispatchExecutionResult(
@@ -820,7 +818,13 @@ async def test_capacity_owned_minute_limit_does_not_project_item_retryable_faile
         for event in repository.events.values()
         if event.projection_type == "workflow_capacity_window_observed"
     ]
-    assert len(retryable) == 0
+    assert len(retryable) == 1
+    assert retryable[0].payload["dispatch_attempt_id"] == _attempt_id()
+    assert retryable[0].payload["work_item_state"] == "retryable_failed"
+    assert retryable[0].payload["dispatch_attempt_state"] == "retryable_failed"
+    assert retryable[0].payload["claim_builder_attempt_next_action_kind"] == (
+        ClaimBuilderAttemptNextActionKind.DEFER_UNTIL_CAPACITY_RESET.value
+    )
     assert len(capacity) == 1
 
 

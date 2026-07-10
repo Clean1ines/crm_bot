@@ -33,6 +33,9 @@ from src.contexts.knowledge_workbench.observability.application.models.frontend_
 from src.contexts.knowledge_workbench.observability.application.projectors.llm_provider_capacity_observed_frontend_workflow_event_projector import (
     LlmProviderCapacityObservedFrontendWorkflowEventProjector,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.knowledge_extraction_frontend_workflow_event_projector import (
+    KnowledgeExtractionFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
     ProjectFrontendWorkflowEvent,
 )
@@ -536,6 +539,59 @@ async def test_projects_llm_provider_capacity_observed_event_once() -> None:
     assert projected.payload["window_key"] == (
         "groq:groq_org_primary:openai/gpt-oss-120b"
     )
+
+
+@pytest.mark.asyncio
+async def test_projects_compaction_attempt_outcome_to_frontend_events() -> None:
+    validator = DraftClaimCompactionLlmDispatchOutputValidator(
+        expected_output_kind=DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS,
+        output_validator=DraftClaimCompactionOutputValidator(),
+        source_claim_refs=("claim-a", "claim-b"),
+    )
+    validation = validator.validate(
+        dispatch_payload=_dispatch_payload(),
+        output_payload={"raw_text": _valid_compacted_raw_text()},
+        llm_status=LlmDispatchExecutionStatus.SUCCEEDED,
+        finished_at=_now(),
+        attempt_number=1,
+    )
+    repository = InMemoryFrontendWorkflowEventRepository()
+    projection_writer = ProjectFrontendWorkflowEvent(
+        projector=KnowledgeExtractionFrontendWorkflowEventProjector(),
+        repository=repository,
+    )
+    workflow_uow = FakeWorkflowUnitOfWork()
+
+    await HandleExecuteDraftClaimCompactionCommandHandler().execute(
+        HandleExecuteDraftClaimCompactionCommand(workflow_command=_command()),
+        execute_prepared_llm_dispatch_attempt=FakeExecutePreparedDispatchAttempt(
+            _execution_result(
+                status=LlmDispatchExecutionStatus.SUCCEEDED,
+                output_payload={"raw_text": _valid_compacted_raw_text()},
+                validation_metadata=validation.metadata,
+            )
+        ),
+        capacity_observation_repository=FakeCapacityObservationRepository(),
+        draft_claim_compaction_output_validator=DraftClaimCompactionOutputValidator(),
+        workflow_unit_of_work=workflow_uow,
+        frontend_event_projection_writer=projection_writer,
+    )
+
+    projection_types = {
+        event.projection_type for event in repository.events.values()
+    }
+    assert "workflow_capacity_window_observed" in projection_types
+    assert "workflow_draft_claim_compaction_attempt_completed" in projection_types
+    outcome_projection = next(
+        event
+        for event in repository.events.values()
+        if event.projection_type
+        == "workflow_draft_claim_compaction_attempt_completed"
+    )
+    assert outcome_projection.payload["dispatch_attempt_id"] == "attempt-1"
+    assert outcome_projection.payload["work_item_id"] == "work-item-1"
+    assert outcome_projection.payload["actual_total_tokens"] == 15
+    assert outcome_projection.payload["model_ref"] == "openai/gpt-oss-120b"
 
 
 def test_compaction_execute_handler_projects_after_canonical_outbox_append() -> None:
