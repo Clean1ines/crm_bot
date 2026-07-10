@@ -591,12 +591,19 @@ export const RagEvalPage: React.FC = () => {
     queryFn: async (): Promise<RagEvalDocumentOption[]> => {
       if (!projectId) return [];
       const response = await knowledgeApi.list(projectId);
-      const rows = response.documents ?? response.items ?? [];
+      const rows: Array<Record<string, unknown>> =
+        response.data.documents ?? response.data.items ?? [];
 
       return rows
         .map(toDocumentOption)
-        .filter((item): item is RagEvalDocumentOption => item !== null)
-        .sort((left, right) => left.fileName.localeCompare(right.fileName));
+        .filter(
+          (item: RagEvalDocumentOption | null): item is RagEvalDocumentOption =>
+            item !== null,
+        )
+        .sort(
+          (left: RagEvalDocumentOption, right: RagEvalDocumentOption) =>
+            left.fileName.localeCompare(right.fileName),
+        );
     },
     enabled: Boolean(projectId),
     retry: false,
