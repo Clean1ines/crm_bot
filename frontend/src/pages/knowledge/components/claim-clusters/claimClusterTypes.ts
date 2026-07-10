@@ -21,6 +21,8 @@ export type FinalCompactedFact = WorkbenchCompactedClaimPreviewLiveState & {
 export type ClaimClusterCompactionAttemptView = {
   key: string;
   workItemId: string | null;
+  batchRef: string | null;
+  groupRef: string | null;
   attemptNumber: number;
   status: string;
   statusLabel: string;

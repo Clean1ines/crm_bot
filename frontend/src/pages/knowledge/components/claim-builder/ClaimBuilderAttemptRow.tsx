@@ -24,6 +24,17 @@ export const ClaimBuilderAttemptRow = ({ attempt }: ClaimBuilderAttemptRowProps)
   ]
     .filter((value): value is string => Boolean(value && value.trim()))
     .join(' · ');
+  const durationText = formatClaimBuilderMilliseconds(attempt.durationMs);
+  const metaText = [
+    modelText || 'модель не указана',
+    tokenText,
+    durationText === '—' ? null : durationText,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' · ');
+  const userErrorText = attempt.errorMessageUser
+    ? claimBuilderUserErrorLabel(attempt.errorMessageUser)
+    : null;
 
   return (
     <details className={`rounded-lg border px-2.5 py-2 ${claimBuilderAttemptRowTone(attempt.status)}`}>
@@ -34,8 +45,7 @@ export const ClaimBuilderAttemptRow = ({ attempt }: ClaimBuilderAttemptRowProps)
               {claimBuilderAttemptStatusLabel(attempt.status)}
             </span>
             <span className="ml-2 text-xs text-[var(--text-muted)]">
-              {modelText || 'модель не указана'} · {tokenText} ·{' '}
-              {formatClaimBuilderMilliseconds(attempt.durationMs)}
+              {metaText}
             </span>
           </span>
 
@@ -48,9 +58,9 @@ export const ClaimBuilderAttemptRow = ({ attempt }: ClaimBuilderAttemptRowProps)
       </summary>
 
       <div className="mt-2 space-y-2">
-        {attempt.errorMessageUser && (
+        {userErrorText && (
           <div className="text-xs text-amber-700 dark:text-amber-300">
-            {attempt.errorMessageUser}
+            {userErrorText}
           </div>
         )}
 

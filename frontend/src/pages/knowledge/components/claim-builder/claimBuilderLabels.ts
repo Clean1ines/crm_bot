@@ -96,6 +96,7 @@ export const claimBuilderAttemptRowTone = (status: string): string => {
 export const claimBuilderUserErrorLabel = (
   errorKind: string | null | undefined,
 ): string => {
+  const original = errorKind?.trim() || '';
   const labels: Record<string, string> = {
     claim_builder_output_validation_failed:
       'ИИ вернул ответ, который не прошёл проверку качества',
@@ -107,5 +108,9 @@ export const claimBuilderUserErrorLabel = (
     input_too_large: 'Раздел слишком большой для текущей модели',
     rate_limited: 'Достигнут временный лимит ИИ-сервиса',
   };
-  return labels[normalize(errorKind)] || (errorKind ? 'Нужна повторная обработка' : '—');
+  const knownLabel = labels[normalize(errorKind)];
+  if (knownLabel) return knownLabel;
+  if (!original) return '—';
+  if (/^[A-Z0-9_:-]+$/.test(original)) return 'Нужна повторная обработка';
+  return original;
 };

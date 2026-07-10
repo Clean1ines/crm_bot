@@ -25,6 +25,17 @@ export const ClaimClusterCompactionAttemptRow = ({
   ]
     .filter((value): value is string => Boolean(value && value.trim()))
     .join(' · ');
+  const durationText = formatClaimBuilderMilliseconds(attempt.durationMs);
+  const metaText = [
+    modelText || 'модель не указана',
+    tokenText,
+    durationText === '—' ? null : durationText,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' · ');
+  const userErrorText = attempt.errorMessage
+    ? claimBuilderUserErrorLabel(attempt.errorMessage)
+    : null;
 
   return (
     <details className={`rounded-lg border px-2.5 py-2 ${claimBuilderAttemptRowTone(attempt.status)}`}>
@@ -35,23 +46,22 @@ export const ClaimClusterCompactionAttemptRow = ({
               {claimBuilderAttemptStatusLabel(attempt.status)}
             </span>
             <span className="ml-2 text-xs text-[var(--text-muted)]">
-              {modelText || 'модель не указана'} · {tokenText} ·{' '}
-              {formatClaimBuilderMilliseconds(attempt.durationMs)}
+              {metaText}
             </span>
           </span>
 
-          {attempt.errorMessage && (
+          {userErrorText && (
             <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700 dark:text-amber-300">
-              {claimBuilderUserErrorLabel(attempt.errorMessage)}
+              {userErrorText}
             </span>
           )}
         </span>
       </summary>
 
       <div className="mt-2 space-y-2">
-        {attempt.errorMessage ? (
+        {userErrorText ? (
           <div className="text-xs text-amber-700 dark:text-amber-300">
-            {attempt.errorMessage}
+            {userErrorText}
           </div>
         ) : (
           <div className="rounded border border-dashed border-[var(--border-subtle)] px-2 py-1.5 text-xs text-[var(--text-muted)]">

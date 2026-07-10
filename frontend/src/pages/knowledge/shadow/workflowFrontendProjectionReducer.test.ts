@@ -255,6 +255,71 @@ describe("workflowFrontendProjectionReducer", () => {
     expect(state.workflow.usage.total_tokens).toBe(230);
   });
 
+  it("starts and closes draft claim compaction attempts by batch scope", () => {
+    let state = seed();
+
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_draft_claim_compaction_dispatch_batch_prepared",
+        {
+          workflow_run_id: "knowledge-extraction:source-document:project-1:doc-1",
+          work_kind: "knowledge_workbench.draft_claim_compaction",
+          prepared_dispatch_count: 1,
+          dispatch_attempt_ids: ["prepared-attempt-id"],
+          work_item_ids: ["work-1"],
+          dispatch_contexts: [
+            {
+              work_item_id: "work-1",
+              group_ref: "cluster-1",
+              batch_ref: "batch-1",
+              prompt_variant: "single_draft_claim_enrichment",
+              source_claim_refs: ["claim-1"],
+              source_node_refs: ["node-1"],
+            },
+          ],
+        },
+        1,
+      ),
+    );
+
+    expect(state.workflow.llm_attempts).toHaveLength(1);
+    expect(state.workflow.llm_attempts[0]).toMatchObject({
+      node_run_id: "prepared-attempt-id",
+      section_id: "work-1",
+      node_name: "knowledge_workbench.draft_claim_compaction",
+      status: "leased",
+    });
+
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_draft_claim_compaction_attempt_completed",
+        {
+          workflow_run_id: "knowledge-extraction:source-document:project-1:doc-1",
+          work_kind: "knowledge_workbench.draft_claim_compaction",
+          work_item_id: "work-1",
+          group_ref: "cluster-1",
+          batch_ref: "batch-1",
+          provider: "groq",
+          model_ref: "qwen/qwen3-32b",
+          actual_prompt_tokens: 3600,
+          actual_completion_tokens: 277,
+          actual_total_tokens: 3877,
+        },
+        2,
+      ),
+    );
+
+    expect(state.workflow.llm_attempts).toHaveLength(1);
+    expect(state.workflow.llm_attempts[0]).toMatchObject({
+      node_run_id: "prepared-attempt-id",
+      status: "completed",
+      total_tokens: 3877,
+    });
+    expect(state.workflow.usage.total_tokens).toBe(3877);
+  });
+
   const seed = () =>
     createInitialWorkflowLiveStateResponse({
       documentId: "source-document:project-1:doc-1",

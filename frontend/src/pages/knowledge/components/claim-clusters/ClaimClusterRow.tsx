@@ -44,8 +44,16 @@ const clusterUiStatus = (status: string): string => {
 const batchAttempts = (
   batch: WorkbenchClaimClusterBatchLiveState,
   attempts: ClaimClusterCompactionAttemptView[],
+  clusterBatchCount: number,
 ): ClaimClusterCompactionAttemptView[] =>
-  attempts.filter((attempt) => attempt.workItemId === batch.work_item_id);
+  attempts.filter(
+    (attempt) =>
+      attempt.workItemId === batch.work_item_id ||
+      attempt.batchRef === batch.batch_ref ||
+      attempt.workItemId === batch.batch_ref ||
+      attempt.groupRef === batch.group_ref ||
+      (clusterBatchCount === 1 && attempt.workItemId === batch.group_ref),
+  );
 
 const batchTitle = (
   batch: WorkbenchClaimClusterBatchLiveState,
@@ -59,13 +67,15 @@ const ClaimClusterBatchRow = ({
   batch,
   batchIndex,
   attempts,
+  clusterBatchCount,
 }: {
   batch: WorkbenchClaimClusterBatchLiveState;
   batchIndex: number;
   attempts: ClaimClusterCompactionAttemptView[];
+  clusterBatchCount: number;
 }) => {
   const status = clusterUiStatus(batch.status);
-  const ownedAttempts = batchAttempts(batch, attempts);
+  const ownedAttempts = batchAttempts(batch, attempts, clusterBatchCount);
 
   return (
     <details className={`rounded-lg border px-3 py-2 ${claimBuilderSectionRowTone(status)}`}>
@@ -194,6 +204,7 @@ export const ClaimClusterRow: React.FC<ClaimClusterRowProps> = ({
                 batch={batch}
                 batchIndex={batchIndex}
                 attempts={attempts}
+                clusterBatchCount={batches.length}
               />
             ))
           ) : (

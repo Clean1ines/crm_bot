@@ -542,6 +542,30 @@ const findLiveAttemptIdForSection = (
   return latest?.node_run_id ?? null;
 };
 
+const findLiveCompactionAttemptIdForScope = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  scopeRefs: Array<string | null | undefined>,
+): string | null => {
+  const refs = new Set(scopeRefs.filter((item): item is string => Boolean(item)));
+  if (refs.size === 0) return null;
+
+  const attempts = response.workflow.llm_attempts.filter((attempt) => {
+    const nodeName = normalize(attempt.node_name);
+    const sectionId = attempt.section_id;
+    if (!sectionId) return false;
+    return (
+      nodeName.includes("draft_claim_compaction") &&
+      refs.has(sectionId) &&
+      ["leased", "running"].includes(normalize(attempt.status))
+    );
+  });
+  const latest = attempts.sort(
+    (left, right) =>
+      Date.parse(right.started_at || "") - Date.parse(left.started_at || ""),
+  )[0];
+  return latest?.node_run_id ?? null;
+};
+
 const resolveOutcomeAttemptId = (
   response: WorkbenchWorkflowLiveStateResponse,
   sourceUnitRef: string,
@@ -556,6 +580,26 @@ const resolveOutcomeAttemptId = (
     return dispatchAttemptId;
   }
   return findLiveAttemptIdForSection(response, sourceUnitRef) ?? dispatchAttemptId;
+};
+
+const resolveCompactionOutcomeAttemptId = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  dispatchAttemptId: string | null,
+  scopeRefs: Array<string | null | undefined>,
+): string | null => {
+  if (
+    dispatchAttemptId &&
+    response.workflow.llm_attempts.some(
+      (attempt) => attempt.node_run_id === dispatchAttemptId,
+    )
+  ) {
+    return dispatchAttemptId;
+  }
+
+  return (
+    findLiveCompactionAttemptIdForScope(response, scopeRefs) ??
+    dispatchAttemptId
+  );
 };
 
 const appendTimeline = (
@@ -1132,6 +1176,24 @@ const upsertPreparedCompactionRows = (
   }
 };
 
+const upsertPreparedCompactionAttempts = (
+  response: WorkbenchWorkflowLiveStateResponse,
+  event: FrontendWorkflowEventEnvelope,
+): void => {
+  const dispatchAttemptIds = stringArray(event.payload, "dispatch_attempt_ids");
+  const workItemIds = stringArray(event.payload, "work_item_ids");
+
+  dispatchAttemptIds.forEach((dispatchAttemptId, index) => {
+    upsertAttempt(response, {
+      dispatchAttemptId,
+      sourceUnitRef: workItemIds[index] ?? null,
+      status: "leased",
+      startedAt: event.occurred_at,
+      nodeName: DRAFT_CLAIM_COMPACTION_NODE_NAME,
+    });
+  });
+};
+
 const upsertCompactionAttempt = (
   response: WorkbenchWorkflowLiveStateResponse,
   event: FrontendWorkflowEventEnvelope,
@@ -1146,7 +1208,6 @@ const upsertCompactionAttempt = (
   const dispatchAttemptId =
     text(payload, "dispatch_attempt_id") ||
     text(attemptScope, "dispatch_attempt_id");
-  if (!dispatchAttemptId) return;
 
   const workItemId =
     text(payload, "work_item_id") ||
@@ -1155,10 +1216,19 @@ const upsertCompactionAttempt = (
   const groupRef =
     text(payload, "group_ref") ||
     text(attemptScope, "group_ref");
+  const batchRef =
+    text(payload, "batch_ref") ||
+    text(attemptScope, "batch_ref");
+  const outcomeAttemptId = resolveCompactionOutcomeAttemptId(
+    response,
+    dispatchAttemptId,
+    [workItemId, batchRef, groupRef],
+  );
+  if (!outcomeAttemptId) return;
 
   upsertAttempt(response, {
-    dispatchAttemptId,
-    sourceUnitRef: workItemId ?? groupRef,
+    dispatchAttemptId: outcomeAttemptId,
+    sourceUnitRef: workItemId ?? batchRef ?? groupRef,
     status,
     provider: text(providerOutcome, "provider") ?? text(payload, "provider"),
     accountRef: text(providerOutcome, "account_ref") ?? text(payload, "account_ref"),
@@ -1460,6 +1530,7 @@ export const reduceWorkflowFrontendProjectionEvent = (
 
     case "workflow_draft_claim_compaction_dispatch_batch_prepared": {
       upsertPreparedCompactionRows(next, payload);
+      upsertPreparedCompactionAttempts(next, normalizedEvent);
       const workItemIds = stringArray(payload, "work_item_ids");
       workItemIds.forEach((workItemId) => {
         updateCompactionBatch(next, {

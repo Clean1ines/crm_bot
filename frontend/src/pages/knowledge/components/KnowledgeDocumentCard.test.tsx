@@ -211,6 +211,104 @@ const workflowProjectionState: WorkbenchWorkflowLiveStateResponse = {
 };
 
 describe('KnowledgeDocumentCard live-state compaction UI', () => {
+  it('shows embedding and clustering stages as running before they finish', () => {
+    const runningEmbeddingState: WorkbenchWorkflowLiveStateResponse = {
+      ...workflowProjectionState,
+      workflow: {
+        ...workflowProjectionState.workflow,
+        claim_clusters: [],
+        claim_compaction_comparisons: [],
+        stages: [
+          {
+            id: 'draft_claim_embeddings',
+            label: 'Embeddings',
+            status: 'running',
+            current: 4,
+            total: 10,
+            message: '',
+          },
+          {
+            id: 'draft_claim_clustering',
+            label: 'Clusters',
+            status: 'pending',
+            current: 0,
+            total: 0,
+            message: '',
+          },
+        ],
+      },
+    };
+
+    const embeddingMarkup = renderToStaticMarkup(
+      <KnowledgeDocumentCard
+        doc={{
+          id: 'document-1',
+          file_name: 'knowledge.md',
+          file_size: 1024,
+          preprocessing_mode: 'faq',
+        }}
+        isDeletePending={false}
+        onRequestDelete={vi.fn()}
+        onCardAction={vi.fn()}
+        onOpenCuration={vi.fn()}
+        workflowProjectionState={runningEmbeddingState}
+        formatSize={() => '1 КБ'}
+        knowledgeProcessingModeLabel={() => 'FAQ'}
+      />,
+    );
+
+    expect(embeddingMarkup).toContain('Векторизация утверждений');
+    expect(embeddingMarkup).toContain('4 / 10');
+    expect(embeddingMarkup).toContain('идёт');
+
+    const runningClusteringState: WorkbenchWorkflowLiveStateResponse = {
+      ...runningEmbeddingState,
+      workflow: {
+        ...runningEmbeddingState.workflow,
+        stages: [
+          {
+            id: 'draft_claim_embeddings',
+            label: 'Embeddings',
+            status: 'completed',
+            current: 10,
+            total: 10,
+            message: '',
+          },
+          {
+            id: 'draft_claim_clustering',
+            label: 'Clusters',
+            status: 'running',
+            current: 0,
+            total: 10,
+            message: '',
+          },
+        ],
+      },
+    };
+
+    const clusteringMarkup = renderToStaticMarkup(
+      <KnowledgeDocumentCard
+        doc={{
+          id: 'document-1',
+          file_name: 'knowledge.md',
+          file_size: 1024,
+          preprocessing_mode: 'faq',
+        }}
+        isDeletePending={false}
+        onRequestDelete={vi.fn()}
+        onCardAction={vi.fn()}
+        onOpenCuration={vi.fn()}
+        workflowProjectionState={runningClusteringState}
+        formatSize={() => '1 КБ'}
+        knowledgeProcessingModeLabel={() => 'FAQ'}
+      />,
+    );
+
+    expect(clusteringMarkup).toContain('Группировка похожих утверждений');
+    expect(clusteringMarkup).toContain('0 / 10');
+    expect(clusteringMarkup).toContain('идёт');
+  });
+
   it('uses live cluster data for summaries and exposes claim details', () => {
     const markup = renderToStaticMarkup(
       <KnowledgeDocumentCard

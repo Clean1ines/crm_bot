@@ -197,21 +197,40 @@ export const selectClaimClustersView = (
     return normalize(attempt.node_run_id).includes('draft_claim_compaction');
   });
   const compactionAttempts: ClaimClusterCompactionAttemptView[] = llmAttempts
-    .map((attempt, index) => ({
-      key: attempt.node_run_id || `draft-compaction-attempt-${index}`,
-      workItemId: attempt.section_id ?? null,
-      attemptNumber: attemptNumberFromId(attempt.node_run_id, index + 1),
-      status: attempt.status,
-      statusLabel: compactionAttemptStatusLabel(attempt.status),
-      toneClassName: compactionAttemptTone(attempt.status),
-      modelName: attempt.model_name?.trim() || null,
-      provider: attempt.model_provider?.trim() || null,
-      tokenCount: Math.max(0, attempt.total_tokens || 0),
-      durationMs: attempt.duration_ms ?? null,
-      startedAt: attempt.started_at ?? null,
-      completedAt: attempt.completed_at ?? null,
-      errorMessage: compactionAttemptErrorMessage(attempt),
-    }))
+    .map((attempt, index) => {
+      const key = attempt.node_run_id || `draft-compaction-attempt-${index}`;
+      const sectionId = attempt.section_id ?? null;
+      const matchingBatch = clusters
+        .flatMap((cluster) => cluster.batches ?? [])
+        .find((batch) =>
+          Boolean(
+            sectionId &&
+              (batch.work_item_id === sectionId ||
+                batch.batch_ref === sectionId ||
+                batch.group_ref === sectionId),
+          ) ||
+          key.includes(batch.work_item_id) ||
+          key.includes(batch.batch_ref),
+        );
+
+      return {
+        key,
+        workItemId: matchingBatch?.work_item_id ?? sectionId,
+        batchRef: matchingBatch?.batch_ref ?? null,
+        groupRef: matchingBatch?.group_ref ?? null,
+        attemptNumber: attemptNumberFromId(attempt.node_run_id, index + 1),
+        status: attempt.status,
+        statusLabel: compactionAttemptStatusLabel(attempt.status),
+        toneClassName: compactionAttemptTone(attempt.status),
+        modelName: attempt.model_name?.trim() || null,
+        provider: attempt.model_provider?.trim() || null,
+        tokenCount: Math.max(0, attempt.total_tokens || 0),
+        durationMs: attempt.duration_ms ?? null,
+        startedAt: attempt.started_at ?? null,
+        completedAt: attempt.completed_at ?? null,
+        errorMessage: compactionAttemptErrorMessage(attempt),
+      };
+    })
     .sort((left, right) => {
       const leftTime = left.startedAt ?? left.completedAt ?? '';
       const rightTime = right.startedAt ?? right.completedAt ?? '';

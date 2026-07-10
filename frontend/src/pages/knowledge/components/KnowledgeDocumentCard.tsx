@@ -177,9 +177,30 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
   const previewStage = stages.find((stage) => stage.id === 'cluster_preview') ?? null;
   const startedStageIds = useMemo(() => {
     const ids: string[] = [];
+    const hasStageProgress = (
+      stage: typeof embeddingStage,
+    ): boolean =>
+      Boolean(
+        stage &&
+          (stage.status === 'running' ||
+            stage.status === 'completed' ||
+            stage.current > 0 ||
+            stage.total > 0 ||
+            stage.started_at ||
+            stage.completed_at),
+      );
+
+    if (hasStageProgress(embeddingStage)) {
+      ids.push('draft_claim_embeddings');
+    }
+
+    if (hasStageProgress(clusterStage)) {
+      ids.push('draft_claim_clustering');
+    }
 
     if (clustersView.hasClusters) {
-      ids.push('draft_claim_embeddings', 'draft_claim_clustering');
+      if (!ids.includes('draft_claim_embeddings')) ids.push('draft_claim_embeddings');
+      if (!ids.includes('draft_claim_clustering')) ids.push('draft_claim_clustering');
     }
 
     if (clustersView.hasComparisons || clustersView.finalFacts.length > 0) {
@@ -191,6 +212,8 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     clustersView.hasClusters,
     clustersView.hasComparisons,
     clustersView.finalFacts.length,
+    embeddingStage,
+    clusterStage,
   ]);
   const workflowStageRows = useMemo(
     () =>
