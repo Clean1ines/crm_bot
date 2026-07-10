@@ -218,21 +218,6 @@ export const ClaimClusterRow: React.FC<ClaimClusterRowProps> = ({
           )}
         </div>
 
-        {(cluster.compacted_claims ?? []).length > 0 && (
-          <div className="space-y-1.5">
-            <div className="text-xs font-medium text-[var(--text-primary)]">
-              Итоговые утверждения
-            </div>
-            {(cluster.compacted_claims ?? []).map((claim) => (
-              <div
-                key={claim.node_ref}
-                className="rounded border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-2 py-1.5 text-xs text-[var(--text-secondary)]"
-              >
-                {claim.claim}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </details>
   );

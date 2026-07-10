@@ -426,8 +426,8 @@ describe('KnowledgeDocumentCard live-state compaction UI', () => {
     expect(markup).not.toContain('Объединение завершено — знания готовы к ручной проверке.');
     expect(markup).toContain('bg-emerald-500/10');
     expect(markup).toContain('Факты кластера: 2');
-    expect(markup).toContain('Итоговые утверждения');
-    expect(markup).toContain('Поддержка доступна круглосуточно без перерывов.');
-    expect(markup).toContain('Оператор подключается после запроса клиента.');
+    expect(markup).not.toContain('Итоговые утверждения');
+    expect(markup).not.toContain('Поддержка доступна круглосуточно без перерывов.');
+    expect(markup).not.toContain('Оператор подключается после запроса клиента.');
   });
 });

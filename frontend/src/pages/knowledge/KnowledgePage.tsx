@@ -8,6 +8,7 @@ import { getErrorMessage } from "@shared/api/core/errors";
 import {
   KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
   knowledgeApi,
+  type FrontendWorkflowEventEnvelope,
   type KnowledgePreprocessingMode,
   type KnowledgePreviewDebugFact,
   type KnowledgePreviewResponse,
@@ -54,21 +55,13 @@ type DraftClaimCurationTarget = {
   documentName: string;
 };
 
-export const shouldAutoOpenCurationOnTransition = ({
-  wasReviewReady,
-  isReviewReady,
-  alreadyOpened,
-  alreadyPublished,
-}: {
-  wasReviewReady: boolean | undefined;
-  isReviewReady: boolean;
-  alreadyOpened: boolean;
-  alreadyPublished: boolean;
-}): boolean =>
-  wasReviewReady === false &&
-  isReviewReady &&
-  !alreadyOpened &&
-  !alreadyPublished;
+const CURATION_READY_LIVE_PROJECTION_TYPE =
+  "workflow_draft_claim_compaction_all_groups_compacted";
+
+export const isCurationReadyLiveEvent = (
+  event: FrontendWorkflowEventEnvelope,
+): boolean =>
+  event.projection_type === CURATION_READY_LIVE_PROJECTION_TYPE;
 
 interface Document {
   id: string;
@@ -448,62 +441,6 @@ export const KnowledgePage: React.FC = () => {
     Record<string, string | null>
   >({});
   const autoOpenedCurationWorkflowsRef = useRef<Set<string>>(new Set());
-  const reviewReadyByWorkflowRef = useRef<Map<string, boolean>>(new Map());
-
-  useEffect(() => {
-    if (!projectId || curationTarget) return;
-
-    for (const doc of documents) {
-      const projectionState = workflowProjectionStates[doc.id];
-      const workflow = projectionState?.workflow;
-      const curation = workflow?.curation;
-      const workflowRunId =
-        curation?.workflow_run_id ??
-        workflow?.workflow_run_id ??
-        doc.current_processing_run_id ??
-        null;
-
-      if (!workflowRunId) {
-        continue;
-      }
-
-      const reviewGateOpen = Boolean(
-        curation?.available &&
-          (curation.workspace_ref ||
-            curation.workspace_status === "pending_open" ||
-            curation.workspace_status === "open" ||
-            curation.workspace_status === "review_required" ||
-            workflow?.workflow_status === "waiting_for_review" ||
-            projectionState?.document_status === "waiting_for_review"),
-      );
-      const alreadyPublished =
-        curation?.workspace_status === "published" ||
-        workflow?.workflow_status === "published" ||
-        projectionState?.document_status === "published";
-
-      const wasReviewReady = reviewReadyByWorkflowRef.current.get(workflowRunId);
-      reviewReadyByWorkflowRef.current.set(workflowRunId, reviewGateOpen);
-
-      if (
-        !shouldAutoOpenCurationOnTransition({
-          wasReviewReady,
-          isReviewReady: reviewGateOpen,
-          alreadyOpened: autoOpenedCurationWorkflowsRef.current.has(workflowRunId),
-          alreadyPublished,
-        })
-      ) {
-        continue;
-      }
-
-      autoOpenedCurationWorkflowsRef.current.add(workflowRunId);
-      setDraftClaimCurationTarget({
-        documentId: doc.id,
-        workflowRunId,
-        documentName: doc.file_name,
-      });
-      return;
-    }
-  }, [projectId, curationTarget, documents, workflowProjectionStates]);
 
   useEffect(() => {
     if (!projectId || workflowProjectionTargets.length === 0) return undefined;
@@ -541,6 +478,22 @@ export const KnowledgePage: React.FC = () => {
           }));
         },
         onEventApplied: (event) => {
+          if (isCurationReadyLiveEvent(event)) {
+            const workflowRunId = event.workflow_run_id.trim();
+
+            if (
+              workflowRunId &&
+              !autoOpenedCurationWorkflowsRef.current.has(workflowRunId)
+            ) {
+              autoOpenedCurationWorkflowsRef.current.add(workflowRunId);
+              setDraftClaimCurationTarget({
+                documentId: target.documentId,
+                workflowRunId,
+                documentName: target.fileName,
+              });
+            }
+          }
+
           const shouldRefreshSourceUnits = [
             "workflow_source_units_created",
             "workflow_source_unit_created",
