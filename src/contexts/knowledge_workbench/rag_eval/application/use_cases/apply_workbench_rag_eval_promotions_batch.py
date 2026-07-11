@@ -67,10 +67,7 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
             if target.status is WorkbenchRagEvalPromotionStatus.APPLIED:
                 skipped_count += 1
                 continue
-            if target.status not in (
-                WorkbenchRagEvalPromotionStatus.CANDIDATE,
-                WorkbenchRagEvalPromotionStatus.APPROVED,
-            ):
+            if target.status is not WorkbenchRagEvalPromotionStatus.APPROVED:
                 skipped_count += 1
                 errors.append(
                     f"{target.promotion_id}: cannot apply status {target.status.value}"

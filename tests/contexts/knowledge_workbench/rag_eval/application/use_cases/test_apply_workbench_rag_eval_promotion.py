@@ -48,7 +48,7 @@ class FakeEmbeddingPort:
 
 @dataclass(slots=True)
 class FakeRepository:
-    status: WorkbenchRagEvalPromotionStatus = WorkbenchRagEvalPromotionStatus.CANDIDATE
+    status: WorkbenchRagEvalPromotionStatus = WorkbenchRagEvalPromotionStatus.APPROVED
     applied_embedding_text: str | None = None
     applied_embedding: Sequence[float] | None = None
 
@@ -58,11 +58,22 @@ class FakeRepository:
             run_id="run-1",
             question_id="question-1",
             project_id=project_id,
+            outcome_id="outcome-1",
+            adjudication_id="adjudication-1",
             target_runtime_entry_id="entry-1",
             target_fact_id="fact-1",
             question="Как спросить иначе?",
             status=self.status,
+            reason="Valid target query with weak retrieval",
+            expected_rank=3,
+            expected_score=0.61,
+            competitor_runtime_entry_id="entry-2",
+            competitor_fact_id="fact-2",
+            competitor_score=0.73,
+            score_margin=-0.12,
             created_at=_now(),
+            reviewed_at=_now(),
+            review_reason=None,
             applied_at=None,
         )
 
@@ -131,6 +142,31 @@ async def test_apply_promotion_builds_embedding_and_applies_candidate() -> None:
     assert repository.applied_embedding_text is not None
     assert "Как спросить иначе?" in repository.applied_embedding_text
     assert "answer_text" not in repository.applied_embedding_text
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_rejects_unapproved_candidate_before_embedding() -> None:
+    embedding_port = FakeEmbeddingPort()
+
+    with pytest.raises(
+        WorkbenchRagEvalPromotionConflictError,
+        match="candidate",
+    ):
+        await ApplyWorkbenchRagEvalPromotion(
+            rag_eval_repository=FakeRepository(
+                status=WorkbenchRagEvalPromotionStatus.CANDIDATE
+            ),
+            embedding_generation_port=embedding_port,
+            embedding_model_id="test-model",
+            embedding_dimensions=3,
+            embedding_text_builder=PromotedQuestionRuntimeEmbeddingTextBuilder(),
+        ).execute(
+            project_id="11111111-1111-1111-1111-111111111111",
+            promotion_id="promotion-1",
+            applied_at=_now(),
+        )
+
+    assert embedding_port.seen_request is None
 
 
 @pytest.mark.asyncio

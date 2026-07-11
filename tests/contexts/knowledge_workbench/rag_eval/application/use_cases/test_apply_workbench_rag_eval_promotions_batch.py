@@ -31,7 +31,7 @@ def _target(
     *,
     runtime_entry_id: str = "entry-1",
     question: str = "How to ask?",
-    status: WorkbenchRagEvalPromotionStatus = WorkbenchRagEvalPromotionStatus.CANDIDATE,
+    status: WorkbenchRagEvalPromotionStatus = WorkbenchRagEvalPromotionStatus.APPROVED,
 ) -> WorkbenchRagEvalPromotionApplicationTarget:
     return WorkbenchRagEvalPromotionApplicationTarget(
         promotion_id=promotion_id,
@@ -138,6 +138,87 @@ async def test_selected_batch_groups_same_runtime_entry_into_one_embedding() -> 
     assert result.embedding_recalculation_count == 1
     assert repo.applied_groups == [("promotion-1", "promotion-2")]
     assert len(embedding.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_selected_batch_skips_unapproved_candidates_without_embedding() -> None:
+    repo = FakeRepository(
+        targets=(
+            _target(
+                "promotion-1",
+                status=WorkbenchRagEvalPromotionStatus.CANDIDATE,
+            ),
+            _target(
+                "promotion-2",
+                status=WorkbenchRagEvalPromotionStatus.APPROVED,
+            ),
+        )
+    )
+    embedding = FakeEmbeddingPort()
+
+    result = await ApplyWorkbenchRagEvalPromotionsBatch(
+        rag_eval_repository=repo,
+        embedding_generation_port=embedding,
+        embedding_model_id="test-model",
+        embedding_dimensions=3,
+        embedding_text_builder=PromotedQuestionRuntimeEmbeddingTextBuilder(),
+    ).execute(
+        project_id="project-1",
+        mode="selected",
+        promotion_ids=("promotion-1", "promotion-2"),
+        run_id=None,
+        applied_at=_now(),
+    )
+
+    assert result.requested_count == 2
+    assert result.applied_count == 1
+    assert result.skipped_count == 1
+    assert result.embedding_recalculation_count == 1
+    assert result.errors == ("promotion-1: cannot apply status candidate",)
+    assert repo.applied_groups == [("promotion-2",)]
+    assert len(embedding.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_selected_batch_with_only_unapproved_candidates_does_not_embed() -> None:
+    repo = FakeRepository(
+        targets=(
+            _target(
+                "promotion-1",
+                status=WorkbenchRagEvalPromotionStatus.CANDIDATE,
+            ),
+            _target(
+                "promotion-2",
+                status=WorkbenchRagEvalPromotionStatus.CANDIDATE,
+            ),
+        )
+    )
+    embedding = FakeEmbeddingPort()
+
+    result = await ApplyWorkbenchRagEvalPromotionsBatch(
+        rag_eval_repository=repo,
+        embedding_generation_port=embedding,
+        embedding_model_id="test-model",
+        embedding_dimensions=3,
+        embedding_text_builder=PromotedQuestionRuntimeEmbeddingTextBuilder(),
+    ).execute(
+        project_id="project-1",
+        mode="selected",
+        promotion_ids=("promotion-1", "promotion-2"),
+        run_id=None,
+        applied_at=_now(),
+    )
+
+    assert result.requested_count == 2
+    assert result.applied_count == 0
+    assert result.skipped_count == 2
+    assert result.embedding_recalculation_count == 0
+    assert result.errors == (
+        "promotion-1: cannot apply status candidate",
+        "promotion-2: cannot apply status candidate",
+    )
+    assert repo.applied_groups == []
+    assert embedding.calls == []
 
 
 @pytest.mark.asyncio
