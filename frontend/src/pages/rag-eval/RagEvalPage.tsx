@@ -15,6 +15,7 @@ import {
   type WorkbenchRagEvalRunSummary,
 } from '@shared/api/modules/ragEval';
 import { ragEvalQueryKeys } from './ragEvalQueryKeys';
+import { RagEvalRetrievalProgress } from './RagEvalRetrievalProgress';
 import { acceptStartedRagEvalRun } from './ragEvalRunStart';
 
 const formatNumber = (value: number): string => new Intl.NumberFormat().format(value);
@@ -497,6 +498,8 @@ const SummaryPanel: React.FC<{ run: WorkbenchRagEvalRunSummary | null; loading?:
           <div>Завершена: {formatDateTime(run.completed_at)}</div>
         </div>
       </div>
+
+      <RagEvalRetrievalProgress run={run} />
 
       {run.error_message && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">

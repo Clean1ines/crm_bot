@@ -55,3 +55,23 @@ def test_workbench_rag_eval_runtime_boundary_uses_runtime_tables() -> None:
                 missing.append(f"{path.as_posix()}: {marker}")
 
     assert missing == []
+
+
+def test_legacy_sync_rag_eval_entrypoints_are_explicitly_retired() -> None:
+    run_source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/application/use_cases/run_workbench_rag_eval.py"
+    ).read_text()
+    batch_source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/application/use_cases/generate_workbench_rag_eval_questions_batch.py"
+    ).read_text()
+    assert "RunWorkbenchRagEval is retired" in run_source
+    assert "question generation is retired on the sync path" in batch_source
+
+
+def test_retrieval_materializes_baseline_before_reading_questions() -> None:
+    source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/application/workflows/handle_run_workbench_rag_eval_retrieval_evaluation_command.py"
+    ).read_text()
+    assert source.index("materialize_baseline_questions(") < source.index(
+        "list_run_questions("
+    )

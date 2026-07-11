@@ -48,6 +48,7 @@ class FakeConnection:
     execute_calls: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     rows: list[Mapping[str, object]] = field(default_factory=list)
     fetchrow_result: Mapping[str, object] | None = None
+    execute_result: str = "UPDATE 1"
 
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]:
         self.fetch_calls.append((query, args))
@@ -59,7 +60,7 @@ class FakeConnection:
 
     async def execute(self, query: str, *args: object) -> object:
         self.execute_calls.append((query, args))
-        return "UPDATE 1"
+        return self.execute_result
 
     def transaction(self) -> FakeTransaction:
         return FakeTransaction()
@@ -237,7 +238,6 @@ def test_details_sql_reads_questions_results_and_candidates_without_legacy_table
         WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL
         + WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL
     )
-
     assert "knowledge_workbench_rag_eval_questions" in combined
     assert "knowledge_workbench_rag_eval_retrieval_results" in combined
     assert "knowledge_workbench_rag_eval_promoted_questions" in combined
@@ -276,10 +276,6 @@ async def test_repository_persists_roles_and_canonical_outcome() -> None:
 
 
 def test_role_and_outcome_migrations_enforce_canonical_contract() -> None:
-    combined = (
-        WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL
-        + WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL
-    )
     root = Path(__file__).parents[6]
     roles = (
         root / "migrations/121_add_workbench_rag_eval_question_roles.sql"
@@ -290,6 +286,61 @@ def test_role_and_outcome_migrations_enforce_canonical_contract() -> None:
     assert "holdout_not_promotion_eligible" in roles
     assert "existing_alias_retrieval_failure" in outcomes
     assert "score_margin" in outcomes
+
+
+@pytest.mark.asyncio
+async def test_repository_materializes_idempotent_baseline_from_persisted_schedules() -> (
+    None
+):
+    combined = (
+        WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL
+        + WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL
+    )
+    connection = FakeConnection(
+        rows=[
+            {
+                "run_id": "run-1",
+                "project_id": "11111111-1111-1111-1111-111111111111",
+                "runtime_entry_id": "runtime-entry-1",
+                "expected_fact_id": "fact-1",
+                "question": "Как оплатить?",
+            },
+            {
+                "run_id": "run-1",
+                "project_id": "11111111-1111-1111-1111-111111111111",
+                "runtime_entry_id": "runtime-entry-1",
+                "expected_fact_id": "fact-1",
+                "question": "  как   оплатить ? ",
+            },
+            {
+                "run_id": "run-1",
+                "project_id": "11111111-1111-1111-1111-111111111111",
+                "runtime_entry_id": "runtime-entry-1",
+                "expected_fact_id": "fact-1",
+                "question": "как оплатить!",
+            },
+        ],
+        execute_result="INSERT 0 1",
+    )
+    count = await PostgresWorkbenchRagEvalRepository(
+        connection
+    ).materialize_baseline_questions(
+        run_id="run-1",
+        project_id="11111111-1111-1111-1111-111111111111",
+        created_at=_now(),
+    )
+    sql, _ = connection.fetch_calls[0]
+    assert count == 1
+    assert "execution_work_item_schedules" in sql
+    assert "workbench_rag_eval.question_generation" in sql
+    assert "md5" not in sql
+    assert "possible.question)" not in sql
+    insert_sql = connection.execute_calls[0][0]
+    assert "ON CONFLICT (question_id) DO NOTHING" in insert_sql
+    insert_args = connection.execute_calls[0][1]
+    assert insert_args[0].startswith("rag-eval-baseline:")
+    assert insert_args[7] == "published_possible_question"
+    assert insert_args[18] == "baseline"
     assert (
         "question.project_id = $1::uuid"
         in WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL
@@ -300,6 +351,21 @@ def test_role_and_outcome_migrations_enforce_canonical_contract() -> None:
     assert "answer_text" not in combined
     assert "knowledge_" + "retrieval_" + "surface" not in combined
     assert "knowledge_workbench_surfaces" not in combined
+
+
+@pytest.mark.asyncio
+async def test_mark_questions_evaluated_persists_evaluated_at_timestamp() -> None:
+    connection = FakeConnection()
+
+    await PostgresWorkbenchRagEvalRepository(connection).mark_questions_evaluated(
+        run_id="run-1",
+        question_ids=("question-1", "question-2"),
+        evaluated_at=_now(),
+    )
+
+    sql, args = connection.execute_calls[0]
+    assert "evaluated_at = $3" in sql
+    assert args == ("run-1", ["question-1", "question-2"], _now())
 
 
 def test_promotion_application_target_sql_reads_runtime_entries_only() -> None:
@@ -399,6 +465,7 @@ async def test_list_run_questions_maps_questions_with_retrieval_results() -> Non
                 "generation_rationale": "Однозначный retrieval alias",
                 "generation_account_ref": "groq_org_primary",
                 "generation_slot_index": 0,
+                "evaluation_role": "promotion_pool",
                 "status": "created",
                 "created_at": _now(),
                 "result_id": "result-1",
@@ -428,6 +495,7 @@ async def test_list_run_questions_maps_questions_with_retrieval_results() -> Non
                 "generation_rationale": "Однозначный retrieval alias",
                 "generation_account_ref": "groq_org_primary",
                 "generation_slot_index": 0,
+                "evaluation_role": "promotion_pool",
                 "status": "created",
                 "created_at": _now(),
                 "result_id": "result-2",

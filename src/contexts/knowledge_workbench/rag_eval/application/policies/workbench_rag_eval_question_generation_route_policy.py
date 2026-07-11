@@ -21,6 +21,9 @@ WORKBENCH_RAG_EVAL_ACCOUNT_REFS = (
     "groq_org_tertiary",
     "groq_org_quaternary",
 )
+# Kept as an explicit guardrail: these legacy/degraded routes are never part of
+# the automatic RAG Eval chain.
+WORKBENCH_RAG_EVAL_FORBIDDEN_AUTOMATIC_MODEL_REFS = ("llama-3.1-8b-instant",)
 
 
 @dataclass(frozen=True, slots=True)

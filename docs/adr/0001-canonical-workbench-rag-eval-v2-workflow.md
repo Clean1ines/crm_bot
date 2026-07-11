@@ -1,7 +1,7 @@
 # ADR-0001: Canonical Workbench RAG Eval V2 workflow
 
 Date: 2026-07-10
-Status: accepted — implementation in progress
+Status: accepted — functional qgen/retrieval implementation present; canonical qgen/retrieval integration proof completed
 Deciders: crm_bot maintainers
 
 Context
@@ -213,6 +213,13 @@ Approval and application are separate states.
 
 The previous ambiguous ACCEPTED state must not remain the final canonical
 review/application contract.
+
+Implementation checkpoint
+
+The qgen and initial retrieval portions of this decision are implemented:
+generated roles are persisted atomically, published possible questions are
+materialized as BASELINE, and `RUN_RETRIEVAL_EVALUATION` uses the production
+`SearchPublishedWorkbenchRuntime` before durably scheduling adjudication.
 
 Reversible grouped application
 

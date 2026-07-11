@@ -427,11 +427,15 @@ def _retry_plan_from_validation_metadata(
         return None
 
     explicit_retry_plan = validation_metadata.get("retry_plan")
-    if isinstance(explicit_retry_plan, str):
+    if explicit_retry_plan is not None:
+        if not isinstance(explicit_retry_plan, str):
+            raise ValueError("explicit retry_plan must be a string")
         try:
             return WorkItemRetryPlan(explicit_retry_plan)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            raise ValueError(
+                f"unknown explicit retry_plan: {explicit_retry_plan}"
+            ) from exc
 
     next_action_kind = validation_metadata.get("claim_builder_attempt_next_action_kind")
     if next_action_kind == "RETRY_SAME_ROUTE":

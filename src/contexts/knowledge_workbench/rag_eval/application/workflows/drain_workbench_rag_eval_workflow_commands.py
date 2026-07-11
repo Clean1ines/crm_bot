@@ -24,6 +24,9 @@ from src.contexts.execution_runtime.application.ports.work_item_progress_read_re
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reconcile_workbench_rag_eval_question_generation_progress_command import (
     QuestionGenerationPersistenceCoveragePort,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_run_workbench_rag_eval_retrieval_evaluation_command import (
+    PublishedWorkbenchSearchPort,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
     WorkbenchRagEvalRepositoryPort,
 )
@@ -76,6 +79,7 @@ class DrainWorkbenchRagEvalWorkflowCommands:
         question_coverage_repository: QuestionGenerationPersistenceCoveragePort
         | None = None,
         rag_eval_repository: WorkbenchRagEvalRepositoryPort | None = None,
+        search_published_workbench_runtime: PublishedWorkbenchSearchPort | None = None,
     ) -> DrainWorkbenchRagEvalWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -104,6 +108,7 @@ class DrainWorkbenchRagEvalWorkflowCommands:
                 work_item_progress_read_repository=work_item_progress_read_repository,
                 question_coverage_repository=question_coverage_repository,
                 rag_eval_repository=rag_eval_repository,
+                search_published_workbench_runtime=search_published_workbench_runtime,
             )
             if not result.dispatched:
                 blocked_count = 1

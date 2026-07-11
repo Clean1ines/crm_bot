@@ -22,6 +22,13 @@ def test_roles_are_deterministic_and_at_least_twenty_percent_holdout() -> None:
         sum(role is WorkbenchRagEvalQuestionRole.HOLDOUT for role in first.values())
         >= 2
     )
+    assert (
+        sum(
+            role is WorkbenchRagEvalQuestionRole.PROMOTION_POOL
+            for role in first.values()
+        )
+        == 8
+    )
 
 
 def test_holdout_is_never_promotion_eligible() -> None:
@@ -107,4 +114,4 @@ def test_outcome_calculates_exact_margin() -> None:
         best_competitor_score=0.55,
         competitor_same_document=False,
     )
-    assert outcome.score_margin == 0.20
+    assert outcome.score_margin == 0.75 - 0.55

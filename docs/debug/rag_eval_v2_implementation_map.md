@@ -1,5 +1,7 @@
 # Workbench RAG Eval V2 implementation map
 
+Current checkpoint: functional qgen/retrieval implementation present; canonical qgen/retrieval integration proof completed.
+
 ## Claim Builder canonical path
 
 | Step | File | Current component | Notes for reuse |
@@ -61,6 +63,12 @@ Existing required tables:
 
 Needed for V2:
 
+Implemented in the retrieval continuation:
+
+- `123_add_workbench_rag_eval_retrieval_progress.sql` adds persisted retrieval totals and classification counters.
+- `handle_run_workbench_rag_eval_retrieval_evaluation_command.py` uses `SearchPublishedWorkbenchRuntime`, materializes BASELINE questions, persists top-k rows/outcomes and schedules adjudication.
+- `workbench_rag_eval_workflow_runtime.py` composes the production retrieval search boundary and dispatches `RUN_RETRIEVAL_EVALUATION`.
+
 - add workflow/progression fields to `knowledge_workbench_rag_eval_runs`;
 - add retrieval outcome columns: competitor, margin, classification;
 - add adjudication status/attempt metadata;
@@ -121,7 +129,11 @@ Needed:
 - `transports_by_account_ref = {account.account_seed.account_ref: GroqHttpTransport(... account.api_key ...) for account in groq_env_config.accounts}`;
 - `GroqDispatchExecutor(..., transports_by_account_ref=transports_by_account_ref, ...)`.
 
-Therefore, if env configuration contains four distinct Groq accounts, dispatch execution can route each admitted attempt by its `llm_allocation.account_ref` to four distinct transports. V2 tests must configure four distinct accounts and assert the attempt allocations cover those refs.
+The production composition proof configures four distinct Groq accounts and
+asserts four distinct transports, real RAG Eval admission across multiple
+accounts, persisted dispatch account refs, per-account/model capacity
+observations and reservation safety on repeated preparation. The test does not
+require round-robin and does not change selection policy.
 
 ## Implementation order
 

@@ -16,15 +16,12 @@ from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_e
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WorkbenchRagEvalQuestionGenerator,
 )
-from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_attempt_decision_policy import (
-    DecideWorkbenchRagEvalQuestionAttemptCommand,
-    WorkbenchRagEvalQuestionAttemptDecisionPolicy,
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_output_validation_policy import (
+    WorkbenchRagEvalQuestionOutputValidationOutcome,
+    WorkbenchRagEvalQuestionOutputValidationPolicy,
 )
-from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_attempt_next_action_policy import (
-    WorkbenchRagEvalQuestionAttemptNextActionPolicy,
-)
-from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
-    workbench_rag_eval_route_catalog,
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_role_policy import (
+    WorkbenchRagEvalQuestionRolePolicy,
 )
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutionStatus,
@@ -56,73 +53,53 @@ class WorkbenchRagEvalQuestionGenerationOutputValidator:
         finished_at: datetime,
         attempt_number: int,
     ) -> LlmDispatchOutputValidationResult:
-        del finished_at
+        del attempt_number, finished_at
         if llm_status is not LlmDispatchExecutionStatus.SUCCEEDED:
             return LlmDispatchOutputValidationResult(
                 status=llm_status,
                 error_kind=None,
                 next_attempt_at=None,
-                metadata={"validated_question_count": 0},
+                metadata={
+                    "validation_decision": None,
+                    "validation_error": None,
+                    "validated_question_count": 0,
+                },
             )
-        try:
-            raw_text = _raw_output_text(output_payload)
-            schedule_payload = _mapping(dispatch_payload, "schedule_payload")
-            questions = self.question_generator.parse_questions_from_raw_text(
-                raw_text=raw_text,
-                generation_model="validation/model",
-                generation_account_ref="validation-account",
-                generation_slot_index=0,
-                existing_possible_questions=_string_tuple(
-                    schedule_payload,
-                    "possible_questions",
-                ),
-            )
-        except Exception as exc:
-            allocation = _mapping(dispatch_payload, "llm_allocation")
-            model_ref = _text(allocation, "model_ref")
-            catalog = workbench_rag_eval_route_catalog()
-            model_refs = (
-                catalog.primary_model_ref(),
-                *catalog.automatic_fallback_model_refs(),
-            )
-            route_index = model_refs.index(model_ref)
-            next_route = (
-                catalog.route_for_model_ref(model_refs[route_index + 1])
-                if route_index + 1 < len(model_refs)
-                else None
-            )
-            action = WorkbenchRagEvalQuestionAttemptNextActionPolicy().decide_next_action(
-                WorkbenchRagEvalQuestionAttemptDecisionPolicy().decide(
-                    DecideWorkbenchRagEvalQuestionAttemptCommand(
-                        error_kind="invalid_contract",
-                        same_route_attempt_number=attempt_number,
-                        same_route_retry_limit=2,
-                        current_route_index=route_index,
-                        route_count=len(model_refs),
-                        input_tokens=0,
-                        next_route_input_limit=next_route.capacity_limits.input_token_limit
-                        if next_route is not None
-                        else None,
-                    )
-                )
-            )
+        schedule_payload = _mapping(dispatch_payload, "schedule_payload")
+        raw_text = (
+            output_payload.get("raw_text") if output_payload is not None else None
+        )
+        validation = WorkbenchRagEvalQuestionOutputValidationPolicy(
+            self.question_generator
+        ).validate(
+            raw_text=raw_text if isinstance(raw_text, str) else "",
+            existing_possible_questions=_string_tuple(
+                schedule_payload, "possible_questions"
+            ),
+        )
+        if (
+            validation.outcome
+            is not WorkbenchRagEvalQuestionOutputValidationOutcome.VALID_QUESTION_SET
+        ):
             return LlmDispatchOutputValidationResult(
-                status=LlmDispatchExecutionStatus.TERMINAL_FAILED
-                if action.terminal
-                else LlmDispatchExecutionStatus.RETRYABLE_FAILED,
-                error_kind="workbench_rag_eval_question_generation_validation_failed",
+                status=LlmDispatchExecutionStatus.RETRYABLE_FAILED,
+                error_kind=_error_kind_from_validation_outcome(validation.outcome),
                 next_attempt_at=None,
                 metadata={
+                    "validation_decision": validation.outcome.value,
+                    "validation_error": validation.error or validation.outcome.value,
                     "validated_question_count": 0,
-                    "validation_error": str(exc),
-                    "retry_plan": action.retry_plan.value,
                 },
             )
         return LlmDispatchOutputValidationResult(
             status=LlmDispatchExecutionStatus.SUCCEEDED,
             error_kind=None,
             next_attempt_at=None,
-            metadata={"validated_question_count": len(questions)},
+            metadata={
+                "validation_decision": validation.outcome.value,
+                "validation_error": None,
+                "validated_question_count": len(validation.questions),
+            },
         )
 
 
@@ -222,29 +199,45 @@ def _questions_from_execution_result(
             "possible_questions",
         ),
     )
-    return tuple(
-        WorkbenchRagEvalQuestion(
-            question_id=_stable_id(workflow_run_id, runtime_entry_id, item.question),
-            run_id=workflow_run_id,
-            project_id=project_id,
-            expected_runtime_entry_id=runtime_entry_id,
-            expected_fact_id=expected_fact_id,
-            question=item.question,
-            question_kind=item.question_kind,
-            source=item.source,
-            generation_model=item.generation_model,
-            prompt_version=prompt_version,
-            contract_version=item.contract_version,
-            promotion_eligible=item.promotion_eligible,
-            ambiguity_risk=item.ambiguity_risk,
-            generation_rationale=item.generation_rationale,
-            generation_account_ref=item.generation_account_ref,
-            generation_slot_index=item.generation_slot_index,
-            status=WorkbenchRagEvalQuestionStatus.CREATED,
-            created_at=execution_result.llm_result.finished_at,
-        )
+    question_ids = tuple(
+        _stable_id(workflow_run_id, runtime_entry_id, item.question)
         for item in generated
     )
+    roles = WorkbenchRagEvalQuestionRolePolicy().assign(
+        entry_id=runtime_entry_id,
+        question_ids=question_ids,
+    )
+    role_policy = WorkbenchRagEvalQuestionRolePolicy()
+    questions: list[WorkbenchRagEvalQuestion] = []
+    for item, question_id in zip(generated, question_ids, strict=True):
+        role = roles[question_id]
+        questions.append(
+            WorkbenchRagEvalQuestion(
+                question_id=question_id,
+                run_id=workflow_run_id,
+                project_id=project_id,
+                expected_runtime_entry_id=runtime_entry_id,
+                expected_fact_id=expected_fact_id,
+                question=item.question,
+                question_kind=item.question_kind,
+                source=item.source,
+                generation_model=item.generation_model,
+                prompt_version=prompt_version,
+                contract_version=item.contract_version,
+                promotion_eligible=role_policy.promotion_eligible(
+                    role=role,
+                    generated_eligible=item.promotion_eligible,
+                ),
+                ambiguity_risk=item.ambiguity_risk,
+                generation_rationale=item.generation_rationale,
+                generation_account_ref=item.generation_account_ref,
+                generation_slot_index=item.generation_slot_index,
+                status=WorkbenchRagEvalQuestionStatus.CREATED,
+                created_at=execution_result.llm_result.finished_at,
+                evaluation_role=role,
+            )
+        )
+    return tuple(questions)
 
 
 def _raw_output_text(output_payload: Mapping[str, object] | None) -> str:
@@ -294,3 +287,11 @@ def _string_tuple(
 
 def _stable_id(*parts: str) -> str:
     return sha256(":".join(parts).encode("utf-8")).hexdigest()
+
+
+def _error_kind_from_validation_outcome(
+    outcome: WorkbenchRagEvalQuestionOutputValidationOutcome,
+) -> str:
+    if outcome is WorkbenchRagEvalQuestionOutputValidationOutcome.INVALID_JSON:
+        return "invalid_json"
+    return "invalid_contract"

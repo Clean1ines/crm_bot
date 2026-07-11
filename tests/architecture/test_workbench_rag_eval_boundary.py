@@ -19,15 +19,33 @@ def test_workbench_rag_eval_boundary_avoids_legacy_surfaces_and_answer_text() ->
 
 
 def test_workbench_rag_eval_retrieval_phase_uses_published_runtime_search() -> None:
-    source = Path(
-        "src/contexts/knowledge_workbench/rag_eval/application/use_cases/"
-        "run_workbench_rag_eval.py"
+    handler_source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/application/workflows/"
+        "handle_run_workbench_rag_eval_retrieval_evaluation_command.py"
+    ).read_text(encoding="utf-8")
+    dispatcher_source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/application/workflows/"
+        "dispatch_workbench_rag_eval_workflow_command.py"
+    ).read_text(encoding="utf-8")
+    composition_source = Path(
+        "src/interfaces/composition/workbench_rag_eval_workflow_runtime.py"
     ).read_text(encoding="utf-8")
 
-    assert "SearchPublishedWorkbenchRuntime" in source
-    assert "search_published_workbench_runtime.execute" in source
-    assert "question_generation_batch_executor.generate_for_entries" in source
-    assert "answer" not in source
+    assert "RUN_RETRIEVAL_EVALUATION" in dispatcher_source
+    assert (
+        "HandleRunWorkbenchRagEvalRetrievalEvaluationCommandHandler"
+        in dispatcher_source
+    )
+    assert "SearchPublishedWorkbenchRuntime" in composition_source
+    assert "save_retrieval_results" in handler_source
+    assert "save_retrieval_outcomes" in handler_source
+    assert "SCHEDULE_ADJUDICATION_WORK" in handler_source
+    assert "save_promoted_question_candidates" not in handler_source
+    assert (
+        "question_generation_batch_executor.generate_for_entries" not in handler_source
+    )
+    assert "asyncio.gather" not in handler_source
+    assert "asyncio.Semaphore" not in handler_source
 
 
 def test_legacy_rag_eval_router_file_is_deleted() -> None:

@@ -51,7 +51,7 @@ class WorkbenchRagEvalRetrievalOutcomePolicy:
     ) -> WorkbenchRagEvalRetrievalOutcome:
         competitor_score = best_competitor_score
         margin = (
-            round(float(expected_score) - float(competitor_score), 12)
+            float(expected_score) - float(competitor_score)
             if expected_score is not None and competitor_score is not None
             else None
         )

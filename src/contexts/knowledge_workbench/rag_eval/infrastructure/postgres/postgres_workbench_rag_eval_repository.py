@@ -6,6 +6,7 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.jsonb_pay
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from hashlib import sha256
 from typing import Protocol, cast
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
@@ -17,6 +18,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalQuestion,
     WorkbenchRagEvalQuestionAmbiguityRisk,
     WorkbenchRagEvalQuestionKind,
+    WorkbenchRagEvalQuestionRole,
     WorkbenchRagEvalQuestionSource,
     WorkbenchRagEvalQuestionStatus,
     WorkbenchRagEvalRetrievalOutcome,
@@ -28,6 +30,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalPromotionStatus,
     WorkbenchRagEvalSummary,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_normalization_policy import (
+    normalize_workbench_rag_eval_question,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
     WorkbenchRagEvalRepositoryPort,
@@ -87,6 +92,7 @@ SELECT
     question.generation_rationale,
     question.generation_account_ref,
     question.generation_slot_index,
+    question.evaluation_role,
     question.status,
     question.created_at,
     result.result_id,
@@ -243,6 +249,43 @@ class WorkbenchRagEvalPoolLike(Protocol):
 class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
     def __init__(self, connection_or_pool: object) -> None:
         self._connection_or_pool = connection_or_pool
+
+    async def materialize_baseline_questions(
+        self, *, run_id: str, project_id: str, created_at: datetime
+    ) -> int:
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                """
+                SELECT
+                    schedule.payload->>'workflow_run_id' AS run_id,
+                    schedule.payload->>'project_id' AS project_id,
+                    schedule.payload->>'runtime_entry_id' AS runtime_entry_id,
+                    schedule.payload->>'expected_fact_id' AS expected_fact_id,
+                    possible.question AS question
+                FROM execution_work_item_schedules AS schedule
+                JOIN execution_work_items AS item
+                  ON item.work_item_id = schedule.work_item_id
+                CROSS JOIN LATERAL jsonb_array_elements_text(
+                    schedule.payload->'possible_questions'
+                ) AS possible(question)
+                WHERE item.work_kind = 'workbench_rag_eval.question_generation'
+                  AND schedule.payload->>'workflow_run_id' = $1
+                  AND schedule.payload->>'project_id' = $2
+                ORDER BY schedule.created_at, schedule.work_item_id, possible.question
+                """,
+                run_id,
+                project_id,
+            )
+            questions = _baseline_questions_from_schedule_rows(
+                rows=rows,
+                run_id=run_id,
+                project_id=project_id,
+                created_at=created_at,
+            )
+            inserted = 0
+            for question in questions:
+                inserted += int(await _insert_rag_eval_question(connection, question))
+            return inserted
 
     async def create_run(self, *, run: WorkbenchRagEvalRun) -> WorkbenchRagEvalRun:
         async with _connection(self._connection_or_pool) as connection:
@@ -434,45 +477,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
     ) -> tuple[WorkbenchRagEvalQuestion, ...]:
         async with _connection(self._connection_or_pool) as connection:
             for question in questions:
-                await connection.execute(
-                    """
-                    INSERT INTO knowledge_workbench_rag_eval_questions (
-                        question_id, run_id, project_id,
-                        expected_runtime_entry_id, expected_fact_id, question,
-                        question_kind, source, generation_model, prompt_version,
-                        contract_version, promotion_eligible, ambiguity_risk,
-                        generation_rationale, generation_account_ref,
-                        generation_slot_index, status, created_at
-                    )
-                    VALUES (
-                        $1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
-                        $11, $12, $13, $14, $15, $16, $17, $18
-                    )
-                    ON CONFLICT (question_id) DO NOTHING
-                    """,
-                    question.question_id,
-                    question.run_id,
-                    question.project_id,
-                    question.expected_runtime_entry_id,
-                    question.expected_fact_id,
-                    question.question,
-                    question.question_kind.value,
-                    question.source.value,
-                    question.generation_model,
-                    question.prompt_version,
-                    question.contract_version,
-                    question.promotion_eligible,
-                    (
-                        question.ambiguity_risk.value
-                        if question.ambiguity_risk is not None
-                        else None
-                    ),
-                    question.generation_rationale,
-                    question.generation_account_ref,
-                    question.generation_slot_index,
-                    question.status.value,
-                    question.created_at,
-                )
+                await _insert_rag_eval_question(connection, question)
         return questions
 
     async def save_retrieval_results(
@@ -610,6 +615,58 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
 
         return outcomes
 
+    async def mark_questions_evaluated(
+        self,
+        *,
+        run_id: str,
+        question_ids: tuple[str, ...],
+        evaluated_at: datetime,
+    ) -> None:
+        async with _connection(self._connection_or_pool) as connection:
+            await connection.execute(
+                """UPDATE knowledge_workbench_rag_eval_questions
+                SET status = 'evaluated',
+                    evaluated_at = $3
+                WHERE run_id = $1 AND question_id = ANY($2::text[])""",
+                run_id,
+                list(question_ids),
+                evaluated_at,
+            )
+
+    async def complete_initial_retrieval_evaluation(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        total_questions: int,
+        classification_counts: Mapping[str, int],
+        updated_at: datetime,
+    ) -> None:
+        async with _connection(self._connection_or_pool) as connection:
+            await connection.execute(
+                """UPDATE knowledge_workbench_rag_eval_runs
+                SET status = 'running',
+                    current_phase = 'adjudication_scheduling',
+                    retrieval_total_questions = $3,
+                    retrieval_evaluated_questions = $3,
+                    retrieval_pass_strong = $4,
+                    retrieval_pass_weak = $5,
+                    retrieval_confusions = $6,
+                    retrieval_misses = $7,
+                    retrieval_existing_alias_failures = $8,
+                    updated_at = $9
+                WHERE run_id = $1 AND project_id = $2::uuid""",
+                run_id,
+                project_id,
+                total_questions,
+                classification_counts.get("pass_strong", 0),
+                classification_counts.get("pass_weak", 0),
+                classification_counts.get("confusion", 0),
+                classification_counts.get("miss", 0),
+                classification_counts.get("existing_alias_retrieval_failure", 0),
+                updated_at,
+            )
+
     async def save_promoted_question_candidates(
         self,
         *,
@@ -716,6 +773,13 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     run.capacity_next_due_at,
                     run.capacity_model_ref,
                     run.capacity_account_ref,
+                    run.retrieval_total_questions,
+                    run.retrieval_evaluated_questions,
+                    run.retrieval_pass_strong,
+                    run.retrieval_pass_weak,
+                    run.retrieval_confusions,
+                    run.retrieval_misses,
+                    run.retrieval_existing_alias_failures,
                     (
                         SELECT count(*)
                         FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
@@ -773,6 +837,13 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     run.capacity_next_due_at,
                     run.capacity_model_ref,
                     run.capacity_account_ref,
+                    run.retrieval_total_questions,
+                    run.retrieval_evaluated_questions,
+                    run.retrieval_pass_strong,
+                    run.retrieval_pass_weak,
+                    run.retrieval_confusions,
+                    run.retrieval_misses,
+                    run.retrieval_existing_alias_failures,
                     (
                         SELECT count(*)
                         FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
@@ -1139,6 +1210,7 @@ class _QuestionDetailsDraft:
     generation_rationale: str | None
     generation_account_ref: str | None
     generation_slot_index: int | None
+    evaluation_role: WorkbenchRagEvalQuestionRole
     status: WorkbenchRagEvalQuestionStatus
     created_at: datetime
     results: list[WorkbenchRagEvalRetrievalResultDetails] = field(default_factory=list)
@@ -1161,6 +1233,7 @@ class _QuestionDetailsDraft:
             generation_rationale=self.generation_rationale,
             generation_account_ref=self.generation_account_ref,
             generation_slot_index=self.generation_slot_index,
+            evaluation_role=self.evaluation_role,
             status=self.status,
             created_at=self.created_at,
             results=tuple(self.results),
@@ -1219,6 +1292,9 @@ def _question_details_from_rows(
                 ),
                 generation_slot_index=_optional_int_from_row(
                     row, "generation_slot_index"
+                ),
+                evaluation_role=WorkbenchRagEvalQuestionRole(
+                    _text_from_row(row, "evaluation_role")
                 ),
                 status=WorkbenchRagEvalQuestionStatus(_text_from_row(row, "status")),
                 created_at=_datetime_from_row(row, "created_at"),
@@ -1349,6 +1425,19 @@ def _summary_from_row(row: Mapping[str, object]) -> WorkbenchRagEvalSummary:
         capacity_next_due_at=_optional_datetime_from_row(row, "capacity_next_due_at"),
         capacity_model_ref=_optional_text_from_row(row, "capacity_model_ref"),
         capacity_account_ref=_optional_text_from_row(row, "capacity_account_ref"),
+        retrieval_total_questions=_int_from_row_default_zero(
+            row, "retrieval_total_questions"
+        ),
+        retrieval_evaluated_questions=_int_from_row_default_zero(
+            row, "retrieval_evaluated_questions"
+        ),
+        retrieval_pass_strong=_int_from_row_default_zero(row, "retrieval_pass_strong"),
+        retrieval_pass_weak=_int_from_row_default_zero(row, "retrieval_pass_weak"),
+        retrieval_confusions=_int_from_row_default_zero(row, "retrieval_confusions"),
+        retrieval_misses=_int_from_row_default_zero(row, "retrieval_misses"),
+        retrieval_existing_alias_failures=_int_from_row_default_zero(
+            row, "retrieval_existing_alias_failures"
+        ),
     )
 
 
@@ -1429,6 +1518,13 @@ def _int_from_row(row: Mapping[str, object], key: str) -> int:
     return value
 
 
+def _int_from_row_default_zero(row: Mapping[str, object], key: str) -> int:
+    value = row.get(key, 0)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{key} must be int")
+    return value
+
+
 def _optional_int_from_row(row: Mapping[str, object], key: str) -> int | None:
     value = row.get(key)
     if value is None:
@@ -1469,3 +1565,119 @@ def _optional_datetime_from_row(
     if not isinstance(value, datetime):
         raise TypeError(f"{key} must be datetime or None")
     return value
+
+
+def _baseline_questions_from_schedule_rows(
+    *,
+    rows: Sequence[Mapping[str, object]],
+    run_id: str,
+    project_id: str,
+    created_at: datetime,
+) -> tuple[WorkbenchRagEvalQuestion, ...]:
+    questions_by_id: dict[str, WorkbenchRagEvalQuestion] = {}
+    for row in rows:
+        row_run_id = _text_from_row(row, "run_id")
+        row_project_id = _text_from_row(row, "project_id")
+        if row_run_id != run_id or row_project_id != project_id:
+            raise ValueError("baseline schedule row does not match requested run")
+        runtime_entry_id = _text_from_row(row, "runtime_entry_id")
+        question = _text_from_row(row, "question")
+        normalized_question = normalize_workbench_rag_eval_question(question)
+        if not normalized_question:
+            raise ValueError("baseline question normalizes to empty text")
+        question_id = _baseline_question_id(
+            run_id=run_id,
+            runtime_entry_id=runtime_entry_id,
+            normalized_question=normalized_question,
+        )
+        questions_by_id.setdefault(
+            question_id,
+            WorkbenchRagEvalQuestion(
+                question_id=question_id,
+                run_id=run_id,
+                project_id=project_id,
+                expected_runtime_entry_id=runtime_entry_id,
+                expected_fact_id=_text_from_row(row, "expected_fact_id"),
+                question=question.strip(),
+                question_kind=WorkbenchRagEvalQuestionKind.EXISTING_POSSIBLE_QUESTION,
+                source=WorkbenchRagEvalQuestionSource.PUBLISHED_POSSIBLE_QUESTION,
+                generation_model=None,
+                prompt_version=None,
+                contract_version=None,
+                promotion_eligible=False,
+                ambiguity_risk=None,
+                generation_rationale=None,
+                generation_account_ref=None,
+                generation_slot_index=None,
+                status=WorkbenchRagEvalQuestionStatus.CREATED,
+                created_at=created_at,
+                evaluation_role=WorkbenchRagEvalQuestionRole.BASELINE,
+            ),
+        )
+    return tuple(questions_by_id.values())
+
+
+def _baseline_question_id(
+    *,
+    run_id: str,
+    runtime_entry_id: str,
+    normalized_question: str,
+) -> str:
+    return (
+        "rag-eval-baseline:"
+        + sha256(
+            "\x1f".join(
+                (
+                    run_id,
+                    runtime_entry_id,
+                    WorkbenchRagEvalQuestionSource.PUBLISHED_POSSIBLE_QUESTION.value,
+                    normalized_question,
+                )
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+
+
+async def _insert_rag_eval_question(
+    connection: WorkbenchRagEvalConnectionLike,
+    question: WorkbenchRagEvalQuestion,
+) -> bool:
+    result = await connection.execute(
+        """
+        INSERT INTO knowledge_workbench_rag_eval_questions (
+            question_id, run_id, project_id,
+            expected_runtime_entry_id, expected_fact_id, question,
+            question_kind, source, generation_model, prompt_version,
+            contract_version, promotion_eligible, ambiguity_risk,
+            generation_rationale, generation_account_ref,
+            generation_slot_index, status, created_at, evaluation_role
+        )
+        VALUES (
+            $1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13, $14, $15, $16, $17, $18, $19
+        )
+        ON CONFLICT (question_id) DO NOTHING
+        """,
+        question.question_id,
+        question.run_id,
+        question.project_id,
+        question.expected_runtime_entry_id,
+        question.expected_fact_id,
+        question.question,
+        question.question_kind.value,
+        question.source.value,
+        question.generation_model,
+        question.prompt_version,
+        question.contract_version,
+        question.promotion_eligible,
+        question.ambiguity_risk.value if question.ambiguity_risk is not None else None,
+        question.generation_rationale,
+        question.generation_account_ref,
+        question.generation_slot_index,
+        question.status.value,
+        question.created_at,
+        question.evaluation_role.value,
+    )
+    if isinstance(result, str) and result.startswith("INSERT 0 "):
+        return result.endswith(" 1")
+    return False

@@ -16,6 +16,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalQuestionAmbiguityRisk,
     WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestionKind,
+    WorkbenchRagEvalQuestionRole,
     WorkbenchRagEvalQuestionSource,
     WorkbenchRagEvalQuestionStatus,
     WorkbenchRagEvalRetrievalResultDetails,
@@ -225,6 +226,7 @@ class FakeWorkbenchRagEvalRepository:
                 generation_rationale="Однозначный retrieval alias",
                 generation_account_ref="groq_org_primary",
                 generation_slot_index=0,
+                evaluation_role=WorkbenchRagEvalQuestionRole.PROMOTION_POOL,
                 status=WorkbenchRagEvalQuestionStatus.CREATED,
                 created_at=now,
                 results=(

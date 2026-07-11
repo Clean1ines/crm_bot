@@ -97,7 +97,9 @@ def test_request_too_large_falls_back_only_to_compatible_profile() -> None:
     assert incompatible.kind is WorkbenchRagEvalQuestionAttemptDecisionKind.TERMINAL
 
 
-def test_invalid_qgen_contract_is_persisted_as_retryable_with_retry_plan() -> None:
+def test_invalid_qgen_contract_is_persisted_as_retryable_without_retry_plan_metadata() -> (
+    None
+):
     result = WorkbenchRagEvalQuestionGenerationOutputValidator(
         WorkbenchRagEvalQuestionGenerator.from_prompt_file()
     ).validate(
@@ -111,4 +113,9 @@ def test_invalid_qgen_contract_is_persisted_as_retryable_with_retry_plan() -> No
         attempt_number=1,
     )
     assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
-    assert result.metadata["retry_plan"] == WorkItemRetryPlan.RETRY_SAME_ROUTE.value
+    assert result.error_kind == "invalid_json"
+    assert result.metadata == {
+        "validation_decision": "INVALID_JSON",
+        "validation_error": "INVALID_JSON: response is not valid JSON",
+        "validated_question_count": 0,
+    }

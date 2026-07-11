@@ -4,8 +4,8 @@
 
 **Date:** 2026-07-10  
 **Committed base:** `aef56def22f943ee1f0caa1037682ffa542ad974`  
-**Working tree:** contains an uncommitted continuation checkpoint  
-**Overall status:** IN PROGRESS — full RAG Eval V2 Definition of Done is not complete
+**Working tree:** contains the retrieval continuation checkpoint
+**Overall status:** IN PROGRESS — functional qgen/retrieval implementation present; canonical qgen/retrieval integration proof completed
 
 This document describes the current working tree. It must not instruct a future
 agent to recreate question-generation workflow components that already exist.
@@ -255,6 +255,17 @@ This is not the completed frontend progression UI.
 
 Current verified test evidence
 
+Retrieval continuation checkpoint:
+
+- Focused RAG Eval/backend slice: `137 passed`.
+- Full backend: `2613 passed, 2 skipped`.
+- Ruff: passed.
+- Mypy: passed.
+- Frontend type-check/build/tests: passed.
+- Frontend tests: `56 passed`.
+- Changed RAG Eval frontend ESLint: passed.
+- Full frontend lint: still fails only in listed unchanged knowledge files.
+
 Latest canonical repair slice:
 
 35 passed
@@ -288,53 +299,32 @@ Ruff focused checks: passed
 These previous focused counts are historical evidence only. They do not replace
 the required final full-suite gates.
 
-Partial implementations that must not be described as complete
-Retry and fallback
+Completed in this continuation
 
-Retry/fallback policy files exist, but the current qgen validator still requires
-a canonical cleanup.
-
-Known problems that remain to be resolved:
-
-retry limit is currently selected inside the qgen validation path;
-invalid output handling still catches an overly broad exception;
-real input-token data must be used for oversized-input fallback decisions;
-retry/fallback must be proven through persisted attempts and dispatches;
-minute, daily, auth, oversized-input and invalid-contract paths require
-explicit end-to-end tests.
-
-Do not report retry/fallback as complete until those tests pass.
+- qgen output validation is separated from route/retry decisions and uses a named validation policy/config.
+- Generated roles are assigned before persistence and written in the same INSERT path; generated sets contain at least two HOLDOUT questions.
+- The legacy synchronous `RunWorkbenchRagEval` boundary is retired fail-fast and production composition no longer uses it.
+- Existing published possible questions are materialized idempotently as BASELINE immediately before retrieval.
+- `RUN_RETRIEVAL_EVALUATION` is registered in dispatcher, drain and production runtime composition.
+- Production `SearchPublishedWorkbenchRuntime` evaluates all persisted roles project-wide with `top_k >= 5`.
+- Diagnostic top-k rows and canonical `initial` outcomes are persisted idempotently; no promotion candidates are created.
+- Retrieval counters and phase transition to `ADJUDICATION_SCHEDULING` are persisted, with one durable `SCHEDULE_ADJUDICATION_WORK` command.
+- Migration `123_add_workbench_rag_eval_retrieval_progress.sql` adds retrieval counters.
 
 Four-account support
 
-The current test proves that:
-
-four configured Groq account refs create four transport objects;
-generic preparation receives the account refs.
-
-It does not yet prove all of:
-
-real admission across accounts;
-persisted attempt allocations;
-persisted dispatch account refs;
-per-account capacity observations;
-reservation safety under concurrent preparation.
-
-Do not call this a complete four-account integration proof.
+The production composition proof covers four configured Groq account refs, four
+distinct transports, real admission across multiple accounts, persisted
+dispatch account refs, per-account/model capacity observations and persisted
+reservation safety on repeated preparation.
 
 Production pump
 
-The pump is composed and invoked from the shared runtime loop.
-
-Still required:
-
-due RAG Eval command selection test;
-future run_after exclusion;
-later due-command pickup;
-completed-command exclusion;
-transaction boundary proof;
-failure isolation between runs;
-no blocked-command busy loop.
+The pump is composed and invoked from the shared runtime loop. The production
+matrix covers due command selection, future `run_after` exclusion, later
+due-command pickup, completed-command exclusion, failure isolation between
+runs, no blocked-command busy loop, repeated-pump idempotency and observable
+per-run failures.
 Roles lifecycle
 
 Role vocabulary, deterministic policy and persistence foundation exist.
@@ -348,24 +338,17 @@ enforce candidate prohibition for holdouts;
 use holdouts in post-promotion verification.
 Retrieval
 
-Canonical outcome model, migration, policy and repository persistence exist.
-
-The actual retrieval workflow handler does not exist yet.
+The retrieval handler and production transition now exist. Baseline
+materialization, diagnostic top-k rows, canonical outcomes, evaluated statuses,
+retrieval counters, run phase, workflow event, timeline, progress snapshot,
+next adjudication scheduling command and completion retrieval command are
+covered by a single transaction-boundary proof.
 
 Not implemented
 
 The following verticals remain incomplete:
 
-Retrieval workflow
-production retrieval handler;
-baseline materialization;
-evaluation of baseline, promotion-pool and holdout questions;
-top-k diagnostic persistence through the workflow;
-canonical outcome persistence through the workflow;
-idempotent rerun behaviour;
-transition to adjudication scheduling;
-dispatcher registration for retrieval execution.
-Adjudication
+Adjudication:
 versioned adjudication prompt;
 eligibility planner;
 adjudication work items;
@@ -375,41 +358,37 @@ adjudication retry/fallback;
 adjudication reconcile;
 adjudication persistence;
 terminal-failure blocking.
-Promotion review
+
+Promotion review:
 canonical candidate policy;
 VALID_TARGET_QUERY gate;
 explicit approve/reject transitions;
 expanded promotion statuses;
 candidate linkage to outcome and adjudication;
 holdout and baseline exclusion.
-Reversible application
+
+Reversible revisions:
 grouped application per runtime entry;
 alias-count policy;
 one embedding recalculation per affected entry;
 revision snapshot before mutation;
 single active pending revision invariant;
 atomic mutation plus revision creation.
-Verification
+
+Verification:
 before/after verification dataset;
 baseline verification;
 holdout verification;
 neighbour/competitor regression checks;
 persisted verification metrics;
-regression-failed state;
+regression-failed state.
+
+Accept/rollback:
 explicit accept;
 explicit rollback;
 restoration of previous aliases, embedding text and embedding vector.
-HTTP and read model
-outcomes endpoint;
-adjudications endpoint;
-revisions endpoint;
-verification endpoint;
-candidate approve/reject endpoints;
-apply-approved endpoint;
-accept-revision endpoint;
-rollback-revision endpoint;
-complete persisted progression payloads for all phases.
-Frontend
+
+Full frontend progression:
 full phase progression;
 capacity-wait details;
 attempts, retries and fallback display;
@@ -422,76 +401,57 @@ accept/rollback actions;
 RAG Eval workflow-event/SSE invalidation.
 Final quality gates
 
-The complete required gates have not yet passed:
+Current checkpoint validation:
 
-python -m ruff format --check src tests
-python -m ruff check src tests
-python -m mypy src
-python -m pytest -q
-
-cd frontend
-npm run lint
-npm run type-check
-npm run build
-npm test -- --run
-
-Current full-suite failures must not be labelled “pre-existing” unless that is
-proven against the clean committed base.
+```text
+focused RAG Eval/backend slice: 137 passed
+full backend: 2613 passed, 2 skipped
+ruff: passed
+mypy: passed
+frontend type-check/build/tests: passed
+frontend tests: 56 passed
+changed RAG Eval frontend ESLint: passed
+full frontend lint: still fails only in listed unchanged knowledge files
+```
 
 Next exact implementation sequence
 
 Continue from the current working tree in this exact order.
 
-1. Finish current checkpoint correctness
-clean up qgen invalid-output retry/fallback separation;
-remove hard-coded or fabricated retry inputs;
-fix the current full backend architecture failure;
-fix current mypy failures without restoring the legacy direct runtime;
-prove the due-command pump behaviour;
-prove four-account admission/reservation/dispatch behaviour;
-run the complete repaired qgen/runtime focused suite.
-2. Implement retrieval workflow
-materialize baseline questions;
-persist generated roles;
-execute production retrieval;
-persist top-k rows;
-persist canonical outcomes;
-register and dispatch retrieval command;
-transition to adjudication scheduling.
-3. Implement adjudication
+1. Implement adjudication
 migration/model/repository;
 prompt and validator;
 planner;
 generic prepare/execute/reconcile;
 retry/fallback;
 terminal blocking.
-4. Implement promotion review
+2. Implement promotion review
 candidate policy;
 approve/reject state transitions;
 API/read projection.
-5. Implement reversible grouped application
+3. Implement reversible grouped application
 revisions migration/model/repository;
 atomic snapshot and mutation;
 one embedding generation per target entry;
 active-revision guard.
-6. Implement post-promotion verification
+4. Implement post-promotion verification
 before/after retrieval outcomes;
 baseline/holdout/neighbour metrics;
 regression policy;
 explicit accept/rollback.
-7. Complete API, SSE and frontend
+5. Complete API, SSE and frontend
 persisted read endpoints;
 workflow-event projection;
 full progression UI;
 revision controls.
-8. Run all final gates
+6. Run all final gates
 
 Do not report the original RAG Eval V2 task as complete until every required
 backend and frontend gate passes.
 
 Continuation instruction
 
-Continue from the current uncommitted working tree.
+Continue from the current working tree.
 
 Do not restart question generation.
 
@@ -507,7 +467,6 @@ question-role migration;
 retrieval-outcome migration;
 production runtime composition foundation.
 
-First finish the partial correctness items listed above, then implement the
-retrieval workflow vertical.
+The qgen/retrieval checkpoint is ready for the next vertical: adjudication.
 
 Do not commit or push without an explicit user request.

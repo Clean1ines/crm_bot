@@ -254,6 +254,7 @@ class WorkbenchRagEvalQuestion:
     generation_slot_index: int | None
     status: WorkbenchRagEvalQuestionStatus
     created_at: datetime
+    evaluation_role: WorkbenchRagEvalQuestionRole
 
     def __post_init__(self) -> None:
         _require_text(self.question_id, "question_id")
@@ -287,6 +288,23 @@ class WorkbenchRagEvalQuestion:
         )
         _require_enum(self.status, WorkbenchRagEvalQuestionStatus, "status")
         _require_datetime(self.created_at, "created_at")
+        _require_enum(
+            self.evaluation_role, WorkbenchRagEvalQuestionRole, "evaluation_role"
+        )
+        if (
+            self.evaluation_role is WorkbenchRagEvalQuestionRole.HOLDOUT
+            and self.promotion_eligible
+        ):
+            raise ValueError("holdout question cannot be promotion eligible")
+        _validate_question_source_role_contract(
+            source=self.source,
+            question_kind=self.question_kind,
+            evaluation_role=self.evaluation_role,
+            promotion_eligible=self.promotion_eligible,
+            generation_model=self.generation_model,
+            generation_account_ref=self.generation_account_ref,
+            generation_slot_index=self.generation_slot_index,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -475,11 +493,12 @@ class WorkbenchRagEvalQuestionDetails:
     promotion_eligible: bool
     ambiguity_risk: WorkbenchRagEvalQuestionAmbiguityRisk | None
     generation_rationale: str | None
+    generation_account_ref: str | None
+    generation_slot_index: int | None
+    evaluation_role: WorkbenchRagEvalQuestionRole
     status: WorkbenchRagEvalQuestionStatus
     created_at: datetime
     results: tuple[WorkbenchRagEvalRetrievalResultDetails, ...]
-    generation_account_ref: str | None = None
-    generation_slot_index: int | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.question_id, "question_id")
@@ -515,6 +534,18 @@ class WorkbenchRagEvalQuestionDetails:
         )
         if not isinstance(self.results, tuple):
             raise TypeError("results must be tuple")
+        _require_enum(
+            self.evaluation_role, WorkbenchRagEvalQuestionRole, "evaluation_role"
+        )
+        _validate_question_source_role_contract(
+            source=self.source,
+            question_kind=self.question_kind,
+            evaluation_role=self.evaluation_role,
+            promotion_eligible=self.promotion_eligible,
+            generation_model=self.generation_model,
+            generation_account_ref=self.generation_account_ref,
+            generation_slot_index=self.generation_slot_index,
+        )
 
     def to_json_dict(self) -> JsonObject:
         return {
@@ -536,6 +567,7 @@ class WorkbenchRagEvalQuestionDetails:
             "generation_rationale": self.generation_rationale,
             "generation_account_ref": self.generation_account_ref,
             "generation_slot_index": self.generation_slot_index,
+            "evaluation_role": self.evaluation_role.value,
             "status": self.status.value,
             "created_at": self.created_at.isoformat(),
             "results": [result.to_json_dict() for result in self.results],
@@ -727,6 +759,13 @@ class WorkbenchRagEvalSummary:
     capacity_next_due_at: datetime | None = None
     capacity_model_ref: str | None = None
     capacity_account_ref: str | None = None
+    retrieval_total_questions: int = 0
+    retrieval_evaluated_questions: int = 0
+    retrieval_pass_strong: int = 0
+    retrieval_pass_weak: int = 0
+    retrieval_confusions: int = 0
+    retrieval_misses: int = 0
+    retrieval_existing_alias_failures: int = 0
 
     def __post_init__(self) -> None:
         _require_text(self.run_id, "run_id")
@@ -754,6 +793,16 @@ class WorkbenchRagEvalSummary:
         _require_optional_datetime(self.updated_at, "updated_at")
         if not isinstance(self.progress, WorkbenchRagEvalRunProgress):
             raise TypeError("progress must be WorkbenchRagEvalRunProgress")
+        for field_name in (
+            "retrieval_total_questions",
+            "retrieval_evaluated_questions",
+            "retrieval_pass_strong",
+            "retrieval_pass_weak",
+            "retrieval_confusions",
+            "retrieval_misses",
+            "retrieval_existing_alias_failures",
+        ):
+            _require_non_negative_int(getattr(self, field_name), field_name)
         _require_optional_datetime(self.capacity_next_due_at, "capacity_next_due_at")
         _require_optional_text(self.capacity_model_ref, "capacity_model_ref")
         _require_optional_text(self.capacity_account_ref, "capacity_account_ref")
@@ -798,6 +847,17 @@ class WorkbenchRagEvalSummary:
             "updated_at": (
                 self.updated_at.isoformat() if self.updated_at is not None else None
             ),
+            "retrieval_progress": {
+                "total": self.retrieval_total_questions,
+                "completed": self.retrieval_evaluated_questions,
+                "classification_counts": {
+                    "pass_strong": self.retrieval_pass_strong,
+                    "pass_weak": self.retrieval_pass_weak,
+                    "confusion": self.retrieval_confusions,
+                    "miss": self.retrieval_misses,
+                    "existing_alias_retrieval_failure": self.retrieval_existing_alias_failures,
+                },
+            },
         }
 
 
@@ -847,3 +907,47 @@ def _require_optional_non_negative_int(value: int | None, field_name: str) -> No
     if value is None:
         return
     _require_non_negative_int(value, field_name)
+
+
+def _validate_question_source_role_contract(
+    *,
+    source: WorkbenchRagEvalQuestionSource,
+    question_kind: WorkbenchRagEvalQuestionKind,
+    evaluation_role: WorkbenchRagEvalQuestionRole,
+    promotion_eligible: bool,
+    generation_model: str | None,
+    generation_account_ref: str | None,
+    generation_slot_index: int | None,
+) -> None:
+    if source is WorkbenchRagEvalQuestionSource.PUBLISHED_POSSIBLE_QUESTION:
+        if question_kind is not WorkbenchRagEvalQuestionKind.EXISTING_POSSIBLE_QUESTION:
+            raise ValueError("published possible question requires existing kind")
+        if evaluation_role is not WorkbenchRagEvalQuestionRole.BASELINE:
+            raise ValueError("published possible question requires baseline role")
+        if promotion_eligible:
+            raise ValueError("published possible question cannot be promotion eligible")
+        if generation_model is not None:
+            raise ValueError("published possible question cannot have generation model")
+        if generation_account_ref is not None:
+            raise ValueError(
+                "published possible question cannot have generation account ref"
+            )
+        if generation_slot_index is not None:
+            raise ValueError(
+                "published possible question cannot have generation slot index"
+            )
+        return
+
+    if source is WorkbenchRagEvalQuestionSource.GENERATED:
+        if evaluation_role is WorkbenchRagEvalQuestionRole.BASELINE:
+            raise ValueError("generated question cannot have baseline role")
+        if evaluation_role not in {
+            WorkbenchRagEvalQuestionRole.PROMOTION_POOL,
+            WorkbenchRagEvalQuestionRole.HOLDOUT,
+        }:
+            raise ValueError("generated question requires promotion_pool or holdout")
+        if (
+            evaluation_role is WorkbenchRagEvalQuestionRole.HOLDOUT
+            and promotion_eligible
+        ):
+            raise ValueError("holdout question cannot be promotion eligible")

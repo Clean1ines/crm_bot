@@ -16,7 +16,9 @@ class WorkbenchRagEvalQuestionRolePolicy:
             raise ValueError("entry_id and question_ids must be non-empty")
         if len(set(question_ids)) != len(question_ids):
             raise ValueError("question_ids must be unique")
-        holdout_count = max(1, math.ceil(len(question_ids) * 0.2))
+        holdout_count = min(
+            len(question_ids), max(2, math.ceil(len(question_ids) * 0.2))
+        )
         ordered = sorted(
             question_ids,
             key=lambda question_id: hashlib.sha256(
@@ -27,11 +29,13 @@ class WorkbenchRagEvalQuestionRolePolicy:
         return {
             question_id: WorkbenchRagEvalQuestionRole.HOLDOUT
             if question_id in holdouts
-            else WorkbenchRagEvalQuestionRole.BASELINE
+            else WorkbenchRagEvalQuestionRole.PROMOTION_POOL
             for question_id in question_ids
         }
 
     def promotion_eligible(
         self, *, role: WorkbenchRagEvalQuestionRole, generated_eligible: bool
     ) -> bool:
-        return generated_eligible and role is WorkbenchRagEvalQuestionRole.BASELINE
+        return (
+            generated_eligible and role is WorkbenchRagEvalQuestionRole.PROMOTION_POOL
+        )

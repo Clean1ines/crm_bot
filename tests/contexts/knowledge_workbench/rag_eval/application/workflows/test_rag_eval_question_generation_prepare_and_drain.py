@@ -335,3 +335,41 @@ async def test_drain_blocks_unimplemented_rag_eval_command_explicitly() -> None:
         WorkbenchRagEvalWorkflowCommandType.EXECUTE_QUESTION_GENERATION.value
     )
     assert result.last_blocked_reason == ("RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED")
+
+
+@pytest.mark.asyncio
+async def test_drain_stops_on_unimplemented_later_command_without_busy_loop() -> None:
+    now = _now()
+    adjudication_command = WorkflowCommand(
+        command_id=WorkflowCommandId("workflow-command:schedule-adjudication:run-1"),
+        command_type=WorkbenchRagEvalWorkflowCommandType.SCHEDULE_ADJUDICATION_WORK.value,
+        workflow_run_id="run-1",
+        idempotency_key=WorkflowIdempotencyKey("schedule-adjudication:run-1"),
+        payload={"workflow_run_id": "run-1"},
+        status=WorkflowCommandStatus.PENDING,
+        run_after=now,
+        created_at=now,
+        updated_at=now,
+    )
+    unit_of_work = FakeWorkflowUnitOfWork(
+        command_log=FakeCommandLog(
+            pending=(adjudication_command, _prepare_command()),
+        )
+    )
+
+    result = await DrainWorkbenchRagEvalWorkflowCommands().execute(
+        DrainWorkbenchRagEvalWorkflowCommandsCommand(
+            workflow_run_id="run-1",
+            max_commands=10,
+        ),
+        workflow_unit_of_work=unit_of_work,
+        prepare_llm_dispatch_batch=FakePrepare(result=SimpleNamespace()),
+    )
+
+    assert result.inspected_count == 1
+    assert result.dispatched_count == 0
+    assert result.blocked_count == 1
+    assert result.last_blocked_command_type == (
+        WorkbenchRagEvalWorkflowCommandType.SCHEDULE_ADJUDICATION_WORK.value
+    )
+    assert unit_of_work.command_log.completed == []

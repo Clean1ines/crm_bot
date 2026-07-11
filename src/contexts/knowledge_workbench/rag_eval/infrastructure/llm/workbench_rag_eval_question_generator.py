@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 import json
-import unicodedata
 
 from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_question_generation_errors import (
     WorkbenchRagEvalQuestionGenerationError,
@@ -15,6 +14,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalQuestionAmbiguityRisk,
     WorkbenchRagEvalQuestionKind,
     WorkbenchRagEvalQuestionSource,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_normalization_policy import (
+    normalize_workbench_rag_eval_question,
 )
 
 
@@ -141,7 +143,7 @@ def _parse_generated_questions(
         )
 
     normalized_existing = {
-        _normalize_question(question)
+        normalize_workbench_rag_eval_question(question)
         for question in existing_possible_questions
         if isinstance(question, str) and question.strip()
     }
@@ -213,7 +215,7 @@ def _parse_generated_questions(
             )
         exact_seen.add(question)
 
-        normalized = _normalize_question(question)
+        normalized = normalize_workbench_rag_eval_question(question)
         if normalized in normalized_seen:
             raise WorkbenchRagEvalQuestionGenerationError(
                 f"DUPLICATE_GENERATED_QUESTION: normalized duplicate {question!r}"
@@ -275,24 +277,6 @@ def _input_payload_text(
         "contract_version": WORKBENCH_RAG_EVAL_QUESTION_CONTRACT_VERSION,
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
-
-
-def _normalize_question(value: str) -> str:
-    normalized = unicodedata.normalize("NFKC", value).casefold().strip()
-    characters: list[str] = []
-    previous_was_space = False
-
-    for character in normalized:
-        category = unicodedata.category(character)
-        if character.isspace() or category.startswith("P"):
-            if characters and not previous_was_space:
-                characters.append(" ")
-                previous_was_space = True
-            continue
-        characters.append(character)
-        previous_was_space = False
-
-    return "".join(characters).strip()
 
 
 def _required_non_empty_string(value: object, *, field_name: str) -> str:

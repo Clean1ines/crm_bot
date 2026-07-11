@@ -2,12 +2,28 @@ import { authedJsonRequest } from '@shared/api/core/http';
 
 export type WorkbenchRagEvalRunStatus = 'created' | 'running' | 'completed' | 'failed' | string;
 
+export type WorkbenchRagEvalRetrievalClassificationCounts = {
+  pass_strong: number;
+  pass_weak: number;
+  confusion: number;
+  miss: number;
+  existing_alias_retrieval_failure: number;
+};
+
+export type WorkbenchRagEvalRetrievalProgress = {
+  completed: number;
+  total: number;
+  classification_counts?: WorkbenchRagEvalRetrievalClassificationCounts | null;
+};
+
 export type WorkbenchRagEvalRunSummary = {
   run_id: string;
   project_id: string;
   publication_id?: string | null;
   source_document_ref?: string | null;
   status: WorkbenchRagEvalRunStatus;
+  current_phase?: string | null;
+  retrieval_progress?: WorkbenchRagEvalRetrievalProgress | null;
   question_generation_model?: string | null;
   question_generation_prompt_version?: string | null;
   total_entries: number;

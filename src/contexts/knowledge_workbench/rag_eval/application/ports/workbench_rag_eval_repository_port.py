@@ -26,6 +26,10 @@ from src.contexts.knowledge_workbench.retrieval.application.models.published_wor
 
 
 class WorkbenchRagEvalRepositoryPort(Protocol):
+    async def materialize_baseline_questions(
+        self, *, run_id: str, project_id: str, created_at: datetime
+    ) -> int: ...
+
     async def create_run(self, *, run: WorkbenchRagEvalRun) -> WorkbenchRagEvalRun: ...
 
     async def transition_run_progress(
@@ -72,6 +76,24 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
     async def save_retrieval_outcomes(
         self, *, outcomes: tuple[WorkbenchRagEvalRetrievalOutcome, ...]
     ) -> tuple[WorkbenchRagEvalRetrievalOutcome, ...]: ...
+
+    async def mark_questions_evaluated(
+        self,
+        *,
+        run_id: str,
+        question_ids: tuple[str, ...],
+        evaluated_at: datetime,
+    ) -> None: ...
+
+    async def complete_initial_retrieval_evaluation(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        total_questions: int,
+        classification_counts: Mapping[str, int],
+        updated_at: datetime,
+    ) -> None: ...
 
     async def save_promoted_question_candidates(
         self,

@@ -6,6 +6,7 @@ import os
 from typing import Protocol, cast
 
 import asyncpg
+import structlog
 
 from src.contexts.capacity_runtime.domain.capacity_policy import CapacityAdmissionPolicy
 from src.contexts.capacity_runtime.infrastructure.postgres.postgres_llm_attempt_capacity_observation_repository import (
@@ -22,6 +23,12 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_a
 )
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_progress_read_repository import (
     PostgresWorkItemProgressReadRepository,
+)
+from src.contexts.embedding_runtime.infrastructure.composition.embedding_generation_provider_factory import (
+    make_embedding_generation_port,
+)
+from src.contexts.embedding_runtime.infrastructure.config.embedding_runtime_settings import (
+    load_embedding_runtime_settings,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.drain_workbench_rag_eval_workflow_commands import (
     DrainWorkbenchRagEvalWorkflowCommands,
@@ -45,6 +52,12 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_
 )
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
+)
+from src.contexts.knowledge_workbench.retrieval.application.use_cases.search_published_workbench_runtime import (
+    SearchPublishedWorkbenchRuntime,
+)
+from src.contexts.knowledge_workbench.retrieval.infrastructure.postgres.postgres_published_workbench_retrieval_repository import (
+    PostgresPublishedWorkbenchRetrievalRepository,
 )
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     ProjectLlmCapacityToCapacityRuntime,
@@ -83,6 +96,9 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
 )
 
 
+LOGGER = structlog.get_logger(__name__)
+
+
 class RuntimePool(Protocol):
     async def acquire(self) -> object: ...
 
@@ -93,6 +109,20 @@ class RuntimePool(Protocol):
 class DueWorkbenchRagEvalWorkflow:
     project_id: str
     workflow_run_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalWorkflowRunFailure:
+    workflow_run_id: str
+    project_id: str
+    error_type: str
+    error_message: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalWorkflowRunDueOnceResult:
+    succeeded: tuple[DrainWorkbenchRagEvalWorkflowCommandsResult, ...]
+    failed: tuple[WorkbenchRagEvalWorkflowRunFailure, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +177,7 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
     execute_prepared_llm_dispatch_attempt: (
         TransactionalExecutePreparedLlmDispatchAttempt
     )
+    search_published_workbench_runtime: SearchPublishedWorkbenchRuntime
 
     async def execute(
         self,
@@ -182,6 +213,10 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
                     PostgresWorkItemProgressReadRepository(asyncpg_connection)
                 ),
                 question_coverage_repository=repository,
+                rag_eval_repository=repository,
+                search_published_workbench_runtime=(
+                    self.search_published_workbench_runtime
+                ),
             )
             await unit_of_work.commit()
             return result
@@ -197,17 +232,38 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
         *,
         workflow_batch_size: int,
         max_commands: int,
-    ) -> tuple[DrainWorkbenchRagEvalWorkflowCommandsResult, ...]:
+    ) -> WorkbenchRagEvalWorkflowRunDueOnceResult:
         due = await self._list_due_workflows(limit=workflow_batch_size)
-        results = []
+        results: list[DrainWorkbenchRagEvalWorkflowCommandsResult] = []
+        failures: list[WorkbenchRagEvalWorkflowRunFailure] = []
         for workflow in due:
-            results.append(
-                await self.execute(
-                    workflow_run_id=workflow.workflow_run_id,
-                    max_commands=max_commands,
+            try:
+                results.append(
+                    await self.execute(
+                        workflow_run_id=workflow.workflow_run_id,
+                        max_commands=max_commands,
+                    )
                 )
-            )
-        return tuple(results)
+            except Exception as exc:
+                failure = WorkbenchRagEvalWorkflowRunFailure(
+                    workflow_run_id=workflow.workflow_run_id,
+                    project_id=workflow.project_id,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
+                failures.append(failure)
+                LOGGER.exception(
+                    "workbench_rag_eval_workflow_run_failed",
+                    workflow_run_id=workflow.workflow_run_id,
+                    project_id=workflow.project_id,
+                    error_type=failure.error_type,
+                    error_message=failure.error_message,
+                )
+                continue
+        return WorkbenchRagEvalWorkflowRunDueOnceResult(
+            succeeded=tuple(results),
+            failed=tuple(failures),
+        )
 
     async def _list_due_workflows(
         self, *, limit: int
@@ -273,11 +329,21 @@ def make_workbench_rag_eval_workflow_runtime(
         pool=runtime_pool,
         llm_executor=resolved_executor,
     )
+    embedding_settings = load_embedding_runtime_settings()
+    search = SearchPublishedWorkbenchRuntime(
+        published_retrieval_port=PostgresPublishedWorkbenchRetrievalRepository(
+            runtime_pool
+        ),
+        embedding_generation_port=make_embedding_generation_port(embedding_settings),
+        embedding_model_id=embedding_settings.local_model,
+        embedding_dimensions=embedding_settings.vector_dimensions,
+    )
     return WorkbenchRagEvalWorkflowRuntimeComposition(
         pool=runtime_pool,
         llm_executor=resolved_executor,
         prepare_llm_dispatch_batch=prepare,
         execute_prepared_llm_dispatch_attempt=transactional_execute,
+        search_published_workbench_runtime=search,
     )
 
 

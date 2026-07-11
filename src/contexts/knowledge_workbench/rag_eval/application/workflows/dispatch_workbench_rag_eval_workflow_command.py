@@ -20,6 +20,11 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reco
     HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler,
     QuestionGenerationPersistenceCoveragePort,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_run_workbench_rag_eval_retrieval_evaluation_command import (
+    HandleRunWorkbenchRagEvalRetrievalEvaluationCommand,
+    HandleRunWorkbenchRagEvalRetrievalEvaluationCommandHandler,
+    PublishedWorkbenchSearchPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
@@ -94,10 +99,41 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
         question_coverage_repository: QuestionGenerationPersistenceCoveragePort
         | None = None,
         rag_eval_repository: WorkbenchRagEvalRepositoryPort | None = None,
+        search_published_workbench_runtime: PublishedWorkbenchSearchPort | None = None,
     ) -> DispatchWorkbenchRagEvalWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = command_type_from_value(workflow_command.command_type)
         operation = operation_for_command_type(command_type)
+
+        if command_type is WorkbenchRagEvalWorkflowCommandType.RUN_RETRIEVAL_EVALUATION:
+            if (
+                rag_eval_repository is None
+                or search_published_workbench_runtime is None
+            ):
+                return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleRunWorkbenchRagEvalRetrievalEvaluationCommandHandler().execute(
+                HandleRunWorkbenchRagEvalRetrievalEvaluationCommand(workflow_command),
+                search_published_workbench_runtime=search_published_workbench_runtime,
+                rag_eval_repository=rag_eval_repository,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name="HandleRunWorkbenchRagEvalRetrievalEvaluationCommandHandler",
+                dispatched=True,
+                blocked_reason=None,
+            )
 
         if command_type is (
             WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH
