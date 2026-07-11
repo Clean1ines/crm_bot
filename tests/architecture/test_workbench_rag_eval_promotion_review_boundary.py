@@ -32,3 +32,30 @@ def test_promotion_review_path_has_no_application_or_llm_dependencies() -> None:
 
     for forbidden in FORBIDDEN:
         assert forbidden not in combined
+
+
+def test_promotion_application_requires_approved_source_state() -> None:
+    repository_source = Path(
+        "src/contexts/knowledge_workbench/rag_eval/infrastructure/postgres/"
+        "postgres_workbench_rag_eval_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert (
+        repository_source.count(
+            "target.status is not WorkbenchRagEvalPromotionStatus.APPROVED"
+        )
+        == 2
+    )
+
+    forbidden_guards = (
+        "WorkbenchRagEvalPromotionStatus.CANDIDATE,\n"
+        "                        WorkbenchRagEvalPromotionStatus.APPROVED",
+        "promotion.status IN ('candidate'",
+        "promotion.status IN ('approved', 'applying', 'applied')",
+    )
+    for forbidden in forbidden_guards:
+        assert forbidden not in repository_source
+
+    assert (
+        "promotion.run_id = $2 AND promotion.status = 'approved'" in repository_source
+    )

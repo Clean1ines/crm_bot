@@ -185,6 +185,8 @@ WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_FOR_REVIEW_SQL = (
     + """
 FROM knowledge_workbench_rag_eval_promoted_questions
 WHERE promotion_id = $1
+  AND run_id = $2
+  AND project_id = $3::uuid
 FOR UPDATE
 """
 )
@@ -233,9 +235,11 @@ WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL = (
 )
 
 
-WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL.replace(
-    "promotion.promotion_id = $2",
-    "promotion.run_id = $2 AND promotion.status IN ('approved', 'applying', 'applied')",
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL = (
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL.replace(
+        "promotion.promotion_id = $2",
+        "promotion.run_id = $2 AND promotion.status = 'approved'",
+    )
 )
 
 
@@ -1318,17 +1322,15 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 row = await connection.fetchrow(
                     WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_FOR_REVIEW_SQL,
                     promotion_id,
+                    run_id,
+                    project_id,
                 )
                 if row is None:
                     raise WorkbenchRagEvalPromotionCandidateNotFoundError(
-                        "Promotion candidate not found"
+                        "Promotion candidate not found in specified run/project"
                     )
 
                 candidate = _promotion_candidate_from_row(row)
-                if candidate.run_id != run_id or candidate.project_id != project_id:
-                    raise WorkbenchRagEvalPromotionCandidateNotFoundError(
-                        "Promotion candidate not found in specified run/project"
-                    )
 
                 try:
                     transition = (
@@ -1443,10 +1445,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 for target in targets:
                     if target.target_runtime_entry_id != target_runtime_entry_id:
                         raise RuntimeError("Promotion target runtime entry mismatch")
-                    if target.status not in (
-                        WorkbenchRagEvalPromotionStatus.CANDIDATE,
-                        WorkbenchRagEvalPromotionStatus.APPROVED,
-                    ):
+                    if target.status is not WorkbenchRagEvalPromotionStatus.APPROVED:
                         raise RuntimeError(
                             "Promotion candidate status cannot be applied: "
                             f"{target.status.value}"
@@ -1554,10 +1553,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 target = _promotion_application_target_from_row(row)
                 if target.status is WorkbenchRagEvalPromotionStatus.APPLIED:
                     raise RuntimeError("Promotion candidate is already applied")
-                if target.status not in (
-                    WorkbenchRagEvalPromotionStatus.CANDIDATE,
-                    WorkbenchRagEvalPromotionStatus.APPROVED,
-                ):
+                if target.status is not WorkbenchRagEvalPromotionStatus.APPROVED:
                     raise RuntimeError(
                         "Promotion candidate status cannot be applied: "
                         f"{target.status.value}"

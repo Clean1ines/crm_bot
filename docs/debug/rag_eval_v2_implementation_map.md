@@ -98,6 +98,8 @@ Implemented:
 Still needed:
 
 - explicit promotion candidate approve/reject handlers are implemented;
+- all existing single and batch application paths require APPROVED and reject
+  direct CANDIDATE application;
 - embedding revision application handler;
 - post-promotion verification handler;
 - rollback handler for failed verification;
@@ -156,4 +158,4 @@ require round-robin and does not change selection policy.
 3. Checkpoint C: retrieval outcome model/schema, retrieval evaluation handler, adjudication work kind/planner/prepare/execute/reconcile, promotion candidate filtering after `VALID_TARGET_QUERY`. Completed.
 4. Checkpoint D1: explicit promotion review approve/reject. Completed.
 5. Checkpoint D2: group approved candidates by runtime entry, reversible embedding revisions, post-promotion verification and accept/rollback.
-5. Checkpoint E: full frontend progression UI and final backend/frontend regression gates.
+6. Checkpoint E: full frontend progression UI and final backend/frontend regression gates.

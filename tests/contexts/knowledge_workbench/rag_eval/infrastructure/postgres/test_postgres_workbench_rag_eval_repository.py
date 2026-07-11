@@ -79,7 +79,7 @@ def _promotion_target_row() -> Mapping[str, object]:
         "target_runtime_entry_id": "runtime-entry-1",
         "target_fact_id": "legacy-fact-1",
         "question": "Как спросить иначе?",
-        "status": "candidate",
+        "status": "approved",
         "created_at": _now(),
         "applied_at": None,
         "claim": "Runtime claim",
@@ -590,10 +590,138 @@ async def test_list_run_promotion_candidates_maps_candidates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_promotion_candidate_rejects_unapproved_candidate() -> None:
+    row = dict(_promotion_target_row())
+    row["status"] = "candidate"
+    connection = FakeConnection(fetchrow_result=row)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Promotion candidate status cannot be applied: candidate",
+    ):
+        await PostgresWorkbenchRagEvalRepository(connection).apply_promotion_candidate(
+            project_id="11111111-1111-1111-1111-111111111111",
+            promotion_id="promotion-1",
+            embedding_model_id="text-embedding-3-small",
+            dimensions=2,
+            embedding=(0.1, 0.2),
+            embedding_text="Claim:\nRuntime claim",
+            embedding_text_hash="hash-1",
+            applied_at=_now(),
+        )
+
+    assert connection.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_candidate_allows_approved_candidate() -> None:
+    row = dict(_promotion_target_row())
+    row["status"] = "approved"
+    connection = FakeConnection(fetchrow_result=row)
+
+    result = await PostgresWorkbenchRagEvalRepository(
+        connection
+    ).apply_promotion_candidate(
+        project_id="11111111-1111-1111-1111-111111111111",
+        promotion_id="promotion-1",
+        embedding_model_id="text-embedding-3-small",
+        dimensions=2,
+        embedding=(0.1, 0.2),
+        embedding_text="Claim:\nRuntime claim",
+        embedding_text_hash="hash-1",
+        applied_at=_now(),
+    )
+
+    assert result.status.value == "applied"
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_candidates_for_target_rejects_unapproved_candidate() -> (
+    None
+):
+    row = dict(_promotion_target_row())
+    row["status"] = "candidate"
+    connection = FakeConnection(rows=[row])
+
+    with pytest.raises(
+        RuntimeError,
+        match="Promotion candidate status cannot be applied: candidate",
+    ):
+        await PostgresWorkbenchRagEvalRepository(
+            connection
+        ).apply_promotion_candidates_for_target(
+            project_id="11111111-1111-1111-1111-111111111111",
+            promotion_ids=("promotion-1",),
+            target_runtime_entry_id="runtime-entry-1",
+            embedding_model_id="text-embedding-3-small",
+            dimensions=2,
+            embedding=(0.1, 0.2),
+            embedding_text="Claim:\nRuntime claim",
+            embedding_text_hash="hash-1",
+            applied_at=_now(),
+        )
+
+    assert connection.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_apply_promotion_candidates_for_target_allows_approved_candidate() -> (
+    None
+):
+    row = dict(_promotion_target_row())
+    row["status"] = "approved"
+    connection = FakeConnection(rows=[row])
+
+    results = await PostgresWorkbenchRagEvalRepository(
+        connection
+    ).apply_promotion_candidates_for_target(
+        project_id="11111111-1111-1111-1111-111111111111",
+        promotion_ids=("promotion-1",),
+        target_runtime_entry_id="runtime-entry-1",
+        embedding_model_id="text-embedding-3-small",
+        dimensions=2,
+        embedding=(0.1, 0.2),
+        embedding_text="Claim:\nRuntime claim",
+        embedding_text_hash="hash-1",
+        applied_at=_now(),
+    )
+
+    assert len(results) == 1
+    assert results[0].status.value == "applied"
+
+
+@pytest.mark.asyncio
+async def test_review_candidate_lock_is_scoped_by_promotion_run_and_project() -> None:
+    connection = FakeConnection(fetchrow_result=None)
+
+    with pytest.raises(Exception):
+        await PostgresWorkbenchRagEvalRepository(
+            connection
+        ).approve_promotion_candidate(
+            promotion_id="promotion-1",
+            run_id="run-1",
+            project_id="11111111-1111-1111-1111-111111111111",
+            reviewed_at=_now(),
+        )
+
+    sql, args = connection.fetchrow_calls[0]
+    assert "WHERE promotion_id = $1" in sql
+    assert "AND run_id = $2" in sql
+    assert "AND project_id = $3::uuid" in sql
+    assert args == (
+        "promotion-1",
+        "run-1",
+        "11111111-1111-1111-1111-111111111111",
+    )
+
+
+@pytest.mark.asyncio
 async def test_apply_promotion_candidate_updates_runtime_entry_and_embedding_only() -> (
     None
 ):
-    connection = FakeConnection(fetchrow_result=_promotion_target_row())
+    row = dict(_promotion_target_row())
+    row["status"] = "approved"
+    connection = FakeConnection(fetchrow_result=row)
 
     result = await PostgresWorkbenchRagEvalRepository(
         connection

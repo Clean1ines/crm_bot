@@ -369,7 +369,9 @@ Promotion review actions are implemented:
 - incompatible review transitions return conflict;
 - run status and phase remain PROMOTION_REVIEW;
 - review actions do not apply aliases, generate embeddings, create revisions or
-  invoke providers.
+  invoke providers;
+- every existing promotion application path requires APPROVED and rejects
+  CANDIDATE, so review cannot be bypassed.
 
 Reversible revisions:
 grouped application per runtime entry;
