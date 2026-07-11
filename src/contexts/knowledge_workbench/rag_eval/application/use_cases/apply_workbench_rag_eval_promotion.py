@@ -69,7 +69,7 @@ class ApplyWorkbenchRagEvalPromotion:
             )
         if candidate.status not in (
             WorkbenchRagEvalPromotionStatus.CANDIDATE,
-            WorkbenchRagEvalPromotionStatus.ACCEPTED,
+            WorkbenchRagEvalPromotionStatus.APPROVED,
         ):
             raise WorkbenchRagEvalPromotionConflictError(
                 f"Promotion candidate status cannot be applied: {candidate.status.value}"

@@ -175,6 +175,25 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         promotion_id: str,
     ) -> WorkbenchRagEvalPromotionCandidateDetails | None: ...
 
+    async def approve_promotion_candidate(
+        self,
+        *,
+        promotion_id: str,
+        run_id: str,
+        project_id: str,
+        reviewed_at: datetime,
+    ) -> WorkbenchRagEvalPromotionCandidateDetails: ...
+
+    async def reject_promotion_candidate(
+        self,
+        *,
+        promotion_id: str,
+        run_id: str,
+        project_id: str,
+        reviewed_at: datetime,
+        reason: str,
+    ) -> WorkbenchRagEvalPromotionCandidateDetails: ...
+
     async def get_promotion_application_target(
         self,
         *,

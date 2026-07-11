@@ -135,9 +135,13 @@ class WorkbenchRagEvalRetrievalClassification(StrEnum):
 
 class WorkbenchRagEvalPromotionStatus(StrEnum):
     CANDIDATE = "candidate"
-    ACCEPTED = "accepted"
+    APPROVED = "approved"
     REJECTED = "rejected"
+    APPLYING = "applying"
     APPLIED = "applied"
+    SUPERSEDED = "superseded"
+    REGRESSION_FAILED = "regression_failed"
+    ROLLED_BACK = "rolled_back"
 
 
 class WorkbenchRagEvalAdjudicationVerdict(StrEnum):
@@ -507,6 +511,8 @@ class WorkbenchRagEvalPromotedQuestion:
     competitor_fact_id: str | None = None
     competitor_score: float | None = None
     score_margin: float | None = None
+    reviewed_at: datetime | None = None
+    review_reason: str | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.promotion_id, "promotion_id")
@@ -541,6 +547,8 @@ class WorkbenchRagEvalPromotedQuestion:
             "competitor_runtime_entry_id",
         )
         _require_optional_text(self.competitor_fact_id, "competitor_fact_id")
+        _require_optional_datetime(self.reviewed_at, "reviewed_at")
+        _require_optional_text(self.review_reason, "review_reason")
 
 
 @dataclass(frozen=True, slots=True)
@@ -688,11 +696,22 @@ class WorkbenchRagEvalPromotionCandidateDetails:
     run_id: str
     question_id: str
     project_id: str
+    outcome_id: str
+    adjudication_id: str
     target_runtime_entry_id: str
     target_fact_id: str
     question: str
     status: WorkbenchRagEvalPromotionStatus
+    reason: str | None
+    expected_rank: int | None
+    expected_score: float | None
+    competitor_runtime_entry_id: str | None
+    competitor_fact_id: str | None
+    competitor_score: float | None
+    score_margin: float | None
     created_at: datetime
+    reviewed_at: datetime | None
+    review_reason: str | None
     applied_at: datetime | None
 
     def __post_init__(self) -> None:
@@ -700,11 +719,35 @@ class WorkbenchRagEvalPromotionCandidateDetails:
         _require_text(self.run_id, "run_id")
         _require_text(self.question_id, "question_id")
         _require_text(self.project_id, "project_id")
+        _require_text(self.outcome_id, "outcome_id")
+        _require_text(self.adjudication_id, "adjudication_id")
         _require_text(self.target_runtime_entry_id, "target_runtime_entry_id")
         _require_text(self.target_fact_id, "target_fact_id")
         _require_text(self.question, "question")
         _require_enum(self.status, WorkbenchRagEvalPromotionStatus, "status")
+        _require_optional_text(self.reason, "reason")
+        if self.expected_rank is not None:
+            _require_non_negative_int(self.expected_rank, "expected_rank")
+            if self.expected_rank == 0:
+                raise ValueError("expected_rank must be positive when provided")
+        for field_name in (
+            "expected_score",
+            "competitor_score",
+            "score_margin",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+            ):
+                raise TypeError(f"{field_name} must be numeric or None")
+        _require_optional_text(
+            self.competitor_runtime_entry_id,
+            "competitor_runtime_entry_id",
+        )
+        _require_optional_text(self.competitor_fact_id, "competitor_fact_id")
         _require_datetime(self.created_at, "created_at")
+        _require_optional_datetime(self.reviewed_at, "reviewed_at")
+        _require_optional_text(self.review_reason, "review_reason")
         _require_optional_datetime(self.applied_at, "applied_at")
 
     def to_json_dict(self) -> JsonObject:
@@ -713,14 +756,27 @@ class WorkbenchRagEvalPromotionCandidateDetails:
             "run_id": self.run_id,
             "question_id": self.question_id,
             "project_id": self.project_id,
+            "outcome_id": self.outcome_id,
+            "adjudication_id": self.adjudication_id,
             "target_runtime_entry_id": self.target_runtime_entry_id,
             "target_fact_id": self.target_fact_id,
             "question": self.question,
             "status": self.status.value,
+            "reason": self.reason,
+            "expected_rank": self.expected_rank,
+            "expected_score": self.expected_score,
+            "competitor_runtime_entry_id": self.competitor_runtime_entry_id,
+            "competitor_fact_id": self.competitor_fact_id,
+            "competitor_score": self.competitor_score,
+            "score_margin": self.score_margin,
             "created_at": self.created_at.isoformat(),
-            "applied_at": self.applied_at.isoformat()
-            if self.applied_at is not None
-            else None,
+            "reviewed_at": (
+                self.reviewed_at.isoformat() if self.reviewed_at is not None else None
+            ),
+            "review_reason": self.review_reason,
+            "applied_at": (
+                self.applied_at.isoformat() if self.applied_at is not None else None
+            ),
         }
 
 

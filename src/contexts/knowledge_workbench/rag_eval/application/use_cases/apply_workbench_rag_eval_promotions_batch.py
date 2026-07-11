@@ -69,7 +69,7 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
                 continue
             if target.status not in (
                 WorkbenchRagEvalPromotionStatus.CANDIDATE,
-                WorkbenchRagEvalPromotionStatus.ACCEPTED,
+                WorkbenchRagEvalPromotionStatus.APPROVED,
             ):
                 skipped_count += 1
                 errors.append(

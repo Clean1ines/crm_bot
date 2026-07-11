@@ -253,11 +253,22 @@ class FakeWorkbenchRagEvalRepository:
                 run_id=run_id,
                 question_id="question-1",
                 project_id=project_id,
+                outcome_id="outcome-1",
+                adjudication_id="adjudication-1",
                 target_runtime_entry_id="entry-expected",
                 target_fact_id="fact-expected",
                 question="Как спросить?",
                 status=WorkbenchRagEvalPromotionStatus.CANDIDATE,
+                reason="Valid target query with weak retrieval",
+                expected_rank=4,
+                expected_score=0.54,
+                competitor_runtime_entry_id="entry-competitor",
+                competitor_fact_id="fact-competitor",
+                competitor_score=0.71,
+                score_margin=-0.17,
                 created_at=now,
+                reviewed_at=None,
+                review_reason=None,
                 applied_at=None,
             ),
         )
@@ -357,8 +368,20 @@ def test_workbench_rag_eval_candidates_endpoint_returns_candidates(monkeypatch) 
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["candidates"][0]["promotion_id"] == "promotion-1"
-    assert payload["candidates"][0]["status"] == "candidate"
+    candidate = payload["candidates"][0]
+    assert candidate["promotion_id"] == "promotion-1"
+    assert candidate["status"] == "candidate"
+    assert candidate["outcome_id"] == "outcome-1"
+    assert candidate["adjudication_id"] == "adjudication-1"
+    assert candidate["reason"] == "Valid target query with weak retrieval"
+    assert candidate["expected_rank"] == 4
+    assert candidate["expected_score"] == 0.54
+    assert candidate["competitor_runtime_entry_id"] == "entry-competitor"
+    assert candidate["competitor_fact_id"] == "fact-competitor"
+    assert candidate["competitor_score"] == 0.71
+    assert candidate["score_margin"] == -0.17
+    assert candidate["reviewed_at"] is None
+    assert candidate["review_reason"] is None
     assert "answer_text" not in str(payload)
 
 

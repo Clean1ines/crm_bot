@@ -5,7 +5,7 @@
 **Date:** 2026-07-11
 **Committed base:** `aef56def22f943ee1f0caa1037682ffa542ad974`  
 **Working tree:** contains the adjudication runtime vertical checkpoint
-**Overall status:** IN PROGRESS — qgen complete; retrieval complete; adjudication complete; promotion review ready
+**Overall status:** IN PROGRESS — qgen complete; retrieval complete; adjudication complete; promotion candidate approve/reject complete
 
 This document describes the current working tree. It must not instruct a future
 agent to recreate question-generation workflow components that already exist.
@@ -361,8 +361,15 @@ Not implemented
 
 The following verticals remain incomplete:
 
-Promotion review actions:
-explicit candidate approve/reject transitions.
+Promotion review actions are implemented:
+
+- persisted candidates can be listed with question/outcome/adjudication linkage;
+- CANDIDATE can transition explicitly to APPROVED or REJECTED;
+- repeated same-state review is idempotent and preserves reviewed_at;
+- incompatible review transitions return conflict;
+- run status and phase remain PROMOTION_REVIEW;
+- review actions do not apply aliases, generate embeddings, create revisions or
+  invoke providers.
 
 Reversible revisions:
 grouped application per runtime entry;
@@ -414,25 +421,23 @@ Next exact implementation sequence
 
 Continue from the current working tree in this exact order.
 
-1. Implement explicit promotion review actions
-candidate approve/reject state transitions;
-API/read projection.
-2. Implement reversible grouped application
+1. Implement reversible grouped application
+group approved candidates by runtime entry;
 revisions migration/model/repository;
 atomic snapshot and mutation;
 one embedding generation per target entry;
 active-revision guard.
-3. Implement post-promotion verification
-before/after retrieval outcomes;
-baseline/holdout/neighbour metrics;
-regression policy;
-explicit accept/rollback.
-4. Complete API, SSE and frontend
+2. Implement post-promotion verification
+revisions migration/model/repository;
+atomic snapshot and mutation;
+one embedding generation per target entry;
+active-revision guard.
+3. Complete API, SSE and frontend
 persisted read endpoints;
 workflow-event projection;
 full progression UI;
 revision controls.
-5. Run all final gates
+4. Run all final gates
 
 Do not report the original RAG Eval V2 task as complete until every required
 backend and frontend gate passes.

@@ -34,6 +34,14 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalPromotionStatus,
     WorkbenchRagEvalSummary,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_promotion_review_errors import (
+    WorkbenchRagEvalPromotionCandidateConflictError,
+    WorkbenchRagEvalPromotionCandidateNotFoundError,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_promotion_review_transition_policy import (
+    WorkbenchRagEvalPromotionReviewTransitionConflictError,
+    WorkbenchRagEvalPromotionReviewTransitionPolicy,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_normalization_policy import (
     normalize_workbench_rag_eval_question,
 )
@@ -123,41 +131,63 @@ ORDER BY question.created_at, question.question_id, result.rank NULLS LAST, resu
 """
 
 
-WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL = """
-SELECT
+WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_COLUMNS_SQL = """
     promotion_id,
     run_id,
     question_id,
     project_id::text AS project_id,
+    outcome_id,
+    adjudication_id,
     target_runtime_entry_id,
     target_fact_id,
     question,
     status,
+    reason,
+    expected_rank,
+    expected_score,
+    competitor_runtime_entry_id,
+    competitor_fact_id,
+    competitor_score,
+    score_margin,
     created_at,
+    reviewed_at,
+    review_reason,
     applied_at
+"""
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL = (
+    "SELECT"
+    + WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_COLUMNS_SQL
+    + """
 FROM knowledge_workbench_rag_eval_promoted_questions
 WHERE project_id = $1::uuid
   AND run_id = $2
 ORDER BY created_at, promotion_id
 """
+)
 
 
-WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_BY_ID_SQL = """
-SELECT
-    promotion_id,
-    run_id,
-    question_id,
-    project_id::text AS project_id,
-    target_runtime_entry_id,
-    target_fact_id,
-    question,
-    status,
-    created_at,
-    applied_at
+WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_BY_ID_SQL = (
+    "SELECT"
+    + WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_COLUMNS_SQL
+    + """
 FROM knowledge_workbench_rag_eval_promoted_questions
 WHERE project_id = $1::uuid
   AND promotion_id = $2
 """
+)
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_FOR_REVIEW_SQL = (
+    "SELECT"
+    + WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_COLUMNS_SQL
+    + """
+FROM knowledge_workbench_rag_eval_promoted_questions
+WHERE promotion_id = $1
+FOR UPDATE
+"""
+)
 
 
 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL = """
@@ -205,7 +235,7 @@ WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL = (
 
 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL.replace(
     "promotion.promotion_id = $2",
-    "promotion.run_id = $2 AND promotion.status IN ('candidate', 'accepted', 'applied')",
+    "promotion.run_id = $2 AND promotion.status IN ('approved', 'applying', 'applied')",
 )
 
 
@@ -1235,6 +1265,111 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
             )
         return _promotion_candidate_from_row(row) if row is not None else None
 
+    async def approve_promotion_candidate(
+        self,
+        *,
+        promotion_id: str,
+        run_id: str,
+        project_id: str,
+        reviewed_at: datetime,
+    ) -> WorkbenchRagEvalPromotionCandidateDetails:
+        return await self._review_promotion_candidate(
+            promotion_id=promotion_id,
+            run_id=run_id,
+            project_id=project_id,
+            requested_status=WorkbenchRagEvalPromotionStatus.APPROVED,
+            reviewed_at=reviewed_at,
+            review_reason=None,
+        )
+
+    async def reject_promotion_candidate(
+        self,
+        *,
+        promotion_id: str,
+        run_id: str,
+        project_id: str,
+        reviewed_at: datetime,
+        reason: str,
+    ) -> WorkbenchRagEvalPromotionCandidateDetails:
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise ValueError("reason must be non-empty")
+        return await self._review_promotion_candidate(
+            promotion_id=promotion_id,
+            run_id=run_id,
+            project_id=project_id,
+            requested_status=WorkbenchRagEvalPromotionStatus.REJECTED,
+            reviewed_at=reviewed_at,
+            review_reason=normalized_reason,
+        )
+
+    async def _review_promotion_candidate(
+        self,
+        *,
+        promotion_id: str,
+        run_id: str,
+        project_id: str,
+        requested_status: WorkbenchRagEvalPromotionStatus,
+        reviewed_at: datetime,
+        review_reason: str | None,
+    ) -> WorkbenchRagEvalPromotionCandidateDetails:
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_FOR_REVIEW_SQL,
+                    promotion_id,
+                )
+                if row is None:
+                    raise WorkbenchRagEvalPromotionCandidateNotFoundError(
+                        "Promotion candidate not found"
+                    )
+
+                candidate = _promotion_candidate_from_row(row)
+                if candidate.run_id != run_id or candidate.project_id != project_id:
+                    raise WorkbenchRagEvalPromotionCandidateNotFoundError(
+                        "Promotion candidate not found in specified run/project"
+                    )
+
+                try:
+                    transition = (
+                        WorkbenchRagEvalPromotionReviewTransitionPolicy().transition(
+                            current_status=candidate.status,
+                            requested_status=requested_status,
+                        )
+                    )
+                except WorkbenchRagEvalPromotionReviewTransitionConflictError as exc:
+                    raise WorkbenchRagEvalPromotionCandidateConflictError(
+                        str(exc)
+                    ) from exc
+
+                if not transition.changed:
+                    return candidate
+
+                updated = await connection.fetchrow(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_promoted_questions
+                    SET status = $4,
+                        reviewed_at = $5,
+                        review_reason = $6
+                    WHERE promotion_id = $1
+                      AND run_id = $2
+                      AND project_id = $3::uuid
+                    RETURNING
+                    """
+                    + WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATE_COLUMNS_SQL,
+                    promotion_id,
+                    run_id,
+                    project_id,
+                    requested_status.value,
+                    reviewed_at,
+                    review_reason,
+                )
+                if updated is None:
+                    raise RuntimeError(
+                        "Promotion candidate changed during locked review transition"
+                    )
+                return _promotion_candidate_from_row(updated)
+
     async def get_promotion_application_target(
         self,
         *,
@@ -1310,7 +1445,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                         raise RuntimeError("Promotion target runtime entry mismatch")
                     if target.status not in (
                         WorkbenchRagEvalPromotionStatus.CANDIDATE,
-                        WorkbenchRagEvalPromotionStatus.ACCEPTED,
+                        WorkbenchRagEvalPromotionStatus.APPROVED,
                     ):
                         raise RuntimeError(
                             "Promotion candidate status cannot be applied: "
@@ -1421,7 +1556,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     raise RuntimeError("Promotion candidate is already applied")
                 if target.status not in (
                     WorkbenchRagEvalPromotionStatus.CANDIDATE,
-                    WorkbenchRagEvalPromotionStatus.ACCEPTED,
+                    WorkbenchRagEvalPromotionStatus.APPROVED,
                 ):
                     raise RuntimeError(
                         "Promotion candidate status cannot be applied: "
@@ -1686,11 +1821,34 @@ def _promotion_candidate_from_row(
         run_id=_text_from_row(row, "run_id"),
         question_id=_text_from_row(row, "question_id"),
         project_id=_text_from_row(row, "project_id"),
-        target_runtime_entry_id=_text_from_row(row, "target_runtime_entry_id"),
+        outcome_id=_text_from_row(row, "outcome_id"),
+        adjudication_id=_text_from_row(row, "adjudication_id"),
+        target_runtime_entry_id=_text_from_row(
+            row,
+            "target_runtime_entry_id",
+        ),
         target_fact_id=_text_from_row(row, "target_fact_id"),
         question=_text_from_row(row, "question"),
         status=WorkbenchRagEvalPromotionStatus(_text_from_row(row, "status")),
+        reason=_optional_text_from_row(row, "reason"),
+        expected_rank=_optional_int_from_row(row, "expected_rank"),
+        expected_score=_optional_float_from_row(row, "expected_score"),
+        competitor_runtime_entry_id=_optional_text_from_row(
+            row,
+            "competitor_runtime_entry_id",
+        ),
+        competitor_fact_id=_optional_text_from_row(
+            row,
+            "competitor_fact_id",
+        ),
+        competitor_score=_optional_float_from_row(
+            row,
+            "competitor_score",
+        ),
+        score_margin=_optional_float_from_row(row, "score_margin"),
         created_at=_datetime_from_row(row, "created_at"),
+        reviewed_at=_optional_datetime_from_row(row, "reviewed_at"),
+        review_reason=_optional_text_from_row(row, "review_reason"),
         applied_at=_optional_datetime_from_row(row, "applied_at"),
     )
 

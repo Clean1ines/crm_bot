@@ -31,6 +31,12 @@ from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workb
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
     ApplyWorkbenchRagEvalPromotion,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.approve_workbench_rag_eval_promotion_candidate import (
+    ApproveWorkbenchRagEvalPromotionCandidate,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.reject_workbench_rag_eval_promotion_candidate import (
+    RejectWorkbenchRagEvalPromotionCandidate,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.start_workbench_rag_eval_v2 import (
     StartWorkbenchRagEvalV2,
 )
@@ -118,6 +124,24 @@ def make_start_workbench_rag_eval_v2(
     pool: object,
 ) -> StartWorkbenchRagEvalV2Composition:
     return StartWorkbenchRagEvalV2Composition(pool=cast(AsyncPool, pool))
+
+
+def make_approve_workbench_rag_eval_promotion_candidate(
+    *,
+    pool: object,
+) -> ApproveWorkbenchRagEvalPromotionCandidate:
+    return ApproveWorkbenchRagEvalPromotionCandidate(
+        repository=PostgresWorkbenchRagEvalRepository(pool),
+    )
+
+
+def make_reject_workbench_rag_eval_promotion_candidate(
+    *,
+    pool: object,
+) -> RejectWorkbenchRagEvalPromotionCandidate:
+    return RejectWorkbenchRagEvalPromotionCandidate(
+        repository=PostgresWorkbenchRagEvalRepository(pool),
+    )
 
 
 def make_apply_workbench_rag_eval_promotion(

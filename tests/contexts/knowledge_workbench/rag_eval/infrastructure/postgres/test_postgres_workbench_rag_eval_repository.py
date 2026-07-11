@@ -544,11 +544,22 @@ async def test_list_run_promotion_candidates_maps_candidates() -> None:
                 "run_id": "run-1",
                 "question_id": "question-1",
                 "project_id": "11111111-1111-1111-1111-111111111111",
+                "outcome_id": "outcome-1",
+                "adjudication_id": "adjudication-1",
                 "target_runtime_entry_id": "entry-1",
                 "target_fact_id": "fact-1",
                 "question": "Плохой retrieval вопрос?",
                 "status": "candidate",
+                "reason": "Valid target query with weak retrieval",
+                "expected_rank": 3,
+                "expected_score": 0.61,
+                "competitor_runtime_entry_id": "entry-2",
+                "competitor_fact_id": "fact-2",
+                "competitor_score": 0.73,
+                "score_margin": -0.12,
                 "created_at": _now(),
+                "reviewed_at": None,
+                "review_reason": None,
                 "applied_at": None,
             }
         ]
@@ -564,6 +575,17 @@ async def test_list_run_promotion_candidates_maps_candidates() -> None:
     assert connection.fetch_calls[0][0] == WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL
     assert candidates[0].promotion_id == "promotion-1"
     assert candidates[0].status.value == "candidate"
+    assert candidates[0].outcome_id == "outcome-1"
+    assert candidates[0].adjudication_id == "adjudication-1"
+    assert candidates[0].reason == "Valid target query with weak retrieval"
+    assert candidates[0].expected_rank == 3
+    assert candidates[0].expected_score == 0.61
+    assert candidates[0].competitor_runtime_entry_id == "entry-2"
+    assert candidates[0].competitor_fact_id == "fact-2"
+    assert candidates[0].competitor_score == 0.73
+    assert candidates[0].score_margin == -0.12
+    assert candidates[0].reviewed_at is None
+    assert candidates[0].review_reason is None
     assert candidates[0].applied_at is None
 
 

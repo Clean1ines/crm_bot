@@ -209,6 +209,16 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.run_workbench_rag_eval import (
     WorkbenchRagEvalNoPublishedEntriesError,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_promotion_review_errors import (
+    WorkbenchRagEvalPromotionCandidateConflictError,
+    WorkbenchRagEvalPromotionCandidateNotFoundError,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.approve_workbench_rag_eval_promotion_candidate import (
+    ApproveWorkbenchRagEvalPromotionCandidateCommand,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.reject_workbench_rag_eval_promotion_candidate import (
+    RejectWorkbenchRagEvalPromotionCandidateCommand,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
     WorkbenchRagEvalPromotionConflictError,
     WorkbenchRagEvalPromotionEmbeddingError,
@@ -2442,6 +2452,101 @@ async def apply_workbench_rag_eval_promotion_candidate(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"result": result.to_json_dict()}
+
+
+@router.post(
+    "/rag-eval/workbench/runs/{run_id}/promotion-candidates/{promotion_id}/approve"
+)
+async def approve_workbench_rag_eval_promotion_candidate(
+    project_id: str,
+    run_id: str,
+    promotion_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.interfaces.composition.workbench_rag_eval import (
+        make_approve_workbench_rag_eval_promotion_candidate,
+    )
+
+    try:
+        candidate = await make_approve_workbench_rag_eval_promotion_candidate(
+            pool=pool
+        ).execute(
+            ApproveWorkbenchRagEvalPromotionCandidateCommand(
+                promotion_id=promotion_id,
+                run_id=run_id,
+                project_id=project_id,
+                now=datetime.now(timezone.utc),
+            )
+        )
+    except WorkbenchRagEvalPromotionCandidateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WorkbenchRagEvalPromotionCandidateConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return {"candidate": candidate.to_json_dict()}
+
+
+@router.post(
+    "/rag-eval/workbench/runs/{run_id}/promotion-candidates/{promotion_id}/reject"
+)
+async def reject_workbench_rag_eval_promotion_candidate(
+    project_id: str,
+    run_id: str,
+    promotion_id: str,
+    payload: Mapping[str, object],
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    raw_reason = payload.get("reason")
+    if not isinstance(raw_reason, str) or not raw_reason.strip():
+        raise HTTPException(
+            status_code=422,
+            detail="reason must be a non-empty string",
+        )
+
+    from src.interfaces.composition.workbench_rag_eval import (
+        make_reject_workbench_rag_eval_promotion_candidate,
+    )
+
+    try:
+        candidate = await make_reject_workbench_rag_eval_promotion_candidate(
+            pool=pool
+        ).execute(
+            RejectWorkbenchRagEvalPromotionCandidateCommand(
+                promotion_id=promotion_id,
+                run_id=run_id,
+                project_id=project_id,
+                now=datetime.now(timezone.utc),
+                reason=raw_reason,
+            )
+        )
+    except WorkbenchRagEvalPromotionCandidateNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WorkbenchRagEvalPromotionCandidateConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return {"candidate": candidate.to_json_dict()}
 
 
 @router.get("/rag-eval/workbench/runs/{run_id}/questions")

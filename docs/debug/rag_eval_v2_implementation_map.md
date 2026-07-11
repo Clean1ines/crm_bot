@@ -1,6 +1,6 @@
 # Workbench RAG Eval V2 implementation map
 
-Current checkpoint: qgen complete; retrieval complete; adjudication complete; promotion review ready.
+Current checkpoint: qgen complete; retrieval complete; adjudication complete; promotion candidate approve/reject complete.
 
 ## Claim Builder canonical path
 
@@ -97,7 +97,7 @@ Implemented:
 
 Still needed:
 
-- explicit promotion candidate approve/reject handlers;
+- explicit promotion candidate approve/reject handlers are implemented;
 - embedding revision application handler;
 - post-promotion verification handler;
 - rollback handler for failed verification;
@@ -154,5 +154,6 @@ require round-robin and does not change selection policy.
 1. Checkpoint A: generic phase preparation builder abstraction and fail-fast registry; preserve Claim Builder behavior and tests.
 2. Checkpoint B: qgen work kind, planner, prompt/payload builder, prepare handler, execute handler, strict 10-question validator, qgen persistence, qgen reconcile.
 3. Checkpoint C: retrieval outcome model/schema, retrieval evaluation handler, adjudication work kind/planner/prepare/execute/reconcile, promotion candidate filtering after `VALID_TARGET_QUERY`. Completed.
-4. Checkpoint D: explicit promotion review approve/reject, grouped promotion application with reversible embedding revisions, post-promotion verification, accept/rollback.
+4. Checkpoint D1: explicit promotion review approve/reject. Completed.
+5. Checkpoint D2: group approved candidates by runtime entry, reversible embedding revisions, post-promotion verification and accept/rollback.
 5. Checkpoint E: full frontend progression UI and final backend/frontend regression gates.

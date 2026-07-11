@@ -1,7 +1,7 @@
 # ADR-0001: Canonical Workbench RAG Eval V2 workflow
 
 Date: 2026-07-10
-Status: accepted — qgen complete; retrieval complete; adjudication complete; promotion review ready
+Status: accepted — qgen complete; retrieval complete; adjudication complete; promotion candidate approve/reject complete
 Deciders: crm_bot maintainers
 
 Context
@@ -234,7 +234,12 @@ coverage;
 promotion candidates are created only behind the `VALID_TARGET_QUERY` and
 `promotion_recommended=true` gate;
 the run transitions to `PROMOTION_REVIEW` after successful adjudication drain
-or zero-eligible scheduling.
+or zero-eligible scheduling;
+persisted promotion candidates expose their question, outcome and adjudication
+linkage;
+operator approval and rejection use explicit, idempotent state transitions;
+review actions leave the run in `PROMOTION_REVIEW` and do not mutate retrieval
+runtime entries or invoke providers.
 
 Reversible grouped application
 
