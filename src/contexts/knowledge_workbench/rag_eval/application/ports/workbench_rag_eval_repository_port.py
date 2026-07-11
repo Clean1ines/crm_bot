@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Protocol
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalAdjudication,
     WorkbenchRagEvalPromotedQuestion,
     WorkbenchRagEvalPromotionApplicationTarget,
     WorkbenchRagEvalPromotionApplyResult,
@@ -19,6 +20,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalRunProgress,
     WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalSummary,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_adjudication_work import (
+    WorkbenchRagEvalAdjudicationPlanningInput,
 )
 from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
     PublishedWorkbenchRetrievalResult,
@@ -94,6 +98,36 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         classification_counts: Mapping[str, int],
         updated_at: datetime,
     ) -> None: ...
+
+    async def list_adjudication_planning_inputs(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+    ) -> tuple[WorkbenchRagEvalAdjudicationPlanningInput, ...]: ...
+
+    async def save_question_adjudication(
+        self,
+        *,
+        adjudication: WorkbenchRagEvalAdjudication,
+    ) -> WorkbenchRagEvalAdjudication: ...
+
+    async def has_adjudications_for_all_eligible_questions(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        pass_weak_enabled: bool,
+    ) -> bool: ...
+
+    async def create_promotion_candidates_from_adjudications(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        created_at: datetime,
+        pass_weak_enabled: bool,
+    ) -> tuple[WorkbenchRagEvalPromotedQuestion, ...]: ...
 
     async def save_promoted_question_candidates(
         self,

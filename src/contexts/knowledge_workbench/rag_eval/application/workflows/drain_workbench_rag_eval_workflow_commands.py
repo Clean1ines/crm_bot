@@ -12,11 +12,17 @@ from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observ
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_execute_workbench_rag_eval_question_generation_command import (
     ExecuteWorkbenchRagEvalQuestionGenerationPort,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_execute_workbench_rag_eval_adjudication_command import (
+    ExecuteWorkbenchRagEvalAdjudicationPort,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_prepare_workbench_rag_eval_question_generation_dispatch_batch import (
     PrepareLlmDispatchBatchPort,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
+)
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
 )
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
@@ -71,6 +77,7 @@ class DrainWorkbenchRagEvalWorkflowCommands:
         question_generation_executor: (
             ExecuteWorkbenchRagEvalQuestionGenerationPort | None
         ) = None,
+        adjudication_executor: ExecuteWorkbenchRagEvalAdjudicationPort | None = None,
         capacity_observation_repository: (
             LlmAttemptCapacityObservationRepositoryPort | None
         ) = None,
@@ -80,6 +87,8 @@ class DrainWorkbenchRagEvalWorkflowCommands:
         | None = None,
         rag_eval_repository: WorkbenchRagEvalRepositoryPort | None = None,
         search_published_workbench_runtime: PublishedWorkbenchSearchPort | None = None,
+        work_item_scheduling_repository: WorkItemSchedulingRepositoryPort | None = None,
+        adjudication_provider_messages_builder: object | None = None,
     ) -> DrainWorkbenchRagEvalWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -104,11 +113,16 @@ class DrainWorkbenchRagEvalWorkflowCommands:
                 workflow_unit_of_work=workflow_unit_of_work,
                 prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
                 question_generation_executor=(question_generation_executor),
+                adjudication_executor=adjudication_executor,
                 capacity_observation_repository=(capacity_observation_repository),
                 work_item_progress_read_repository=work_item_progress_read_repository,
                 question_coverage_repository=question_coverage_repository,
                 rag_eval_repository=rag_eval_repository,
                 search_published_workbench_runtime=search_published_workbench_runtime,
+                work_item_scheduling_repository=work_item_scheduling_repository,
+                adjudication_provider_messages_builder=(
+                    adjudication_provider_messages_builder
+                ),
             )
             if not result.dispatched:
                 blocked_count = 1

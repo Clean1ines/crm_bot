@@ -24,6 +24,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_a
 from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_progress_read_repository import (
     PostgresWorkItemProgressReadRepository,
 )
+from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_scheduling_repository import (
+    PostgresWorkItemSchedulingRepository,
+)
 from src.contexts.embedding_runtime.infrastructure.composition.embedding_generation_provider_factory import (
     make_embedding_generation_port,
 )
@@ -38,6 +41,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.drain_workb
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_execute_workbench_rag_eval_question_generation import (
     ExecuteWorkbenchRagEvalQuestionGeneration,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_execute_workbench_rag_eval_adjudication import (
+    ExecuteWorkbenchRagEvalAdjudication,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
     make_adjudication_dispatch_preparation_builder,
     make_question_generation_dispatch_preparation_builder,
@@ -49,6 +55,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_r
 )
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WorkbenchRagEvalQuestionGenerator,
+)
+from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_adjudication_prompt import (
+    WorkbenchRagEvalAdjudicationPrompt,
 )
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
@@ -206,6 +215,12 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
                     rag_eval_repository=repository,
                     question_generator=WorkbenchRagEvalQuestionGenerator.from_prompt_file(),
                 ),
+                adjudication_executor=ExecuteWorkbenchRagEvalAdjudication(
+                    execute_prepared_llm_dispatch_attempt=(
+                        self.execute_prepared_llm_dispatch_attempt
+                    ),
+                    rag_eval_repository=repository,
+                ),
                 capacity_observation_repository=(
                     PostgresLlmAttemptCapacityObservationRepository(asyncpg_connection)
                 ),
@@ -214,6 +229,12 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
                 ),
                 question_coverage_repository=repository,
                 rag_eval_repository=repository,
+                work_item_scheduling_repository=PostgresWorkItemSchedulingRepository(
+                    asyncpg_connection
+                ),
+                adjudication_provider_messages_builder=(
+                    WorkbenchRagEvalAdjudicationPrompt.from_prompt_file()
+                ),
                 search_published_workbench_runtime=(
                     self.search_published_workbench_runtime
                 ),

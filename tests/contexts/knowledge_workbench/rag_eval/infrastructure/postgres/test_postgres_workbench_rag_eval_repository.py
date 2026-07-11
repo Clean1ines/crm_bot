@@ -124,7 +124,13 @@ def _summary_row() -> Mapping[str, object]:
         "capacity_next_due_at": None,
         "capacity_model_ref": None,
         "capacity_account_ref": None,
-        "promotion_candidate_count": 2,
+        "adjudication_total": 2,
+        "adjudication_waiting": 0,
+        "adjudication_running": 0,
+        "adjudication_completed": 2,
+        "adjudication_failed": 0,
+        "persisted_promotion_candidate_count": 2,
+        "computed_promotion_candidate_count": 2,
     }
 
 

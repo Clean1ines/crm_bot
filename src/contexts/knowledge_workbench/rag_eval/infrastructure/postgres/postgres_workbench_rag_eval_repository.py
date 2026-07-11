@@ -10,6 +10,8 @@ from hashlib import sha256
 from typing import Protocol, cast
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalAdjudication,
+    WorkbenchRagEvalAdjudicationVerdict,
     WorkbenchRagEvalPromotedQuestion,
     WorkbenchRagEvalPromotionApplicationTarget,
     WorkbenchRagEvalPromotionApplyResult,
@@ -22,6 +24,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalQuestionSource,
     WorkbenchRagEvalQuestionStatus,
     WorkbenchRagEvalRetrievalOutcome,
+    WorkbenchRagEvalRetrievalClassification,
     WorkbenchRagEvalRetrievalResult,
     WorkbenchRagEvalRetrievalResultDetails,
     WorkbenchRagEvalRun,
@@ -36,6 +39,11 @@ from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_ra
 )
 from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
     WorkbenchRagEvalRepositoryPort,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_adjudication_work import (
+    WorkbenchRagEvalAdjudicationPlanningInput,
+    WorkbenchRagEvalAdjudicationRetrievedClaimSnapshot,
+    WorkbenchRagEvalAdjudicationEligibilityPolicy,
 )
 from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
     PublishedWorkbenchRetrievalResult,
@@ -302,13 +310,16 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     scheduled_generation_items, waiting_work_items,
                     running_work_items, completed_work_items, failed_work_items,
                     generated_question_sets, capacity_next_due_at,
-                    capacity_model_ref, capacity_account_ref
+                    capacity_model_ref, capacity_account_ref,
+                    adjudication_total, adjudication_waiting,
+                    adjudication_running, adjudication_completed,
+                    adjudication_failed, promotion_candidate_count
                 )
                 VALUES (
                     $1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
                     $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
                     $21, $22, $23, $24, $25, $26, $27, $28, $29, $30,
-                    $31, $32, $33
+                    $31, $32, $33, $34, $35, $36, $37, $38, $39
                 )
                 """,
                 run.run_id,
@@ -343,6 +354,12 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 run.capacity_next_due_at,
                 run.capacity_model_ref,
                 run.capacity_account_ref,
+                run.progress.adjudication_total,
+                run.progress.adjudication_waiting,
+                run.progress.adjudication_running,
+                run.progress.adjudication_completed,
+                run.progress.adjudication_failed,
+                run.progress.promotion_candidate_count,
             )
         return run
 
@@ -430,7 +447,13 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     generated_question_sets = $14,
                     capacity_next_due_at = $15,
                     capacity_model_ref = $16,
-                    capacity_account_ref = $17
+                    capacity_account_ref = $17,
+                    adjudication_total = $18,
+                    adjudication_waiting = $19,
+                    adjudication_running = $20,
+                    adjudication_completed = $21,
+                    adjudication_failed = $22,
+                    promotion_candidate_count = $23
                 WHERE run_id = $1 AND project_id = $2::uuid
                 """,
                 run_id,
@@ -450,6 +473,12 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 capacity_next_due_at,
                 capacity_model_ref,
                 capacity_account_ref,
+                progress.adjudication_total,
+                progress.adjudication_waiting,
+                progress.adjudication_running,
+                progress.adjudication_completed,
+                progress.adjudication_failed,
+                progress.promotion_candidate_count,
             )
 
     async def list_published_entries_for_eval(
@@ -667,6 +696,284 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                 updated_at,
             )
 
+    async def list_adjudication_planning_inputs(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+    ) -> tuple[WorkbenchRagEvalAdjudicationPlanningInput, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                """
+                SELECT
+                    question.run_id,
+                    question.project_id::text AS project_id,
+                    question.question_id,
+                    question.question,
+                    question.evaluation_role,
+                    question.promotion_eligible,
+                    question.ambiguity_risk,
+                    outcome.outcome_id,
+                    outcome.classification,
+                    outcome.expected_runtime_entry_id,
+                    outcome.expected_fact_id,
+                    outcome.expected_rank,
+                    outcome.expected_score,
+                    outcome.best_competitor_runtime_entry_id,
+                    outcome.best_competitor_fact_id,
+                    outcome.best_competitor_score,
+                    outcome.score_margin,
+                    target.claim AS target_claim,
+                    target.possible_questions AS target_possible_questions,
+                    target.exclusion_scope AS target_exclusion_scope,
+                    target.evidence_block AS target_evidence_block,
+                    result.rank AS retrieved_rank,
+                    result.matched_runtime_entry_id AS retrieved_runtime_entry_id,
+                    result.matched_fact_id AS retrieved_fact_id,
+                    result.score AS retrieved_score,
+                    retrieved.claim AS retrieved_claim
+                FROM knowledge_workbench_rag_eval_questions AS question
+                JOIN knowledge_workbench_rag_eval_retrieval_outcomes AS outcome
+                  ON outcome.run_id = question.run_id
+                 AND outcome.question_id = question.question_id
+                 AND outcome.project_id = question.project_id
+                 AND outcome.evaluation_stage = 'initial'
+                JOIN knowledge_workbench_runtime_retrieval_entries AS target
+                  ON target.project_id = question.project_id
+                 AND target.runtime_entry_id = outcome.expected_runtime_entry_id
+                LEFT JOIN knowledge_workbench_rag_eval_retrieval_results AS result
+                  ON result.run_id = question.run_id
+                 AND result.question_id = question.question_id
+                 AND result.project_id = question.project_id
+                LEFT JOIN knowledge_workbench_runtime_retrieval_entries AS retrieved
+                  ON retrieved.project_id = question.project_id
+                 AND retrieved.runtime_entry_id = result.matched_runtime_entry_id
+                WHERE question.run_id = $1
+                  AND question.project_id = $2::uuid
+                ORDER BY question.created_at, question.question_id, result.rank NULLS LAST
+                """,
+                run_id,
+                project_id,
+            )
+        return _adjudication_planning_inputs_from_rows(rows)
+
+    async def save_question_adjudication(
+        self,
+        *,
+        adjudication: WorkbenchRagEvalAdjudication,
+    ) -> WorkbenchRagEvalAdjudication:
+        async with _connection(self._connection_or_pool) as connection:
+            existing = await connection.fetchrow(
+                """
+                SELECT
+                    adjudication_id, run_id, project_id::text AS project_id,
+                    question_id, outcome_id, expected_runtime_entry_id,
+                    expected_fact_id, verdict, promotion_recommended, reason,
+                    contract_version, model_ref, account_ref, slot_index,
+                    attempt_id, created_at, updated_at
+                FROM knowledge_workbench_rag_eval_question_adjudications
+                WHERE run_id = $1 AND question_id = $2 AND outcome_id = $3
+                """,
+                adjudication.run_id,
+                adjudication.question_id,
+                adjudication.outcome_id,
+            )
+            if existing is not None:
+                hydrated = _adjudication_from_row(existing)
+                if hydrated == adjudication:
+                    return hydrated
+                raise ValueError("adjudication immutable identity/context conflict")
+            await connection.execute(
+                """
+                INSERT INTO knowledge_workbench_rag_eval_question_adjudications (
+                    adjudication_id, run_id, project_id, question_id,
+                    outcome_id, expected_runtime_entry_id, expected_fact_id,
+                    verdict, promotion_recommended, reason, contract_version,
+                    model_ref, account_ref, slot_index, attempt_id,
+                    created_at, updated_at
+                )
+                VALUES (
+                    $1, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15, $16, $17
+                )
+                """,
+                adjudication.adjudication_id,
+                adjudication.run_id,
+                adjudication.project_id,
+                adjudication.question_id,
+                adjudication.outcome_id,
+                adjudication.expected_runtime_entry_id,
+                adjudication.expected_fact_id,
+                adjudication.verdict.value,
+                adjudication.promotion_recommended,
+                adjudication.reason,
+                adjudication.contract_version,
+                adjudication.model_ref,
+                adjudication.account_ref,
+                adjudication.slot_index,
+                adjudication.attempt_id,
+                adjudication.created_at,
+                adjudication.updated_at,
+            )
+        return adjudication
+
+    async def has_adjudications_for_all_eligible_questions(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        pass_weak_enabled: bool,
+    ) -> bool:
+        inputs = await self.list_adjudication_planning_inputs(
+            run_id=run_id,
+            project_id=project_id,
+        )
+        policy = WorkbenchRagEvalAdjudicationEligibilityPolicy(
+            pass_weak_enabled=pass_weak_enabled
+        )
+        eligible = tuple(
+            item
+            for item in inputs
+            if policy.is_eligible(
+                evaluation_role=item.evaluation_role,
+                promotion_eligible=item.promotion_eligible,
+                ambiguity_risk=item.ambiguity_risk,
+                classification=item.classification,
+            )
+        )
+        if not eligible:
+            return True
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                """
+                SELECT question_id, outcome_id
+                FROM knowledge_workbench_rag_eval_question_adjudications
+                WHERE run_id = $1 AND project_id = $2::uuid
+                """,
+                run_id,
+                project_id,
+            )
+        persisted = {
+            (_text_from_row(row, "question_id"), _text_from_row(row, "outcome_id"))
+            for row in rows
+        }
+        return all(
+            (item.question_id, item.outcome_id) in persisted for item in eligible
+        )
+
+    async def create_promotion_candidates_from_adjudications(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        created_at: datetime,
+        pass_weak_enabled: bool,
+    ) -> tuple[WorkbenchRagEvalPromotedQuestion, ...]:
+        policy = WorkbenchRagEvalAdjudicationEligibilityPolicy(
+            pass_weak_enabled=pass_weak_enabled
+        )
+        inputs = await self.list_adjudication_planning_inputs(
+            run_id=run_id,
+            project_id=project_id,
+        )
+        eligible_by_key = {
+            (item.question_id, item.outcome_id): item
+            for item in inputs
+            if policy.is_eligible(
+                evaluation_role=item.evaluation_role,
+                promotion_eligible=item.promotion_eligible,
+                ambiguity_risk=item.ambiguity_risk,
+                classification=item.classification,
+            )
+        }
+        if not eligible_by_key:
+            await self._persist_promotion_review_state(
+                run_id=run_id,
+                project_id=project_id,
+                candidate_count=0,
+                updated_at=created_at,
+            )
+            return ()
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                """
+                SELECT
+                    adjudication_id, run_id, project_id::text AS project_id,
+                    question_id, outcome_id, expected_runtime_entry_id,
+                    expected_fact_id, verdict, promotion_recommended, reason,
+                    contract_version, model_ref, account_ref, slot_index,
+                    attempt_id, created_at, updated_at
+                FROM knowledge_workbench_rag_eval_question_adjudications
+                WHERE run_id = $1 AND project_id = $2::uuid
+                  AND verdict = 'valid_target_query'
+                  AND promotion_recommended = TRUE
+                """,
+                run_id,
+                project_id,
+            )
+            promotions: list[WorkbenchRagEvalPromotedQuestion] = []
+            for row in rows:
+                adjudication = _adjudication_from_row(row)
+                item = eligible_by_key.get(
+                    (adjudication.question_id, adjudication.outcome_id)
+                )
+                if item is None:
+                    continue
+                promotion = WorkbenchRagEvalPromotedQuestion(
+                    promotion_id=_promotion_id(adjudication.adjudication_id),
+                    run_id=run_id,
+                    question_id=item.question_id,
+                    project_id=project_id,
+                    target_runtime_entry_id=item.expected_runtime_entry_id,
+                    target_fact_id=item.expected_fact_id,
+                    question=item.question,
+                    status=WorkbenchRagEvalPromotionStatus.CANDIDATE,
+                    created_at=created_at,
+                    applied_at=None,
+                    outcome_id=item.outcome_id,
+                    adjudication_id=adjudication.adjudication_id,
+                    reason=adjudication.reason,
+                    expected_rank=item.expected_rank,
+                    expected_score=item.expected_score,
+                    competitor_runtime_entry_id=(item.best_competitor_runtime_entry_id),
+                    competitor_fact_id=item.best_competitor_fact_id,
+                    competitor_score=item.best_competitor_score,
+                    score_margin=item.score_margin,
+                )
+                promotions.append(promotion)
+                await _insert_promotion_candidate(connection, promotion)
+            await self._persist_promotion_review_state(
+                run_id=run_id,
+                project_id=project_id,
+                candidate_count=len(promotions),
+                updated_at=created_at,
+            )
+        return tuple(promotions)
+
+    async def _persist_promotion_review_state(
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        candidate_count: int,
+        updated_at: datetime,
+    ) -> None:
+        async with _connection(self._connection_or_pool) as connection:
+            await connection.execute(
+                """
+                UPDATE knowledge_workbench_rag_eval_runs
+                SET status = 'promotion_review',
+                    current_phase = 'promotion_review',
+                    promotion_candidate_count = $3,
+                    updated_at = $4
+                WHERE run_id = $1 AND project_id = $2::uuid
+                """,
+                run_id,
+                project_id,
+                candidate_count,
+                updated_at,
+            )
+
     async def save_promoted_question_candidates(
         self,
         *,
@@ -679,9 +986,15 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     INSERT INTO knowledge_workbench_rag_eval_promoted_questions (
                         promotion_id, run_id, question_id, project_id,
                         target_runtime_entry_id, target_fact_id, question,
-                        status, created_at, applied_at
+                        status, created_at, applied_at, outcome_id,
+                        adjudication_id, reason, expected_rank, expected_score,
+                        competitor_runtime_entry_id, competitor_fact_id,
+                        competitor_score, score_margin
                     )
-                    VALUES ($1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10)
+                    VALUES (
+                        $1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10,
+                        $11, $12, $13, $14, $15, $16, $17, $18, $19
+                    )
                     ON CONFLICT (promotion_id) DO NOTHING
                     """,
                     promotion.promotion_id,
@@ -694,6 +1007,15 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     promotion.status.value,
                     promotion.created_at,
                     promotion.applied_at,
+                    promotion.outcome_id,
+                    promotion.adjudication_id,
+                    promotion.reason,
+                    promotion.expected_rank,
+                    promotion.expected_score,
+                    promotion.competitor_runtime_entry_id,
+                    promotion.competitor_fact_id,
+                    promotion.competitor_score,
+                    promotion.score_margin,
                 )
         return promotions
 
@@ -780,12 +1102,18 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     run.retrieval_confusions,
                     run.retrieval_misses,
                     run.retrieval_existing_alias_failures,
+                    run.adjudication_total,
+                    run.adjudication_waiting,
+                    run.adjudication_running,
+                    run.adjudication_completed,
+                    run.adjudication_failed,
+                    run.promotion_candidate_count AS persisted_promotion_candidate_count,
                     (
                         SELECT count(*)
                         FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
                         WHERE promotion.run_id = run.run_id
                           AND promotion.status = 'candidate'
-                    ) AS promotion_candidate_count
+                    ) AS computed_promotion_candidate_count
                 FROM knowledge_workbench_rag_eval_runs AS run
                 WHERE run.project_id = $1::uuid
                 ORDER BY run.created_at DESC
@@ -844,12 +1172,18 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     run.retrieval_confusions,
                     run.retrieval_misses,
                     run.retrieval_existing_alias_failures,
+                    run.adjudication_total,
+                    run.adjudication_waiting,
+                    run.adjudication_running,
+                    run.adjudication_completed,
+                    run.adjudication_failed,
+                    run.promotion_candidate_count AS persisted_promotion_candidate_count,
                     (
                         SELECT count(*)
                         FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
                         WHERE promotion.run_id = run.run_id
                           AND promotion.status = 'candidate'
-                    ) AS promotion_candidate_count
+                    ) AS computed_promotion_candidate_count
                 FROM knowledge_workbench_rag_eval_runs AS run
                 WHERE run.run_id = $1
                   AND run.project_id = $2::uuid
@@ -1406,7 +1740,9 @@ def _summary_from_row(row: Mapping[str, object]) -> WorkbenchRagEvalSummary:
         top3_hits=_int_from_row(row, "top3_hits"),
         top5_hits=_int_from_row(row, "top5_hits"),
         misses=_int_from_row(row, "misses"),
-        promotion_candidate_count=_int_from_row(row, "promotion_candidate_count"),
+        promotion_candidate_count=_int_from_row_default_zero(
+            row, "persisted_promotion_candidate_count"
+        ),
         created_at=_datetime_from_row(row, "created_at"),
         completed_at=_optional_datetime_from_row(row, "completed_at"),
         error_message=_optional_text_from_row(row, "error_message"),
@@ -1421,6 +1757,20 @@ def _summary_from_row(row: Mapping[str, object]) -> WorkbenchRagEvalSummary:
             completed=_int_from_row(row, "completed_work_items"),
             failed=_int_from_row(row, "failed_work_items"),
             generated_question_sets=_int_from_row(row, "generated_question_sets"),
+            adjudication_total=_int_from_row_default_zero(row, "adjudication_total"),
+            adjudication_waiting=_int_from_row_default_zero(
+                row, "adjudication_waiting"
+            ),
+            adjudication_running=_int_from_row_default_zero(
+                row, "adjudication_running"
+            ),
+            adjudication_completed=_int_from_row_default_zero(
+                row, "adjudication_completed"
+            ),
+            adjudication_failed=_int_from_row_default_zero(row, "adjudication_failed"),
+            promotion_candidate_count=_int_from_row_default_zero(
+                row, "persisted_promotion_candidate_count"
+            ),
         ),
         capacity_next_due_at=_optional_datetime_from_row(row, "capacity_next_due_at"),
         capacity_model_ref=_optional_text_from_row(row, "capacity_model_ref"),
@@ -1439,6 +1789,172 @@ def _summary_from_row(row: Mapping[str, object]) -> WorkbenchRagEvalSummary:
             row, "retrieval_existing_alias_failures"
         ),
     )
+
+
+def _adjudication_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalAdjudication:
+    return WorkbenchRagEvalAdjudication(
+        adjudication_id=_text_from_row(row, "adjudication_id"),
+        run_id=_text_from_row(row, "run_id"),
+        project_id=_text_from_row(row, "project_id"),
+        question_id=_text_from_row(row, "question_id"),
+        outcome_id=_text_from_row(row, "outcome_id"),
+        expected_runtime_entry_id=_text_from_row(row, "expected_runtime_entry_id"),
+        expected_fact_id=_text_from_row(row, "expected_fact_id"),
+        verdict=WorkbenchRagEvalAdjudicationVerdict(_text_from_row(row, "verdict")),
+        promotion_recommended=_bool_from_row(row, "promotion_recommended"),
+        reason=_text_from_row(row, "reason"),
+        contract_version=_text_from_row(row, "contract_version"),
+        model_ref=_text_from_row(row, "model_ref"),
+        account_ref=_text_from_row(row, "account_ref"),
+        slot_index=_int_from_row(row, "slot_index"),
+        attempt_id=_text_from_row(row, "attempt_id"),
+        created_at=_datetime_from_row(row, "created_at"),
+        updated_at=_datetime_from_row(row, "updated_at"),
+    )
+
+
+def _adjudication_planning_inputs_from_rows(
+    rows: Sequence[Mapping[str, object]],
+) -> tuple[WorkbenchRagEvalAdjudicationPlanningInput, ...]:
+    drafts: dict[tuple[str, str], dict[str, object]] = {}
+    order: list[tuple[str, str]] = []
+    for row in rows:
+        key = (_text_from_row(row, "question_id"), _text_from_row(row, "outcome_id"))
+        if key not in drafts:
+            drafts[key] = {
+                "row": row,
+                "retrieved": [],
+            }
+            order.append(key)
+        if row.get("retrieved_runtime_entry_id") is not None:
+            retrieved = drafts[key]["retrieved"]
+            if not isinstance(retrieved, list):
+                raise TypeError("retrieved draft must be list")
+            retrieved.append(
+                WorkbenchRagEvalAdjudicationRetrievedClaimSnapshot(
+                    rank=_int_from_row(row, "retrieved_rank"),
+                    runtime_entry_id=_text_from_row(row, "retrieved_runtime_entry_id"),
+                    fact_id=_text_from_row(row, "retrieved_fact_id"),
+                    claim=_text_from_row(row, "retrieved_claim"),
+                    score=_float_from_row(row, "retrieved_score"),
+                )
+            )
+    result: list[WorkbenchRagEvalAdjudicationPlanningInput] = []
+    for key in order:
+        draft = drafts[key]
+        row = cast(Mapping[str, object], draft["row"])
+        retrieved = cast(
+            list[WorkbenchRagEvalAdjudicationRetrievedClaimSnapshot],
+            draft["retrieved"],
+        )
+        if not isinstance(row, Mapping) or not isinstance(retrieved, list):
+            raise TypeError("invalid adjudication planning draft")
+        ambiguity_risk = _optional_text_from_row(row, "ambiguity_risk")
+        result.append(
+            WorkbenchRagEvalAdjudicationPlanningInput(
+                run_id=_text_from_row(row, "run_id"),
+                project_id=_text_from_row(row, "project_id"),
+                question_id=_text_from_row(row, "question_id"),
+                question=_text_from_row(row, "question"),
+                evaluation_role=WorkbenchRagEvalQuestionRole(
+                    _text_from_row(row, "evaluation_role")
+                ),
+                promotion_eligible=_bool_from_row(row, "promotion_eligible"),
+                ambiguity_risk=WorkbenchRagEvalQuestionAmbiguityRisk(ambiguity_risk)
+                if ambiguity_risk is not None
+                else None,
+                outcome_id=_text_from_row(row, "outcome_id"),
+                classification=WorkbenchRagEvalRetrievalClassification(
+                    _text_from_row(row, "classification")
+                ),
+                expected_runtime_entry_id=_text_from_row(
+                    row, "expected_runtime_entry_id"
+                ),
+                expected_fact_id=_text_from_row(row, "expected_fact_id"),
+                expected_rank=_optional_int_from_row(row, "expected_rank"),
+                expected_score=_optional_float_from_row(row, "expected_score"),
+                best_competitor_runtime_entry_id=_optional_text_from_row(
+                    row, "best_competitor_runtime_entry_id"
+                ),
+                best_competitor_fact_id=_optional_text_from_row(
+                    row, "best_competitor_fact_id"
+                ),
+                best_competitor_score=_optional_float_from_row(
+                    row, "best_competitor_score"
+                ),
+                score_margin=_optional_float_from_row(row, "score_margin"),
+                target_claim=_text_from_row(row, "target_claim"),
+                target_possible_questions=_text_tuple(
+                    row.get("target_possible_questions")
+                ),
+                target_exclusion_scope=_optional_text_from_row(
+                    row, "target_exclusion_scope"
+                ),
+                target_evidence_block=_optional_text_from_row(
+                    row, "target_evidence_block"
+                )
+                or "",
+                retrieved=tuple(retrieved),
+            )
+        )
+    return tuple(result)
+
+
+def _optional_float_from_row(row: Mapping[str, object], key: str) -> float | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{key} must be numeric or None")
+    return float(value)
+
+
+async def _insert_promotion_candidate(
+    connection: WorkbenchRagEvalConnectionLike,
+    promotion: WorkbenchRagEvalPromotedQuestion,
+) -> None:
+    await connection.execute(
+        """
+        INSERT INTO knowledge_workbench_rag_eval_promoted_questions (
+            promotion_id, run_id, question_id, project_id,
+            target_runtime_entry_id, target_fact_id, question,
+            status, created_at, applied_at, outcome_id, adjudication_id,
+            reason, expected_rank, expected_score,
+            competitor_runtime_entry_id, competitor_fact_id,
+            competitor_score, score_margin
+        )
+        VALUES (
+            $1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13, $14, $15, $16, $17, $18, $19
+        )
+        ON CONFLICT (promotion_id) DO NOTHING
+        """,
+        promotion.promotion_id,
+        promotion.run_id,
+        promotion.question_id,
+        promotion.project_id,
+        promotion.target_runtime_entry_id,
+        promotion.target_fact_id,
+        promotion.question,
+        promotion.status.value,
+        promotion.created_at,
+        promotion.applied_at,
+        promotion.outcome_id,
+        promotion.adjudication_id,
+        promotion.reason,
+        promotion.expected_rank,
+        promotion.expected_score,
+        promotion.competitor_runtime_entry_id,
+        promotion.competitor_fact_id,
+        promotion.competitor_score,
+        promotion.score_margin,
+    )
+
+
+def _promotion_id(adjudication_id: str) -> str:
+    return "rag-eval-promotion:" + sha256(adjudication_id.encode("utf-8")).hexdigest()
 
 
 def _text_from_row(row: Mapping[str, object], key: str) -> str:

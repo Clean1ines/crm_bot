@@ -1,7 +1,7 @@
 # ADR-0001: Canonical Workbench RAG Eval V2 workflow
 
 Date: 2026-07-10
-Status: accepted — functional qgen/retrieval implementation present; canonical qgen/retrieval integration proof completed
+Status: accepted — qgen complete; retrieval complete; adjudication complete; promotion review ready
 Deciders: crm_bot maintainers
 
 Context
@@ -216,10 +216,25 @@ review/application contract.
 
 Implementation checkpoint
 
-The qgen and initial retrieval portions of this decision are implemented:
-generated roles are persisted atomically, published possible questions are
-materialized as BASELINE, and `RUN_RETRIEVAL_EVALUATION` uses the production
-`SearchPublishedWorkbenchRuntime` before durably scheduling adjudication.
+The qgen, initial retrieval and adjudication portions of this decision are
+implemented:
+
+generated roles are persisted atomically;
+published possible questions are materialized as BASELINE;
+`RUN_RETRIEVAL_EVALUATION` uses the production `SearchPublishedWorkbenchRuntime`;
+canonical initial outcomes are persisted before adjudication scheduling;
+`SCHEDULE_ADJUDICATION_WORK` creates stable adjudication work items only for
+eligible promotion-pool outcomes;
+`PREPARE_ADJUDICATION_DISPATCH_BATCH` uses generic capacity admission and
+reservation;
+`EXECUTE_ADJUDICATION` uses `ExecutePreparedLlmDispatchAttempt` and strict
+contract validation;
+`RECONCILE_ADJUDICATION_PROGRESS` drains only after persisted adjudication
+coverage;
+promotion candidates are created only behind the `VALID_TARGET_QUERY` and
+`promotion_recommended=true` gate;
+the run transitions to `PROMOTION_REVIEW` after successful adjudication drain
+or zero-eligible scheduling.
 
 Reversible grouped application
 
@@ -366,13 +381,13 @@ Diagnostics are persisted first; accept and rollback are explicit actions.
 
 Consequences
 additive migrations are required for progression, roles, outcomes,
-adjudications, candidate review, revisions and verification;
+adjudications, candidate review actions, revisions and verification;
 both LLM phases use generic execution and capacity runtime infrastructure;
 retrieval outcomes become first-class persisted entities;
 frontend and backend contracts evolve together;
 promotion application becomes more expensive but bounded to affected runtime
 entries;
 every embedding mutation becomes auditable and reversible;
-the implementation remains incomplete until retrieval, adjudication,
-revisions, verification, API and frontend verticals are delivered and all
-final gates pass.
+the implementation remains incomplete until explicit candidate approve/reject,
+revisions, verification, accept/rollback and full frontend progression are
+delivered and all final gates pass.

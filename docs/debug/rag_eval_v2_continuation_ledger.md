@@ -2,10 +2,10 @@
 
 ## Current checkpoint
 
-**Date:** 2026-07-10  
+**Date:** 2026-07-11
 **Committed base:** `aef56def22f943ee1f0caa1037682ffa542ad974`  
-**Working tree:** contains the retrieval continuation checkpoint
-**Overall status:** IN PROGRESS — functional qgen/retrieval implementation present; canonical qgen/retrieval integration proof completed
+**Working tree:** contains the adjudication runtime vertical checkpoint
+**Overall status:** IN PROGRESS — qgen complete; retrieval complete; adjudication complete; promotion review ready
 
 This document describes the current working tree. It must not instruct a future
 agent to recreate question-generation workflow components that already exist.
@@ -189,6 +189,8 @@ generated question-set count;
 capacity next-due timestamp;
 capacity model/account metadata;
 blocked and failed reasons.
+adjudication totals/waiting/running/completed/failed;
+promotion candidate count.
 Roles and retrieval outcome foundation
 
 The current checkpoint contains additive migrations:
@@ -196,6 +198,10 @@ The current checkpoint contains additive migrations:
 120_extend_workbench_rag_eval_run_progression.sql
 121_add_workbench_rag_eval_question_roles.sql
 122_create_workbench_rag_eval_retrieval_outcomes.sql
+123_add_workbench_rag_eval_retrieval_progress.sql
+124_add_workbench_rag_eval_evaluated_at.sql
+125_create_workbench_rag_eval_question_adjudications.sql
+126_add_workbench_rag_eval_adjudication_progress.sql
 
 Migration 121 supports:
 
@@ -238,8 +244,8 @@ the RAG Eval repository.
 
 The shared runtime loop currently invokes the RAG Eval due-command pump.
 
-This is a composition foundation. Full delayed-command and transactional pump
-behaviour has not yet been proven end to end.
+Delayed-command selection, pump failure isolation and transaction boundaries
+are covered by focused production composition tests.
 
 Frontend checkpoint
 
@@ -255,16 +261,15 @@ This is not the completed frontend progression UI.
 
 Current verified test evidence
 
-Retrieval continuation checkpoint:
+Adjudication continuation checkpoint:
 
-- Focused RAG Eval/backend slice: `137 passed`.
-- Full backend: `2613 passed, 2 skipped`.
+- Focused RAG Eval/backend slice: `200 passed`.
+- Full backend: `2676 passed, 2 skipped`.
 - Ruff: passed.
 - Mypy: passed.
 - Frontend type-check/build/tests: passed.
 - Frontend tests: `56 passed`.
-- Changed RAG Eval frontend ESLint: passed.
-- Full frontend lint: still fails only in listed unchanged knowledge files.
+- Changed RAG Eval frontend ESLint: no RAG Eval frontend changes in this checkpoint.
 
 Latest canonical repair slice:
 
@@ -310,6 +315,8 @@ Completed in this continuation
 - Diagnostic top-k rows and canonical `initial` outcomes are persisted idempotently; no promotion candidates are created.
 - Retrieval counters and phase transition to `ADJUDICATION_SCHEDULING` are persisted, with one durable `SCHEDULE_ADJUDICATION_WORK` command.
 - Migration `123_add_workbench_rag_eval_retrieval_progress.sql` adds retrieval counters.
+- Migration `125_create_workbench_rag_eval_question_adjudications.sql` adds persisted adjudications with `(run_id, question_id, outcome_id)` uniqueness.
+- Migration `126_add_workbench_rag_eval_adjudication_progress.sql` adds adjudication counters and persisted promotion candidate count.
 
 Four-account support
 
@@ -325,17 +332,23 @@ matrix covers due command selection, future `run_after` exclusion, later
 due-command pickup, completed-command exclusion, failure isolation between
 runs, no blocked-command busy loop, repeated-pump idempotency and observable
 per-run failures.
-Roles lifecycle
+Adjudication
 
-Role vocabulary, deterministic policy and persistence foundation exist.
+The adjudication vertical is implemented:
 
-Still required:
-
-materialize existing published aliases as BASELINE;
-persist generated questions as PROMOTION_POOL or HOLDOUT;
-expose roles through the read API;
-enforce candidate prohibition for holdouts;
-use holdouts in post-promotion verification.
+- `SCHEDULE_ADJUDICATION_WORK` plans one stable work item for each eligible initial outcome.
+- Eligibility is limited to PROMOTION_POOL, promotion-eligible, low-ambiguity questions with MISS, CONFUSION or policy-enabled PASS_WEAK classifications.
+- BASELINE, HOLDOUT, PASS_STRONG, existing-alias failures, non-promotion-eligible questions and medium/high ambiguity risks are excluded.
+- The exact work kind is `workbench_rag_eval.adjudication`.
+- The adjudication prompt is versioned as `workbench_rag_eval_question_adjudication.ru.v1.txt`.
+- `RagEvalAdjudicationDispatchPreparationBuilder` is registered through `DispatchPreparationBuilderRegistry`.
+- `PREPARE_ADJUDICATION_DISPATCH_BATCH` reuses generic capacity admission, reservations, leases, attempts and dispatch persistence.
+- `EXECUTE_ADJUDICATION` calls `ExecutePreparedLlmDispatchAttempt`, strict-validates output and persists model/account/slot/attempt metadata.
+- Invalid output retry, fallback to `openai/gpt-oss-120b`, capacity wait and terminal failure handling remain owned by the generic persisted attempt path.
+- `RECONCILE_ADJUDICATION_PROGRESS` supports now/later/wait/drained/blocked decisions.
+- Drained adjudication creates promotion candidates only for `VALID_TARGET_QUERY` with `promotion_recommended=true`.
+- Terminal adjudication failure blocks the run and does not create candidates.
+- Zero eligible scheduling transitions directly to PROMOTION_REVIEW with zero candidates and a canonical candidates-ready event.
 Retrieval
 
 The retrieval handler and production transition now exist. Baseline
@@ -348,24 +361,8 @@ Not implemented
 
 The following verticals remain incomplete:
 
-Adjudication:
-versioned adjudication prompt;
-eligibility planner;
-adjudication work items;
-adjudication preparation;
-adjudication execution;
-adjudication retry/fallback;
-adjudication reconcile;
-adjudication persistence;
-terminal-failure blocking.
-
-Promotion review:
-canonical candidate policy;
-VALID_TARGET_QUERY gate;
-explicit approve/reject transitions;
-expanded promotion statuses;
-candidate linkage to outcome and adjudication;
-holdout and baseline exclusion.
+Promotion review actions:
+explicit candidate approve/reject transitions.
 
 Reversible revisions:
 grouped application per runtime entry;
@@ -404,47 +401,38 @@ Final quality gates
 Current checkpoint validation:
 
 ```text
-focused RAG Eval/backend slice: 137 passed
-full backend: 2613 passed, 2 skipped
+focused RAG Eval/backend slice: 200 passed
+full backend: 2676 passed, 2 skipped
 ruff: passed
 mypy: passed
 frontend type-check/build/tests: passed
 frontend tests: 56 passed
-changed RAG Eval frontend ESLint: passed
-full frontend lint: still fails only in listed unchanged knowledge files
+changed RAG Eval frontend ESLint: no RAG Eval frontend changes in this checkpoint
 ```
 
 Next exact implementation sequence
 
 Continue from the current working tree in this exact order.
 
-1. Implement adjudication
-migration/model/repository;
-prompt and validator;
-planner;
-generic prepare/execute/reconcile;
-retry/fallback;
-terminal blocking.
-2. Implement promotion review
-candidate policy;
-approve/reject state transitions;
+1. Implement explicit promotion review actions
+candidate approve/reject state transitions;
 API/read projection.
-3. Implement reversible grouped application
+2. Implement reversible grouped application
 revisions migration/model/repository;
 atomic snapshot and mutation;
 one embedding generation per target entry;
 active-revision guard.
-4. Implement post-promotion verification
+3. Implement post-promotion verification
 before/after retrieval outcomes;
 baseline/holdout/neighbour metrics;
 regression policy;
 explicit accept/rollback.
-5. Complete API, SSE and frontend
+4. Complete API, SSE and frontend
 persisted read endpoints;
 workflow-event projection;
 full progression UI;
 revision controls.
-6. Run all final gates
+5. Run all final gates
 
 Do not report the original RAG Eval V2 task as complete until every required
 backend and frontend gate passes.
@@ -467,6 +455,7 @@ question-role migration;
 retrieval-outcome migration;
 production runtime composition foundation.
 
-The qgen/retrieval checkpoint is ready for the next vertical: adjudication.
+The qgen/retrieval/adjudication checkpoint is ready for the next vertical:
+explicit promotion review actions.
 
 Do not commit or push without an explicit user request.

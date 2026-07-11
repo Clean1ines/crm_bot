@@ -10,10 +10,23 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_exec
     HandleExecuteWorkbenchRagEvalQuestionGenerationCommand,
     HandleExecuteWorkbenchRagEvalQuestionGenerationCommandHandler,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_execute_workbench_rag_eval_adjudication_command import (
+    ExecuteWorkbenchRagEvalAdjudicationPort,
+    HandleExecuteWorkbenchRagEvalAdjudicationCommand,
+    HandleExecuteWorkbenchRagEvalAdjudicationCommandHandler,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_prepare_workbench_rag_eval_adjudication_dispatch_batch import (
+    HandlePrepareWorkbenchRagEvalAdjudicationDispatchBatchCommand,
+    HandlePrepareWorkbenchRagEvalAdjudicationDispatchBatchCommandHandler,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_prepare_workbench_rag_eval_question_generation_dispatch_batch import (
     HandlePrepareWorkbenchRagEvalQuestionGenerationDispatchBatchCommand,
     HandlePrepareWorkbenchRagEvalQuestionGenerationDispatchBatchCommandHandler,
     PrepareLlmDispatchBatchPort,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reconcile_workbench_rag_eval_adjudication_progress_command import (
+    HandleReconcileWorkbenchRagEvalAdjudicationProgressCommand,
+    HandleReconcileWorkbenchRagEvalAdjudicationProgressCommandHandler,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reconcile_workbench_rag_eval_question_generation_progress_command import (
     HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand,
@@ -24,6 +37,13 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_run_
     HandleRunWorkbenchRagEvalRetrievalEvaluationCommand,
     HandleRunWorkbenchRagEvalRetrievalEvaluationCommandHandler,
     PublishedWorkbenchSearchPort,
+)
+from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
+    WorkItemSchedulingRepositoryPort,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_schedule_workbench_rag_eval_adjudication_work_command import (
+    HandleScheduleWorkbenchRagEvalAdjudicationWorkCommand,
+    HandleScheduleWorkbenchRagEvalAdjudicationWorkCommandHandler,
 )
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
@@ -91,6 +111,7 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
         question_generation_executor: (
             ExecuteWorkbenchRagEvalQuestionGenerationPort | None
         ) = None,
+        adjudication_executor: ExecuteWorkbenchRagEvalAdjudicationPort | None = None,
         capacity_observation_repository: (
             LlmAttemptCapacityObservationRepositoryPort | None
         ) = None,
@@ -100,10 +121,145 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
         | None = None,
         rag_eval_repository: WorkbenchRagEvalRepositoryPort | None = None,
         search_published_workbench_runtime: PublishedWorkbenchSearchPort | None = None,
+        work_item_scheduling_repository: WorkItemSchedulingRepositoryPort | None = None,
+        adjudication_provider_messages_builder: object | None = None,
     ) -> DispatchWorkbenchRagEvalWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = command_type_from_value(workflow_command.command_type)
         operation = operation_for_command_type(command_type)
+
+        if (
+            command_type
+            is WorkbenchRagEvalWorkflowCommandType.SCHEDULE_ADJUDICATION_WORK
+        ):
+            if (
+                rag_eval_repository is None
+                or work_item_scheduling_repository is None
+                or adjudication_provider_messages_builder is None
+            ):
+                return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await (
+                HandleScheduleWorkbenchRagEvalAdjudicationWorkCommandHandler().execute(
+                    HandleScheduleWorkbenchRagEvalAdjudicationWorkCommand(
+                        workflow_command
+                    ),
+                    rag_eval_repository=rag_eval_repository,
+                    work_item_scheduling_repository=work_item_scheduling_repository,
+                    workflow_unit_of_work=workflow_unit_of_work,
+                    provider_messages_builder=adjudication_provider_messages_builder,
+                )
+            )
+            return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name="HandleScheduleWorkbenchRagEvalAdjudicationWorkCommandHandler",
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is WorkbenchRagEvalWorkflowCommandType.PREPARE_ADJUDICATION_DISPATCH_BATCH
+        ):
+            if prepare_llm_dispatch_batch is None:
+                return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandlePrepareWorkbenchRagEvalAdjudicationDispatchBatchCommandHandler().execute(
+                HandlePrepareWorkbenchRagEvalAdjudicationDispatchBatchCommand(
+                    workflow_command
+                ),
+                prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name="HandlePrepareWorkbenchRagEvalAdjudicationDispatchBatchCommandHandler",
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if command_type is WorkbenchRagEvalWorkflowCommandType.EXECUTE_ADJUDICATION:
+            if adjudication_executor is None or capacity_observation_repository is None:
+                return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleExecuteWorkbenchRagEvalAdjudicationCommandHandler().execute(
+                HandleExecuteWorkbenchRagEvalAdjudicationCommand(workflow_command),
+                adjudication_executor=adjudication_executor,
+                capacity_observation_repository=capacity_observation_repository,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name="HandleExecuteWorkbenchRagEvalAdjudicationCommandHandler",
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is WorkbenchRagEvalWorkflowCommandType.RECONCILE_ADJUDICATION_PROGRESS
+        ):
+            if (
+                work_item_progress_read_repository is None
+                or rag_eval_repository is None
+            ):
+                return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleReconcileWorkbenchRagEvalAdjudicationProgressCommandHandler().execute(
+                HandleReconcileWorkbenchRagEvalAdjudicationProgressCommand(
+                    workflow_command
+                ),
+                work_item_progress_read_repository=work_item_progress_read_repository,
+                adjudication_coverage_repository=rag_eval_repository,
+                rag_eval_repository=rag_eval_repository,
+                workflow_unit_of_work=workflow_unit_of_work,
+            )
+            return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name="HandleReconcileWorkbenchRagEvalAdjudicationProgressCommandHandler",
+                dispatched=True,
+                blocked_reason=None,
+            )
 
         if command_type is WorkbenchRagEvalWorkflowCommandType.RUN_RETRIEVAL_EVALUATION:
             if (

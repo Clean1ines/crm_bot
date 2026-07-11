@@ -137,6 +137,13 @@ class WorkbenchRagEvalDispatchPreparationBuilder:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class RagEvalAdjudicationDispatchPreparationBuilder(
+    WorkbenchRagEvalDispatchPreparationBuilder
+):
+    pass
+
+
 def make_question_generation_dispatch_preparation_builder() -> (
     WorkbenchRagEvalDispatchPreparationBuilder
 ):
@@ -146,9 +153,9 @@ def make_question_generation_dispatch_preparation_builder() -> (
 
 
 def make_adjudication_dispatch_preparation_builder() -> (
-    WorkbenchRagEvalDispatchPreparationBuilder
+    RagEvalAdjudicationDispatchPreparationBuilder
 ):
-    return WorkbenchRagEvalDispatchPreparationBuilder(
+    return RagEvalAdjudicationDispatchPreparationBuilder(
         profile_id=ADJUDICATION_PROFILE_ID,
     )
 

@@ -291,6 +291,12 @@ def test_workbench_rag_eval_latest_serializes_persisted_progress(monkeypatch) ->
         "completed": 0,
         "failed": 0,
         "generated_question_sets": 0,
+        "adjudication_total": 0,
+        "adjudication_waiting": 0,
+        "adjudication_running": 0,
+        "adjudication_completed": 0,
+        "adjudication_failed": 0,
+        "promotion_candidate_count": 0,
     }
     assert run["capacity_wait"] is None
 

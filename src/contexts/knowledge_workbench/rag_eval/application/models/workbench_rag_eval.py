@@ -43,6 +43,12 @@ class WorkbenchRagEvalRunProgress:
     completed: int = 0
     failed: int = 0
     generated_question_sets: int = 0
+    adjudication_total: int = 0
+    adjudication_waiting: int = 0
+    adjudication_running: int = 0
+    adjudication_completed: int = 0
+    adjudication_failed: int = 0
+    promotion_candidate_count: int = 0
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -53,6 +59,12 @@ class WorkbenchRagEvalRunProgress:
             "completed",
             "failed",
             "generated_question_sets",
+            "adjudication_total",
+            "adjudication_waiting",
+            "adjudication_running",
+            "adjudication_completed",
+            "adjudication_failed",
+            "promotion_candidate_count",
         ):
             _require_non_negative_int(getattr(self, field_name), field_name)
 
@@ -65,6 +77,12 @@ class WorkbenchRagEvalRunProgress:
             "completed": self.completed,
             "failed": self.failed,
             "generated_question_sets": self.generated_question_sets,
+            "adjudication_total": self.adjudication_total,
+            "adjudication_waiting": self.adjudication_waiting,
+            "adjudication_running": self.adjudication_running,
+            "adjudication_completed": self.adjudication_completed,
+            "adjudication_failed": self.adjudication_failed,
+            "promotion_candidate_count": self.promotion_candidate_count,
         }
 
 
@@ -120,6 +138,15 @@ class WorkbenchRagEvalPromotionStatus(StrEnum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     APPLIED = "applied"
+
+
+class WorkbenchRagEvalAdjudicationVerdict(StrEnum):
+    VALID_TARGET_QUERY = "valid_target_query"
+    AMBIGUOUS = "ambiguous"
+    WRONG_EXPECTED_TARGET = "wrong_expected_target"
+    UNSUPPORTED_BY_CLAIM = "unsupported_by_claim"
+    DUPLICATE_QUERY = "duplicate_query"
+    OVERLAPPING_PUBLISHED_ENTRIES = "overlapping_published_entries"
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,6 +437,56 @@ class WorkbenchRagEvalRetrievalOutcome:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalAdjudication:
+    adjudication_id: str
+    run_id: str
+    project_id: str
+    question_id: str
+    outcome_id: str
+    expected_runtime_entry_id: str
+    expected_fact_id: str
+    verdict: WorkbenchRagEvalAdjudicationVerdict
+    promotion_recommended: bool
+    reason: str
+    contract_version: str
+    model_ref: str
+    account_ref: str
+    slot_index: int
+    attempt_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "adjudication_id",
+            "run_id",
+            "project_id",
+            "question_id",
+            "outcome_id",
+            "expected_runtime_entry_id",
+            "expected_fact_id",
+            "reason",
+            "contract_version",
+            "model_ref",
+            "account_ref",
+            "attempt_id",
+        ):
+            _require_text(getattr(self, field_name), field_name)
+        _require_enum(self.verdict, WorkbenchRagEvalAdjudicationVerdict, "verdict")
+        if not isinstance(self.promotion_recommended, bool):
+            raise TypeError("promotion_recommended must be bool")
+        if (
+            self.promotion_recommended
+            and self.verdict
+            is not WorkbenchRagEvalAdjudicationVerdict.VALID_TARGET_QUERY
+        ):
+            raise ValueError("promotion recommendation requires valid target query")
+        _require_non_negative_int(self.slot_index, "slot_index")
+        _require_datetime(self.created_at, "created_at")
+        _require_datetime(self.updated_at, "updated_at")
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalPromotedQuestion:
     promotion_id: str
     run_id: str
@@ -421,6 +498,15 @@ class WorkbenchRagEvalPromotedQuestion:
     status: WorkbenchRagEvalPromotionStatus
     created_at: datetime
     applied_at: datetime | None
+    outcome_id: str | None = None
+    adjudication_id: str | None = None
+    reason: str | None = None
+    expected_rank: int | None = None
+    expected_score: float | None = None
+    competitor_runtime_entry_id: str | None = None
+    competitor_fact_id: str | None = None
+    competitor_score: float | None = None
+    score_margin: float | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.promotion_id, "promotion_id")
@@ -433,6 +519,28 @@ class WorkbenchRagEvalPromotedQuestion:
         _require_enum(self.status, WorkbenchRagEvalPromotionStatus, "status")
         _require_datetime(self.created_at, "created_at")
         _require_optional_datetime(self.applied_at, "applied_at")
+        _require_optional_text(self.outcome_id, "outcome_id")
+        _require_optional_text(self.adjudication_id, "adjudication_id")
+        _require_optional_text(self.reason, "reason")
+        if self.expected_rank is not None:
+            _require_non_negative_int(self.expected_rank, "expected_rank")
+            if self.expected_rank == 0:
+                raise ValueError("expected_rank must be positive when provided")
+        for field_name in (
+            "expected_score",
+            "competitor_score",
+            "score_margin",
+        ):
+            value = getattr(self, field_name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, (int, float))
+            ):
+                raise TypeError(f"{field_name} must be numeric or None")
+        _require_optional_text(
+            self.competitor_runtime_entry_id,
+            "competitor_runtime_entry_id",
+        )
+        _require_optional_text(self.competitor_fact_id, "competitor_fact_id")
 
 
 @dataclass(frozen=True, slots=True)
