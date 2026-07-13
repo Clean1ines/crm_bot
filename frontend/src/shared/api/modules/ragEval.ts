@@ -1,6 +1,14 @@
 import { authedJsonRequest } from '@shared/api/core/http';
 
-export type WorkbenchRagEvalRunStatus = 'created' | 'running' | 'completed' | 'failed' | string;
+export type WorkbenchRagEvalRunStatus =
+  | 'created'
+  | 'running'
+  | 'promotion_review'
+  | 'verifying'
+  | 'completed'
+  | 'blocked'
+  | 'failed'
+  | string;
 
 export type WorkbenchRagEvalRetrievalClassificationCounts = {
   pass_strong: number;
@@ -107,24 +115,41 @@ export type WorkbenchRagEvalPromotionCandidatesResponse = {
   candidates: WorkbenchRagEvalPromotionCandidateDetails[];
 };
 
-export type WorkbenchRagEvalPromotionApplyResult = {
-  promotion_id: string;
-  run_id: string;
-  question_id: string;
-  project_id: string;
-  target_runtime_entry_id: string;
-  target_fact_id: string;
-  question: string;
-  status: string;
-  possible_question_count: number;
-  embedding_model_id: string;
-  embedding_count: number;
-  applied_at: string;
+export type WorkbenchRagEvalEmbeddingRevisionStatus =
+  | 'pending_verification'
+  | 'accepted'
+  | 'regression_failed'
+  | 'rolled_back';
+
+export type WorkbenchRagEvalPromotionRevisionResult = {
+  revision_id: string;
+  runtime_entry_id: string;
+  source_rag_eval_run_id: string;
+  status: WorkbenchRagEvalEmbeddingRevisionStatus;
+  promotion_ids: string[];
+  idempotent: boolean;
 };
 
-export type WorkbenchRagEvalPromotionApplyResponse = {
-  result: WorkbenchRagEvalPromotionApplyResult;
+export type WorkbenchRagEvalPromotionApplicationError = {
+  code: string;
+  message: string;
+  promotion_ids: string[];
+  runtime_entry_id: string | null;
 };
+
+export type WorkbenchRagEvalPromotionApplicationResult = {
+  requested_count: number;
+  applied_count: number;
+  skipped_count: number;
+  embedding_recalculation_count: number;
+  revisions: WorkbenchRagEvalPromotionRevisionResult[];
+  errors: WorkbenchRagEvalPromotionApplicationError[];
+};
+
+export type WorkbenchRagEvalPromotionApplyResponse =
+  WorkbenchRagEvalPromotionApplicationResult & {
+    result: WorkbenchRagEvalPromotionApplicationResult;
+  };
 
 export type WorkbenchRagEvalPromotionBatchApplyRequest =
   | {
@@ -136,16 +161,28 @@ export type WorkbenchRagEvalPromotionBatchApplyRequest =
       run_id: string;
     };
 
-export type WorkbenchRagEvalPromotionBatchApplyResult = {
-  requested_count: number;
-  applied_count: number;
-  skipped_count: number;
-  embedding_recalculation_count: number;
-  errors: string[];
+export type WorkbenchRagEvalPromotionBatchApplyResponse =
+  WorkbenchRagEvalPromotionApplicationResult & {
+    result: WorkbenchRagEvalPromotionApplicationResult;
+  };
+
+export type WorkbenchRagEvalEmbeddingRevision = {
+  revision_id: string;
+  project_id: string;
+  runtime_entry_id: string;
+  source_rag_eval_run_id: string;
+  promotion_ids: string[];
+  status: WorkbenchRagEvalEmbeddingRevisionStatus;
+  previous_promoted_questions: string[];
+  new_promoted_questions: string[];
+  created_at: string;
+  accepted_at: string | null;
+  regression_failed_at: string | null;
+  rolled_back_at: string | null;
 };
 
-export type WorkbenchRagEvalPromotionBatchApplyResponse = {
-  result: WorkbenchRagEvalPromotionBatchApplyResult;
+export type WorkbenchRagEvalEmbeddingRevisionsResponse = {
+  revisions: WorkbenchRagEvalEmbeddingRevision[];
 };
 
 const encode = (value: string): string => encodeURIComponent(value);
@@ -211,6 +248,18 @@ export const ragEvalApi = {
     return unwrap(
       authedJsonRequest<WorkbenchRagEvalPromotionCandidatesResponse>(
         `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}/promotion-candidates`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async listWorkbenchEmbeddingRevisions(
+    projectId: string,
+    runId: string,
+  ): Promise<WorkbenchRagEvalEmbeddingRevisionsResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalEmbeddingRevisionsResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}/embedding-revisions`,
         { method: 'GET' },
       ),
     );

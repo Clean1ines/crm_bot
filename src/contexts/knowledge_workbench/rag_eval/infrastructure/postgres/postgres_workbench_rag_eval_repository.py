@@ -1,42 +1,58 @@
 from __future__ import annotations
 
-from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.jsonb_payload_hydration import (
-    hydrate_jsonb_text_array_payload,
-)
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
 from typing import Protocol, cast
 
-from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
-    WorkbenchRagEvalAdjudication,
-    WorkbenchRagEvalAdjudicationVerdict,
-    WorkbenchRagEvalPromotedQuestion,
-    WorkbenchRagEvalPromotionApplicationTarget,
-    WorkbenchRagEvalPromotionApplyResult,
-    WorkbenchRagEvalPromotionCandidateDetails,
-    WorkbenchRagEvalQuestionDetails,
-    WorkbenchRagEvalQuestion,
-    WorkbenchRagEvalQuestionAmbiguityRisk,
-    WorkbenchRagEvalQuestionKind,
-    WorkbenchRagEvalQuestionRole,
-    WorkbenchRagEvalQuestionSource,
-    WorkbenchRagEvalQuestionStatus,
-    WorkbenchRagEvalRetrievalOutcome,
-    WorkbenchRagEvalRetrievalClassification,
-    WorkbenchRagEvalRetrievalResult,
-    WorkbenchRagEvalRetrievalResultDetails,
-    WorkbenchRagEvalRun,
-    WorkbenchRagEvalCurrentPhase,
-    WorkbenchRagEvalRunProgress,
-    WorkbenchRagEvalRunStatus,
-    WorkbenchRagEvalPromotionStatus,
-    WorkbenchRagEvalSummary,
+from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_promotion_application_errors import (
+    WorkbenchRagEvalPromotionConflictCode,
+    WorkbenchRagEvalPromotionConflictError,
+    WorkbenchRagEvalPromotionNotFoundError,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_promotion_review_errors import (
     WorkbenchRagEvalPromotionCandidateConflictError,
     WorkbenchRagEvalPromotionCandidateNotFoundError,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalAdjudication,
+    WorkbenchRagEvalAdjudicationVerdict,
+    WorkbenchRagEvalCurrentPhase,
+    WorkbenchRagEvalPromotedQuestion,
+    WorkbenchRagEvalPromotionApplicationTarget,
+    WorkbenchRagEvalPromotionCandidateDetails,
+    WorkbenchRagEvalPromotionStatus,
+    WorkbenchRagEvalQuestion,
+    WorkbenchRagEvalQuestionAmbiguityRisk,
+    WorkbenchRagEvalQuestionDetails,
+    WorkbenchRagEvalQuestionKind,
+    WorkbenchRagEvalQuestionRole,
+    WorkbenchRagEvalQuestionSource,
+    WorkbenchRagEvalQuestionStatus,
+    WorkbenchRagEvalRetrievalClassification,
+    WorkbenchRagEvalRetrievalOutcome,
+    WorkbenchRagEvalRetrievalResult,
+    WorkbenchRagEvalRetrievalResultDetails,
+    WorkbenchRagEvalRun,
+    WorkbenchRagEvalRunProgress,
+    WorkbenchRagEvalRunStatus,
+    WorkbenchRagEvalSummary,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
+    WorkbenchRagEvalEmbeddingRevision,
+    WorkbenchRagEvalEmbeddingRevisionReadModel,
+    WorkbenchRagEvalEmbeddingRevisionStatus,
+    WorkbenchRagEvalPromotionApplicationCandidate,
+    WorkbenchRagEvalPromotionApplicationSnapshot,
+    stable_runtime_snapshot_hash,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
+    WorkbenchRagEvalWorkflowEventType,
+)
+from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.jsonb_payload_hydration import (
+    hydrate_jsonb_text_array_payload,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_promotion_review_transition_policy import (
     WorkbenchRagEvalPromotionReviewTransitionConflictError,
@@ -210,22 +226,15 @@ SELECT
     entry.exclusion_scope,
     entry.evidence_block,
     entry.triples,
-    entry.embedding_text AS existing_embedding_text,
+    entry.embedding_text AS existing_embedding_text
 FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
 JOIN knowledge_workbench_runtime_retrieval_entries AS entry
   ON entry.runtime_entry_id = promotion.target_runtime_entry_id
  AND entry.project_id = promotion.project_id
 WHERE promotion.project_id = $1::uuid
   AND promotion.promotion_id = $2
-  AND entry.visibility = 'published'
-  AND entry.status = 'active'
 """
 
-
-WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL = (
-    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL
-    + " FOR UPDATE OF promotion, entry"
-)
 
 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL = (
     WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL.replace(
@@ -238,15 +247,112 @@ WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL = (
 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL = (
     WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL.replace(
         "promotion.promotion_id = $2",
-        "promotion.run_id = $2 AND promotion.status = 'approved'",
+        ("promotion.run_id = $2 AND promotion.status IN ('approved', 'applied')"),
     )
 )
 
 
-WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL = (
-    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL
-    + " AND promotion.target_runtime_entry_id = $3"
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL = """
+SELECT
+    promotion.promotion_id,
+    promotion.run_id,
+    promotion.question_id,
+    promotion.project_id::text AS project_id,
+    promotion.target_runtime_entry_id,
+    promotion.target_fact_id,
+    promotion.question,
+    promotion.status,
+    entry.runtime_entry_id,
+    COALESCE(NULLIF(entry.fact_id, ''), entry.runtime_entry_id) AS fact_id,
+    entry.status AS runtime_status,
+    entry.visibility AS runtime_visibility,
+    entry.claim,
+    entry.possible_questions,
+    entry.exclusion_scope,
+    entry.embedding_text,
+    emb.embedding_model_id,
+    emb.dimensions AS embedding_dimensions,
+    emb.embedding::text AS current_embedding,
+    active.revision_id AS active_revision_id
+FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
+JOIN knowledge_workbench_runtime_retrieval_entries AS entry
+  ON entry.runtime_entry_id = promotion.target_runtime_entry_id
+ AND entry.project_id = promotion.project_id
+LEFT JOIN LATERAL (
+    SELECT
+        current_embedding.embedding_model_id,
+        current_embedding.dimensions,
+        current_embedding.embedding,
+        current_embedding.embedding_text_hash,
+        current_embedding.created_at
+    FROM knowledge_workbench_runtime_retrieval_entry_embeddings AS current_embedding
+    WHERE current_embedding.runtime_entry_id = entry.runtime_entry_id
+      AND current_embedding.embedding_model_id = $4
+    ORDER BY current_embedding.created_at DESC,
+             current_embedding.embedding_text_hash DESC
+    LIMIT 1
+) AS emb ON TRUE
+LEFT JOIN LATERAL (
+    SELECT revision.revision_id
+    FROM knowledge_workbench_rag_eval_embedding_revisions AS revision
+    WHERE revision.project_id = promotion.project_id
+      AND revision.runtime_entry_id = promotion.target_runtime_entry_id
+      AND revision.status = 'pending_verification'
+    ORDER BY revision.created_at DESC, revision.revision_id
+    LIMIT 1
+) AS active ON TRUE
+WHERE promotion.project_id = $1::uuid
+  AND promotion.promotion_id = ANY($2::text[])
+  AND promotion.target_runtime_entry_id = $3
+ORDER BY promotion.promotion_id
+"""
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_FOR_UPDATE_SQL = (
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL
     + " FOR UPDATE OF promotion, entry"
+)
+
+
+WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_COLUMNS_SQL = """
+    revision_id,
+    project_id::text AS project_id,
+    runtime_entry_id,
+    source_rag_eval_run_id,
+    promotion_ids,
+    status,
+    previous_promoted_questions,
+    new_promoted_questions,
+    created_at,
+    accepted_at,
+    regression_failed_at,
+    rolled_back_at
+"""
+
+
+WORKBENCH_RAG_EVAL_ACTIVE_EMBEDDING_REVISION_SQL = (
+    "SELECT "
+    + WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_COLUMNS_SQL
+    + """
+FROM knowledge_workbench_rag_eval_embedding_revisions
+WHERE project_id = $1::uuid
+  AND runtime_entry_id = $2
+  AND status = 'pending_verification'
+"""
+)
+
+
+WORKBENCH_RAG_EVAL_PENDING_REVISION_FOR_PROMOTIONS_SQL = (
+    "SELECT "
+    + WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_COLUMNS_SQL
+    + """
+FROM knowledge_workbench_rag_eval_embedding_revisions
+WHERE project_id = $1::uuid
+  AND runtime_entry_id = $2
+  AND source_rag_eval_run_id = $3
+  AND promotion_ids = $4::jsonb
+  AND status = 'pending_verification'
+"""
 )
 
 
@@ -1392,11 +1498,14 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
         project_id: str,
         promotion_ids: Sequence[str],
     ) -> tuple[WorkbenchRagEvalPromotionApplicationTarget, ...]:
+        requested_ids = tuple(dict.fromkeys(promotion_ids))
+        if not requested_ids:
+            return ()
         async with _connection(self._connection_or_pool) as connection:
             rows = await connection.fetch(
                 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_BY_IDS_SQL,
                 project_id,
-                list(promotion_ids),
+                list(requested_ids),
             )
         return tuple(_promotion_application_target_from_row(row) for row in rows)
 
@@ -1414,50 +1523,217 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
             )
         return tuple(_promotion_application_target_from_row(row) for row in rows)
 
-    async def apply_promotion_candidates_for_target(
+    async def load_promotion_application_group(
         self,
         *,
         project_id: str,
         promotion_ids: Sequence[str],
         target_runtime_entry_id: str,
         embedding_model_id: str,
-        dimensions: int,
-        embedding: Sequence[float],
-        embedding_text: str,
-        embedding_text_hash: str,
-        applied_at: datetime,
-    ) -> tuple[WorkbenchRagEvalPromotionApplyResult, ...]:
-        requested_ids = tuple(promotion_ids)
+    ) -> WorkbenchRagEvalPromotionApplicationSnapshot | None:
+        requested_ids = tuple(sorted(dict.fromkeys(promotion_ids)))
+        if not requested_ids:
+            raise ValueError("promotion_ids must be non-empty")
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL,
+                project_id,
+                list(requested_ids),
+                target_runtime_entry_id,
+                embedding_model_id,
+            )
+        if not rows:
+            return None
+        if len(rows) != len(requested_ids):
+            raise WorkbenchRagEvalPromotionNotFoundError(
+                "Promotion application group changed while loading snapshot"
+            )
+        return _promotion_application_snapshot_from_rows(
+            rows,
+            expected_embedding_model_id=embedding_model_id,
+        )
+
+    async def get_active_embedding_revision(
+        self,
+        *,
+        project_id: str,
+        runtime_entry_id: str,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel | None:
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                WORKBENCH_RAG_EVAL_ACTIVE_EMBEDDING_REVISION_SQL,
+                project_id,
+                runtime_entry_id,
+            )
+        return _embedding_revision_read_model_from_row(row) if row is not None else None
+
+    async def find_pending_revision_for_promotions(
+        self,
+        *,
+        project_id: str,
+        runtime_entry_id: str,
+        source_rag_eval_run_id: str,
+        promotion_ids: Sequence[str],
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel | None:
+        requested_ids = tuple(sorted(dict.fromkeys(promotion_ids)))
+        if not requested_ids:
+            raise ValueError("promotion_ids must be non-empty")
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                WORKBENCH_RAG_EVAL_PENDING_REVISION_FOR_PROMOTIONS_SQL,
+                project_id,
+                runtime_entry_id,
+                source_rag_eval_run_id,
+                _json_text_list(requested_ids),
+            )
+        return _embedding_revision_read_model_from_row(row) if row is not None else None
+
+    async def persist_promotion_application_revision(
+        self,
+        *,
+        snapshot: WorkbenchRagEvalPromotionApplicationSnapshot,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
+        _assert_revision_matches_snapshot(snapshot=snapshot, revision=revision)
+        requested_ids = tuple(sorted(revision.promotion_ids))
         async with _connection(self._connection_or_pool) as connection:
             async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"rag-eval-revision:{revision.project_id}:{revision.runtime_entry_id}",
+                )
                 rows = await connection.fetch(
-                    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL,
-                    project_id,
+                    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_FOR_UPDATE_SQL,
+                    revision.project_id,
                     list(requested_ids),
-                    target_runtime_entry_id,
+                    revision.runtime_entry_id,
+                    revision.embedding_model_id,
                 )
                 if len(rows) != len(requested_ids):
-                    raise LookupError("Promotion candidates not found for target")
-
-                targets = tuple(
-                    _promotion_application_target_from_row(row) for row in rows
+                    raise WorkbenchRagEvalPromotionNotFoundError(
+                        "Promotion application group changed before persistence"
+                    )
+                locked_snapshot = _promotion_application_snapshot_from_rows(
+                    rows,
+                    expected_embedding_model_id=revision.embedding_model_id,
                 )
-                for target in targets:
-                    if target.target_runtime_entry_id != target_runtime_entry_id:
-                        raise RuntimeError("Promotion target runtime entry mismatch")
-                    if target.status is not WorkbenchRagEvalPromotionStatus.APPROVED:
-                        raise RuntimeError(
-                            "Promotion candidate status cannot be applied: "
-                            f"{target.status.value}"
-                        )
 
-                base = targets[0]
-                runtime_questions = _append_texts_once(
-                    base.runtime_possible_questions,
-                    tuple(target.question for target in targets),
+                # active revision guard
+                if locked_snapshot.active_revision_id is not None:
+                    if locked_snapshot.active_revision_id == revision.revision_id:
+                        existing = await _load_embedding_revision_by_id(
+                            connection,
+                            revision.revision_id,
+                        )
+                        if existing is None:
+                            raise RuntimeError(
+                                "active revision id did not resolve to revision row"
+                            )
+                        return existing
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "active PENDING_VERIFICATION revision already exists",
+                        code=WorkbenchRagEvalPromotionConflictCode.ACTIVE_REVISION,
+                        promotion_ids=requested_ids,
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+
+                if locked_snapshot.runtime_status != "active":
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "runtime entry is no longer active",
+                        code=WorkbenchRagEvalPromotionConflictCode.TARGET_NOT_ACTIVE,
+                        promotion_ids=requested_ids,
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+                if locked_snapshot.runtime_visibility != "published":
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "runtime entry is no longer published",
+                        code=WorkbenchRagEvalPromotionConflictCode.TARGET_NOT_PUBLISHED,
+                        promotion_ids=requested_ids,
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+                if any(
+                    candidate.status is not WorkbenchRagEvalPromotionStatus.APPROVED
+                    for candidate in locked_snapshot.candidates
+                ):
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "all promotions must still be APPROVED",
+                        code=(
+                            WorkbenchRagEvalPromotionConflictCode.NON_APPROVED_CANDIDATE
+                        ),
+                        promotion_ids=requested_ids,
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+                if (
+                    locked_snapshot.runtime_hash != snapshot.runtime_hash
+                    or locked_snapshot.runtime_hash != revision.previous_runtime_hash
+                ):
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "stale runtime snapshot",
+                        code=(
+                            WorkbenchRagEvalPromotionConflictCode.STALE_RUNTIME_SNAPSHOT
+                        ),
+                        promotion_ids=requested_ids,
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+                _assert_locked_candidates_match(
+                    expected=snapshot,
+                    locked=locked_snapshot,
                 )
 
                 await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_rag_eval_embedding_revisions (
+                        revision_id,
+                        project_id,
+                        runtime_entry_id,
+                        source_rag_eval_run_id,
+                        promotion_ids,
+                        status,
+                        previous_embedding_text,
+                        new_embedding_text,
+                        previous_embedding,
+                        new_embedding,
+                        previous_promoted_questions,
+                        new_promoted_questions,
+                        embedding_model_id,
+                        embedding_dimensions,
+                        previous_runtime_hash,
+                        new_runtime_hash,
+                        created_at,
+                        accepted_at,
+                        regression_failed_at,
+                        rolled_back_at
+                    )
+                    VALUES (
+                        $1, $2::uuid, $3, $4, $5::jsonb, $6,
+                        $7, $8, $9::vector, $10::vector,
+                        $11::jsonb, $12::jsonb, $13, $14,
+                        $15, $16, $17, $18, $19, $20
+                    )
+                    """,
+                    revision.revision_id,
+                    revision.project_id,
+                    revision.runtime_entry_id,
+                    revision.source_rag_eval_run_id,
+                    _json_text_list(tuple(sorted(revision.promotion_ids))),
+                    revision.status.value,
+                    revision.previous_embedding_text,
+                    revision.new_embedding_text,
+                    _pg_vector_text(revision.previous_embedding),
+                    _pg_vector_text(revision.new_embedding),
+                    _json_text_list(revision.previous_promoted_questions),
+                    _json_text_list(revision.new_promoted_questions),
+                    revision.embedding_model_id,
+                    revision.embedding_dimensions,
+                    revision.previous_runtime_hash,
+                    revision.new_runtime_hash,
+                    revision.created_at,
+                    revision.accepted_at,
+                    revision.regression_failed_at,
+                    revision.rolled_back_at,
+                )
+
+                runtime_update = await connection.execute(
                     """
                     UPDATE knowledge_workbench_runtime_retrieval_entries
                     SET possible_questions = $3::jsonb,
@@ -1467,36 +1743,47 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                       AND visibility = 'published'
                       AND status = 'active'
                     """,
-                    project_id,
-                    base.target_runtime_entry_id,
-                    _json_text_list(runtime_questions),
-                    embedding_text,
+                    revision.project_id,
+                    revision.runtime_entry_id,
+                    _json_text_list(revision.new_promoted_questions),
+                    revision.new_embedding_text,
                 )
+                _require_affected_rows(
+                    runtime_update,
+                    expected=1,
+                    operation="runtime entry update",
+                )
+
                 await connection.execute(
                     """
                     DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings
                     WHERE runtime_entry_id = $1
                       AND embedding_model_id = $2
                     """,
-                    base.target_runtime_entry_id,
-                    embedding_model_id,
+                    revision.runtime_entry_id,
+                    revision.embedding_model_id,
                 )
                 await connection.execute(
                     """
                     INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings (
-                        runtime_entry_id, embedding_model_id, dimensions,
-                        embedding, embedding_text_hash, created_at
+                        runtime_entry_id,
+                        embedding_model_id,
+                        dimensions,
+                        embedding,
+                        embedding_text_hash,
+                        created_at
                     )
                     VALUES ($1, $2, $3, $4::vector, $5, $6)
                     """,
-                    base.target_runtime_entry_id,
-                    embedding_model_id,
-                    dimensions,
-                    _pg_vector_text(tuple(float(value) for value in embedding)),
-                    embedding_text_hash,
-                    applied_at,
+                    revision.runtime_entry_id,
+                    revision.embedding_model_id,
+                    revision.embedding_dimensions,
+                    _pg_vector_text(revision.new_embedding),
+                    sha256(revision.new_embedding_text.encode("utf-8")).hexdigest(),
+                    revision.created_at,
                 )
-                await connection.execute(
+
+                promotion_update = await connection.execute(
                     """
                     UPDATE knowledge_workbench_rag_eval_promoted_questions
                     SET status = 'applied',
@@ -1504,132 +1791,86 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     WHERE project_id = $1::uuid
                       AND promotion_id = ANY($2::text[])
                       AND target_runtime_entry_id = $3
+                      AND status = 'approved'
                     """,
-                    project_id,
+                    revision.project_id,
                     list(requested_ids),
-                    target_runtime_entry_id,
-                    applied_at,
+                    revision.runtime_entry_id,
+                    revision.created_at,
+                )
+                _require_affected_rows(
+                    promotion_update,
+                    expected=len(requested_ids),
+                    operation="promotion status update",
                 )
 
-        return tuple(
-            WorkbenchRagEvalPromotionApplyResult(
-                promotion_id=target.promotion_id,
-                run_id=target.run_id,
-                question_id=target.question_id,
-                project_id=target.project_id,
-                target_runtime_entry_id=target.target_runtime_entry_id,
-                target_fact_id=target.target_fact_id,
-                question=target.question,
-                status=WorkbenchRagEvalPromotionStatus.APPLIED,
-                possible_question_count=len(runtime_questions),
-                embedding_model_id=embedding_model_id,
-                embedding_count=1,
-                applied_at=applied_at,
-            )
-            for target in targets
-        )
+                run_update = await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_runs
+                    SET status = 'verifying',
+                        current_phase = 'post_promotion_verification',
+                        updated_at = $3
+                    WHERE run_id = $1
+                      AND project_id = $2::uuid
+                      AND status IN ('promotion_review', 'verifying')
+                    """,
+                    revision.source_rag_eval_run_id,
+                    revision.project_id,
+                    revision.created_at,
+                )
+                _require_affected_rows(
+                    run_update,
+                    expected=1,
+                    operation="RAG Eval run transition",
+                )
 
-    async def apply_promotion_candidate(
+                event_payload = {
+                    "workflow_run_id": revision.source_rag_eval_run_id,
+                    "rag_eval_run_id": revision.source_rag_eval_run_id,
+                    "project_id": revision.project_id,
+                    "runtime_entry_id": revision.runtime_entry_id,
+                    "revision_id": revision.revision_id,
+                    "promotion_ids": list(requested_ids),
+                    "status": revision.status.value,
+                    "phase": "POST_PROMOTION_VERIFICATION",
+                }
+                await _append_promotion_revision_event(
+                    connection,
+                    event_type=WorkbenchRagEvalWorkflowEventType.PROMOTIONS_APPLIED.value,
+                    message="RAG Eval promotions applied",
+                    payload=event_payload,
+                    revision=revision,
+                )
+                await _append_promotion_revision_event(
+                    connection,
+                    event_type=WorkbenchRagEvalWorkflowEventType.EMBEDDING_REVISION_CREATED.value,
+                    message="RAG Eval embedding revision created",
+                    payload=event_payload,
+                    revision=revision,
+                )
+
+        return _embedding_revision_read_model(revision)
+
+    async def list_embedding_revisions(
         self,
         *,
         project_id: str,
-        promotion_id: str,
-        embedding_model_id: str,
-        dimensions: int,
-        embedding: Sequence[float],
-        embedding_text: str,
-        embedding_text_hash: str,
-        applied_at: datetime,
-    ) -> WorkbenchRagEvalPromotionApplyResult:
+        source_rag_eval_run_id: str,
+    ) -> tuple[WorkbenchRagEvalEmbeddingRevisionReadModel, ...]:
         async with _connection(self._connection_or_pool) as connection:
-            async with connection.transaction():
-                row = await connection.fetchrow(
-                    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL,
-                    project_id,
-                    promotion_id,
-                )
-                if row is None:
-                    raise LookupError("Promotion candidate not found")
-                target = _promotion_application_target_from_row(row)
-                if target.status is WorkbenchRagEvalPromotionStatus.APPLIED:
-                    raise RuntimeError("Promotion candidate is already applied")
-                if target.status is not WorkbenchRagEvalPromotionStatus.APPROVED:
-                    raise RuntimeError(
-                        "Promotion candidate status cannot be applied: "
-                        f"{target.status.value}"
-                    )
-
-                runtime_questions = _append_text_once(
-                    target.runtime_possible_questions,
-                    target.question,
-                )
-
-                await connection.execute(
-                    """
-                    UPDATE knowledge_workbench_runtime_retrieval_entries
-                    SET possible_questions = $3::jsonb,
-                        embedding_text = $4
-                    WHERE project_id = $1::uuid
-                      AND runtime_entry_id = $2
-                      AND visibility = 'published'
-                      AND status = 'active'
-                    """,
-                    project_id,
-                    target.target_runtime_entry_id,
-                    _json_text_list(runtime_questions),
-                    embedding_text,
-                )
-                await connection.execute(
-                    """
-                    DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings
-                    WHERE runtime_entry_id = $1
-                      AND embedding_model_id = $2
-                    """,
-                    target.target_runtime_entry_id,
-                    embedding_model_id,
-                )
-                await connection.execute(
-                    """
-                    INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings (
-                        runtime_entry_id, embedding_model_id, dimensions,
-                        embedding, embedding_text_hash, created_at
-                    )
-                    VALUES ($1, $2, $3, $4::vector, $5, $6)
-                    """,
-                    target.target_runtime_entry_id,
-                    embedding_model_id,
-                    dimensions,
-                    _pg_vector_text(tuple(float(value) for value in embedding)),
-                    embedding_text_hash,
-                    applied_at,
-                )
-                await connection.execute(
-                    """
-                    UPDATE knowledge_workbench_rag_eval_promoted_questions
-                    SET status = 'applied',
-                        applied_at = $3
-                    WHERE project_id = $1::uuid
-                      AND promotion_id = $2
-                    """,
-                    project_id,
-                    promotion_id,
-                    applied_at,
-                )
-
-        return WorkbenchRagEvalPromotionApplyResult(
-            promotion_id=target.promotion_id,
-            run_id=target.run_id,
-            question_id=target.question_id,
-            project_id=target.project_id,
-            target_runtime_entry_id=target.target_runtime_entry_id,
-            target_fact_id=target.target_fact_id,
-            question=target.question,
-            status=WorkbenchRagEvalPromotionStatus.APPLIED,
-            possible_question_count=len(runtime_questions),
-            embedding_model_id=embedding_model_id,
-            embedding_count=1,
-            applied_at=applied_at,
-        )
+            rows = await connection.fetch(
+                "SELECT "
+                + WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_COLUMNS_SQL
+                + """
+                FROM knowledge_workbench_rag_eval_embedding_revisions
+                WHERE project_id = $1::uuid
+                  AND source_rag_eval_run_id = $2
+                ORDER BY created_at, revision_id
+                """,
+                project_id,
+                source_rag_eval_run_id,
+            )
+        return tuple(_embedding_revision_read_model_from_row(row) for row in rows)
 
 
 class _DirectConnectionContext:
@@ -1787,6 +2028,361 @@ def _result_details_from_row(
         top5_hit=_bool_from_row(row, "top5_hit"),
         created_at=_datetime_from_row(row, "result_created_at"),
     )
+
+
+def _promotion_application_snapshot_from_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    expected_embedding_model_id: str,
+) -> WorkbenchRagEvalPromotionApplicationSnapshot:
+    if not rows:
+        raise ValueError("promotion application snapshot requires rows")
+    first = rows[0]
+    embedding_model_id = _optional_text_from_row(first, "embedding_model_id")
+    if embedding_model_id is None:
+        raise WorkbenchRagEvalPromotionConflictError(
+            "current runtime embedding is missing",
+            code=WorkbenchRagEvalPromotionConflictCode.STALE_RUNTIME_SNAPSHOT,
+            promotion_ids=tuple(_text_from_row(row, "promotion_id") for row in rows),
+            runtime_entry_id=_text_from_row(first, "runtime_entry_id"),
+        )
+    if embedding_model_id != expected_embedding_model_id:
+        raise WorkbenchRagEvalPromotionConflictError(
+            "runtime embedding model changed",
+            code=WorkbenchRagEvalPromotionConflictCode.STALE_RUNTIME_SNAPSHOT,
+            promotion_ids=tuple(_text_from_row(row, "promotion_id") for row in rows),
+            runtime_entry_id=_text_from_row(first, "runtime_entry_id"),
+        )
+    dimensions = _int_from_row(first, "embedding_dimensions")
+    embedding = _vector_tuple(first.get("current_embedding"))
+    candidates = tuple(
+        WorkbenchRagEvalPromotionApplicationCandidate(
+            promotion_id=_text_from_row(row, "promotion_id"),
+            run_id=_text_from_row(row, "run_id"),
+            question_id=_text_from_row(row, "question_id"),
+            target_fact_id=_text_from_row(row, "target_fact_id"),
+            question=_text_from_row(row, "question"),
+            status=WorkbenchRagEvalPromotionStatus(_text_from_row(row, "status")),
+        )
+        for row in rows
+    )
+    snapshot = WorkbenchRagEvalPromotionApplicationSnapshot(
+        project_id=_text_from_row(first, "project_id"),
+        runtime_entry_id=_text_from_row(first, "runtime_entry_id"),
+        fact_id=_text_from_row(first, "fact_id"),
+        runtime_status=_text_from_row(first, "runtime_status"),
+        runtime_visibility=_text_from_row(first, "runtime_visibility"),
+        claim=_text_from_row(first, "claim"),
+        possible_questions=_text_tuple(first.get("possible_questions")),
+        exclusion_scope=_optional_text_from_row(first, "exclusion_scope"),
+        embedding_text=_text_from_row(first, "embedding_text"),
+        embedding=embedding,
+        embedding_model_id=embedding_model_id,
+        embedding_dimensions=dimensions,
+        candidates=candidates,
+        runtime_hash=stable_runtime_snapshot_hash(
+            possible_questions=_text_tuple(first.get("possible_questions")),
+            embedding_text=_text_from_row(first, "embedding_text"),
+            embedding=embedding,
+            embedding_model_id=embedding_model_id,
+            embedding_dimensions=dimensions,
+        ),
+        active_revision_id=_optional_text_from_row(
+            first,
+            "active_revision_id",
+        ),
+    )
+    for row in rows[1:]:
+        if _text_from_row(row, "project_id") != snapshot.project_id:
+            raise RuntimeError("promotion application rows cross project boundary")
+        if _text_from_row(row, "runtime_entry_id") != snapshot.runtime_entry_id:
+            raise RuntimeError("promotion application rows cross runtime boundary")
+        if _text_from_row(row, "fact_id") != snapshot.fact_id:
+            raise RuntimeError("promotion application rows disagree on fact id")
+        if _text_from_row(row, "runtime_status") != snapshot.runtime_status:
+            raise RuntimeError("promotion application rows disagree on runtime status")
+        if _text_from_row(row, "runtime_visibility") != snapshot.runtime_visibility:
+            raise RuntimeError(
+                "promotion application rows disagree on runtime visibility"
+            )
+        if _text_from_row(row, "embedding_text") != snapshot.embedding_text:
+            raise RuntimeError("promotion application rows disagree on embedding text")
+        if _optional_text_from_row(row, "active_revision_id") != (
+            snapshot.active_revision_id
+        ):
+            raise RuntimeError("promotion application rows disagree on active revision")
+    return snapshot
+
+
+def _embedding_revision_read_model_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
+    return WorkbenchRagEvalEmbeddingRevisionReadModel(
+        revision_id=_text_from_row(row, "revision_id"),
+        project_id=_text_from_row(row, "project_id"),
+        runtime_entry_id=_text_from_row(row, "runtime_entry_id"),
+        source_rag_eval_run_id=_text_from_row(
+            row,
+            "source_rag_eval_run_id",
+        ),
+        promotion_ids=_text_tuple(row.get("promotion_ids")),
+        status=WorkbenchRagEvalEmbeddingRevisionStatus(_text_from_row(row, "status")),
+        previous_promoted_questions=_text_tuple(row.get("previous_promoted_questions")),
+        new_promoted_questions=_text_tuple(row.get("new_promoted_questions")),
+        created_at=_datetime_from_row(row, "created_at"),
+        accepted_at=_optional_datetime_from_row(row, "accepted_at"),
+        regression_failed_at=_optional_datetime_from_row(
+            row,
+            "regression_failed_at",
+        ),
+        rolled_back_at=_optional_datetime_from_row(row, "rolled_back_at"),
+    )
+
+
+def _embedding_revision_read_model(
+    revision: WorkbenchRagEvalEmbeddingRevision,
+) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
+    return WorkbenchRagEvalEmbeddingRevisionReadModel(
+        revision_id=revision.revision_id,
+        project_id=revision.project_id,
+        runtime_entry_id=revision.runtime_entry_id,
+        source_rag_eval_run_id=revision.source_rag_eval_run_id,
+        promotion_ids=tuple(sorted(revision.promotion_ids)),
+        status=revision.status,
+        previous_promoted_questions=revision.previous_promoted_questions,
+        new_promoted_questions=revision.new_promoted_questions,
+        created_at=revision.created_at,
+        accepted_at=revision.accepted_at,
+        regression_failed_at=revision.regression_failed_at,
+        rolled_back_at=revision.rolled_back_at,
+    )
+
+
+async def _load_embedding_revision_by_id(
+    connection: WorkbenchRagEvalConnectionLike,
+    revision_id: str,
+) -> WorkbenchRagEvalEmbeddingRevisionReadModel | None:
+    row = await connection.fetchrow(
+        "SELECT "
+        + WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_COLUMNS_SQL
+        + """
+        FROM knowledge_workbench_rag_eval_embedding_revisions
+        WHERE revision_id = $1
+        """,
+        revision_id,
+    )
+    return _embedding_revision_read_model_from_row(row) if row is not None else None
+
+
+def _assert_revision_matches_snapshot(
+    *,
+    snapshot: WorkbenchRagEvalPromotionApplicationSnapshot,
+    revision: WorkbenchRagEvalEmbeddingRevision,
+) -> None:
+    expected_ids = tuple(
+        sorted(candidate.promotion_id for candidate in snapshot.candidates)
+    )
+    if tuple(sorted(revision.promotion_ids)) != expected_ids:
+        raise ValueError("revision promotion_ids do not match snapshot candidates")
+    if revision.project_id != snapshot.project_id:
+        raise ValueError("revision project_id does not match snapshot")
+    if revision.runtime_entry_id != snapshot.runtime_entry_id:
+        raise ValueError("revision runtime_entry_id does not match snapshot")
+    if revision.source_rag_eval_run_id != snapshot.source_rag_eval_run_id:
+        raise ValueError("revision source run does not match snapshot")
+    if (
+        revision.status
+        is not WorkbenchRagEvalEmbeddingRevisionStatus.PENDING_VERIFICATION
+    ):
+        raise ValueError("application revision must be PENDING_VERIFICATION")
+    if revision.previous_embedding_text != snapshot.embedding_text:
+        raise ValueError("revision previous embedding text does not match snapshot")
+    if revision.previous_embedding != snapshot.embedding:
+        raise ValueError("revision previous embedding does not match snapshot")
+    if revision.previous_promoted_questions != snapshot.possible_questions:
+        raise ValueError("revision previous aliases do not match snapshot")
+    if revision.embedding_model_id != snapshot.embedding_model_id:
+        raise ValueError("revision embedding model does not match snapshot")
+    if revision.embedding_dimensions != snapshot.embedding_dimensions:
+        raise ValueError("revision embedding dimensions do not match snapshot")
+    if revision.previous_runtime_hash != snapshot.runtime_hash:
+        raise ValueError("revision previous runtime hash does not match snapshot")
+    expected_new_hash = stable_runtime_snapshot_hash(
+        possible_questions=revision.new_promoted_questions,
+        embedding_text=revision.new_embedding_text,
+        embedding=revision.new_embedding,
+        embedding_model_id=revision.embedding_model_id,
+        embedding_dimensions=revision.embedding_dimensions,
+    )
+    if revision.new_runtime_hash != expected_new_hash:
+        raise ValueError("revision new runtime hash is invalid")
+
+
+def _assert_locked_candidates_match(
+    *,
+    expected: WorkbenchRagEvalPromotionApplicationSnapshot,
+    locked: WorkbenchRagEvalPromotionApplicationSnapshot,
+) -> None:
+    def identity(
+        snapshot: WorkbenchRagEvalPromotionApplicationSnapshot,
+    ) -> tuple[tuple[str, str, str, str, str], ...]:
+        return tuple(
+            sorted(
+                (
+                    candidate.promotion_id,
+                    candidate.run_id,
+                    candidate.question_id,
+                    candidate.target_fact_id,
+                    candidate.question,
+                )
+                for candidate in snapshot.candidates
+            )
+        )
+
+    if identity(expected) != identity(locked):
+        raise WorkbenchRagEvalPromotionConflictError(
+            "promotion rows changed after immutable snapshot",
+            code=WorkbenchRagEvalPromotionConflictCode.STALE_RUNTIME_SNAPSHOT,
+            promotion_ids=tuple(
+                candidate.promotion_id for candidate in expected.candidates
+            ),
+            runtime_entry_id=expected.runtime_entry_id,
+        )
+
+
+def _require_affected_rows(
+    result: object,
+    *,
+    expected: int,
+    operation: str,
+) -> None:
+    if not isinstance(result, str):
+        raise RuntimeError(f"{operation} did not return an asyncpg command tag")
+    try:
+        affected = int(result.rsplit(" ", 1)[1])
+    except (IndexError, ValueError) as exc:
+        raise RuntimeError(f"{operation} returned invalid command tag") from exc
+    if affected != expected:
+        raise WorkbenchRagEvalPromotionConflictError(
+            f"{operation} affected {affected} rows; expected {expected}",
+            code=WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT,
+        )
+
+
+async def _append_promotion_revision_event(
+    connection: WorkbenchRagEvalConnectionLike,
+    *,
+    event_type: str,
+    message: str,
+    payload: Mapping[str, object],
+    revision: WorkbenchRagEvalEmbeddingRevision,
+) -> None:
+    event_id = (
+        f"workflow-event:{revision.source_rag_eval_run_id}:"
+        f"{event_type}:{revision.revision_id}"
+    )
+    payload_json = json.dumps(
+        dict(payload),
+        ensure_ascii=False,
+        default=str,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    row = await connection.fetchrow(
+        """
+        INSERT INTO workflow_runtime_outbox_events (
+            event_id,
+            event_type,
+            workflow_run_id,
+            payload,
+            occurred_at,
+            causation_command_id,
+            correlation_id
+        )
+        VALUES ($1, $2, $3, $4::jsonb, $5, NULL, $6)
+        ON CONFLICT (event_id) DO NOTHING
+        RETURNING sequence_number
+        """,
+        event_id,
+        event_type,
+        revision.source_rag_eval_run_id,
+        payload_json,
+        revision.created_at,
+        revision.revision_id,
+    )
+    timeline_id = (
+        f"timeline:{revision.source_rag_eval_run_id}:"
+        f"{event_type}:{revision.revision_id}"
+    )
+    await connection.execute(
+        """
+        INSERT INTO workflow_runtime_timeline_entries (
+            timeline_entry_id,
+            workflow_run_id,
+            event_type,
+            phase,
+            severity,
+            message,
+            payload_summary,
+            occurred_at,
+            source_ref,
+            work_item_id,
+            attempt_id
+        )
+        VALUES (
+            $1, $2, $3, 'POST_PROMOTION_VERIFICATION',
+            'info', $4, $5::jsonb, $6, $7, NULL, NULL
+        )
+        ON CONFLICT (timeline_entry_id) DO NOTHING
+        """,
+        timeline_id,
+        revision.source_rag_eval_run_id,
+        event_type,
+        message,
+        payload_json,
+        revision.created_at,
+        revision.runtime_entry_id,
+    )
+    if row is not None:
+        sequence_number = row.get("sequence_number")
+        if not isinstance(sequence_number, int):
+            raise TypeError("outbox sequence_number must be int")
+        notification_payload = json.dumps(
+            {
+                "sequence_number": sequence_number,
+                "event_id": event_id,
+                "event_type": event_type,
+                "workflow_run_id": revision.source_rag_eval_run_id,
+                "occurred_at": revision.created_at.isoformat(),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        await connection.execute(
+            "SELECT pg_notify($1, $2)",
+            "workflow_live_state_changed",
+            notification_payload,
+        )
+
+
+def _vector_tuple(value: object) -> tuple[float, ...]:
+    decoded: object = value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise TypeError("embedding vector text must be JSON-compatible") from exc
+    if not isinstance(decoded, Sequence) or isinstance(
+        decoded,
+        (str, bytes, bytearray),
+    ):
+        raise TypeError("embedding vector must be a sequence")
+    result: list[float] = []
+    for item in decoded:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise TypeError("embedding vector values must be numeric")
+        result.append(float(item))
+    return tuple(result)
 
 
 def _promotion_application_target_from_row(

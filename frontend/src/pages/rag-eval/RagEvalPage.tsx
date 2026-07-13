@@ -51,7 +51,7 @@ const statusClass = (status: string): string => {
 };
 
 const isApplyableCandidate = (candidate: WorkbenchRagEvalPromotionCandidateDetails): boolean => (
-  candidate.status === 'candidate' || candidate.status === 'accepted'
+  candidate.status === 'approved'
 );
 
 type RagEvalDocumentOption = {
@@ -657,8 +657,11 @@ export const RagEvalPage: React.FC = () => {
       return ragEvalApi.applyWorkbenchPromotionCandidate(projectId, candidate.promotion_id);
     },
     onSuccess: async (result) => {
+      const revision = result.result.revisions[0];
       toast.success(
-        `Вопрос добавлен. Всего формулировок: ${result.result.possible_question_count}`,
+        revision
+          ? `Изменение сохранено для проверки: ${shortId(revision.revision_id)}`
+          : 'Изменение уже ожидает проверки',
       );
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.promotionCandidates(projectId, visibleRun?.run_id) }),

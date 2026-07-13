@@ -1,7 +1,7 @@
 # ADR-0001: Canonical Workbench RAG Eval V2 workflow
 
 Date: 2026-07-10
-Status: accepted — qgen complete; retrieval complete; adjudication complete; promotion candidate approve/reject complete
+Status: accepted — qgen complete; retrieval complete; adjudication complete; promotion review complete; reversible grouped application complete; embedding revisions PENDING_VERIFICATION complete
 Deciders: crm_bot maintainers
 
 Context
@@ -393,6 +393,8 @@ frontend and backend contracts evolve together;
 promotion application becomes more expensive but bounded to affected runtime
 entries;
 every embedding mutation becomes auditable and reversible;
-the implementation remains incomplete until explicit candidate approve/reject,
-revisions, verification, accept/rollback and full frontend progression are
+explicit candidate review, grouped revision-aware application and the
+`PENDING_VERIFICATION` checkpoint are implemented;
+the implementation remains incomplete until post-promotion verification,
+regression policy, revision accept/rollback and full frontend progression are
 delivered and all final gates pass.

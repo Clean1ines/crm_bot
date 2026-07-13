@@ -18,10 +18,11 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
 
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL,
-    WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL,
-    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL,
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_FOR_UPDATE_SQL,
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL,
     WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL,
-    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL,
+    WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL,
+    WORKBENCH_RAG_EVAL_PROMOTION_CANDIDATES_SQL,
     WORKBENCH_RAG_EVAL_QUESTIONS_WITH_RESULTS_SQL,
     PostgresWorkbenchRagEvalRepository,
 )
@@ -374,29 +375,27 @@ async def test_mark_questions_evaluated_persists_evaluated_at_timestamp() -> Non
     assert args == ("run-1", ["question-1", "question-2"], _now())
 
 
-def test_promotion_application_target_sql_reads_runtime_entries_only() -> None:
-    target_sqls = (
-        WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL,
-        WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_FOR_UPDATE_SQL,
-        WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_UPDATE_SQL,
-    )
+def test_promotion_application_sql_uses_revision_aware_runtime_boundary() -> None:
+    target_sql = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL
+    group_sql = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL
+    locked_group_sql = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_FOR_UPDATE_SQL
 
-    for sql in target_sqls:
-        assert "knowledge_workbench_rag_eval_promoted_questions" in sql
-        assert "knowledge_workbench_runtime_retrieval_entries" in sql
-        assert "knowledge_workbench_" + "canonical_facts" not in sql
-        assert "JOIN knowledge_workbench_" + "canonical_facts" not in sql
-        assert "fact.status" not in sql
-        assert "fact.fact_id" not in sql
-        assert "entry.visibility = 'published'" in sql
-        assert "entry.status = 'active'" in sql
-        assert "entry.possible_questions AS runtime_possible_questions" in sql
-        assert "entry.possible_questions AS fact_possible_questions" in sql
-        assert "entry.exclusion_scope" in sql
-        assert "entry.evidence_block" in sql
-        assert "entry.triples" in sql
-        assert "entry.embedding_text AS existing_embedding_text" in sql
-        assert "FOR UPDATE OF promotion, entry, fact" not in sql
+    assert "knowledge_workbench_rag_eval_promoted_questions" in target_sql
+    assert "knowledge_workbench_runtime_retrieval_entries" in target_sql
+    assert "knowledge_workbench_" + "canonical_facts" not in target_sql
+    assert "entry.visibility = 'published'" not in target_sql
+    assert "entry.status = 'active'" not in target_sql
+    assert "entry.possible_questions AS runtime_possible_questions" in target_sql
+
+    assert "knowledge_workbench_rag_eval_embedding_revisions" in group_sql
+    assert "knowledge_workbench_runtime_retrieval_entry_embeddings" in group_sql
+    assert "active.revision_id AS active_revision_id" in group_sql
+    assert "emb.embedding::text AS current_embedding" in group_sql
+    assert "FOR UPDATE OF promotion, entry" in locked_group_sql
+    assert (
+        "promotion.status IN ('approved', 'applied')"
+        in WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGETS_FOR_RUN_SQL
+    )
 
 
 @pytest.mark.asyncio
@@ -590,107 +589,6 @@ async def test_list_run_promotion_candidates_maps_candidates() -> None:
 
 
 @pytest.mark.asyncio
-async def test_apply_promotion_candidate_rejects_unapproved_candidate() -> None:
-    row = dict(_promotion_target_row())
-    row["status"] = "candidate"
-    connection = FakeConnection(fetchrow_result=row)
-
-    with pytest.raises(
-        RuntimeError,
-        match="Promotion candidate status cannot be applied: candidate",
-    ):
-        await PostgresWorkbenchRagEvalRepository(connection).apply_promotion_candidate(
-            project_id="11111111-1111-1111-1111-111111111111",
-            promotion_id="promotion-1",
-            embedding_model_id="text-embedding-3-small",
-            dimensions=2,
-            embedding=(0.1, 0.2),
-            embedding_text="Claim:\nRuntime claim",
-            embedding_text_hash="hash-1",
-            applied_at=_now(),
-        )
-
-    assert connection.execute_calls == []
-
-
-@pytest.mark.asyncio
-async def test_apply_promotion_candidate_allows_approved_candidate() -> None:
-    row = dict(_promotion_target_row())
-    row["status"] = "approved"
-    connection = FakeConnection(fetchrow_result=row)
-
-    result = await PostgresWorkbenchRagEvalRepository(
-        connection
-    ).apply_promotion_candidate(
-        project_id="11111111-1111-1111-1111-111111111111",
-        promotion_id="promotion-1",
-        embedding_model_id="text-embedding-3-small",
-        dimensions=2,
-        embedding=(0.1, 0.2),
-        embedding_text="Claim:\nRuntime claim",
-        embedding_text_hash="hash-1",
-        applied_at=_now(),
-    )
-
-    assert result.status.value == "applied"
-
-
-@pytest.mark.asyncio
-async def test_apply_promotion_candidates_for_target_rejects_unapproved_candidate() -> (
-    None
-):
-    row = dict(_promotion_target_row())
-    row["status"] = "candidate"
-    connection = FakeConnection(rows=[row])
-
-    with pytest.raises(
-        RuntimeError,
-        match="Promotion candidate status cannot be applied: candidate",
-    ):
-        await PostgresWorkbenchRagEvalRepository(
-            connection
-        ).apply_promotion_candidates_for_target(
-            project_id="11111111-1111-1111-1111-111111111111",
-            promotion_ids=("promotion-1",),
-            target_runtime_entry_id="runtime-entry-1",
-            embedding_model_id="text-embedding-3-small",
-            dimensions=2,
-            embedding=(0.1, 0.2),
-            embedding_text="Claim:\nRuntime claim",
-            embedding_text_hash="hash-1",
-            applied_at=_now(),
-        )
-
-    assert connection.execute_calls == []
-
-
-@pytest.mark.asyncio
-async def test_apply_promotion_candidates_for_target_allows_approved_candidate() -> (
-    None
-):
-    row = dict(_promotion_target_row())
-    row["status"] = "approved"
-    connection = FakeConnection(rows=[row])
-
-    results = await PostgresWorkbenchRagEvalRepository(
-        connection
-    ).apply_promotion_candidates_for_target(
-        project_id="11111111-1111-1111-1111-111111111111",
-        promotion_ids=("promotion-1",),
-        target_runtime_entry_id="runtime-entry-1",
-        embedding_model_id="text-embedding-3-small",
-        dimensions=2,
-        embedding=(0.1, 0.2),
-        embedding_text="Claim:\nRuntime claim",
-        embedding_text_hash="hash-1",
-        applied_at=_now(),
-    )
-
-    assert len(results) == 1
-    assert results[0].status.value == "applied"
-
-
-@pytest.mark.asyncio
 async def test_review_candidate_lock_is_scoped_by_promotion_run_and_project() -> None:
     connection = FakeConnection(fetchrow_result=None)
 
@@ -712,46 +610,6 @@ async def test_review_candidate_lock_is_scoped_by_promotion_run_and_project() ->
         "promotion-1",
         "run-1",
         "11111111-1111-1111-1111-111111111111",
-    )
-
-
-@pytest.mark.asyncio
-async def test_apply_promotion_candidate_updates_runtime_entry_and_embedding_only() -> (
-    None
-):
-    row = dict(_promotion_target_row())
-    row["status"] = "approved"
-    connection = FakeConnection(fetchrow_result=row)
-
-    result = await PostgresWorkbenchRagEvalRepository(
-        connection
-    ).apply_promotion_candidate(
-        project_id="11111111-1111-1111-1111-111111111111",
-        promotion_id="promotion-1",
-        embedding_model_id="text-embedding-3-small",
-        dimensions=2,
-        embedding=(0.1, 0.2),
-        embedding_text="Claim:\nRuntime claim\n\nPossible questions:\nOld question?\nHow ask?",
-        embedding_text_hash="hash-1",
-        applied_at=_now(),
-    )
-
-    executed_sql = "\n".join(query for query, _ in connection.execute_calls)
-    assert result.status.value == "applied"
-    assert result.possible_question_count == 2
-    assert "UPDATE knowledge_workbench_" + "canonical_facts" not in executed_sql
-    assert "UPDATE knowledge_workbench_runtime_retrieval_entries" in executed_sql
-    assert "possible_questions = $3::jsonb" in executed_sql
-    assert "embedding_text = $4" in executed_sql
-    assert "visibility = 'published'" in executed_sql
-    assert "status = 'active'" in executed_sql
-    assert (
-        "DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings"
-        in executed_sql
-    )
-    assert (
-        "INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings"
-        in executed_sql
     )
 
 

@@ -6,20 +6,24 @@ from typing import Protocol
 
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalAdjudication,
+    WorkbenchRagEvalCurrentPhase,
     WorkbenchRagEvalPromotedQuestion,
     WorkbenchRagEvalPromotionApplicationTarget,
-    WorkbenchRagEvalPromotionApplyResult,
     WorkbenchRagEvalPromotionCandidateDetails,
-    WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestion,
-    WorkbenchRagEvalRetrievalResult,
-    WorkbenchRagEvalRetrievalOutcome,
+    WorkbenchRagEvalQuestionDetails,
     WorkbenchRagEvalQuestionRole,
+    WorkbenchRagEvalRetrievalOutcome,
+    WorkbenchRagEvalRetrievalResult,
     WorkbenchRagEvalRun,
-    WorkbenchRagEvalCurrentPhase,
     WorkbenchRagEvalRunProgress,
     WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalSummary,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
+    WorkbenchRagEvalEmbeddingRevision,
+    WorkbenchRagEvalEmbeddingRevisionReadModel,
+    WorkbenchRagEvalPromotionApplicationSnapshot,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_adjudication_work import (
     WorkbenchRagEvalAdjudicationPlanningInput,
@@ -31,10 +35,18 @@ from src.contexts.knowledge_workbench.retrieval.application.models.published_wor
 
 class WorkbenchRagEvalRepositoryPort(Protocol):
     async def materialize_baseline_questions(
-        self, *, run_id: str, project_id: str, created_at: datetime
+        self,
+        *,
+        run_id: str,
+        project_id: str,
+        created_at: datetime,
     ) -> int: ...
 
-    async def create_run(self, *, run: WorkbenchRagEvalRun) -> WorkbenchRagEvalRun: ...
+    async def create_run(
+        self,
+        *,
+        run: WorkbenchRagEvalRun,
+    ) -> WorkbenchRagEvalRun: ...
 
     async def transition_run_progress(
         self,
@@ -74,11 +86,15 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
     ) -> tuple[WorkbenchRagEvalRetrievalResult, ...]: ...
 
     async def save_question_roles(
-        self, *, roles: Mapping[str, WorkbenchRagEvalQuestionRole]
+        self,
+        *,
+        roles: Mapping[str, WorkbenchRagEvalQuestionRole],
     ) -> None: ...
 
     async def save_retrieval_outcomes(
-        self, *, outcomes: tuple[WorkbenchRagEvalRetrievalOutcome, ...]
+        self,
+        *,
+        outcomes: tuple[WorkbenchRagEvalRetrievalOutcome, ...],
     ) -> tuple[WorkbenchRagEvalRetrievalOutcome, ...]: ...
 
     async def mark_questions_evaluated(
@@ -215,29 +231,41 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         run_id: str,
     ) -> tuple[WorkbenchRagEvalPromotionApplicationTarget, ...]: ...
 
-    async def apply_promotion_candidates_for_target(
+    async def load_promotion_application_group(
         self,
         *,
         project_id: str,
         promotion_ids: Sequence[str],
         target_runtime_entry_id: str,
         embedding_model_id: str,
-        dimensions: int,
-        embedding: Sequence[float],
-        embedding_text: str,
-        embedding_text_hash: str,
-        applied_at: datetime,
-    ) -> tuple[WorkbenchRagEvalPromotionApplyResult, ...]: ...
+    ) -> WorkbenchRagEvalPromotionApplicationSnapshot | None: ...
 
-    async def apply_promotion_candidate(
+    async def get_active_embedding_revision(
         self,
         *,
         project_id: str,
-        promotion_id: str,
-        embedding_model_id: str,
-        dimensions: int,
-        embedding: Sequence[float],
-        embedding_text: str,
-        embedding_text_hash: str,
-        applied_at: datetime,
-    ) -> WorkbenchRagEvalPromotionApplyResult: ...
+        runtime_entry_id: str,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel | None: ...
+
+    async def find_pending_revision_for_promotions(
+        self,
+        *,
+        project_id: str,
+        runtime_entry_id: str,
+        source_rag_eval_run_id: str,
+        promotion_ids: Sequence[str],
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel | None: ...
+
+    async def persist_promotion_application_revision(
+        self,
+        *,
+        snapshot: WorkbenchRagEvalPromotionApplicationSnapshot,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel: ...
+
+    async def list_embedding_revisions(
+        self,
+        *,
+        project_id: str,
+        source_rag_eval_run_id: str,
+    ) -> tuple[WorkbenchRagEvalEmbeddingRevisionReadModel, ...]: ...

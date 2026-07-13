@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib
 from pathlib import Path
 
@@ -26,18 +27,29 @@ def test_knowledge_upload_http_boundary_is_workbench_only() -> None:
 
 def test_non_faq_upload_modes_fail_closed_until_workbench_analog_exists() -> None:
     source = Path("src/interfaces/http/knowledge.py").read_text(encoding="utf-8")
+    module = ast.parse(source)
 
-    assert "require_faq_workbench_mode" in source
-    assert "status_code=400" in source
-    assert "Only FAQ Workbench uploads are supported by this endpoint" in source
+    upload_nodes = [
+        node
+        for node in module.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "upload_knowledge"
+    ]
+    assert len(upload_nodes) == 1
 
-    forbidden = (
+    upload_source = ast.get_source_segment(source, upload_nodes[0])
+    assert upload_source is not None
+
+    assert "require_faq_workbench_mode" in upload_source
+    assert "status_code=400" in upload_source
+    assert "Only FAQ Workbench uploads are supported by this endpoint" in upload_source
+    assert "status_code=422" not in upload_source
+
+    globally_forbidden = (
         "mode != MODE_FAQ",
         "normalize_preprocessing_mode",
         "src.domain.project_plane.knowledge_preprocessing",
-        "status_code=422",
     )
-    for marker in forbidden:
+    for marker in globally_forbidden:
         assert marker not in source
 
 

@@ -1,6 +1,6 @@
 # Workbench RAG Eval V2 implementation map
 
-Current checkpoint: qgen complete; retrieval complete; adjudication complete; promotion candidate approve/reject complete.
+Current checkpoint: qgen complete; retrieval complete; adjudication complete; promotion review complete; reversible grouped application complete; embedding revisions PENDING_VERIFICATION complete.
 
 ## Claim Builder canonical path
 
@@ -78,10 +78,20 @@ Implemented in the adjudication continuation:
 - `handle_execute_workbench_rag_eval_adjudication.py` and `_command.py` call `ExecutePreparedLlmDispatchAttempt`, validate strict output, persist adjudication and capacity observation, and append reconcile.
 - `handle_reconcile_workbench_rag_eval_adjudication_progress_command.py` drains to PROMOTION_REVIEW only after persisted adjudication coverage, or blocks on terminal failures.
 
-Still needed after the adjudication checkpoint:
+Implemented after promotion review:
 
-- add reversible embedding revision table with previous aliases/text/vector and verification status;
-- add holdout/cycle marker so holdout questions are never promoted in the same cycle.
+- `128_create_workbench_rag_eval_embedding_revisions.sql` adds immutable
+  previous/new aliases, embedding text and full vectors, lifecycle timestamps and
+  one active `PENDING_VERIFICATION` revision per project/runtime entry;
+- grouped application uses persisted runtime hashes, row/advisory locks and one
+  transaction per target entry.
+
+Still needed:
+
+- post-promotion verification persistence and metrics;
+- revision acceptance/regression/rollback transitions;
+- a holdout/cycle marker if the current role contract is later expanded beyond
+  the persisted same-run role boundary.
 
 ## Handlers
 
@@ -95,14 +105,23 @@ Implemented:
 - plan/prepare/execute/reconcile adjudication handlers;
 - promotion candidate grouping after adjudication drain.
 
+Implemented:
+
+- explicit promotion candidate approve/reject handlers;
+- APPROVED-only application policy across single, batch, run-level, HTTP and
+  repository consumers;
+- one grouped embedding generation and one revision-aware transaction per target;
+- active-revision, stale-snapshot, alias-limit and idempotency guards;
+- revision read projection without raw vectors;
+- transition to `VERIFYING` / `POST_PROMOTION_VERIFICATION` without dispatching
+  an unimplemented verification command.
+
 Still needed:
 
-- explicit promotion candidate approve/reject handlers are implemented;
-- all existing single and batch application paths require APPROVED and reject
-  direct CANDIDATE application;
-- embedding revision application handler;
-- post-promotion verification handler;
-- rollback handler for failed verification;
+- post-promotion verification handler and persisted metrics;
+- regression policy;
+- explicit accept revision;
+- explicit rollback revision;
 - terminal failure guard that prevents successful run completion when any terminal work item exists.
 
 ## Composition changes
@@ -116,8 +135,12 @@ Still needed:
 
 - `POST /knowledge/projects/{project_id}/workbench/rag-eval/run` returns HTTP 202 with running workflow/run projection.
 - Existing latest/get endpoints return V2 progression fields.
-- Frontend progression UI remains partial; full rendering for adjudication, promotion review, verification and accept/rollback is still future scope.
-- `frontend/src/shared/api/modules/ragEval.ts` must model 202/running and V2 status payloads.
+- Single and batch promotion apply endpoints use the grouped revision service and
+  return applied counts plus `PENDING_VERIFICATION` revision identities.
+- `GET .../runs/{run_id}/embedding-revisions` exposes revision metadata and
+  previous/new promoted questions without raw vectors.
+- Frontend API types accept the revision-aware response and only APPROVED rows are
+  applyable; revision workflow UI remains future scope.
 
 ## Test matrix
 
@@ -157,5 +180,9 @@ require round-robin and does not change selection policy.
 2. Checkpoint B: qgen work kind, planner, prompt/payload builder, prepare handler, execute handler, strict 10-question validator, qgen persistence, qgen reconcile.
 3. Checkpoint C: retrieval outcome model/schema, retrieval evaluation handler, adjudication work kind/planner/prepare/execute/reconcile, promotion candidate filtering after `VALID_TARGET_QUERY`. Completed.
 4. Checkpoint D1: explicit promotion review approve/reject. Completed.
-5. Checkpoint D2: group approved candidates by runtime entry, reversible embedding revisions, post-promotion verification and accept/rollback.
-6. Checkpoint E: full frontend progression UI and final backend/frontend regression gates.
+5. Checkpoint D2a: grouped APPROVED application, immutable embedding revisions,
+   active-revision/stale-snapshot guards and `PENDING_VERIFICATION` transition.
+   Completed.
+6. Checkpoint D2b: post-promotion verification and regression policy.
+7. Checkpoint D2c: explicit revision accept and rollback.
+8. Checkpoint E: full frontend progression UI and final backend/frontend regression gates.

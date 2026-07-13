@@ -2413,7 +2413,18 @@ async def apply_workbench_rag_eval_promotion_candidates_batch(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {"result": result.to_json_dict()}
+    if result.applied_count == 0 and result.errors:
+        first_error = result.errors[0]
+        error_code = getattr(first_error, "code", "persistence_conflict")
+        error_message = getattr(first_error, "message", str(first_error))
+        if error_code == "not_found":
+            raise HTTPException(status_code=404, detail=error_message)
+        if error_code == "embedding_failed":
+            raise HTTPException(status_code=502, detail=error_message)
+        raise HTTPException(status_code=409, detail=error_message)
+
+    result_payload = result.to_json_dict()
+    return {**result_payload, "result": result_payload}
 
 
 @router.post("/rag-eval/workbench/promotion-candidates/{promotion_id}/apply")
@@ -2451,7 +2462,8 @@ async def apply_workbench_rag_eval_promotion_candidate(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return {"result": result.to_json_dict()}
+    result_payload = result.to_json_dict()
+    return {**result_payload, "result": result_payload}
 
 
 @router.post(
@@ -2599,6 +2611,32 @@ async def list_workbench_rag_eval_promotion_candidates(
         run_id=run_id,
     )
     return {"candidates": [candidate.to_json_dict() for candidate in candidates]}
+
+
+@router.get("/rag-eval/workbench/runs/{run_id}/embedding-revisions")
+async def list_workbench_rag_eval_embedding_revisions(
+    project_id: str,
+    run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    repository = PostgresWorkbenchRagEvalRepository(pool)
+    summary = await repository.get_run(run_id=run_id, project_id=project_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Workbench RAG Eval run not found")
+    revisions = await repository.list_embedding_revisions(
+        project_id=project_id,
+        source_rag_eval_run_id=run_id,
+    )
+    return {"revisions": [revision.to_json_dict() for revision in revisions]}
 
 
 @router.get("/{document_id}/workflow-live-state")

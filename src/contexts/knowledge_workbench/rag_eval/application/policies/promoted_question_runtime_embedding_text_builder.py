@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_question_normalization_policy import (
+    normalize_workbench_rag_eval_question,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PromotedQuestionRuntimeEmbeddingText:
@@ -31,7 +35,7 @@ class PromotedQuestionRuntimeEmbeddingTextBuilder:
             existing_embedding_text,
             "existing_embedding_text",
         )
-        questions = _dedupe_texts(possible_questions)
+        questions = dedupe_promoted_questions(possible_questions)
         evidence = _extract_evidence(existing_embedding_text)
         triples = _extract_triples(existing_embedding_text)
 
@@ -66,18 +70,18 @@ def append_question_once(
     possible_questions: tuple[str, ...],
     question: str,
 ) -> tuple[str, ...]:
-    return _dedupe_texts((*possible_questions, question))
+    return dedupe_promoted_questions((*possible_questions, question))
 
 
-def _dedupe_texts(values: tuple[str, ...]) -> tuple[str, ...]:
+def dedupe_promoted_questions(values: tuple[str, ...]) -> tuple[str, ...]:
     result: list[str] = []
     seen: set[str] = set()
     for value in values:
         stripped = value.strip()
         if not stripped:
             continue
-        normalized = " ".join(stripped.casefold().split())
-        if normalized in seen:
+        normalized = normalize_workbench_rag_eval_question(stripped)
+        if not normalized or normalized in seen:
             continue
         seen.add(normalized)
         result.append(stripped)

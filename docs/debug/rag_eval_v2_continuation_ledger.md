@@ -2,10 +2,10 @@
 
 ## Current checkpoint
 
-**Date:** 2026-07-11
-**Committed base:** `aef56def22f943ee1f0caa1037682ffa542ad974`  
-**Working tree:** contains the adjudication runtime vertical checkpoint
-**Overall status:** IN PROGRESS — qgen complete; retrieval complete; adjudication complete; promotion candidate approve/reject complete
+**Date:** 2026-07-13
+**Committed base:** `fd171dfc05d54075018ce703572bc2635dff76d7`
+**Working tree:** contains the reversible grouped promotion application checkpoint
+**Overall status:** IN PROGRESS — qgen complete; retrieval complete; adjudication complete; promotion review complete; reversible grouped application complete; embedding revisions PENDING_VERIFICATION complete
 
 This document describes the current working tree. It must not instruct a future
 agent to recreate question-generation workflow components that already exist.
@@ -373,13 +373,23 @@ Promotion review actions are implemented:
 - every existing promotion application path requires APPROVED and rejects
   CANDIDATE, so review cannot be bypassed.
 
-Reversible revisions:
-grouped application per runtime entry;
-alias-count policy;
-one embedding recalculation per affected entry;
-revision snapshot before mutation;
-single active pending revision invariant;
-atomic mutation plus revision creation.
+Reversible grouped application is implemented:
+
+- only APPROVED candidates are eligible for mutation;
+- batch application groups by project and target runtime entry;
+- single application delegates to the same grouped service;
+- one immutable runtime/embedding snapshot is loaded before provider execution;
+- one embedding text build and one embedding generation occur per affected target;
+- a complete previous/new alias, embedding-text and vector revision is persisted;
+- each target group commits revision, runtime mutation, APPROVED → APPLIED,
+  run transition and canonical events in one transaction;
+- the active `PENDING_VERIFICATION` revision partial unique index and repository
+  lock/hash checks reject concurrent or stale overwrite;
+- repeated requests for the same pending revision return the persisted result
+  without another embedding generation;
+- batch partial failure semantics are explicitly per-target transactional;
+- application moves the run to `VERIFYING` /
+  `POST_PROMOTION_VERIFICATION` but does not execute verification.
 
 Verification:
 before/after verification dataset;
@@ -423,22 +433,20 @@ Next exact implementation sequence
 
 Continue from the current working tree in this exact order.
 
-1. Implement reversible grouped application
-group approved candidates by runtime entry;
-revisions migration/model/repository;
-atomic snapshot and mutation;
-one embedding generation per target entry;
-active-revision guard.
-2. Implement post-promotion verification
-revisions migration/model/repository;
-atomic snapshot and mutation;
-one embedding generation per target entry;
-active-revision guard.
-3. Complete API, SSE and frontend
-persisted read endpoints;
-workflow-event projection;
-full progression UI;
-revision controls.
+1. Implement post-promotion verification
+before/after verification dataset;
+baseline and holdout verification;
+neighbour/competitor regression checks;
+persisted metrics and regression decision.
+2. Implement revision terminal actions
+explicit accept;
+explicit rollback;
+restore previous aliases, embedding text and vector atomically.
+3. Complete frontend progression
+verification metrics;
+revision state;
+accept/rollback controls;
+workflow-event/SSE invalidation.
 4. Run all final gates
 
 Do not report the original RAG Eval V2 task as complete until every required
@@ -462,7 +470,9 @@ question-role migration;
 retrieval-outcome migration;
 production runtime composition foundation.
 
-The qgen/retrieval/adjudication checkpoint is ready for the next vertical:
-explicit promotion review actions.
+The qgen, retrieval, adjudication, promotion review and reversible grouped
+application checkpoints are complete. The next unfinished vertical is
+post-promotion verification, followed by regression policy, explicit revision
+accept/rollback and full frontend progression.
 
 Do not commit or push without an explicit user request.

@@ -74,8 +74,8 @@ class WorkbenchRagEvalWorkflowEventType(StrEnum):
     ADJUDICATION_COMPLETED = "RagEvalAdjudicationCompleted"
 
     PROMOTION_CANDIDATES_READY = "RagEvalPromotionCandidatesReady"
-    PROMOTIONS_APPLIED = "RagEvalPromotionsApplied"
-    EMBEDDING_REVISION_CREATED = "RagEvalEmbeddingRevisionCreated"
+    PROMOTIONS_APPLIED = "RAG_EVAL_PROMOTIONS_APPLIED"
+    EMBEDDING_REVISION_CREATED = "RAG_EVAL_EMBEDDING_REVISION_CREATED"
     VERIFICATION_COMPLETED = "RagEvalVerificationCompleted"
     EMBEDDING_REVISION_ACCEPTED = "RagEvalEmbeddingRevisionAccepted"
     EMBEDDING_REVISION_ROLLED_BACK = "RagEvalEmbeddingRevisionRolledBack"

@@ -2,44 +2,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from collections.abc import Sequence
 
-from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
-    EmbeddingGenerationPort,
-    EmbeddingGenerationRequest,
+from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_promotion_application_errors import (
+    WorkbenchRagEvalPromotionConflictCode,
+    WorkbenchRagEvalPromotionConflictError,
+    WorkbenchRagEvalPromotionEmbeddingError,
+    WorkbenchRagEvalPromotionNotFoundError,
 )
-from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
-    WorkbenchRagEvalPromotionApplyResult,
-    WorkbenchRagEvalPromotionStatus,
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
+    WorkbenchRagEvalPromotionApplicationResult,
 )
-from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_question_runtime_embedding_text_builder import (
-    PromotedQuestionRuntimeEmbeddingTextBuilder,
-    append_question_once,
-)
-from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
-    WorkbenchRagEvalRepositoryPort,
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotions_batch import (
+    ApplyWorkbenchRagEvalPromotionsBatch,
 )
 
 
-class WorkbenchRagEvalPromotionNotFoundError(LookupError):
-    pass
-
-
-class WorkbenchRagEvalPromotionConflictError(RuntimeError):
-    pass
-
-
-class WorkbenchRagEvalPromotionEmbeddingError(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class ApplyWorkbenchRagEvalPromotion:
-    rag_eval_repository: WorkbenchRagEvalRepositoryPort
-    embedding_generation_port: EmbeddingGenerationPort
-    embedding_model_id: str
-    embedding_dimensions: int
-    embedding_text_builder: PromotedQuestionRuntimeEmbeddingTextBuilder
+    grouped_application: ApplyWorkbenchRagEvalPromotionsBatch
 
     async def execute(
         self,
@@ -47,99 +27,37 @@ class ApplyWorkbenchRagEvalPromotion:
         project_id: str,
         promotion_id: str,
         applied_at: datetime,
-    ) -> WorkbenchRagEvalPromotionApplyResult:
-        project_id = _require_text(project_id, "project_id")
-        promotion_id = _require_text(promotion_id, "promotion_id")
-        if not self.embedding_model_id.strip():
-            raise ValueError("embedding_model_id must be non-empty")
-        if self.embedding_dimensions < 1:
-            raise ValueError("embedding_dimensions must be positive")
-
-        candidate = await self.rag_eval_repository.get_promotion_candidate(
+    ) -> WorkbenchRagEvalPromotionApplicationResult:
+        result = await self.grouped_application.execute(
             project_id=project_id,
-            promotion_id=promotion_id,
-        )
-        if candidate is None:
-            raise WorkbenchRagEvalPromotionNotFoundError(
-                "Promotion candidate not found"
-            )
-        if candidate.status is WorkbenchRagEvalPromotionStatus.APPLIED:
-            raise WorkbenchRagEvalPromotionConflictError(
-                "Promotion candidate is already applied"
-            )
-        if candidate.status is not WorkbenchRagEvalPromotionStatus.APPROVED:
-            raise WorkbenchRagEvalPromotionConflictError(
-                f"Promotion candidate status cannot be applied: {candidate.status.value}"
-            )
-
-        target = await self.rag_eval_repository.get_promotion_application_target(
-            project_id=project_id,
-            promotion_id=promotion_id,
-        )
-        if target is None:
-            raise WorkbenchRagEvalPromotionNotFoundError("Promotion target not found")
-
-        updated_questions = append_question_once(
-            possible_questions=target.runtime_possible_questions,
-            question=target.question,
-        )
-        embedding_text = self.embedding_text_builder.build(
-            claim=target.claim,
-            possible_questions=updated_questions,
-            exclusion_scope=target.exclusion_scope,
-            existing_embedding_text=target.existing_embedding_text,
-        )
-        embedding = await self._embed(embedding_text.text)
-
-        return await self.rag_eval_repository.apply_promotion_candidate(
-            project_id=project_id,
-            promotion_id=promotion_id,
-            embedding_model_id=self.embedding_model_id,
-            dimensions=self.embedding_dimensions,
-            embedding=embedding,
-            embedding_text=embedding_text.text,
-            embedding_text_hash=embedding_text.text_hash,
+            mode="selected",
+            promotion_ids=(promotion_id,),
+            run_id=None,
             applied_at=applied_at,
         )
-
-    async def _embed(self, text: str) -> tuple[float, ...]:
-        try:
-            result = await self.embedding_generation_port.embed(
-                EmbeddingGenerationRequest(
-                    texts=(text,),
-                    model_id=self.embedding_model_id,
-                    expected_dimensions=self.embedding_dimensions,
-                    task="retrieval.passage",
-                )
+        if result.errors:
+            error = result.errors[0]
+            if error.code == "not_found":
+                raise WorkbenchRagEvalPromotionNotFoundError(error.message)
+            if error.code == "embedding_failed":
+                raise WorkbenchRagEvalPromotionEmbeddingError(error.message)
+            try:
+                code = WorkbenchRagEvalPromotionConflictCode(error.code)
+            except ValueError:
+                code = WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT
+            raise WorkbenchRagEvalPromotionConflictError(
+                error.message,
+                code=code,
+                promotion_ids=error.promotion_ids,
+                runtime_entry_id=error.runtime_entry_id,
             )
-        except Exception as exc:
-            raise WorkbenchRagEvalPromotionEmbeddingError(
-                "Failed to generate promotion embedding"
-            ) from exc
-
-        if len(result.embeddings) != 1:
-            raise WorkbenchRagEvalPromotionEmbeddingError(
-                "Promotion embedding generation returned unexpected vector count"
-            )
-        vector = result.embeddings[0]
-        _validate_embedding(vector, self.embedding_dimensions)
-        return tuple(float(value) for value in vector)
+        return result
 
 
-def _validate_embedding(vector: Sequence[float], dimensions: int) -> None:
-    if len(vector) != dimensions:
-        raise WorkbenchRagEvalPromotionEmbeddingError(
-            "Promotion embedding has unexpected dimensions"
-        )
-    for index, value in enumerate(vector):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise WorkbenchRagEvalPromotionEmbeddingError(
-                f"Promotion embedding[{index}] must be numeric"
-            )
-
-
-def _require_text(value: str, field_name: str) -> str:
-    stripped = value.strip()
-    if not stripped:
-        raise ValueError(f"{field_name} must be non-empty")
-    return stripped
+__all__ = [
+    "ApplyWorkbenchRagEvalPromotion",
+    "WorkbenchRagEvalPromotionConflictCode",
+    "WorkbenchRagEvalPromotionConflictError",
+    "WorkbenchRagEvalPromotionEmbeddingError",
+    "WorkbenchRagEvalPromotionNotFoundError",
+]
