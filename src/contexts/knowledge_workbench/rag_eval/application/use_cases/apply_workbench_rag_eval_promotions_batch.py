@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
-from dataclasses import dataclass, replace
-from datetime import datetime
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta
+from uuid import uuid4
 
 from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
     EmbeddingGenerationPort,
@@ -20,12 +21,16 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalPromotionStatus,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
+    WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
     WorkbenchRagEvalEmbeddingRevision,
+    WorkbenchRagEvalEmbeddingRevisionReadModel,
     WorkbenchRagEvalEmbeddingRevisionStatus,
+    WorkbenchRagEvalPromotionApplicationClaimDecisionCode,
     WorkbenchRagEvalPromotionApplicationError,
     WorkbenchRagEvalPromotionApplicationResult,
     WorkbenchRagEvalPromotionRevisionResult,
     stable_embedding_revision_id,
+    stable_promotion_application_key,
     stable_runtime_snapshot_hash,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_question_runtime_embedding_text_builder import (
@@ -42,6 +47,13 @@ from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_e
 )
 
 
+_DEFAULT_APPLICATION_LEASE_SECONDS = 300
+
+
+def _new_lease_owner() -> str:
+    return f"rag-eval-promotion-application:{uuid4()}"
+
+
 @dataclass(slots=True)
 class ApplyWorkbenchRagEvalPromotionsBatch:
     rag_eval_repository: WorkbenchRagEvalRepositoryPort
@@ -50,6 +62,21 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
     embedding_dimensions: int
     embedding_text_builder: PromotedQuestionRuntimeEmbeddingTextBuilder
     application_policy: WorkbenchRagEvalPromotionApplicationPolicy
+    application_lease_seconds: int = _DEFAULT_APPLICATION_LEASE_SECONDS
+    lease_owner_factory: Callable[[], str] = field(default=_new_lease_owner)
+
+    def __post_init__(self) -> None:
+        if self.embedding_dimensions != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS:
+            raise ValueError(
+                "RAG Eval promotion application requires embedding_dimensions = "
+                f"{WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS}"
+            )
+        if (
+            isinstance(self.application_lease_seconds, bool)
+            or not isinstance(self.application_lease_seconds, int)
+            or self.application_lease_seconds <= 0
+        ):
+            raise ValueError("application_lease_seconds must be > 0")
 
     async def execute(
         self,
@@ -226,37 +253,129 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
                 snapshot,
                 candidates=decision.applicable_candidates,
             )
+            applicable_ids = tuple(
+                candidate.promotion_id for candidate in decision.applicable_candidates
+            )
+            application_key = stable_promotion_application_key(
+                project_id=project_id,
+                runtime_entry_id=runtime_entry_id,
+                source_rag_eval_run_id=applicable_snapshot.source_rag_eval_run_id,
+                promotion_ids=applicable_ids,
+                previous_runtime_hash=snapshot.runtime_hash,
+            )
+            lease_owner = self.lease_owner_factory()
+            lease_expires_at = applied_at + timedelta(
+                seconds=self.application_lease_seconds
+            )
+            try:
+                claim_decision = (
+                    await self.rag_eval_repository.claim_promotion_application(
+                        application_key=application_key,
+                        project_id=project_id,
+                        runtime_entry_id=runtime_entry_id,
+                        source_rag_eval_run_id=(
+                            applicable_snapshot.source_rag_eval_run_id
+                        ),
+                        promotion_ids=applicable_ids,
+                        previous_runtime_hash=snapshot.runtime_hash,
+                        lease_owner=lease_owner,
+                        now=applied_at,
+                        lease_expires_at=lease_expires_at,
+                    )
+                )
+            except WorkbenchRagEvalPromotionConflictError as exc:
+                errors.append(
+                    _error_from_conflict(exc, applicable_ids, runtime_entry_id)
+                )
+                continue
+
+            if (
+                claim_decision.code
+                is WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ALREADY_COMPLETED
+            ):
+                completed_revision = claim_decision.revision
+                if completed_revision is None:
+                    raise RuntimeError(
+                        "ALREADY_COMPLETED claim decision is missing revision"
+                    )
+                revisions.append(_idempotent_revision_result(completed_revision))
+                continue
+            if (
+                claim_decision.code
+                is WorkbenchRagEvalPromotionApplicationClaimDecisionCode.IN_PROGRESS
+            ):
+                errors.append(
+                    WorkbenchRagEvalPromotionApplicationError(
+                        code=(
+                            WorkbenchRagEvalPromotionConflictCode.APPLICATION_IN_PROGRESS.value
+                        ),
+                        message="promotion application is already in progress",
+                        promotion_ids=applicable_ids,
+                        runtime_entry_id=runtime_entry_id,
+                    )
+                )
+                continue
+            if (
+                claim_decision.code
+                is WorkbenchRagEvalPromotionApplicationClaimDecisionCode.CONFLICTING_ACTIVE_GROUP
+            ):
+                errors.append(
+                    WorkbenchRagEvalPromotionApplicationError(
+                        code=(
+                            WorkbenchRagEvalPromotionConflictCode.CONFLICTING_ACTIVE_APPLICATION.value
+                        ),
+                        message=(
+                            "another promotion application group is active for this "
+                            "runtime entry"
+                        ),
+                        promotion_ids=applicable_ids,
+                        runtime_entry_id=runtime_entry_id,
+                    )
+                )
+                continue
+            if claim_decision.code not in {
+                WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ACQUIRED,
+                WorkbenchRagEvalPromotionApplicationClaimDecisionCode.RECOVERED_EXPIRED_LEASE,
+            }:
+                raise RuntimeError(
+                    f"unsupported application claim decision {claim_decision.code}"
+                )
+
             built = self.embedding_text_builder.build(
                 claim=snapshot.claim,
                 possible_questions=decision.new_possible_questions,
                 exclusion_scope=snapshot.exclusion_scope,
                 existing_embedding_text=snapshot.embedding_text,
             )
-            # one grouped embedding generation
             try:
+                # one grouped embedding generation; persisted claim owner only
                 embedding = await self._embed(built.text)
             except WorkbenchRagEvalPromotionEmbeddingError as exc:
+                cleanup_error = await self._fail_claim(
+                    application_key=application_key,
+                    lease_owner=lease_owner,
+                    failed_at=applied_at,
+                    promotion_ids=applicable_ids,
+                    runtime_entry_id=runtime_entry_id,
+                )
                 errors.append(
-                    WorkbenchRagEvalPromotionApplicationError(
+                    cleanup_error
+                    or WorkbenchRagEvalPromotionApplicationError(
                         code="embedding_failed",
                         message=str(exc),
-                        promotion_ids=tuple(
-                            candidate.promotion_id
-                            for candidate in decision.applicable_candidates
-                        ),
+                        promotion_ids=applicable_ids,
                         runtime_entry_id=runtime_entry_id,
                     )
                 )
                 continue
+            embedding_recalculation_count += 1
+
             new_runtime_hash = stable_runtime_snapshot_hash(
                 possible_questions=decision.new_possible_questions,
                 embedding_text=built.text,
                 embedding=embedding,
                 embedding_model_id=self.embedding_model_id,
                 embedding_dimensions=self.embedding_dimensions,
-            )
-            applicable_ids = tuple(
-                candidate.promotion_id for candidate in decision.applicable_candidates
             )
             revision = WorkbenchRagEvalEmbeddingRevision(
                 revision_id=stable_embedding_revision_id(
@@ -290,14 +409,46 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
                 persisted = await self.rag_eval_repository.persist_promotion_application_revision(
                     snapshot=applicable_snapshot,
                     revision=revision,
+                    application_key=application_key,
+                    lease_owner=lease_owner,
                 )
             except WorkbenchRagEvalPromotionConflictError as exc:
+                cleanup_error = await self._fail_claim(
+                    application_key=application_key,
+                    lease_owner=lease_owner,
+                    failed_at=applied_at,
+                    promotion_ids=applicable_ids,
+                    runtime_entry_id=runtime_entry_id,
+                )
                 errors.append(
-                    _error_from_conflict(
+                    cleanup_error
+                    or _error_from_conflict(
                         exc,
                         applicable_ids,
                         runtime_entry_id,
                     )
+                )
+                continue
+            except Exception:
+                await self._fail_claim(
+                    application_key=application_key,
+                    lease_owner=lease_owner,
+                    failed_at=applied_at,
+                    promotion_ids=applicable_ids,
+                    runtime_entry_id=runtime_entry_id,
+                )
+                raise
+
+            try:
+                await self.rag_eval_repository.complete_promotion_application_claim(
+                    application_key=application_key,
+                    lease_owner=lease_owner,
+                    revision_id=persisted.revision_id,
+                    completed_at=applied_at,
+                )
+            except WorkbenchRagEvalPromotionConflictError as exc:
+                errors.append(
+                    _error_from_conflict(exc, applicable_ids, runtime_entry_id)
                 )
                 continue
 
@@ -311,7 +462,6 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
                     idempotent=False,
                 )
             )
-            embedding_recalculation_count += 1
 
         applied_count = sum(len(revision.promotion_ids) for revision in revisions)
         return WorkbenchRagEvalPromotionApplicationResult(
@@ -368,14 +518,26 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
         )
         if revision is None:
             return None
-        return WorkbenchRagEvalPromotionRevisionResult(
-            revision_id=revision.revision_id,
-            runtime_entry_id=revision.runtime_entry_id,
-            source_rag_eval_run_id=revision.source_rag_eval_run_id,
-            status=revision.status,
-            promotion_ids=revision.promotion_ids,
-            idempotent=True,
-        )
+        return _idempotent_revision_result(revision)
+
+    async def _fail_claim(
+        self,
+        *,
+        application_key: str,
+        lease_owner: str,
+        failed_at: datetime,
+        promotion_ids: tuple[str, ...],
+        runtime_entry_id: str,
+    ) -> WorkbenchRagEvalPromotionApplicationError | None:
+        try:
+            await self.rag_eval_repository.fail_promotion_application_claim(
+                application_key=application_key,
+                lease_owner=lease_owner,
+                failed_at=failed_at,
+            )
+        except WorkbenchRagEvalPromotionConflictError as exc:
+            return _error_from_conflict(exc, promotion_ids, runtime_entry_id)
+        return None
 
     async def _embed(self, text: str) -> tuple[float, ...]:
         try:
@@ -383,7 +545,7 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
                 EmbeddingGenerationRequest(
                     texts=(text,),
                     model_id=self.embedding_model_id,
-                    expected_dimensions=self.embedding_dimensions,
+                    expected_dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
                     task="retrieval.passage",
                 )
             )
@@ -395,7 +557,7 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
             raise WorkbenchRagEvalPromotionEmbeddingError(
                 "Embedding provider returned unexpected model"
             )
-        if result.dimensions != self.embedding_dimensions:
+        if result.dimensions != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS:
             raise WorkbenchRagEvalPromotionEmbeddingError(
                 "Embedding provider returned unexpected dimensions"
             )
@@ -404,11 +566,24 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
                 "Embedding provider must return exactly one vector"
             )
         embedding = tuple(float(value) for value in result.embeddings[0])
-        if len(embedding) != self.embedding_dimensions:
+        if len(embedding) != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS:
             raise WorkbenchRagEvalPromotionEmbeddingError(
                 "Embedding vector dimensions mismatch"
             )
         return embedding
+
+
+def _idempotent_revision_result(
+    revision: WorkbenchRagEvalEmbeddingRevisionReadModel,
+) -> WorkbenchRagEvalPromotionRevisionResult:
+    return WorkbenchRagEvalPromotionRevisionResult(
+        revision_id=revision.revision_id,
+        runtime_entry_id=revision.runtime_entry_id,
+        source_rag_eval_run_id=revision.source_rag_eval_run_id,
+        status=revision.status,
+        promotion_ids=revision.promotion_ids,
+        idempotent=True,
+    )
 
 
 def _application_conflict_code(

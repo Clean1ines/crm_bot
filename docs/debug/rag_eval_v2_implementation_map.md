@@ -81,10 +81,16 @@ Implemented in the adjudication continuation:
 Implemented after promotion review:
 
 - `128_create_workbench_rag_eval_embedding_revisions.sql` adds immutable
-  previous/new aliases, embedding text and full vectors, lifecycle timestamps and
-  one active `PENDING_VERIFICATION` revision per project/runtime entry;
-- grouped application uses persisted runtime hashes, row/advisory locks and one
-  transaction per target entry.
+  previous/new aliases, embedding text and full `vector(384)` snapshots, lifecycle
+  timestamps and one active `PENDING_VERIFICATION` revision per project/runtime
+  entry;
+- the same migration adds persisted promotion application claims with stable
+  application identity, one active PREPARING claim per project/runtime entry,
+  owner-scoped leases, completion linkage and expired-lease recovery;
+- grouped application uses persisted runtime hashes, short claim transactions,
+  row/advisory locks and one atomic revision/runtime/event/claim-completion
+  transaction per target entry;
+- `embedding_dimensions = 384` is enforced by both domain and migration checks.
 
 Still needed:
 
@@ -110,8 +116,14 @@ Implemented:
 - explicit promotion candidate approve/reject handlers;
 - APPROVED-only application policy across single, batch, run-level, HTTP and
   repository consumers;
-- one grouped embedding generation and one revision-aware transaction per target;
-- active-revision, stale-snapshot, alias-limit and idempotency guards;
+- a persisted PREPARING/COMPLETED/FAILED application claim acquired before the
+  provider call, with active-lease conflict and expired-lease recovery semantics;
+- only the claim lease owner can generate one grouped embedding and enter the
+  revision-aware transaction for a target;
+- active-revision, stale-snapshot and idempotency guards;
+- active promoted alias limit based on normalized APPLIED promotion aliases rather
+  than baseline runtime `possible_questions`;
+- canonical runtime/revision embedding dimensions fixed at 384;
 - revision read projection without raw vectors;
 - transition to `VERIFYING` / `POST_PROMOTION_VERIFICATION` without dispatching
   an unimplemented verification command.

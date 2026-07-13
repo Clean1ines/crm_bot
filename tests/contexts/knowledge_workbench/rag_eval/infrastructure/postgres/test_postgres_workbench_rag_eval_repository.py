@@ -628,3 +628,28 @@ def test_repository_source_does_not_use_legacy_rag_eval_or_answer_text() -> None
     )
     for marker in forbidden:
         assert marker not in source
+
+
+def test_active_promoted_alias_query_counts_only_applied_lifecycle_rows() -> None:
+    from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
+        WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL,
+    )
+
+    alias_lateral_start = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL.index(
+        "LEFT JOIN LATERAL (\n    SELECT COALESCE("
+    )
+    alias_lateral_end = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL.index(
+        ") AS applied_aliases ON TRUE",
+        alias_lateral_start,
+    )
+    alias_lateral = WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_SQL[
+        alias_lateral_start:alias_lateral_end
+    ]
+
+    assert "applied.status = 'applied'" in alias_lateral
+    for non_active_status in (
+        "'rejected'",
+        "'regression_failed'",
+        "'rolled_back'",
+    ):
+        assert non_active_status not in alias_lateral

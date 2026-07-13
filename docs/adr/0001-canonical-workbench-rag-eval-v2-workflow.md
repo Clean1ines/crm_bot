@@ -395,6 +395,12 @@ entries;
 every embedding mutation becomes auditable and reversible;
 explicit candidate review, grouped revision-aware application and the
 `PENDING_VERIFICATION` checkpoint are implemented;
+concurrent same-group application is serialized by a persisted lease claim before
+provider execution, only the lease owner may generate and persist the revision,
+claim completion is atomic with revision/runtime mutation, and expired claims are
+recoverable;
+active promoted alias limits count APPLIED lifecycle aliases rather than baseline
+`possible_questions`, and revision embeddings are fixed at 384 dimensions;
 the implementation remains incomplete until post-promotion verification,
 regression policy, revision accept/rollback and full frontend progression are
 delivered and all final gates pass.

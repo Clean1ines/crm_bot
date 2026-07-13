@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -18,11 +19,16 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalPromotionStatus,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
+    WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
     WorkbenchRagEvalEmbeddingRevision,
     WorkbenchRagEvalEmbeddingRevisionReadModel,
-    WorkbenchRagEvalEmbeddingRevisionStatus,
     WorkbenchRagEvalPromotionApplicationCandidate,
+    WorkbenchRagEvalPromotionApplicationClaim,
+    WorkbenchRagEvalPromotionApplicationClaimDecision,
+    WorkbenchRagEvalPromotionApplicationClaimDecisionCode,
+    WorkbenchRagEvalPromotionApplicationClaimStatus,
     WorkbenchRagEvalPromotionApplicationSnapshot,
+    stable_promotion_application_key,
     stable_runtime_snapshot_hash,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_question_runtime_embedding_text_builder import (
@@ -30,10 +36,6 @@ from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_que
 )
 from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_promotion_application_policy import (
     WorkbenchRagEvalPromotionApplicationPolicy,
-    WorkbenchRagEvalPromotionApplicationPolicyConfig,
-)
-from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
-    ApplyWorkbenchRagEvalPromotion,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotions_batch import (
     ApplyWorkbenchRagEvalPromotionsBatch,
@@ -41,44 +43,38 @@ from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workb
 
 
 NOW = datetime(2026, 7, 13, 12, 0, tzinfo=timezone.utc)
+VECTOR_384 = (0.0,) * WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS
+NEW_VECTOR_384 = (0.5,) * WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS
 
 
 def _target(
-    promotion_id: str,
+    promotion_id: str = "promotion-1",
     *,
-    runtime_entry_id: str = "entry-1",
-    run_id: str = "run-1",
-    question: str = "New alias?",
     status: WorkbenchRagEvalPromotionStatus = WorkbenchRagEvalPromotionStatus.APPROVED,
 ) -> WorkbenchRagEvalPromotionApplicationTarget:
     return WorkbenchRagEvalPromotionApplicationTarget(
         promotion_id=promotion_id,
-        run_id=run_id,
+        run_id="run-1",
         question_id=f"question-{promotion_id}",
         project_id="project-1",
-        target_runtime_entry_id=runtime_entry_id,
-        target_fact_id=f"fact-{runtime_entry_id}",
-        question=question,
+        target_runtime_entry_id="entry-1",
+        target_fact_id="fact-1",
+        question="New alias?",
         status=status,
-        claim=f"Claim {runtime_entry_id}",
+        claim="Claim text",
         runtime_possible_questions=("Existing?",),
         fact_possible_questions=("Existing?",),
         exclusion_scope=None,
         existing_embedding_text=(
-            f"Claim:\nClaim {runtime_entry_id}\n\n"
-            "Possible questions:\n- Existing?\n\nEvidence:\nEvidence"
+            "Claim:\nClaim text\n\nPossible questions:\n- Existing?"
         ),
     )
 
 
 def _snapshot(
-    targets: tuple[WorkbenchRagEvalPromotionApplicationTarget, ...],
-    *,
-    active_revision_id: str | None = None,
+    target: WorkbenchRagEvalPromotionApplicationTarget,
 ) -> WorkbenchRagEvalPromotionApplicationSnapshot:
-    first = targets[0]
-    embedding = (0.1, 0.2, 0.3)
-    candidates = tuple(
+    candidates = (
         WorkbenchRagEvalPromotionApplicationCandidate(
             promotion_id=target.promotion_id,
             run_id=target.run_id,
@@ -86,72 +82,68 @@ def _snapshot(
             target_fact_id=target.target_fact_id,
             question=target.question,
             status=target.status,
-        )
-        for target in targets
+        ),
     )
     return WorkbenchRagEvalPromotionApplicationSnapshot(
-        project_id=first.project_id,
-        runtime_entry_id=first.target_runtime_entry_id,
-        fact_id=first.target_fact_id,
+        project_id=target.project_id,
+        runtime_entry_id=target.target_runtime_entry_id,
+        fact_id=target.target_fact_id,
         runtime_status="active",
         runtime_visibility="published",
-        claim=first.claim,
-        possible_questions=first.runtime_possible_questions,
-        exclusion_scope=first.exclusion_scope,
-        embedding_text=first.existing_embedding_text,
-        embedding=embedding,
+        claim=target.claim,
+        possible_questions=target.runtime_possible_questions,
+        active_promoted_questions=(),
+        exclusion_scope=target.exclusion_scope,
+        embedding_text=target.existing_embedding_text,
+        embedding=VECTOR_384,
         embedding_model_id="model-1",
-        embedding_dimensions=3,
+        embedding_dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
         candidates=candidates,
         runtime_hash=stable_runtime_snapshot_hash(
-            possible_questions=first.runtime_possible_questions,
-            embedding_text=first.existing_embedding_text,
-            embedding=embedding,
+            possible_questions=target.runtime_possible_questions,
+            embedding_text=target.existing_embedding_text,
+            embedding=VECTOR_384,
             embedding_model_id="model-1",
-            embedding_dimensions=3,
+            embedding_dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
         ),
-        active_revision_id=active_revision_id,
+        active_revision_id=None,
+    )
+
+
+def _read_model(
+    revision: WorkbenchRagEvalEmbeddingRevision,
+) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
+    return WorkbenchRagEvalEmbeddingRevisionReadModel(
+        revision_id=revision.revision_id,
+        project_id=revision.project_id,
+        runtime_entry_id=revision.runtime_entry_id,
+        source_rag_eval_run_id=revision.source_rag_eval_run_id,
+        promotion_ids=revision.promotion_ids,
+        status=revision.status,
+        previous_promoted_questions=revision.previous_promoted_questions,
+        new_promoted_questions=revision.new_promoted_questions,
+        created_at=revision.created_at,
+        accepted_at=revision.accepted_at,
+        regression_failed_at=revision.regression_failed_at,
+        rolled_back_at=revision.rolled_back_at,
     )
 
 
 @dataclass(slots=True)
-class FakeEmbeddingPort:
-    calls: list[EmbeddingGenerationRequest] = field(default_factory=list)
-    fail_for_text: str | None = None
-
-    async def embed(
-        self,
-        request: EmbeddingGenerationRequest,
-    ) -> EmbeddingGenerationResult:
-        self.calls.append(request)
-        if self.fail_for_text and self.fail_for_text in request.texts[0]:
-            raise RuntimeError("embedding failed")
-        return EmbeddingGenerationResult(
-            embeddings=((0.4, 0.5, 0.6),),
-            model_id=request.model_id,
-            dimensions=request.expected_dimensions,
-        )
-
-
-@dataclass(slots=True)
-class FakeRepository:
-    targets: list[WorkbenchRagEvalPromotionApplicationTarget]
-    snapshots: dict[str, WorkbenchRagEvalPromotionApplicationSnapshot] = field(
-        default_factory=dict
-    )
+class SharedPersistedClaimRepository:
+    target: WorkbenchRagEvalPromotionApplicationTarget = field(default_factory=_target)
+    claim: WorkbenchRagEvalPromotionApplicationClaim | None = None
     revisions: dict[str, WorkbenchRagEvalEmbeddingRevisionReadModel] = field(
         default_factory=dict
     )
-    persist_calls: list[WorkbenchRagEvalEmbeddingRevision] = field(default_factory=list)
-    persist_order: list[str] = field(default_factory=list)
-    fail_runtime_entry_id: str | None = None
-
-    def __post_init__(self) -> None:
-        grouped: dict[str, list[WorkbenchRagEvalPromotionApplicationTarget]] = {}
-        for target in self.targets:
-            grouped.setdefault(target.target_runtime_entry_id, []).append(target)
-        for runtime_entry_id, group in grouped.items():
-            self.snapshots[runtime_entry_id] = _snapshot(tuple(group))
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    snapshot_load_count: int = 0
+    both_snapshots_loaded: asyncio.Event = field(default_factory=asyncio.Event)
+    second_claim_attempted: asyncio.Event = field(default_factory=asyncio.Event)
+    runtime_mutation_count: int = 0
+    persist_count: int = 0
+    fail_persistence: bool = False
+    require_two_initial_snapshots: bool = False
 
     async def list_promotion_application_targets_for_ids(
         self,
@@ -160,10 +152,7 @@ class FakeRepository:
         promotion_ids,
     ):
         assert project_id == "project-1"
-        requested = set(promotion_ids)
-        return tuple(
-            target for target in self.targets if target.promotion_id in requested
-        )
+        return (self.target,) if self.target.promotion_id in promotion_ids else ()
 
     async def list_promotion_application_targets_for_run(
         self,
@@ -172,7 +161,7 @@ class FakeRepository:
         run_id: str,
     ):
         assert project_id == "project-1"
-        return tuple(target for target in self.targets if target.run_id == run_id)
+        return (self.target,) if self.target.run_id == run_id else ()
 
     async def load_promotion_application_group(
         self,
@@ -183,17 +172,205 @@ class FakeRepository:
         embedding_model_id: str,
     ):
         assert project_id == "project-1"
+        assert target_runtime_entry_id == "entry-1"
         assert embedding_model_id == "model-1"
-        snapshot = self.snapshots.get(target_runtime_entry_id)
-        if snapshot is None:
-            return None
-        requested = set(promotion_ids)
-        candidates = tuple(
-            candidate
-            for candidate in snapshot.candidates
-            if candidate.promotion_id in requested
-        )
-        return replace(snapshot, candidates=candidates)
+        snapshot = _snapshot(self.target)
+        self.snapshot_load_count += 1
+        if self.require_two_initial_snapshots and not self.revisions:
+            if self.snapshot_load_count >= 2:
+                self.both_snapshots_loaded.set()
+            else:
+                await self.both_snapshots_loaded.wait()
+        return snapshot
+
+    async def claim_promotion_application(
+        self,
+        *,
+        application_key: str,
+        project_id: str,
+        runtime_entry_id: str,
+        source_rag_eval_run_id: str,
+        promotion_ids,
+        previous_runtime_hash: str,
+        lease_owner: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> WorkbenchRagEvalPromotionApplicationClaimDecision:
+        async with self.lock:
+            if self.claim is None:
+                self.claim = WorkbenchRagEvalPromotionApplicationClaim(
+                    application_key=application_key,
+                    project_id=project_id,
+                    runtime_entry_id=runtime_entry_id,
+                    source_rag_eval_run_id=source_rag_eval_run_id,
+                    promotion_ids=tuple(promotion_ids),
+                    previous_runtime_hash=previous_runtime_hash,
+                    status=WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING,
+                    lease_owner=lease_owner,
+                    lease_expires_at=lease_expires_at,
+                    revision_id=None,
+                    created_at=now,
+                    updated_at=now,
+                    completed_at=None,
+                )
+                return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                    code=WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ACQUIRED,
+                    claim=self.claim,
+                )
+            if self.claim.application_key != application_key:
+                return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                    code=(
+                        WorkbenchRagEvalPromotionApplicationClaimDecisionCode.CONFLICTING_ACTIVE_GROUP
+                    ),
+                    claim=self.claim,
+                )
+            if (
+                self.claim.status
+                is WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED
+            ):
+                assert self.claim.revision_id is not None
+                return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                    code=(
+                        WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ALREADY_COMPLETED
+                    ),
+                    claim=self.claim,
+                    revision=self.revisions[self.claim.revision_id],
+                )
+            if (
+                self.claim.status
+                is WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
+                and self.claim.lease_expires_at > now
+            ):
+                self.second_claim_attempted.set()
+                return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                    code=(
+                        WorkbenchRagEvalPromotionApplicationClaimDecisionCode.IN_PROGRESS
+                    ),
+                    claim=self.claim,
+                )
+            recovered_code = (
+                WorkbenchRagEvalPromotionApplicationClaimDecisionCode.RECOVERED_EXPIRED_LEASE
+                if self.claim.status
+                is WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
+                else WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ACQUIRED
+            )
+            self.claim = replace(
+                self.claim,
+                status=WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING,
+                lease_owner=lease_owner,
+                lease_expires_at=lease_expires_at,
+                revision_id=None,
+                updated_at=now,
+                completed_at=None,
+            )
+            return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                code=recovered_code,
+                claim=self.claim,
+            )
+
+    async def complete_promotion_application_claim(
+        self,
+        *,
+        application_key: str,
+        lease_owner: str,
+        revision_id: str,
+        completed_at: datetime,
+    ) -> None:
+        async with self.lock:
+            if (
+                self.claim is not None
+                and self.claim.application_key == application_key
+                and self.claim.status
+                is WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED
+                and self.claim.revision_id == revision_id
+            ):
+                return
+            if (
+                self.claim is None
+                or self.claim.application_key != application_key
+                or self.claim.lease_owner != lease_owner
+                or self.claim.status
+                is not WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
+            ):
+                raise WorkbenchRagEvalPromotionConflictError(
+                    "lease lost",
+                    code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+                )
+            self.claim = replace(
+                self.claim,
+                status=WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED,
+                revision_id=revision_id,
+                updated_at=completed_at,
+                completed_at=completed_at,
+            )
+
+    async def fail_promotion_application_claim(
+        self,
+        *,
+        application_key: str,
+        lease_owner: str,
+        failed_at: datetime,
+    ) -> None:
+        async with self.lock:
+            if (
+                self.claim is None
+                or self.claim.application_key != application_key
+                or self.claim.lease_owner != lease_owner
+                or self.claim.status
+                is not WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
+            ):
+                raise WorkbenchRagEvalPromotionConflictError(
+                    "lease lost",
+                    code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+                )
+            self.claim = replace(
+                self.claim,
+                status=WorkbenchRagEvalPromotionApplicationClaimStatus.FAILED,
+                lease_expires_at=failed_at,
+                updated_at=failed_at,
+            )
+
+    async def persist_promotion_application_revision(
+        self,
+        *,
+        snapshot: WorkbenchRagEvalPromotionApplicationSnapshot,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+        application_key: str,
+        lease_owner: str,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
+        async with self.lock:
+            assert self.claim is not None
+            if (
+                self.claim.application_key != application_key
+                or self.claim.lease_owner != lease_owner
+                or self.claim.status
+                is not WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
+            ):
+                raise WorkbenchRagEvalPromotionConflictError(
+                    "lease lost",
+                    code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+                )
+            if self.fail_persistence:
+                raise WorkbenchRagEvalPromotionConflictError(
+                    "injected persistence failure",
+                    code=WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT,
+                )
+            read_model = _read_model(revision)
+            self.revisions[revision.revision_id] = read_model
+            self.persist_count += 1
+            self.runtime_mutation_count += 1
+            self.target = replace(
+                self.target,
+                status=WorkbenchRagEvalPromotionStatus.APPLIED,
+            )
+            self.claim = replace(
+                self.claim,
+                status=WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED,
+                revision_id=revision.revision_id,
+                updated_at=revision.created_at,
+                completed_at=revision.created_at,
+            )
+            return read_model
 
     async def find_pending_revision_for_promotions(
         self,
@@ -210,301 +387,64 @@ class FakeRepository:
                 and revision.runtime_entry_id == runtime_entry_id
                 and revision.source_rag_eval_run_id == source_rag_eval_run_id
                 and tuple(sorted(revision.promotion_ids)) == requested
-                and revision.status
-                is WorkbenchRagEvalEmbeddingRevisionStatus.PENDING_VERIFICATION
             ):
                 return revision
         return None
 
-    async def persist_promotion_application_revision(
+
+@dataclass(slots=True)
+class BarrierEmbeddingPort:
+    repository: SharedPersistedClaimRepository
+    calls: list[EmbeddingGenerationRequest] = field(default_factory=list)
+    wait_for_second_claim: bool = True
+    mutation_count_at_first_call: int | None = None
+
+    async def embed(
         self,
-        *,
-        snapshot: WorkbenchRagEvalPromotionApplicationSnapshot,
-        revision: WorkbenchRagEvalEmbeddingRevision,
-    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
-        self.persist_order.append("revision")
-        if snapshot.runtime_entry_id == self.fail_runtime_entry_id:
-            raise WorkbenchRagEvalPromotionConflictError(
-                "injected target failure",
-                code=WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT,
-                promotion_ids=revision.promotion_ids,
-                runtime_entry_id=revision.runtime_entry_id,
+        request: EmbeddingGenerationRequest,
+    ) -> EmbeddingGenerationResult:
+        self.calls.append(request)
+        if self.mutation_count_at_first_call is None:
+            self.mutation_count_at_first_call = self.repository.runtime_mutation_count
+        if self.wait_for_second_claim:
+            await asyncio.wait_for(
+                self.repository.second_claim_attempted.wait(),
+                timeout=1,
             )
-        self.persist_calls.append(revision)
-        read_model = WorkbenchRagEvalEmbeddingRevisionReadModel(
-            revision_id=revision.revision_id,
-            project_id=revision.project_id,
-            runtime_entry_id=revision.runtime_entry_id,
-            source_rag_eval_run_id=revision.source_rag_eval_run_id,
-            promotion_ids=tuple(sorted(revision.promotion_ids)),
-            status=revision.status,
-            previous_promoted_questions=revision.previous_promoted_questions,
-            new_promoted_questions=revision.new_promoted_questions,
-            created_at=revision.created_at,
-            accepted_at=None,
-            regression_failed_at=None,
-            rolled_back_at=None,
+        return EmbeddingGenerationResult(
+            embeddings=(NEW_VECTOR_384,),
+            model_id=request.model_id,
+            dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
         )
-        self.revisions[read_model.revision_id] = read_model
-        applied_ids = set(revision.promotion_ids)
-        self.targets = [
-            replace(
-                target,
-                status=WorkbenchRagEvalPromotionStatus.APPLIED,
-            )
-            if target.promotion_id in applied_ids
-            else target
-            for target in self.targets
-        ]
-        self.snapshots[snapshot.runtime_entry_id] = replace(
-            snapshot,
-            possible_questions=revision.new_promoted_questions,
-            embedding_text=revision.new_embedding_text,
-            embedding=revision.new_embedding,
-            runtime_hash=revision.new_runtime_hash,
-            active_revision_id=revision.revision_id,
-            candidates=tuple(
-                replace(
-                    candidate,
-                    status=WorkbenchRagEvalPromotionStatus.APPLIED,
-                )
-                if candidate.promotion_id in applied_ids
-                else candidate
-                for candidate in snapshot.candidates
-            ),
-        )
-        self.persist_order.append("runtime-and-promotions")
-        return read_model
 
 
 def _service(
-    repo: FakeRepository,
-    embedding: FakeEmbeddingPort,
+    repository: SharedPersistedClaimRepository,
+    embedding: BarrierEmbeddingPort,
+    owners: list[str],
 ) -> ApplyWorkbenchRagEvalPromotionsBatch:
+    def next_owner() -> str:
+        return owners.pop(0)
+
     return ApplyWorkbenchRagEvalPromotionsBatch(
-        rag_eval_repository=repo,
+        rag_eval_repository=repository,
         embedding_generation_port=embedding,
         embedding_model_id="model-1",
-        embedding_dimensions=3,
+        embedding_dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
         embedding_text_builder=PromotedQuestionRuntimeEmbeddingTextBuilder(),
-        application_policy=WorkbenchRagEvalPromotionApplicationPolicy(
-            WorkbenchRagEvalPromotionApplicationPolicyConfig(
-                max_active_promoted_questions_per_runtime_entry=12
-            )
-        ),
+        application_policy=WorkbenchRagEvalPromotionApplicationPolicy(),
+        application_lease_seconds=300,
+        lease_owner_factory=next_owner,
     )
 
 
 @pytest.mark.asyncio
-async def test_single_approved_application_uses_grouped_service_and_one_revision() -> (
-    None
-):
-    repo = FakeRepository([_target("promotion-1")])
-    embedding = FakeEmbeddingPort()
-    result = await ApplyWorkbenchRagEvalPromotion(
-        grouped_application=_service(repo, embedding)
-    ).execute(
-        project_id="project-1",
-        promotion_id="promotion-1",
-        applied_at=NOW,
+async def test_two_simultaneous_same_group_applications_call_provider_once() -> None:
+    repository = SharedPersistedClaimRepository(
+        require_two_initial_snapshots=True,
     )
-
-    assert result.applied_count == 1
-    assert result.embedding_recalculation_count == 1
-    assert len(result.revisions) == 1
-    assert len(embedding.calls) == 1
-    assert len(repo.persist_calls) == 1
-    assert repo.persist_order == ["revision", "runtime-and-promotions"]
-
-
-@pytest.mark.asyncio
-async def test_single_candidate_cannot_apply_and_does_not_embed() -> None:
-    repo = FakeRepository(
-        [_target("promotion-1", status=WorkbenchRagEvalPromotionStatus.CANDIDATE)]
-    )
-    embedding = FakeEmbeddingPort()
-
-    with pytest.raises(WorkbenchRagEvalPromotionConflictError):
-        await ApplyWorkbenchRagEvalPromotion(
-            grouped_application=_service(repo, embedding)
-        ).execute(
-            project_id="project-1",
-            promotion_id="promotion-1",
-            applied_at=NOW,
-        )
-
-    assert embedding.calls == []
-    assert repo.persist_calls == []
-
-
-@pytest.mark.asyncio
-async def test_repeated_single_request_returns_pending_revision_without_reembedding() -> (
-    None
-):
-    repo = FakeRepository([_target("promotion-1")])
-    embedding = FakeEmbeddingPort()
-    single = ApplyWorkbenchRagEvalPromotion(
-        grouped_application=_service(repo, embedding)
-    )
-
-    first = await single.execute(
-        project_id="project-1",
-        promotion_id="promotion-1",
-        applied_at=NOW,
-    )
-    second = await single.execute(
-        project_id="project-1",
-        promotion_id="promotion-1",
-        applied_at=NOW,
-    )
-
-    assert first.revisions[0].revision_id == second.revisions[0].revision_id
-    assert second.revisions[0].idempotent is True
-    assert len(embedding.calls) == 1
-    assert len(repo.persist_calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_two_approved_candidates_same_target_use_one_embedding_and_revision() -> (
-    None
-):
-    repo = FakeRepository(
-        [
-            _target("promotion-1", question="Q1?"),
-            _target("promotion-2", question="Q2?"),
-        ]
-    )
-    embedding = FakeEmbeddingPort()
-    result = await _service(repo, embedding).execute(
-        project_id="project-1",
-        mode="selected",
-        promotion_ids=("promotion-1", "promotion-2"),
-        run_id=None,
-        applied_at=NOW,
-    )
-
-    assert result.applied_count == 2
-    assert result.embedding_recalculation_count == 1
-    assert len(result.revisions) == 1
-    assert result.revisions[0].promotion_ids == ("promotion-1", "promotion-2")
-    assert len(embedding.calls) == 1
-
-
-@pytest.mark.asyncio
-async def test_candidates_for_two_targets_use_two_embeddings_and_revisions() -> None:
-    repo = FakeRepository(
-        [
-            _target("promotion-1", runtime_entry_id="entry-1"),
-            _target("promotion-2", runtime_entry_id="entry-2"),
-        ]
-    )
-    embedding = FakeEmbeddingPort()
-    result = await _service(repo, embedding).execute(
-        project_id="project-1",
-        mode="selected",
-        promotion_ids=("promotion-1", "promotion-2"),
-        run_id=None,
-        applied_at=NOW,
-    )
-
-    assert result.applied_count == 2
-    assert result.embedding_recalculation_count == 2
-    assert len(result.revisions) == 2
-    assert len(embedding.calls) == 2
-
-
-@pytest.mark.asyncio
-async def test_mixed_candidate_and_approved_never_leaks_candidate_alias() -> None:
-    repo = FakeRepository(
-        [
-            _target(
-                "promotion-1",
-                runtime_entry_id="entry-1",
-                question="Forbidden candidate alias?",
-                status=WorkbenchRagEvalPromotionStatus.CANDIDATE,
-            ),
-            _target(
-                "promotion-2",
-                runtime_entry_id="entry-2",
-                question="Approved alias?",
-            ),
-        ]
-    )
-    embedding = FakeEmbeddingPort()
-    result = await _service(repo, embedding).execute(
-        project_id="project-1",
-        mode="selected",
-        promotion_ids=("promotion-1", "promotion-2"),
-        run_id=None,
-        applied_at=NOW,
-    )
-
-    assert result.applied_count == 1
-    assert result.revisions[0].promotion_ids == ("promotion-2",)
-    assert "Forbidden candidate alias?" not in embedding.calls[0].texts[0]
-    assert any(error.promotion_ids == ("promotion-1",) for error in result.errors)
-
-
-@pytest.mark.asyncio
-async def test_active_revision_on_one_target_does_not_corrupt_other_target() -> None:
-    repo = FakeRepository(
-        [
-            _target("promotion-1", runtime_entry_id="entry-1"),
-            _target("promotion-2", runtime_entry_id="entry-2"),
-        ]
-    )
-    repo.snapshots["entry-1"] = replace(
-        repo.snapshots["entry-1"],
-        active_revision_id="active-revision",
-    )
-    embedding = FakeEmbeddingPort()
-    result = await _service(repo, embedding).execute(
-        project_id="project-1",
-        mode="selected",
-        promotion_ids=("promotion-1", "promotion-2"),
-        run_id=None,
-        applied_at=NOW,
-    )
-
-    assert result.applied_count == 1
-    assert result.revisions[0].runtime_entry_id == "entry-2"
-    assert len(embedding.calls) == 1
-    assert any(error.runtime_entry_id == "entry-1" for error in result.errors)
-
-
-@pytest.mark.asyncio
-async def test_partial_group_failure_is_per_target_transactional_and_explicit() -> None:
-    repo = FakeRepository(
-        [
-            _target("promotion-1", runtime_entry_id="entry-1"),
-            _target("promotion-2", runtime_entry_id="entry-2"),
-        ],
-        fail_runtime_entry_id="entry-1",
-    )
-    embedding = FakeEmbeddingPort()
-    result = await _service(repo, embedding).execute(
-        project_id="project-1",
-        mode="selected",
-        promotion_ids=("promotion-1", "promotion-2"),
-        run_id=None,
-        applied_at=NOW,
-    )
-
-    assert result.applied_count == 1
-    assert result.revisions[0].runtime_entry_id == "entry-2"
-    assert any(error.runtime_entry_id == "entry-1" for error in result.errors)
-    assert len(embedding.calls) == 2
-
-
-@pytest.mark.asyncio
-async def test_concurrent_apply_same_target_creates_one_revision_and_one_mutation() -> (
-    None
-):
-    import asyncio
-
-    repo = FakeRepository([_target("promotion-1")])
-    embedding = FakeEmbeddingPort()
-    service = _service(repo, embedding)
+    embedding = BarrierEmbeddingPort(repository=repository)
+    service = _service(repository, embedding, ["owner-1", "owner-2"])
 
     first, second = await asyncio.gather(
         service.execute(
@@ -523,11 +463,193 @@ async def test_concurrent_apply_same_target_creates_one_revision_and_one_mutatio
         ),
     )
 
-    assert len(repo.persist_calls) == 1
-    assert len(repo.revisions) == 1
+    results = (first, second)
     assert len(embedding.calls) == 1
-    assert first.revisions[0].revision_id == second.revisions[0].revision_id
-    assert {first.revisions[0].idempotent, second.revisions[0].idempotent} == {
-        False,
-        True,
-    }
+    assert embedding.mutation_count_at_first_call == 0
+    assert repository.persist_count == 1
+    assert repository.runtime_mutation_count == 1
+    assert len(repository.revisions) == 1
+    assert sum(result.applied_count for result in results) == 1
+    assert any(
+        error.code
+        == WorkbenchRagEvalPromotionConflictCode.APPLICATION_IN_PROGRESS.value
+        for result in results
+        for error in result.errors
+    )
+
+
+@pytest.mark.asyncio
+async def test_completed_claim_returns_idempotent_revision_without_embedding() -> None:
+    repository = SharedPersistedClaimRepository()
+    first_embedding = BarrierEmbeddingPort(
+        repository=repository,
+        wait_for_second_claim=False,
+    )
+    first_service = _service(repository, first_embedding, ["owner-1"])
+    first = await first_service.execute(
+        project_id="project-1",
+        mode="selected",
+        promotion_ids=("promotion-1",),
+        run_id=None,
+        applied_at=NOW,
+    )
+    assert first.applied_count == 1
+    repository.target = replace(
+        repository.target,
+        status=WorkbenchRagEvalPromotionStatus.APPROVED,
+    )
+
+    second_embedding = BarrierEmbeddingPort(
+        repository=repository,
+        wait_for_second_claim=False,
+    )
+    second_service = _service(repository, second_embedding, ["owner-2"])
+    second = await second_service.execute(
+        project_id="project-1",
+        mode="selected",
+        promotion_ids=("promotion-1",),
+        run_id=None,
+        applied_at=NOW + timedelta(seconds=1),
+    )
+
+    assert second.revisions[0].idempotent is True
+    assert second.embedding_recalculation_count == 0
+    assert second_embedding.calls == []
+    assert repository.persist_count == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_lease_is_recovered_and_stale_owner_cannot_complete() -> None:
+    repository = SharedPersistedClaimRepository()
+    snapshot = _snapshot(repository.target)
+    repository.claim = WorkbenchRagEvalPromotionApplicationClaim(
+        application_key=stable_promotion_application_key(
+            project_id="project-1",
+            runtime_entry_id="entry-1",
+            source_rag_eval_run_id="run-1",
+            promotion_ids=("promotion-1",),
+            previous_runtime_hash=snapshot.runtime_hash,
+        ),
+        project_id="project-1",
+        runtime_entry_id="entry-1",
+        source_rag_eval_run_id="run-1",
+        promotion_ids=("promotion-1",),
+        previous_runtime_hash=snapshot.runtime_hash,
+        status=WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING,
+        lease_owner="stale-owner",
+        lease_expires_at=NOW - timedelta(seconds=1),
+        revision_id=None,
+        created_at=NOW - timedelta(minutes=10),
+        updated_at=NOW - timedelta(minutes=10),
+        completed_at=None,
+    )
+
+    application_key = repository.claim.application_key
+    embedding = BarrierEmbeddingPort(
+        repository=repository,
+        wait_for_second_claim=False,
+    )
+    service = _service(repository, embedding, ["recovered-owner"])
+    result = await service.execute(
+        project_id="project-1",
+        mode="selected",
+        promotion_ids=("promotion-1",),
+        run_id=None,
+        applied_at=NOW,
+    )
+
+    assert result.applied_count == 1
+    assert len(embedding.calls) == 1
+    assert repository.persist_count == 1
+    assert repository.runtime_mutation_count == 1
+    assert repository.claim is not None
+    assert repository.claim.status is (
+        WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED
+    )
+    assert repository.claim.lease_owner == "recovered-owner"
+
+    with pytest.raises(WorkbenchRagEvalPromotionConflictError) as exc_info:
+        await repository.complete_promotion_application_claim(
+            application_key=application_key,
+            lease_owner="stale-owner",
+            revision_id="revision-stale",
+            completed_at=NOW,
+        )
+    assert exc_info.value.code is (
+        WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST
+    )
+
+
+@pytest.mark.asyncio
+async def test_persistence_failure_marks_claim_failed_after_rollback() -> None:
+    repository = SharedPersistedClaimRepository(fail_persistence=True)
+    embedding = BarrierEmbeddingPort(
+        repository=repository,
+        wait_for_second_claim=False,
+    )
+    service = _service(repository, embedding, ["owner-1"])
+
+    result = await service.execute(
+        project_id="project-1",
+        mode="selected",
+        promotion_ids=("promotion-1",),
+        run_id=None,
+        applied_at=NOW,
+    )
+
+    assert repository.runtime_mutation_count == 0
+    assert repository.persist_count == 0
+    assert repository.claim is not None
+    assert repository.claim.status is (
+        WorkbenchRagEvalPromotionApplicationClaimStatus.FAILED
+    )
+    assert result.errors[0].code == (
+        WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT.value
+    )
+
+
+@dataclass(slots=True)
+class FailingEmbeddingPort:
+    calls: int = 0
+
+    async def embed(
+        self,
+        request: EmbeddingGenerationRequest,
+    ) -> EmbeddingGenerationResult:
+        del request
+        self.calls += 1
+        raise RuntimeError("provider unavailable")
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_marks_claim_failed_without_runtime_mutation() -> None:
+    repository = SharedPersistedClaimRepository()
+    embedding = FailingEmbeddingPort()
+    service = ApplyWorkbenchRagEvalPromotionsBatch(
+        rag_eval_repository=repository,
+        embedding_generation_port=embedding,
+        embedding_model_id="model-1",
+        embedding_dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
+        embedding_text_builder=PromotedQuestionRuntimeEmbeddingTextBuilder(),
+        application_policy=WorkbenchRagEvalPromotionApplicationPolicy(),
+        application_lease_seconds=300,
+        lease_owner_factory=lambda: "owner-1",
+    )
+
+    result = await service.execute(
+        project_id="project-1",
+        mode="selected",
+        promotion_ids=("promotion-1",),
+        run_id=None,
+        applied_at=NOW,
+    )
+
+    assert embedding.calls == 1
+    assert repository.persist_count == 0
+    assert repository.runtime_mutation_count == 0
+    assert repository.revisions == {}
+    assert repository.claim is not None
+    assert repository.claim.status is (
+        WorkbenchRagEvalPromotionApplicationClaimStatus.FAILED
+    )
+    assert result.errors[0].code == "embedding_failed"

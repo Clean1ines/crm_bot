@@ -4,9 +4,16 @@ import sys
 from datetime import datetime, timezone
 from types import ModuleType
 
+import pytest
+
+from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_eval_promotion_application_errors import (
+    WorkbenchRagEvalPromotionConflictCode,
+    WorkbenchRagEvalPromotionConflictError,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
     WorkbenchRagEvalEmbeddingRevisionReadModel,
     WorkbenchRagEvalEmbeddingRevisionStatus,
+    WorkbenchRagEvalPromotionApplicationError,
     WorkbenchRagEvalPromotionApplicationResult,
     WorkbenchRagEvalPromotionRevisionResult,
 )
@@ -147,3 +154,131 @@ def test_revision_read_projection_omits_raw_vectors(monkeypatch) -> None:
     assert revision["status"] == "pending_verification"
     assert "previous_embedding" not in revision
     assert "new_embedding" not in revision
+
+
+class FakeConflictApplyUseCase:
+    def __init__(self, code: WorkbenchRagEvalPromotionConflictCode) -> None:
+        self.code = code
+
+    async def execute(self, **kwargs):
+        del kwargs
+        raise WorkbenchRagEvalPromotionConflictError(
+            self.code.value,
+            code=self.code,
+        )
+
+
+@pytest.mark.parametrize(
+    "code",
+    (
+        WorkbenchRagEvalPromotionConflictCode.APPLICATION_IN_PROGRESS,
+        WorkbenchRagEvalPromotionConflictCode.CONFLICTING_ACTIVE_APPLICATION,
+        WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+    ),
+)
+def test_single_apply_expected_concurrency_conflicts_map_to_409(
+    monkeypatch,
+    code: WorkbenchRagEvalPromotionConflictCode,
+) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    def fake_factory(**kwargs):
+        del kwargs
+        return FakeConflictApplyUseCase(code)
+
+    composition_module = ModuleType("src.interfaces.composition.workbench_rag_eval")
+    setattr(
+        composition_module,
+        "make_apply_workbench_rag_eval_promotion",
+        fake_factory,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "src.interfaces.composition.workbench_rag_eval",
+        composition_module,
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access",
+        allow_access,
+    )
+
+    response = _client().post(
+        f"/api/projects/{PROJECT_ID}/knowledge/rag-eval/workbench/"
+        "promotion-candidates/promotion-1/apply",
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == code.value
+
+
+class FakeBatchConflictApplyUseCase:
+    def __init__(self, code: WorkbenchRagEvalPromotionConflictCode) -> None:
+        self.code = code
+
+    async def execute(self, **kwargs):
+        del kwargs
+        error = WorkbenchRagEvalPromotionApplicationError(
+            code=self.code.value,
+            message=self.code.value,
+            promotion_ids=("promotion-1",),
+            runtime_entry_id="entry-1",
+        )
+        return WorkbenchRagEvalPromotionApplicationResult(
+            requested_count=1,
+            applied_count=0,
+            skipped_count=1,
+            embedding_recalculation_count=0,
+            revisions=(),
+            errors=(error,),
+        )
+
+
+@pytest.mark.parametrize(
+    "code",
+    (
+        WorkbenchRagEvalPromotionConflictCode.APPLICATION_IN_PROGRESS,
+        WorkbenchRagEvalPromotionConflictCode.CONFLICTING_ACTIVE_APPLICATION,
+        WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+    ),
+)
+def test_batch_apply_expected_concurrency_conflicts_map_to_409(
+    monkeypatch,
+    code: WorkbenchRagEvalPromotionConflictCode,
+) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    def fake_factory(**kwargs):
+        del kwargs
+        return FakeBatchConflictApplyUseCase(code)
+
+    composition_module = ModuleType("src.interfaces.composition.workbench_rag_eval")
+    setattr(
+        composition_module,
+        "make_apply_workbench_rag_eval_promotions_batch",
+        fake_factory,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "src.interfaces.composition.workbench_rag_eval",
+        composition_module,
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access",
+        allow_access,
+    )
+
+    response = _client().post(
+        f"/api/projects/{PROJECT_ID}/knowledge/rag-eval/workbench/"
+        "promotion-candidates/apply-batch",
+        json={
+            "mode": "selected",
+            "promotion_ids": ["promotion-1"],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == code.value

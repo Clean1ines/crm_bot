@@ -19,6 +19,9 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_s
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalSummary,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
+    WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.policies.promoted_question_runtime_embedding_text_builder import (
     PromotedQuestionRuntimeEmbeddingTextBuilder,
 )
@@ -153,6 +156,12 @@ def make_apply_workbench_rag_eval_promotions_batch(
     pool: object,
 ) -> ApplyWorkbenchRagEvalPromotionsBatch:
     embedding_settings = load_embedding_runtime_settings()
+    if embedding_settings.vector_dimensions != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS:
+        raise RuntimeError(
+            "Workbench runtime embedding dimensions must equal "
+            f"{WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS}; got "
+            f"{embedding_settings.vector_dimensions}"
+        )
     return ApplyWorkbenchRagEvalPromotionsBatch(
         rag_eval_repository=PostgresWorkbenchRagEvalRepository(pool),
         embedding_generation_port=make_embedding_generation_port(embedding_settings),

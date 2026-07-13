@@ -16,11 +16,28 @@ from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_ra
 from src.domain.project_plane.json_types import JsonObject
 
 
+WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS = 384
+
+
 class WorkbenchRagEvalEmbeddingRevisionStatus(StrEnum):
     PENDING_VERIFICATION = "pending_verification"
     ACCEPTED = "accepted"
     REGRESSION_FAILED = "regression_failed"
     ROLLED_BACK = "rolled_back"
+
+
+class WorkbenchRagEvalPromotionApplicationClaimStatus(StrEnum):
+    PREPARING = "PREPARING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class WorkbenchRagEvalPromotionApplicationClaimDecisionCode(StrEnum):
+    ACQUIRED = "ACQUIRED"
+    ALREADY_COMPLETED = "ALREADY_COMPLETED"
+    IN_PROGRESS = "IN_PROGRESS"
+    RECOVERED_EXPIRED_LEASE = "RECOVERED_EXPIRED_LEASE"
+    CONFLICTING_ACTIVE_GROUP = "CONFLICTING_ACTIVE_GROUP"
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +68,7 @@ class WorkbenchRagEvalPromotionApplicationSnapshot:
     runtime_visibility: str
     claim: str
     possible_questions: tuple[str, ...]
+    active_promoted_questions: tuple[str, ...]
     exclusion_scope: str | None
     embedding_text: str
     embedding: tuple[float, ...]
@@ -71,11 +89,15 @@ class WorkbenchRagEvalPromotionApplicationSnapshot:
             self.possible_questions,
             "possible_questions",
         )
+        _require_unique_normalized_questions(
+            self.active_promoted_questions,
+            "active_promoted_questions",
+        )
         _require_optional_text(self.exclusion_scope, "exclusion_scope")
         _require_text(self.embedding_text, "embedding_text")
-        _require_vector(self.embedding, self.embedding_dimensions, "embedding")
+        _require_canonical_embedding_dimensions(self.embedding_dimensions)
+        _require_vector(self.embedding, "embedding")
         _require_text(self.embedding_model_id, "embedding_model_id")
-        _require_positive_int(self.embedding_dimensions, "embedding_dimensions")
         if not isinstance(self.candidates, tuple) or not self.candidates:
             raise ValueError("candidates must be a non-empty tuple")
         for candidate in self.candidates:
@@ -134,17 +156,9 @@ class WorkbenchRagEvalEmbeddingRevision:
             _require_text(getattr(self, field_name), field_name)
 
         _require_unique_texts(self.promotion_ids, "promotion_ids")
-        _require_positive_int(self.embedding_dimensions, "embedding_dimensions")
-        _require_vector(
-            self.previous_embedding,
-            self.embedding_dimensions,
-            "previous_embedding",
-        )
-        _require_vector(
-            self.new_embedding,
-            self.embedding_dimensions,
-            "new_embedding",
-        )
+        _require_canonical_embedding_dimensions(self.embedding_dimensions)
+        _require_vector(self.previous_embedding, "previous_embedding")
+        _require_vector(self.new_embedding, "new_embedding")
         _require_unique_normalized_questions(
             self.previous_promoted_questions,
             "previous_promoted_questions",
@@ -276,6 +290,87 @@ class WorkbenchRagEvalEmbeddingRevisionReadModel:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalPromotionApplicationClaim:
+    application_key: str
+    project_id: str
+    runtime_entry_id: str
+    source_rag_eval_run_id: str
+    promotion_ids: tuple[str, ...]
+    previous_runtime_hash: str
+    status: WorkbenchRagEvalPromotionApplicationClaimStatus
+    lease_owner: str
+    lease_expires_at: datetime
+    revision_id: str | None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "application_key",
+            "project_id",
+            "runtime_entry_id",
+            "source_rag_eval_run_id",
+            "previous_runtime_hash",
+            "lease_owner",
+        ):
+            _require_text(getattr(self, field_name), field_name)
+        _require_unique_texts(self.promotion_ids, "promotion_ids")
+        if not isinstance(self.status, WorkbenchRagEvalPromotionApplicationClaimStatus):
+            raise TypeError(
+                "status must be WorkbenchRagEvalPromotionApplicationClaimStatus"
+            )
+        _require_datetime(self.lease_expires_at, "lease_expires_at")
+        _require_optional_text(self.revision_id, "revision_id")
+        _require_datetime(self.created_at, "created_at")
+        _require_datetime(self.updated_at, "updated_at")
+        _require_optional_datetime(self.completed_at, "completed_at")
+        if self.status is WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING:
+            if self.revision_id is not None or self.completed_at is not None:
+                raise ValueError(
+                    "PREPARING claim cannot have revision_id or completed_at"
+                )
+        elif self.status is WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED:
+            if self.revision_id is None or self.completed_at is None:
+                raise ValueError(
+                    "COMPLETED claim requires revision_id and completed_at"
+                )
+        elif self.revision_id is not None:
+            raise ValueError("FAILED claim cannot have revision_id")
+
+
+@dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalPromotionApplicationClaimDecision:
+    code: WorkbenchRagEvalPromotionApplicationClaimDecisionCode
+    claim: WorkbenchRagEvalPromotionApplicationClaim
+    revision: WorkbenchRagEvalEmbeddingRevisionReadModel | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.code,
+            WorkbenchRagEvalPromotionApplicationClaimDecisionCode,
+        ):
+            raise TypeError(
+                "code must be WorkbenchRagEvalPromotionApplicationClaimDecisionCode"
+            )
+        if not isinstance(self.claim, WorkbenchRagEvalPromotionApplicationClaim):
+            raise TypeError("claim must be WorkbenchRagEvalPromotionApplicationClaim")
+        if self.revision is not None and not isinstance(
+            self.revision,
+            WorkbenchRagEvalEmbeddingRevisionReadModel,
+        ):
+            raise TypeError(
+                "revision must be WorkbenchRagEvalEmbeddingRevisionReadModel"
+            )
+        if (
+            self.code
+            is WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ALREADY_COMPLETED
+            and self.revision is None
+        ):
+            raise ValueError("ALREADY_COMPLETED decision requires revision")
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalPromotionRevisionResult:
     revision_id: str
     runtime_entry_id: str
@@ -378,12 +473,14 @@ def stable_runtime_snapshot_hash(
     embedding_model_id: str,
     embedding_dimensions: int,
 ) -> str:
+    _require_canonical_embedding_dimensions(embedding_dimensions)
+    _require_vector(embedding, "embedding")
     payload = {
         "possible_questions": list(possible_questions),
         "embedding_text": embedding_text,
         "embedding": [float(value) for value in embedding],
         "embedding_model_id": embedding_model_id,
-        "embedding_dimensions": embedding_dimensions,
+        "embedding_dimensions": WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
     }
     return sha256(
         json.dumps(
@@ -395,7 +492,43 @@ def stable_runtime_snapshot_hash(
     ).hexdigest()
 
 
+def stable_promotion_application_key(
+    *,
+    project_id: str,
+    runtime_entry_id: str,
+    source_rag_eval_run_id: str,
+    promotion_ids: tuple[str, ...],
+    previous_runtime_hash: str,
+) -> str:
+    digest = _stable_application_identity_digest(
+        project_id=project_id,
+        runtime_entry_id=runtime_entry_id,
+        source_rag_eval_run_id=source_rag_eval_run_id,
+        promotion_ids=promotion_ids,
+        previous_runtime_hash=previous_runtime_hash,
+    )
+    return f"rag-eval-promotion-application:{digest}"
+
+
 def stable_embedding_revision_id(
+    *,
+    project_id: str,
+    runtime_entry_id: str,
+    source_rag_eval_run_id: str,
+    promotion_ids: tuple[str, ...],
+    previous_runtime_hash: str,
+) -> str:
+    digest = _stable_application_identity_digest(
+        project_id=project_id,
+        runtime_entry_id=runtime_entry_id,
+        source_rag_eval_run_id=source_rag_eval_run_id,
+        promotion_ids=promotion_ids,
+        previous_runtime_hash=previous_runtime_hash,
+    )
+    return f"rag-eval-embedding-revision:{digest}"
+
+
+def _stable_application_identity_digest(
     *,
     project_id: str,
     runtime_entry_id: str,
@@ -420,7 +553,7 @@ def stable_embedding_revision_id(
             previous_runtime_hash,
         )
     )
-    return "rag-eval-embedding-revision:" + sha256(payload.encode("utf-8")).hexdigest()
+    return sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _require_text(value: object, field_name: str) -> str:
@@ -435,9 +568,15 @@ def _require_optional_text(value: object, field_name: str) -> None:
     _require_text(value, field_name)
 
 
-def _require_positive_int(value: object, field_name: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError(f"{field_name} must be > 0")
+def _require_canonical_embedding_dimensions(value: object) -> None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS
+    ):
+        raise ValueError(
+            f"embedding_dimensions must equal {WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS}"
+        )
 
 
 def _require_non_negative_int(value: object, field_name: str) -> None:
@@ -455,17 +594,13 @@ def _require_optional_datetime(value: object, field_name: str) -> None:
         _require_datetime(value, field_name)
 
 
-def _require_vector(
-    vector: object,
-    dimensions: int,
-    field_name: str,
-) -> None:
-    _require_positive_int(dimensions, "embedding_dimensions")
+def _require_vector(vector: object, field_name: str) -> None:
     if not isinstance(vector, tuple):
         raise TypeError(f"{field_name} must be tuple")
-    if len(vector) != dimensions:
+    if len(vector) != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS:
         raise ValueError(
-            f"{field_name} dimensions {len(vector)} do not match {dimensions}"
+            f"{field_name} dimensions {len(vector)} do not match "
+            f"{WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS}"
         )
     for value in vector:
         if isinstance(value, bool) or not isinstance(value, (int, float)):

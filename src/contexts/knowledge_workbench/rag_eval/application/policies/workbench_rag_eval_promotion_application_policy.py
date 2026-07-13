@@ -170,6 +170,10 @@ class WorkbenchRagEvalPromotionApplicationPolicy:
             normalize_workbench_rag_eval_question(question): question
             for question in snapshot.possible_questions
         }
+        active_promoted_normalized = {
+            normalize_workbench_rag_eval_question(question)
+            for question in snapshot.active_promoted_questions
+        }
         selected_normalized: set[str] = set()
         applicable: list[WorkbenchRagEvalPromotionApplicationCandidate] = []
         skipped: list[WorkbenchRagEvalPromotionApplicationSkippedCandidate] = []
@@ -223,15 +227,22 @@ class WorkbenchRagEvalPromotionApplicationPolicy:
             *snapshot.possible_questions,
             *(candidate.question.strip() for candidate in applicable),
         )
+        new_active_promoted_count = len(
+            active_promoted_normalized
+            | {
+                normalize_workbench_rag_eval_question(candidate.question)
+                for candidate in applicable
+            }
+        )
         limit = self.config.max_active_promoted_questions_per_runtime_entry
-        if len(new_possible_questions) > limit:
+        if new_active_promoted_count > limit:
             raise WorkbenchRagEvalPromotionApplicationPolicyConflictError(
                 code=(
                     WorkbenchRagEvalPromotionApplicationConflictCode.ALIAS_LIMIT_EXCEEDED
                 ),
                 message=(
                     f"runtime entry {snapshot.runtime_entry_id} would have "
-                    f"{len(new_possible_questions)} active promoted aliases; limit is "
+                    f"{new_active_promoted_count} active promoted aliases; limit is "
                     f"{limit}"
                 ),
                 promotion_ids=tuple(candidate.promotion_id for candidate in applicable),

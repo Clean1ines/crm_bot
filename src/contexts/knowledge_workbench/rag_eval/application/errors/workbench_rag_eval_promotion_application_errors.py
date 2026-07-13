@@ -15,6 +15,9 @@ class WorkbenchRagEvalPromotionConflictCode(StrEnum):
     DUPLICATE_SELECTED_ALIAS = "duplicate_selected_alias"
     EXISTING_ALIAS = "existing_alias"
     PERSISTENCE_CONFLICT = "persistence_conflict"
+    APPLICATION_IN_PROGRESS = "application_in_progress"
+    CONFLICTING_ACTIVE_APPLICATION = "conflicting_active_application"
+    APPLICATION_LEASE_LOST = "application_lease_lost"
 
 
 class WorkbenchRagEvalPromotionNotFoundError(LookupError):

@@ -41,11 +41,17 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalSummary,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
+    WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
     WorkbenchRagEvalEmbeddingRevision,
     WorkbenchRagEvalEmbeddingRevisionReadModel,
     WorkbenchRagEvalEmbeddingRevisionStatus,
     WorkbenchRagEvalPromotionApplicationCandidate,
+    WorkbenchRagEvalPromotionApplicationClaim,
+    WorkbenchRagEvalPromotionApplicationClaimDecision,
+    WorkbenchRagEvalPromotionApplicationClaimDecisionCode,
+    WorkbenchRagEvalPromotionApplicationClaimStatus,
     WorkbenchRagEvalPromotionApplicationSnapshot,
+    stable_promotion_application_key,
     stable_runtime_snapshot_hash,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
@@ -268,6 +274,7 @@ SELECT
     entry.visibility AS runtime_visibility,
     entry.claim,
     entry.possible_questions,
+    applied_aliases.active_promoted_questions,
     entry.exclusion_scope,
     entry.embedding_text,
     emb.embedding_model_id,
@@ -292,6 +299,16 @@ LEFT JOIN LATERAL (
              current_embedding.embedding_text_hash DESC
     LIMIT 1
 ) AS emb ON TRUE
+LEFT JOIN LATERAL (
+    SELECT COALESCE(
+        jsonb_agg(applied.question ORDER BY applied.promotion_id),
+        '[]'::jsonb
+    ) AS active_promoted_questions
+    FROM knowledge_workbench_rag_eval_promoted_questions AS applied
+    WHERE applied.project_id = promotion.project_id
+      AND applied.target_runtime_entry_id = promotion.target_runtime_entry_id
+      AND applied.status = 'applied'
+) AS applied_aliases ON TRUE
 LEFT JOIN LATERAL (
     SELECT revision.revision_id
     FROM knowledge_workbench_rag_eval_embedding_revisions AS revision
@@ -354,6 +371,23 @@ WHERE project_id = $1::uuid
   AND status = 'pending_verification'
 """
 )
+
+
+WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_CLAIM_COLUMNS_SQL = """
+    application_key,
+    project_id::text AS project_id,
+    runtime_entry_id,
+    source_rag_eval_run_id,
+    promotion_ids,
+    previous_runtime_hash,
+    status,
+    lease_owner,
+    lease_expires_at,
+    revision_id,
+    created_at,
+    updated_at,
+    completed_at
+"""
 
 
 class WorkbenchRagEvalTransactionLike(Protocol):
@@ -1588,13 +1622,346 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
             )
         return _embedding_revision_read_model_from_row(row) if row is not None else None
 
+    async def claim_promotion_application(
+        self,
+        *,
+        application_key: str,
+        project_id: str,
+        runtime_entry_id: str,
+        source_rag_eval_run_id: str,
+        promotion_ids: Sequence[str],
+        previous_runtime_hash: str,
+        lease_owner: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> WorkbenchRagEvalPromotionApplicationClaimDecision:
+        requested_ids = tuple(sorted(dict.fromkeys(promotion_ids)))
+        if not requested_ids:
+            raise ValueError("promotion_ids must be non-empty")
+        expected_key = stable_promotion_application_key(
+            project_id=project_id,
+            runtime_entry_id=runtime_entry_id,
+            source_rag_eval_run_id=source_rag_eval_run_id,
+            promotion_ids=requested_ids,
+            previous_runtime_hash=previous_runtime_hash,
+        )
+        if application_key != expected_key:
+            raise ValueError(
+                "application_key does not match stable application identity"
+            )
+        if lease_expires_at <= now:
+            raise ValueError("lease_expires_at must be later than now")
+
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
+                    f"rag-eval-application-claim:{project_id}:{runtime_entry_id}",
+                )
+                revision_row = await connection.fetchrow(
+                    "SELECT "
+                    + WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_COLUMNS_SQL
+                    + """
+                    FROM knowledge_workbench_rag_eval_embedding_revisions
+                    WHERE application_key = $1
+                    """,
+                    application_key,
+                )
+                claim_row = await connection.fetchrow(
+                    "SELECT "
+                    + WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_CLAIM_COLUMNS_SQL
+                    + """
+                    FROM knowledge_workbench_rag_eval_promotion_application_claims
+                    WHERE application_key = $1
+                    FOR UPDATE
+                    """,
+                    application_key,
+                )
+
+                if revision_row is not None:
+                    revision = _embedding_revision_read_model_from_row(revision_row)
+                    if claim_row is None:
+                        raise RuntimeError(
+                            "embedding revision exists without promotion application claim"
+                        )
+                    completed = await connection.fetchrow(
+                        """
+                        UPDATE knowledge_workbench_rag_eval_promotion_application_claims
+                        SET status = 'COMPLETED',
+                            revision_id = $2,
+                            updated_at = $3,
+                            completed_at = $3
+                        WHERE application_key = $1
+                          AND lease_owner = $4
+                        RETURNING
+                        """
+                        + WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_CLAIM_COLUMNS_SQL,
+                        application_key,
+                        revision.revision_id,
+                        now,
+                        _text_from_row(claim_row, "lease_owner"),
+                    )
+                    if completed is None:
+                        raise RuntimeError(
+                            "failed to repair completed application claim"
+                        )
+                    return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                        code=(
+                            WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ALREADY_COMPLETED
+                        ),
+                        claim=_promotion_application_claim_from_row(completed),
+                        revision=revision,
+                    )
+
+                if claim_row is not None:
+                    existing = _promotion_application_claim_from_row(claim_row)
+                    _assert_claim_identity(
+                        claim=existing,
+                        project_id=project_id,
+                        runtime_entry_id=runtime_entry_id,
+                        source_rag_eval_run_id=source_rag_eval_run_id,
+                        promotion_ids=requested_ids,
+                        previous_runtime_hash=previous_runtime_hash,
+                    )
+                    if (
+                        existing.status
+                        is WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED
+                    ):
+                        if existing.revision_id is None:
+                            raise RuntimeError("completed claim is missing revision_id")
+                        completed_revision = await _load_embedding_revision_by_id(
+                            connection,
+                            existing.revision_id,
+                        )
+                        if completed_revision is None:
+                            raise RuntimeError(
+                                "completed claim revision_id did not resolve to revision row"
+                            )
+                        return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                            code=(
+                                WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ALREADY_COMPLETED
+                            ),
+                            claim=existing,
+                            revision=completed_revision,
+                        )
+                    if (
+                        existing.status
+                        is WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
+                        and existing.lease_expires_at > now
+                    ):
+                        return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                            code=(
+                                WorkbenchRagEvalPromotionApplicationClaimDecisionCode.IN_PROGRESS
+                            ),
+                            claim=existing,
+                        )
+                    recovered = await connection.fetchrow(
+                        """
+                        UPDATE knowledge_workbench_rag_eval_promotion_application_claims
+                        SET status = 'PREPARING',
+                            lease_owner = $2,
+                            lease_expires_at = $3,
+                            revision_id = NULL,
+                            updated_at = $4,
+                            completed_at = NULL
+                        WHERE application_key = $1
+                          AND lease_owner = $5
+                          AND status = $6
+                          AND (status = 'FAILED' OR lease_expires_at <= $4)
+                        RETURNING
+                        """
+                        + WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_CLAIM_COLUMNS_SQL,
+                        application_key,
+                        lease_owner,
+                        lease_expires_at,
+                        now,
+                        existing.lease_owner,
+                        existing.status.value,
+                    )
+                    if recovered is None:
+                        raise RuntimeError(
+                            "failed to acquire existing application claim"
+                        )
+                    code = (
+                        WorkbenchRagEvalPromotionApplicationClaimDecisionCode.RECOVERED_EXPIRED_LEASE
+                        if existing.status
+                        is WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
+                        else WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ACQUIRED
+                    )
+                    return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                        code=code,
+                        claim=_promotion_application_claim_from_row(recovered),
+                    )
+
+                active_row = await connection.fetchrow(
+                    "SELECT "
+                    + WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_CLAIM_COLUMNS_SQL
+                    + """
+                    FROM knowledge_workbench_rag_eval_promotion_application_claims
+                    WHERE project_id = $1::uuid
+                      AND runtime_entry_id = $2
+                      AND status = 'PREPARING'
+                    FOR UPDATE
+                    """,
+                    project_id,
+                    runtime_entry_id,
+                )
+                if active_row is not None:
+                    return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                        code=(
+                            WorkbenchRagEvalPromotionApplicationClaimDecisionCode.CONFLICTING_ACTIVE_GROUP
+                        ),
+                        claim=_promotion_application_claim_from_row(active_row),
+                    )
+
+                inserted = await connection.fetchrow(
+                    """
+                    INSERT INTO knowledge_workbench_rag_eval_promotion_application_claims (
+                        application_key,
+                        project_id,
+                        runtime_entry_id,
+                        source_rag_eval_run_id,
+                        promotion_ids,
+                        previous_runtime_hash,
+                        status,
+                        lease_owner,
+                        lease_expires_at,
+                        revision_id,
+                        created_at,
+                        updated_at,
+                        completed_at
+                    )
+                    VALUES (
+                        $1, $2::uuid, $3, $4, $5::jsonb, $6,
+                        'PREPARING', $7, $8, NULL, $9, $9, NULL
+                    )
+                    RETURNING
+                    """
+                    + WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_CLAIM_COLUMNS_SQL,
+                    application_key,
+                    project_id,
+                    runtime_entry_id,
+                    source_rag_eval_run_id,
+                    _json_text_list(requested_ids),
+                    previous_runtime_hash,
+                    lease_owner,
+                    lease_expires_at,
+                    now,
+                )
+                if inserted is None:
+                    raise RuntimeError("failed to insert application claim")
+                return WorkbenchRagEvalPromotionApplicationClaimDecision(
+                    code=WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ACQUIRED,
+                    claim=_promotion_application_claim_from_row(inserted),
+                )
+
+    async def complete_promotion_application_claim(
+        self,
+        *,
+        application_key: str,
+        lease_owner: str,
+        revision_id: str,
+        completed_at: datetime,
+    ) -> None:
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                row = await connection.fetchrow(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_promotion_application_claims
+                    SET status = 'COMPLETED',
+                        revision_id = $3,
+                        updated_at = $4,
+                        completed_at = $4
+                    WHERE application_key = $1
+                      AND lease_owner = $2
+                      AND status = 'PREPARING'
+                      AND lease_expires_at > CURRENT_TIMESTAMP
+                    RETURNING application_key
+                    """,
+                    application_key,
+                    lease_owner,
+                    revision_id,
+                    completed_at,
+                )
+                if row is None:
+                    existing = await connection.fetchrow(
+                        """
+                        SELECT status, revision_id, lease_owner
+                        FROM knowledge_workbench_rag_eval_promotion_application_claims
+                        WHERE application_key = $1
+                        """,
+                        application_key,
+                    )
+                    if (
+                        existing is not None
+                        and existing.get("status") == "COMPLETED"
+                        and existing.get("revision_id") == revision_id
+                        and existing.get("lease_owner") == lease_owner
+                    ):
+                        return
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "promotion application lease is no longer owned by caller",
+                        code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+                    )
+
+    async def fail_promotion_application_claim(
+        self,
+        *,
+        application_key: str,
+        lease_owner: str,
+        failed_at: datetime,
+    ) -> None:
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                """
+                UPDATE knowledge_workbench_rag_eval_promotion_application_claims
+                SET status = 'FAILED',
+                    lease_expires_at = $3,
+                    revision_id = NULL,
+                    updated_at = $3,
+                    completed_at = NULL
+                WHERE application_key = $1
+                  AND lease_owner = $2
+                  AND status = 'PREPARING'
+                  AND lease_expires_at > CURRENT_TIMESTAMP
+                RETURNING application_key
+                """,
+                application_key,
+                lease_owner,
+                failed_at,
+            )
+        if row is None:
+            raise WorkbenchRagEvalPromotionConflictError(
+                "promotion application lease is no longer owned by caller",
+                code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+            )
+
+    async def get_embedding_revision(
+        self,
+        *,
+        revision_id: str,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel | None:
+        async with _connection(self._connection_or_pool) as connection:
+            return await _load_embedding_revision_by_id(connection, revision_id)
+
     async def persist_promotion_application_revision(
         self,
         *,
         snapshot: WorkbenchRagEvalPromotionApplicationSnapshot,
         revision: WorkbenchRagEvalEmbeddingRevision,
+        application_key: str,
+        lease_owner: str,
     ) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
         _assert_revision_matches_snapshot(snapshot=snapshot, revision=revision)
+        expected_application_key = stable_promotion_application_key(
+            project_id=revision.project_id,
+            runtime_entry_id=revision.runtime_entry_id,
+            source_rag_eval_run_id=revision.source_rag_eval_run_id,
+            promotion_ids=revision.promotion_ids,
+            previous_runtime_hash=revision.previous_runtime_hash,
+        )
+        if application_key != expected_application_key:
+            raise ValueError("application_key does not match revision identity")
         requested_ids = tuple(sorted(revision.promotion_ids))
         async with _connection(self._connection_or_pool) as connection:
             async with connection.transaction():
@@ -1602,6 +1969,46 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))",
                     f"rag-eval-revision:{revision.project_id}:{revision.runtime_entry_id}",
                 )
+                claim_row = await connection.fetchrow(
+                    "SELECT "
+                    + WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_CLAIM_COLUMNS_SQL
+                    + ", lease_expires_at > CURRENT_TIMESTAMP AS lease_is_active"
+                    + """
+                    FROM knowledge_workbench_rag_eval_promotion_application_claims
+                    WHERE application_key = $1
+                    FOR UPDATE
+                    """,
+                    application_key,
+                )
+                if claim_row is None:
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "promotion application claim not found",
+                        code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+                        promotion_ids=requested_ids,
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+                claim = _promotion_application_claim_from_row(claim_row)
+                _assert_claim_identity(
+                    claim=claim,
+                    project_id=revision.project_id,
+                    runtime_entry_id=revision.runtime_entry_id,
+                    source_rag_eval_run_id=revision.source_rag_eval_run_id,
+                    promotion_ids=requested_ids,
+                    previous_runtime_hash=revision.previous_runtime_hash,
+                )
+                if (
+                    claim.status
+                    is not WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
+                    or claim.lease_owner != lease_owner
+                    or claim_row.get("lease_is_active") is not True
+                ):
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "promotion application lease is no longer active for caller",
+                        code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
+                        promotion_ids=requested_ids,
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+
                 rows = await connection.fetch(
                     WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_GROUP_FOR_UPDATE_SQL,
                     revision.project_id,
@@ -1684,6 +2091,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     """
                     INSERT INTO knowledge_workbench_rag_eval_embedding_revisions (
                         revision_id,
+                        application_key,
                         project_id,
                         runtime_entry_id,
                         source_rag_eval_run_id,
@@ -1705,13 +2113,14 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                         rolled_back_at
                     )
                     VALUES (
-                        $1, $2::uuid, $3, $4, $5::jsonb, $6,
-                        $7, $8, $9::vector, $10::vector,
-                        $11::jsonb, $12::jsonb, $13, $14,
-                        $15, $16, $17, $18, $19, $20
+                        $1, $2, $3::uuid, $4, $5, $6::jsonb, $7,
+                        $8, $9, $10::vector, $11::vector,
+                        $12::jsonb, $13::jsonb, $14, $15,
+                        $16, $17, $18, $19, $20, $21
                     )
                     """,
                     revision.revision_id,
+                    application_key,
                     revision.project_id,
                     revision.runtime_entry_id,
                     revision.source_rag_eval_run_id,
@@ -1777,7 +2186,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     """,
                     revision.runtime_entry_id,
                     revision.embedding_model_id,
-                    revision.embedding_dimensions,
+                    WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
                     _pg_vector_text(revision.new_embedding),
                     sha256(revision.new_embedding_text.encode("utf-8")).hexdigest(),
                     revision.created_at,
@@ -1830,6 +2239,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     "project_id": revision.project_id,
                     "runtime_entry_id": revision.runtime_entry_id,
                     "revision_id": revision.revision_id,
+                    "application_key": application_key,
                     "promotion_ids": list(requested_ids),
                     "status": revision.status.value,
                     "phase": "POST_PROMOTION_VERIFICATION",
@@ -1847,6 +2257,29 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     message="RAG Eval embedding revision created",
                     payload=event_payload,
                     revision=revision,
+                )
+
+                claim_completion = await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_promotion_application_claims
+                    SET status = 'COMPLETED',
+                        revision_id = $3,
+                        updated_at = $4,
+                        completed_at = $4
+                    WHERE application_key = $1
+                      AND lease_owner = $2
+                      AND status = 'PREPARING'
+                      AND lease_expires_at > CURRENT_TIMESTAMP
+                    """,
+                    application_key,
+                    lease_owner,
+                    revision.revision_id,
+                    revision.created_at,
+                )
+                _require_affected_rows(
+                    claim_completion,
+                    expected=1,
+                    operation="promotion application claim completion",
                 )
 
         return _embedding_revision_read_model(revision)
@@ -2054,7 +2487,21 @@ def _promotion_application_snapshot_from_rows(
             runtime_entry_id=_text_from_row(first, "runtime_entry_id"),
         )
     dimensions = _int_from_row(first, "embedding_dimensions")
+    if dimensions != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS:
+        raise WorkbenchRagEvalPromotionConflictError(
+            "runtime embedding dimensions violate canonical invariant",
+            code=WorkbenchRagEvalPromotionConflictCode.STALE_RUNTIME_SNAPSHOT,
+            promotion_ids=tuple(_text_from_row(row, "promotion_id") for row in rows),
+            runtime_entry_id=_text_from_row(first, "runtime_entry_id"),
+        )
     embedding = _vector_tuple(first.get("current_embedding"))
+    if len(embedding) != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS:
+        raise WorkbenchRagEvalPromotionConflictError(
+            "runtime embedding vector violates canonical dimensions",
+            code=WorkbenchRagEvalPromotionConflictCode.STALE_RUNTIME_SNAPSHOT,
+            promotion_ids=tuple(_text_from_row(row, "promotion_id") for row in rows),
+            runtime_entry_id=_text_from_row(first, "runtime_entry_id"),
+        )
     candidates = tuple(
         WorkbenchRagEvalPromotionApplicationCandidate(
             promotion_id=_text_from_row(row, "promotion_id"),
@@ -2066,6 +2513,10 @@ def _promotion_application_snapshot_from_rows(
         )
         for row in rows
     )
+    possible_questions = _text_tuple(first.get("possible_questions"))
+    active_promoted_questions = _normalized_unique_questions(
+        _text_tuple(first.get("active_promoted_questions"))
+    )
     snapshot = WorkbenchRagEvalPromotionApplicationSnapshot(
         project_id=_text_from_row(first, "project_id"),
         runtime_entry_id=_text_from_row(first, "runtime_entry_id"),
@@ -2073,19 +2524,20 @@ def _promotion_application_snapshot_from_rows(
         runtime_status=_text_from_row(first, "runtime_status"),
         runtime_visibility=_text_from_row(first, "runtime_visibility"),
         claim=_text_from_row(first, "claim"),
-        possible_questions=_text_tuple(first.get("possible_questions")),
+        possible_questions=possible_questions,
+        active_promoted_questions=active_promoted_questions,
         exclusion_scope=_optional_text_from_row(first, "exclusion_scope"),
         embedding_text=_text_from_row(first, "embedding_text"),
         embedding=embedding,
         embedding_model_id=embedding_model_id,
-        embedding_dimensions=dimensions,
+        embedding_dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
         candidates=candidates,
         runtime_hash=stable_runtime_snapshot_hash(
-            possible_questions=_text_tuple(first.get("possible_questions")),
+            possible_questions=possible_questions,
             embedding_text=_text_from_row(first, "embedding_text"),
             embedding=embedding,
             embedding_model_id=embedding_model_id,
-            embedding_dimensions=dimensions,
+            embedding_dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
         ),
         active_revision_id=_optional_text_from_row(
             first,
@@ -2107,11 +2559,66 @@ def _promotion_application_snapshot_from_rows(
             )
         if _text_from_row(row, "embedding_text") != snapshot.embedding_text:
             raise RuntimeError("promotion application rows disagree on embedding text")
+        if (
+            _normalized_unique_questions(
+                _text_tuple(row.get("active_promoted_questions"))
+            )
+            != snapshot.active_promoted_questions
+        ):
+            raise RuntimeError(
+                "promotion application rows disagree on active promoted aliases"
+            )
         if _optional_text_from_row(row, "active_revision_id") != (
             snapshot.active_revision_id
         ):
             raise RuntimeError("promotion application rows disagree on active revision")
     return snapshot
+
+
+def _promotion_application_claim_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalPromotionApplicationClaim:
+    return WorkbenchRagEvalPromotionApplicationClaim(
+        application_key=_text_from_row(row, "application_key"),
+        project_id=_text_from_row(row, "project_id"),
+        runtime_entry_id=_text_from_row(row, "runtime_entry_id"),
+        source_rag_eval_run_id=_text_from_row(row, "source_rag_eval_run_id"),
+        promotion_ids=_text_tuple(row.get("promotion_ids")),
+        previous_runtime_hash=_text_from_row(row, "previous_runtime_hash"),
+        status=WorkbenchRagEvalPromotionApplicationClaimStatus(
+            _text_from_row(row, "status")
+        ),
+        lease_owner=_text_from_row(row, "lease_owner"),
+        lease_expires_at=_datetime_from_row(row, "lease_expires_at"),
+        revision_id=_optional_text_from_row(row, "revision_id"),
+        created_at=_datetime_from_row(row, "created_at"),
+        updated_at=_datetime_from_row(row, "updated_at"),
+        completed_at=_optional_datetime_from_row(row, "completed_at"),
+    )
+
+
+def _assert_claim_identity(
+    *,
+    claim: WorkbenchRagEvalPromotionApplicationClaim,
+    project_id: str,
+    runtime_entry_id: str,
+    source_rag_eval_run_id: str,
+    promotion_ids: tuple[str, ...],
+    previous_runtime_hash: str,
+) -> None:
+    if (
+        claim.project_id != project_id
+        or claim.runtime_entry_id != runtime_entry_id
+        or claim.source_rag_eval_run_id != source_rag_eval_run_id
+        or tuple(sorted(claim.promotion_ids)) != tuple(sorted(promotion_ids))
+        or claim.previous_runtime_hash != previous_runtime_hash
+    ):
+        raise WorkbenchRagEvalPromotionConflictError(
+            "application claim identity does not match requested group",
+            code=WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT,
+            promotion_ids=promotion_ids,
+            runtime_entry_id=runtime_entry_id,
+        )
 
 
 def _embedding_revision_read_model_from_row(
@@ -2203,8 +2710,11 @@ def _assert_revision_matches_snapshot(
         raise ValueError("revision previous aliases do not match snapshot")
     if revision.embedding_model_id != snapshot.embedding_model_id:
         raise ValueError("revision embedding model does not match snapshot")
-    if revision.embedding_dimensions != snapshot.embedding_dimensions:
-        raise ValueError("revision embedding dimensions do not match snapshot")
+    if (
+        revision.embedding_dimensions != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS
+        or snapshot.embedding_dimensions != WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS
+    ):
+        raise ValueError("revision embedding dimensions violate canonical invariant")
     if revision.previous_runtime_hash != snapshot.runtime_hash:
         raise ValueError("revision previous runtime hash does not match snapshot")
     expected_new_hash = stable_runtime_snapshot_hash(
@@ -2212,7 +2722,7 @@ def _assert_revision_matches_snapshot(
         embedding_text=revision.new_embedding_text,
         embedding=revision.new_embedding,
         embedding_model_id=revision.embedding_model_id,
-        embedding_dimensions=revision.embedding_dimensions,
+        embedding_dimensions=WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
     )
     if revision.new_runtime_hash != expected_new_hash:
         raise ValueError("revision new runtime hash is invalid")
@@ -2248,6 +2758,25 @@ def _assert_locked_candidates_match(
             ),
             runtime_entry_id=expected.runtime_entry_id,
         )
+    if expected.active_promoted_questions != locked.active_promoted_questions:
+        raise WorkbenchRagEvalPromotionConflictError(
+            "active promoted aliases changed after immutable snapshot",
+            code=WorkbenchRagEvalPromotionConflictCode.STALE_RUNTIME_SNAPSHOT,
+            promotion_ids=tuple(
+                candidate.promotion_id for candidate in expected.candidates
+            ),
+            runtime_entry_id=expected.runtime_entry_id,
+        )
+
+
+def _normalized_unique_questions(values: tuple[str, ...]) -> tuple[str, ...]:
+    by_normalized: dict[str, str] = {}
+    for value in values:
+        normalized = normalize_workbench_rag_eval_question(value)
+        if not normalized:
+            raise ValueError("promoted alias normalizes to empty")
+        by_normalized.setdefault(normalized, value.strip())
+    return tuple(by_normalized[key] for key in sorted(by_normalized))
 
 
 def _require_affected_rows(

@@ -379,14 +379,24 @@ Reversible grouped application is implemented:
 - batch application groups by project and target runtime entry;
 - single application delegates to the same grouped service;
 - one immutable runtime/embedding snapshot is loaded before provider execution;
-- one embedding text build and one embedding generation occur per affected target;
+- concurrent same-group requests are serialized by a persisted lease claim before
+  provider execution;
+- only the active lease owner may generate the target embedding and persist its
+  revision; active claims return `application_in_progress` without a provider call;
+- expired claims are recoverable and stale lease owners cannot complete or fail a
+  recovered claim;
+- one embedding text build and one embedding generation occur per acquired target
+  claim;
 - a complete previous/new alias, embedding-text and vector revision is persisted;
 - each target group commits revision, runtime mutation, APPROVED → APPLIED,
-  run transition and canonical events in one transaction;
+  run transition, canonical events and claim completion in one transaction;
 - the active `PENDING_VERIFICATION` revision partial unique index and repository
-  lock/hash checks reject concurrent or stale overwrite;
-- repeated requests for the same pending revision return the persisted result
-  without another embedding generation;
+  lock/hash checks reject stale overwrite;
+- completed application claims return the persisted revision idempotently without
+  another embedding generation;
+- the active promoted alias limit counts normalized APPLIED promotion aliases and
+  applicable candidates, not baseline `possible_questions`;
+- revision and runtime embedding dimensions are canonically fixed at 384;
 - batch partial failure semantics are explicitly per-target transactional;
 - application moves the run to `VERIFYING` /
   `POST_PROMOTION_VERIFICATION` but does not execute verification.

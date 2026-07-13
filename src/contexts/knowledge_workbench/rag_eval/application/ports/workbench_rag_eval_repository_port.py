@@ -23,6 +23,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
     WorkbenchRagEvalEmbeddingRevision,
     WorkbenchRagEvalEmbeddingRevisionReadModel,
+    WorkbenchRagEvalPromotionApplicationClaimDecision,
     WorkbenchRagEvalPromotionApplicationSnapshot,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_adjudication_work import (
@@ -256,11 +257,50 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         promotion_ids: Sequence[str],
     ) -> WorkbenchRagEvalEmbeddingRevisionReadModel | None: ...
 
+    async def claim_promotion_application(
+        self,
+        *,
+        application_key: str,
+        project_id: str,
+        runtime_entry_id: str,
+        source_rag_eval_run_id: str,
+        promotion_ids: Sequence[str],
+        previous_runtime_hash: str,
+        lease_owner: str,
+        now: datetime,
+        lease_expires_at: datetime,
+    ) -> WorkbenchRagEvalPromotionApplicationClaimDecision: ...
+
+    async def complete_promotion_application_claim(
+        self,
+        *,
+        application_key: str,
+        lease_owner: str,
+        revision_id: str,
+        completed_at: datetime,
+    ) -> None: ...
+
+    async def fail_promotion_application_claim(
+        self,
+        *,
+        application_key: str,
+        lease_owner: str,
+        failed_at: datetime,
+    ) -> None: ...
+
+    async def get_embedding_revision(
+        self,
+        *,
+        revision_id: str,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel | None: ...
+
     async def persist_promotion_application_revision(
         self,
         *,
         snapshot: WorkbenchRagEvalPromotionApplicationSnapshot,
         revision: WorkbenchRagEvalEmbeddingRevision,
+        application_key: str,
+        lease_owner: str,
     ) -> WorkbenchRagEvalEmbeddingRevisionReadModel: ...
 
     async def list_embedding_revisions(
