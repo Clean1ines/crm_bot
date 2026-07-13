@@ -391,5 +391,21 @@ def test_repository_source_keeps_network_embedding_outside_transaction() -> None
     assert "embedding_generation_port" not in source
     assert "EmbeddingGenerationRequest" not in source
     assert "claim_promotion_application" in source
-    assert "lease_expires_at > CURRENT_TIMESTAMP" in source
     assert "application_key" in source
+
+    persist_start = source.index(
+        "    async def persist_promotion_application_revision("
+    )
+    persist_end = source.index(
+        "    async def list_embedding_revisions(",
+        persist_start,
+    )
+    persist_source = source[persist_start:persist_end]
+
+    assert "SET status = 'COMPLETED'" in persist_source
+    assert "WHERE application_key = $1" in persist_source
+    assert "AND lease_owner = $2" in persist_source
+    assert "AND status = 'PREPARING'" in persist_source
+    assert "AND lease_expires_at > CURRENT_TIMESTAMP" in persist_source
+    assert 'operation="promotion application claim completion"' in persist_source
+    assert "complete_promotion_application_claim" not in persist_source

@@ -283,6 +283,7 @@ async def test_completed_same_claim_returns_existing_revision() -> None:
     repository = _repository(connection)
     acquired = await _claim(repository)
     revision_id = "revision-1"
+
     connection.revisions[revision_id] = {
         "application_key": APPLICATION_KEY,
         "revision_id": revision_id,
@@ -298,18 +299,27 @@ async def test_completed_same_claim_returns_existing_revision() -> None:
         "regression_failed_at": None,
         "rolled_back_at": None,
     }
-    await repository.complete_promotion_application_claim(
-        application_key=APPLICATION_KEY,
-        lease_owner=acquired.claim.lease_owner,
-        revision_id=revision_id,
-        completed_at=NOW,
+    connection.claims[APPLICATION_KEY].update(
+        {
+            "status": "COMPLETED",
+            "revision_id": revision_id,
+            "updated_at": NOW,
+            "completed_at": NOW,
+            "lease_owner": acquired.claim.lease_owner,
+        }
     )
+
     decision = await _claim(repository, lease_owner="owner-2", now=NOW)
+
     assert decision.code is (
         WorkbenchRagEvalPromotionApplicationClaimDecisionCode.ALREADY_COMPLETED
     )
     assert decision.revision is not None
     assert decision.revision.revision_id == revision_id
+    assert not hasattr(
+        repository,
+        "complete_promotion_application_claim",
+    )
 
 
 @pytest.mark.asyncio
@@ -350,22 +360,15 @@ async def test_conflicting_group_for_same_runtime_returns_conflict_decision() ->
 
 
 @pytest.mark.asyncio
-async def test_stale_owner_cannot_complete_or_fail_recovered_claim() -> None:
+async def test_stale_owner_cannot_fail_recovered_claim() -> None:
     connection = ClaimFakeConnection()
     repository = _repository(connection)
-    await _claim(repository, lease_owner="owner-1", now=NOW - timedelta(minutes=10))
-    await _claim(repository, lease_owner="owner-2", now=NOW)
-
-    with pytest.raises(WorkbenchRagEvalPromotionConflictError) as complete_error:
-        await repository.complete_promotion_application_claim(
-            application_key=APPLICATION_KEY,
-            lease_owner="owner-1",
-            revision_id="revision-1",
-            completed_at=NOW,
-        )
-    assert complete_error.value.code is (
-        WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST
+    await _claim(
+        repository,
+        lease_owner="owner-1",
+        now=NOW - timedelta(minutes=10),
     )
+    await _claim(repository, lease_owner="owner-2", now=NOW)
 
     with pytest.raises(WorkbenchRagEvalPromotionConflictError) as fail_error:
         await repository.fail_promotion_application_claim(
@@ -373,52 +376,13 @@ async def test_stale_owner_cannot_complete_or_fail_recovered_claim() -> None:
             lease_owner="owner-1",
             failed_at=NOW,
         )
+
     assert fail_error.value.code is (
         WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST
     )
-
-
-@pytest.mark.asyncio
-async def test_stale_owner_cannot_idempotently_complete_recovered_owner_revision() -> (
-    None
-):
-    connection = ClaimFakeConnection()
-    repository = _repository(connection)
-    await _claim(repository, lease_owner="owner-1", now=NOW - timedelta(minutes=10))
-    recovered = await _claim(repository, lease_owner="owner-2", now=NOW)
-
-    revision_id = "revision-1"
-    connection.revisions[revision_id] = {
-        "application_key": APPLICATION_KEY,
-        "revision_id": revision_id,
-        "project_id": PROJECT_ID,
-        "runtime_entry_id": "entry-1",
-        "source_rag_eval_run_id": "run-1",
-        "promotion_ids": list(PROMOTION_IDS),
-        "status": "pending_verification",
-        "previous_promoted_questions": ["Existing?"],
-        "new_promoted_questions": ["Existing?", "New?"],
-        "created_at": NOW,
-        "accepted_at": None,
-        "regression_failed_at": None,
-        "rolled_back_at": None,
-    }
-    await repository.complete_promotion_application_claim(
-        application_key=APPLICATION_KEY,
-        lease_owner=recovered.claim.lease_owner,
-        revision_id=revision_id,
-        completed_at=NOW,
-    )
-
-    with pytest.raises(WorkbenchRagEvalPromotionConflictError) as exc_info:
-        await repository.complete_promotion_application_claim(
-            application_key=APPLICATION_KEY,
-            lease_owner="owner-1",
-            revision_id=revision_id,
-            completed_at=NOW,
-        )
-    assert exc_info.value.code is (
-        WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST
+    assert not hasattr(
+        repository,
+        "complete_promotion_application_claim",
     )
 
 

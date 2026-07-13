@@ -41,7 +41,6 @@ def test_all_application_consumers_use_persisted_claim_before_provider() -> None
 
     for marker in (
         "claim_promotion_application(",
-        "complete_promotion_application_claim(",
         "fail_promotion_application_claim(",
         "persist_promotion_application_revision(",
     ):
@@ -52,8 +51,15 @@ def test_all_application_consumers_use_persisted_claim_before_provider() -> None
     claim_index = batch.index("claim_promotion_application(")
     provider_index = batch.index("embedding = await self._embed(built.text)")
     persistence_index = batch.index("persist_promotion_application_revision(")
-    completion_index = batch.index("complete_promotion_application_claim(")
-    assert claim_index < provider_index < persistence_index < completion_index
+    result_index = batch.index(
+        "WorkbenchRagEvalPromotionRevisionResult(",
+        persistence_index,
+    )
+    assert claim_index < provider_index < persistence_index < result_index
+
+    assert "complete_promotion_application_claim" not in batch
+    assert "complete_promotion_application_claim" not in port
+    assert "    async def complete_promotion_application_claim(" not in repository
 
     assert "application_key=application_key" in batch
     assert "lease_owner=lease_owner" in batch
@@ -79,7 +85,8 @@ def test_only_claim_owner_can_generate_and_persist_revision() -> None:
     assert "lease_owner != lease_owner" in repository
     assert "lease_expires_at > CURRENT_TIMESTAMP AS lease_is_active" in repository
     assert "APPLICATION_LEASE_LOST" in repository
-    assert "promotion application claim completion" in repository
+    assert 'operation="promotion application claim completion"' in repository
+    assert "    async def complete_promotion_application_claim(" not in repository
     persist_start = repository.index(
         "    async def persist_promotion_application_revision("
     )

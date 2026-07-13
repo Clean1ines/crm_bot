@@ -439,19 +439,6 @@ class ApplyWorkbenchRagEvalPromotionsBatch:
                 )
                 raise
 
-            try:
-                await self.rag_eval_repository.complete_promotion_application_claim(
-                    application_key=application_key,
-                    lease_owner=lease_owner,
-                    revision_id=persisted.revision_id,
-                    completed_at=applied_at,
-                )
-            except WorkbenchRagEvalPromotionConflictError as exc:
-                errors.append(
-                    _error_from_conflict(exc, applicable_ids, runtime_entry_id)
-                )
-                continue
-
             revisions.append(
                 WorkbenchRagEvalPromotionRevisionResult(
                     revision_id=persisted.revision_id,

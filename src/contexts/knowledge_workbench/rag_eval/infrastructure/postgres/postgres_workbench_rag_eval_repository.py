@@ -1855,55 +1855,6 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     claim=_promotion_application_claim_from_row(inserted),
                 )
 
-    async def complete_promotion_application_claim(
-        self,
-        *,
-        application_key: str,
-        lease_owner: str,
-        revision_id: str,
-        completed_at: datetime,
-    ) -> None:
-        async with _connection(self._connection_or_pool) as connection:
-            async with connection.transaction():
-                row = await connection.fetchrow(
-                    """
-                    UPDATE knowledge_workbench_rag_eval_promotion_application_claims
-                    SET status = 'COMPLETED',
-                        revision_id = $3,
-                        updated_at = $4,
-                        completed_at = $4
-                    WHERE application_key = $1
-                      AND lease_owner = $2
-                      AND status = 'PREPARING'
-                      AND lease_expires_at > CURRENT_TIMESTAMP
-                    RETURNING application_key
-                    """,
-                    application_key,
-                    lease_owner,
-                    revision_id,
-                    completed_at,
-                )
-                if row is None:
-                    existing = await connection.fetchrow(
-                        """
-                        SELECT status, revision_id, lease_owner
-                        FROM knowledge_workbench_rag_eval_promotion_application_claims
-                        WHERE application_key = $1
-                        """,
-                        application_key,
-                    )
-                    if (
-                        existing is not None
-                        and existing.get("status") == "COMPLETED"
-                        and existing.get("revision_id") == revision_id
-                        and existing.get("lease_owner") == lease_owner
-                    ):
-                        return
-                    raise WorkbenchRagEvalPromotionConflictError(
-                        "promotion application lease is no longer owned by caller",
-                        code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
-                    )
-
     async def fail_promotion_application_claim(
         self,
         *,

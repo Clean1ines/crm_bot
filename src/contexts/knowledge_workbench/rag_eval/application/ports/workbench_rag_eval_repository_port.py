@@ -271,15 +271,6 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         lease_expires_at: datetime,
     ) -> WorkbenchRagEvalPromotionApplicationClaimDecision: ...
 
-    async def complete_promotion_application_claim(
-        self,
-        *,
-        application_key: str,
-        lease_owner: str,
-        revision_id: str,
-        completed_at: datetime,
-    ) -> None: ...
-
     async def fail_promotion_application_claim(
         self,
         *,

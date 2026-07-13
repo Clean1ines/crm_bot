@@ -268,42 +268,6 @@ class SharedPersistedClaimRepository:
                 claim=self.claim,
             )
 
-    async def complete_promotion_application_claim(
-        self,
-        *,
-        application_key: str,
-        lease_owner: str,
-        revision_id: str,
-        completed_at: datetime,
-    ) -> None:
-        async with self.lock:
-            if (
-                self.claim is not None
-                and self.claim.application_key == application_key
-                and self.claim.status
-                is WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED
-                and self.claim.revision_id == revision_id
-            ):
-                return
-            if (
-                self.claim is None
-                or self.claim.application_key != application_key
-                or self.claim.lease_owner != lease_owner
-                or self.claim.status
-                is not WorkbenchRagEvalPromotionApplicationClaimStatus.PREPARING
-            ):
-                raise WorkbenchRagEvalPromotionConflictError(
-                    "lease lost",
-                    code=WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST,
-                )
-            self.claim = replace(
-                self.claim,
-                status=WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED,
-                revision_id=revision_id,
-                updated_at=completed_at,
-                completed_at=completed_at,
-            )
-
     async def fail_promotion_application_claim(
         self,
         *,
@@ -469,6 +433,10 @@ async def test_two_simultaneous_same_group_applications_call_provider_once() -> 
     assert repository.persist_count == 1
     assert repository.runtime_mutation_count == 1
     assert len(repository.revisions) == 1
+    assert not hasattr(
+        repository,
+        "complete_promotion_application_claim",
+    )
     assert sum(result.applied_count for result in results) == 1
     assert any(
         error.code
@@ -516,10 +484,14 @@ async def test_completed_claim_returns_idempotent_revision_without_embedding() -
     assert second.embedding_recalculation_count == 0
     assert second_embedding.calls == []
     assert repository.persist_count == 1
+    assert not hasattr(
+        repository,
+        "complete_promotion_application_claim",
+    )
 
 
 @pytest.mark.asyncio
-async def test_expired_lease_is_recovered_and_stale_owner_cannot_complete() -> None:
+async def test_expired_lease_is_recovered_and_completed_by_atomic_persistence() -> None:
     repository = SharedPersistedClaimRepository()
     snapshot = _snapshot(repository.target)
     repository.claim = WorkbenchRagEvalPromotionApplicationClaim(
@@ -544,7 +516,6 @@ async def test_expired_lease_is_recovered_and_stale_owner_cannot_complete() -> N
         completed_at=None,
     )
 
-    application_key = repository.claim.application_key
     embedding = BarrierEmbeddingPort(
         repository=repository,
         wait_for_second_claim=False,
@@ -559,6 +530,7 @@ async def test_expired_lease_is_recovered_and_stale_owner_cannot_complete() -> N
     )
 
     assert result.applied_count == 1
+    assert len(result.revisions) == 1
     assert len(embedding.calls) == 1
     assert repository.persist_count == 1
     assert repository.runtime_mutation_count == 1
@@ -567,16 +539,10 @@ async def test_expired_lease_is_recovered_and_stale_owner_cannot_complete() -> N
         WorkbenchRagEvalPromotionApplicationClaimStatus.COMPLETED
     )
     assert repository.claim.lease_owner == "recovered-owner"
-
-    with pytest.raises(WorkbenchRagEvalPromotionConflictError) as exc_info:
-        await repository.complete_promotion_application_claim(
-            application_key=application_key,
-            lease_owner="stale-owner",
-            revision_id="revision-stale",
-            completed_at=NOW,
-        )
-    assert exc_info.value.code is (
-        WorkbenchRagEvalPromotionConflictCode.APPLICATION_LEASE_LOST
+    assert repository.claim.revision_id == result.revisions[0].revision_id
+    assert not hasattr(
+        repository,
+        "complete_promotion_application_claim",
     )
 
 
