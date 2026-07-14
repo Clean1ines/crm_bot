@@ -8,6 +8,15 @@ import sys
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event import (
+    FrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event_cursor import (
+    FrontendWorkflowEventCursor,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.workbench_rag_eval_frontend_workflow_event_projector import (
+    WorkbenchRagEvalFrontendWorkflowEventProjector,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalPromotionApplyResult,
     WorkbenchRagEvalPromotionBatchApplyResult,
@@ -25,6 +34,14 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalRunStatus,
     WorkbenchRagEvalSummary,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
+    WorkbenchRagEvalWorkflowEventType,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_event import WorkflowEvent
+from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import (
+    WorkflowEventId,
+)
+import src.interfaces.http.knowledge as knowledge
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutionInput,
     LlmDispatchExecutionResult,
@@ -45,6 +62,49 @@ class FakeLlmDispatchExecutor:
         execution_input: LlmDispatchExecutionInput,
     ) -> LlmDispatchExecutionResult:
         raise AssertionError("HTTP test must not execute LLM")
+
+
+class FakeAcquire:
+    async def __aenter__(self):
+        return object()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        del exc_type, exc, tb
+        return None
+
+
+class FakePool:
+    def acquire(self) -> FakeAcquire:
+        return FakeAcquire()
+
+
+class FakeFrontendWorkflowEventRepository:
+    events: list[FrontendWorkflowEvent] = []
+
+    def __init__(self, connection):
+        del connection
+
+    async def append(self, event: FrontendWorkflowEvent) -> FrontendWorkflowEvent:
+        self.events.append(event)
+        return event
+
+    async def list_frontend_events(
+        self,
+        workflow_run_id: str,
+        after_cursor: FrontendWorkflowEventCursor,
+        limit: int,
+    ) -> tuple[FrontendWorkflowEvent, ...]:
+        return tuple(
+            event
+            for event in self.events
+            if event.workflow_run_id == workflow_run_id
+            and event.source_sequence_number > after_cursor.source_sequence_number
+        )[:limit]
+
+
+class DisconnectingRequest:
+    async def is_disconnected(self) -> bool:
+        return True
 
 
 def _summary() -> WorkbenchRagEvalSummary:
@@ -138,6 +198,83 @@ def test_workbench_rag_eval_run_endpoint_returns_202_and_starts_v2_workflow(
         "source_document_ref": None,
     }
     assert response.json()["run"]["progress"]["scheduled_generation_items"] == 1
+
+
+async def test_project_workflow_frontend_events_returns_rag_eval_synthetic_projection(
+    monkeypatch,
+) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    monkeypatch.setattr(knowledge, "_require_project_access", allow_access)
+    monkeypatch.setattr(
+        knowledge,
+        "PostgresFrontendWorkflowEventRepository",
+        FakeFrontendWorkflowEventRepository,
+    )
+    FakeFrontendWorkflowEventRepository.events = []
+
+    projected = WorkbenchRagEvalFrontendWorkflowEventProjector().project(
+        WorkflowEvent(
+            event_id=WorkflowEventId("workflow-event:rag-eval-run-1:verification"),
+            event_type=WorkbenchRagEvalWorkflowEventType.VERIFICATION_BATCH_COMPLETED.value,
+            workflow_run_id="rag-eval-run-1",
+            payload={
+                "workflow_run_id": "rag-eval-run-1",
+                "rag_eval_run_id": "rag-eval-run-1",
+                "project_id": "11111111-1111-1111-1111-111111111111",
+                "revision_id": "revision-1",
+                "runtime_entry_id": "entry-1",
+                "phase": "POST_PROMOTION_VERIFICATION",
+                "status": "running",
+                "processed_count": 20,
+                "remaining_count": 25,
+            },
+            occurred_at=datetime(2026, 7, 14, 12, tzinfo=timezone.utc),
+            sequence_number=7,
+        )
+    )
+    assert projected is not None
+    assert projected.document_id == (
+        "rag-eval:11111111-1111-1111-1111-111111111111:rag-eval-run-1"
+    )
+    await FakeFrontendWorkflowEventRepository(object()).append(projected)
+
+    response = await knowledge.list_project_workflow_frontend_events(
+        project_id="11111111-1111-1111-1111-111111111111",
+        workflow_run_id="rag-eval-run-1",
+        after_cursor=None,
+        after_source_sequence=0,
+        limit=100,
+        authorization="Bearer test",
+        pool=FakePool(),
+        project_repo=object(),
+        user_repo=object(),
+    )
+
+    assert response["events"][0]["projection_event_id"] == projected.projection_event_id
+    assert response["events"][0]["document_id"] == projected.document_id
+
+    stream = await knowledge.stream_project_workflow_frontend_events(
+        project_id="11111111-1111-1111-1111-111111111111",
+        workflow_run_id="rag-eval-run-1",
+        request=DisconnectingRequest(),
+        after_cursor=None,
+        after_source_sequence=0,
+        authorization="Bearer test",
+        pool=FakePool(),
+        project_repo=object(),
+        user_repo=object(),
+    )
+    chunks = [chunk async for chunk in stream.body_iterator]
+    text = "".join(
+        chunk.decode() if isinstance(chunk, bytes) else chunk for chunk in chunks
+    )
+
+    assert "event: frontend_workflow_event" in text
+    assert projected.projection_event_id in text
+    assert projected.document_id in text
 
 
 def test_workbench_rag_eval_run_endpoint_validates_top_k(monkeypatch) -> None:

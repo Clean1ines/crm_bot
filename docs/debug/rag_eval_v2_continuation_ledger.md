@@ -1,488 +1,223 @@
 # RAG Eval V2 continuation ledger
 
-## Current checkpoint
+## Current state
 
-**Date:** 2026-07-13
-**Committed base:** `fd171dfc05d54075018ce703572bc2635dff76d7`
-**Working tree:** contains the reversible grouped promotion application checkpoint
-**Overall status:** IN PROGRESS — qgen complete; retrieval complete; adjudication complete; promotion review complete; reversible grouped application complete; embedding revisions PENDING_VERIFICATION complete
+**Date:** 2026-07-14
+**Committed base / HEAD:** `82f133bbae5b9c8401184dd5e3d8d26b02ff827f`
+(`82f133bb Remove duplicate RAG Eval claim completion`)
+**Working tree:** dirty with the uncommitted RAG Eval V2 continuation and
+separate hygiene/schema changes described below.
 
-This document describes the current working tree. It must not instruct a future
-agent to recreate question-generation workflow components that already exist.
+The active RAG Eval V2 implementation in this working tree includes:
 
----
+- qgen, retrieval, adjudication, promotion review and reversible grouped
+  promotion application;
+- embedding revision read models, accept and rollback use cases, HTTP routes and
+  frontend revision controls;
+- bounded durable post-promotion verification: the command handler uses a named
+  `batch_limit`, lists only the next pending verification queries, persists only
+  the processed batch outcomes, emits `VerificationBatchCompleted`, appends a
+  stable continuation command while pending work remains, and emits terminal
+  metrics/policy/`VerificationCompleted` only when `remaining == 0`;
+- durable verification schema, query planning, before/after outcome pair
+  persistence, metrics calculation and conservative regression policy;
+- project/workflow frontend-event list and SSE endpoints for documentless RAG
+  Eval runs using the existing frontend event repository and transport;
+- synthetic RAG Eval projection document ids for runs without
+  `source_document_ref`;
+- frontend projection reducer/query invalidation for RAG Eval workflow events;
+- persisted `available_actions.can_accept` and
+  `available_actions.can_rollback`, consumed by the revision panel instead of
+  frontend lifecycle guessing;
+- verification read/list APIs and frontend metrics UI for persisted
+  promoted/holdout/baseline/neighbour metrics, including before/after
+  top1/top3/top5, mean rank, mean margin, miss/confusion counts and deltas.
 
-## Canonical contracts fixed in the current checkpoint
+## Commit set plan
+
+The current working tree should be split into three logical commit sets before
+committing.
+
+### A. RAG Eval V2 feature
+
+Contains the RAG Eval backend/application/infrastructure/interfaces changes,
+RAG Eval frontend page/API/reducer changes, RAG Eval migration, RAG Eval tests,
+and this ledger.
+
+Must not include Knowledge UI lint-hygiene files or generated TypeScript schema
+refresh.
+
+### B. Knowledge UI lint hygiene
+
+Contains only repository-wide Knowledge UI lint hygiene required for the full
+frontend lint gate. These changes are not part of the RAG Eval runtime.
+
+Current hygiene scope:
+
+- `frontend/src/pages/knowledge/KnowledgePage.tsx`
+- `frontend/src/pages/knowledge/KnowledgePage.workflowProjection.test.ts`
+- `frontend/src/pages/knowledge/curationReadyLiveEvent.ts`
+- `frontend/src/pages/knowledge/components/DraftClaimCurationWorkspaceModal.tsx`
+- `frontend/src/pages/knowledge/components/DraftClaimCurationWorkspaceModalState.ts`
+- `frontend/src/pages/knowledge/components/DraftClaimCurationWorkspaceModalState.test.ts`
+- `frontend/src/pages/knowledge/components/KnowledgeDocumentCard.tsx`
+- `frontend/src/pages/knowledge/components/workflow-timer/useWorkflowTimerText.ts`
+
+No `queueMicrotask` remains in the four reviewed Knowledge UI files. The curation
+modal lifecycle cleanup is covered by a pure focused regression test.
+
+### C. Generated TypeScript OpenAPI schema refresh
+
+Contains only:
+
+- `frontend/src/shared/api/generated/schema.ts`
+
+Generated OpenAPI JSON files are clean against HEAD after regeneration; the
+TypeScript schema refresh must be committed separately or explicitly separated
+from the RAG Eval feature commit.
+
+## Validation evidence
+
+Final validation after the current hygiene pass:
+
+```text
+bash dev_scripts/ensure_test_env.sh: passed
+python -m ruff format --check src tests: passed
+python -m ruff check src tests: passed
+python -m mypy src: passed
+python -m pytest -q: 2782 passed, 2 skipped, 1 warning
+
+cd frontend && npm run lint: passed
+cd frontend && npm run type-check: passed
+cd frontend && npm run build: passed
+cd frontend && npm test -- --run: 60 passed
+
+git diff --check: passed
+```
+
+Frontend build still emits the environment warning that local Node.js is
+`18.19.1` while Vite requires `20.19+` or `22.12+`; the build nevertheless
+completed successfully.
+
+## Historical checkpoints
+
+### 2026-07-14 post-promotion verification foundation
+
+This historical checkpoint was recorded before the read APIs, full metrics UI
+and project/workflow SSE work were completed.
+
+Implemented at that point:
+
+- verification domain models, durable metrics and conservative regression
+  policy;
+- migration `129_create_workbench_rag_eval_post_promotion_verifications.sql`
+  for verification headers, dataset queries and before/after outcome pairs;
+- grouped promotion application enqueued `RUN_POST_PROMOTION_VERIFICATION` with
+  a stable idempotency key;
+- workflow dispatcher/drain could call a registered post-promotion verification
+  executor and mark the command complete;
+- production workflow runtime composition wired the real post-promotion
+  verification executor;
+- repository methods created durable promoted/baseline/holdout/neighbour
+  verification query plans, ranked before/after observations and persisted
+  outcome pairs/final verification state;
+- explicit embedding revision accept/rollback use cases, repository methods and
+  HTTP routes;
+- rollback restored previous aliases, embedding text and embedding vector
+  atomically when the current runtime hash matched the revision's
+  `new_runtime_hash`;
+- accept required a passed/acceptable persisted verification row;
+- frontend API/query keys and minimal revision panel controls existed for
+  accept/rollback.
+
+Historical gaps from that checkpoint, now resolved in the current working tree:
+
+- verification read models and HTTP detail/list endpoints;
+- full frontend verification metrics/regression reasons and SSE invalidation;
+- frontend lint blockers in the reviewed Knowledge UI files.
+
+Historical focused validation from that checkpoint:
+
+```text
+python -m pytest tests/architecture/test_workbench_rag_eval_post_promotion_verification_boundary.py tests/contexts/knowledge_workbench/rag_eval/application/policies/test_workbench_rag_eval_promotion_verification_policy.py tests/contexts/knowledge_workbench/rag_eval/application/use_cases/test_workbench_rag_eval_embedding_revision_actions.py tests/interfaces/http/test_workbench_rag_eval_embedding_revisions.py tests/contexts/knowledge_workbench/rag_eval/application/workflows/test_workbench_rag_eval_adjudication_workflow.py::test_dispatch_post_promotion_verification_uses_registered_handler tests/architecture/test_workbench_rag_eval_promotion_application_claim_boundary.py -q: 28 passed
+python -m pytest tests/architecture/test_workbench_rag_eval_post_promotion_verification_boundary.py tests/contexts/knowledge_workbench/rag_eval/application/use_cases/test_run_workbench_rag_eval_post_promotion_verification.py tests/contexts/knowledge_workbench/rag_eval/application/policies/test_workbench_rag_eval_promotion_verification_policy.py tests/contexts/knowledge_workbench/rag_eval/application/workflows/test_workbench_rag_eval_adjudication_workflow.py tests/interfaces/http/test_workbench_rag_eval_embedding_revisions.py -q: 32 passed
+python -m pytest -q: 2777 passed, 2 skipped
+```
+
+## Canonical contracts
 
 ### Question roles
 
-The only valid question roles are:
+The valid question roles are:
 
 ```text
 BASELINE
 PROMOTION_POOL
 HOLDOUT
+```
 
 Semantics:
 
-existing published possible questions become BASELINE;
-generated questions are deterministically divided into PROMOTION_POOL
-and HOLDOUT;
-each generated set contains at least two holdout questions;
-BASELINE and HOLDOUT are never promotion-eligible;
-HOLDOUT questions must participate in post-promotion verification and
-must never be promoted in the same cycle.
-Retrieval classifications
+- existing published possible questions become `BASELINE`;
+- generated questions are deterministically divided into `PROMOTION_POOL` and
+  `HOLDOUT`;
+- each generated set contains at least two holdout questions;
+- `BASELINE` and `HOLDOUT` are never promotion-eligible;
+- `HOLDOUT` questions participate in post-promotion verification and must never
+  be promoted in the same cycle.
 
-The only valid canonical retrieval classifications are:
+### Retrieval classifications
 
+The canonical retrieval classifications are:
+
+```text
 PASS_STRONG
 PASS_WEAK
 CONFUSION
 MISS
 EXISTING_ALIAS_RETRIEVAL_FAILURE
+```
 
-The previous temporary vocabulary:
+The previous temporary vocabulary is invalid and must not be reintroduced:
 
+```text
 TOP1
 TOP3
 TOP5
 CONFUSED_WITHIN_DOCUMENT
+```
 
-is invalid and must not be reintroduced.
-
-Retrieval outcome identity
+### Retrieval outcome identity
 
 A canonical retrieval outcome is scoped by:
 
+```text
 outcome_id
 run_id
 question_id
 project_id
 evaluation_stage
+```
 
 The supported stages are:
 
+```text
 initial
 verification_before
 verification_after
+```
 
 The uniqueness boundary is:
 
+```text
 (run_id, question_id, evaluation_stage)
+```
 
 A retrieval outcome contains:
 
-expected runtime entry and fact
-expected rank and score
-best competitor runtime entry and fact
-best competitor score
-score margin
-canonical classification
-Implemented and currently verified
-Generic preparation/runtime foundation
-PrepareLlmDispatchBatch uses DispatchPreparationBuilderRegistry.
-Claim Builder remains the default preparation builder.
-Work-kind-specific builders can be registered without duplicating generic:
-capacity projection;
-admission;
-reservations;
-leases;
-attempts;
-persisted dispatches;
-retry scheduling.
-Separate RAG Eval work kinds exist:
-workbench_rag_eval.question_generation;
-workbench_rag_eval.adjudication.
-Question generation
-one published runtime entry maps to one qgen work item;
-one qgen work item maps to one normal LLM dispatch;
-qgen uses the generic prepared-dispatch execution path;
-direct provider dispatch from the RAG Eval context is forbidden;
-the qgen parser requires exactly ten generated questions;
-exact question-kind distribution is validated;
-duplicate generated questions are rejected;
-duplicates against existing possible questions are rejected;
-generation model, account and slot metadata are persisted;
-the route catalog is:
-primary: qwen/qwen3-32b;
-automatic fallback: openai/gpt-oss-120b.
-Start workflow
-
-StartWorkbenchRagEvalV2 currently:
-
-resolves active published entries;
-rejects an empty selected scope;
-creates a running run;
-persists the initial phase and progress projection;
-schedules one qgen work item per selected entry;
-appends the initial durable qgen prepare command;
-returns an asynchronous running projection through HTTP 202;
-does not wait for LLM completion.
-Workflow definition and qgen handlers
-
-The separate RAG Eval workflow vocabulary exists, including commands/events for
-the intended complete cycle.
-
-The following qgen commands are implemented and wired:
-
-PREPARE_QUESTION_GENERATION_DISPATCH_BATCH
-EXECUTE_QUESTION_GENERATION
-RECONCILE_QUESTION_GENERATION_PROGRESS
-
-The qgen prepare handler:
-
-calls generic PrepareLlmDispatchBatch;
-appends durable execute commands;
-supports delayed preparation through run_after;
-writes workflow events and timeline entries.
-
-The qgen execute path:
-
-calls ExecutePreparedLlmDispatchAttempt;
-validates and persists generated questions;
-persists capacity observations;
-appends capacity-window wakeups;
-appends a durable reconcile command;
-writes workflow events and timeline entries.
-
-The qgen reconcile path supports:
-
-PREPARE_NEXT_BATCH_NOW
-PREPARE_NEXT_BATCH_LATER
-WAIT_FOR_ACTIVE_ATTEMPTS
-QUESTION_GENERATION_DRAINED
-QUESTION_GENERATION_BLOCKED
-
-A qgen run may drain only when:
-
-total work-item count is greater than zero;
-all work items completed successfully;
-there are no terminal failures;
-there are no waiting or active items;
-every expected runtime entry has exactly ten persisted generated questions.
-
-Successful qgen drain transitions to retrieval evaluation and appends one
-idempotent retrieval command.
-
-Persisted run progression foundation
-
-Run persistence now supports:
-
-RUNNING
-WAITING_CAPACITY
-PROMOTION_REVIEW
-VERIFYING
-COMPLETED
-BLOCKED
-FAILED
-
-Persisted phases include the complete intended lifecycle.
-
-The run/read projection currently contains:
-
-current phase;
-selected entry count;
-scheduled qgen item count;
-waiting/running/completed/failed counts;
-generated question-set count;
-capacity next-due timestamp;
-capacity model/account metadata;
-blocked and failed reasons.
-adjudication totals/waiting/running/completed/failed;
-promotion candidate count.
-Roles and retrieval outcome foundation
-
-The current checkpoint contains additive migrations:
-
-120_extend_workbench_rag_eval_run_progression.sql
-121_add_workbench_rag_eval_question_roles.sql
-122_create_workbench_rag_eval_retrieval_outcomes.sql
-123_add_workbench_rag_eval_retrieval_progress.sql
-124_add_workbench_rag_eval_evaluated_at.sql
-125_create_workbench_rag_eval_question_adjudications.sql
-126_add_workbench_rag_eval_adjudication_progress.sql
-
-Migration 121 supports:
-
-baseline
-promotion_pool
-holdout
-
-Migration 122 supports:
-
-pass_strong
-pass_weak
-confusion
-miss
-existing_alias_retrieval_failure
-
-The repository can persist:
-
-question-role assignments;
-run/project/stage-scoped canonical retrieval outcomes.
-
-The exact per-entry question coverage query has been changed to a grouped
-aggregate that rejects:
-
-zero entries;
-missing entries;
-nine-question sets;
-eleven-question sets;
-any entry whose count is not exactly ten.
-Production composition foundation
-
-A separate RAG Eval workflow runtime composition exists and reuses:
-
-the generic preparation boundary;
-the generic prepared-dispatch execution boundary;
-the existing multi-account Groq executor;
-execution-runtime repositories;
-workflow-runtime repositories;
-capacity observation persistence;
-the RAG Eval repository.
-
-The shared runtime loop currently invokes the RAG Eval due-command pump.
-
-Delayed-command selection, pump failure isolation and transaction boundaries
-are covered by focused production composition tests.
-
-Frontend checkpoint
-
-The current frontend changes:
-
-remove stale local lastRun as workflow truth;
-read the visible run from the persisted latest-run query;
-centralize React Query keys;
-treat the HTTP 202 result as a started run, not a completed run;
-invalidate persisted run queries after start and promotion actions.
-
-This is not the completed frontend progression UI.
-
-Current verified test evidence
-
-Adjudication continuation checkpoint:
-
-- Focused RAG Eval/backend slice: `200 passed`.
-- Full backend: `2676 passed, 2 skipped`.
-- Ruff: passed.
-- Mypy: passed.
-- Frontend type-check/build/tests: passed.
-- Frontend tests: `56 passed`.
-- Changed RAG Eval frontend ESLint: no RAG Eval frontend changes in this checkpoint.
-
-Latest canonical repair slice:
-
-35 passed
-
-It covers:
-
-exact canonical question roles;
-exact canonical retrieval classifications;
-run/project/stage-scoped outcome construction;
-role and outcome migration contracts;
-role determinism and minimum holdout allocation;
-holdout promotion prohibition;
-all five retrieval classifications;
-exact score-margin calculation;
-qgen reconcile decisions and transitions;
-persisted progression repository behaviour;
-exact question-set coverage;
-canonical outcome persistence.
-
-Previous checkpoint evidence recorded by the implementation agent:
-
-qgen/retry/runtime focused slice: 34 passed
-persisted progression slice: 23 passed
-roles/outcomes slice before canonical repair: 17 passed
-production composition slice: 5 passed
-frontend tests: 54 passed
-frontend type-check: passed
-frontend build: passed
-Ruff focused checks: passed
-
-These previous focused counts are historical evidence only. They do not replace
-the required final full-suite gates.
-
-Completed in this continuation
-
-- qgen output validation is separated from route/retry decisions and uses a named validation policy/config.
-- Generated roles are assigned before persistence and written in the same INSERT path; generated sets contain at least two HOLDOUT questions.
-- The legacy synchronous `RunWorkbenchRagEval` boundary is retired fail-fast and production composition no longer uses it.
-- Existing published possible questions are materialized idempotently as BASELINE immediately before retrieval.
-- `RUN_RETRIEVAL_EVALUATION` is registered in dispatcher, drain and production runtime composition.
-- Production `SearchPublishedWorkbenchRuntime` evaluates all persisted roles project-wide with `top_k >= 5`.
-- Diagnostic top-k rows and canonical `initial` outcomes are persisted idempotently; no promotion candidates are created.
-- Retrieval counters and phase transition to `ADJUDICATION_SCHEDULING` are persisted, with one durable `SCHEDULE_ADJUDICATION_WORK` command.
-- Migration `123_add_workbench_rag_eval_retrieval_progress.sql` adds retrieval counters.
-- Migration `125_create_workbench_rag_eval_question_adjudications.sql` adds persisted adjudications with `(run_id, question_id, outcome_id)` uniqueness.
-- Migration `126_add_workbench_rag_eval_adjudication_progress.sql` adds adjudication counters and persisted promotion candidate count.
-
-Four-account support
-
-The production composition proof covers four configured Groq account refs, four
-distinct transports, real admission across multiple accounts, persisted
-dispatch account refs, per-account/model capacity observations and persisted
-reservation safety on repeated preparation.
-
-Production pump
-
-The pump is composed and invoked from the shared runtime loop. The production
-matrix covers due command selection, future `run_after` exclusion, later
-due-command pickup, completed-command exclusion, failure isolation between
-runs, no blocked-command busy loop, repeated-pump idempotency and observable
-per-run failures.
-Adjudication
-
-The adjudication vertical is implemented:
-
-- `SCHEDULE_ADJUDICATION_WORK` plans one stable work item for each eligible initial outcome.
-- Eligibility is limited to PROMOTION_POOL, promotion-eligible, low-ambiguity questions with MISS, CONFUSION or policy-enabled PASS_WEAK classifications.
-- BASELINE, HOLDOUT, PASS_STRONG, existing-alias failures, non-promotion-eligible questions and medium/high ambiguity risks are excluded.
-- The exact work kind is `workbench_rag_eval.adjudication`.
-- The adjudication prompt is versioned as `workbench_rag_eval_question_adjudication.ru.v1.txt`.
-- `RagEvalAdjudicationDispatchPreparationBuilder` is registered through `DispatchPreparationBuilderRegistry`.
-- `PREPARE_ADJUDICATION_DISPATCH_BATCH` reuses generic capacity admission, reservations, leases, attempts and dispatch persistence.
-- `EXECUTE_ADJUDICATION` calls `ExecutePreparedLlmDispatchAttempt`, strict-validates output and persists model/account/slot/attempt metadata.
-- Invalid output retry, fallback to `openai/gpt-oss-120b`, capacity wait and terminal failure handling remain owned by the generic persisted attempt path.
-- `RECONCILE_ADJUDICATION_PROGRESS` supports now/later/wait/drained/blocked decisions.
-- Drained adjudication creates promotion candidates only for `VALID_TARGET_QUERY` with `promotion_recommended=true`.
-- Terminal adjudication failure blocks the run and does not create candidates.
-- Zero eligible scheduling transitions directly to PROMOTION_REVIEW with zero candidates and a canonical candidates-ready event.
-Retrieval
-
-The retrieval handler and production transition now exist. Baseline
-materialization, diagnostic top-k rows, canonical outcomes, evaluated statuses,
-retrieval counters, run phase, workflow event, timeline, progress snapshot,
-next adjudication scheduling command and completion retrieval command are
-covered by a single transaction-boundary proof.
-
-Not implemented
-
-The following verticals remain incomplete:
-
-Promotion review actions are implemented:
-
-- persisted candidates can be listed with question/outcome/adjudication linkage;
-- CANDIDATE can transition explicitly to APPROVED or REJECTED;
-- repeated same-state review is idempotent and preserves reviewed_at;
-- incompatible review transitions return conflict;
-- run status and phase remain PROMOTION_REVIEW;
-- review actions do not apply aliases, generate embeddings, create revisions or
-  invoke providers;
-- every existing promotion application path requires APPROVED and rejects
-  CANDIDATE, so review cannot be bypassed.
-
-Reversible grouped application is implemented:
-
-- only APPROVED candidates are eligible for mutation;
-- batch application groups by project and target runtime entry;
-- single application delegates to the same grouped service;
-- one immutable runtime/embedding snapshot is loaded before provider execution;
-- concurrent same-group requests are serialized by a persisted lease claim before
-  provider execution;
-- only the active lease owner may generate the target embedding and persist its
-  revision; active claims return `application_in_progress` without a provider call;
-- expired claims are recoverable and stale lease owners cannot complete or fail a
-  recovered claim;
-- one embedding text build and one embedding generation occur per acquired target
-  claim;
-- a complete previous/new alias, embedding-text and vector revision is persisted;
-- each target group commits revision, runtime mutation, APPROVED → APPLIED,
-  run transition, canonical events and claim completion in one transaction;
-- the active `PENDING_VERIFICATION` revision partial unique index and repository
-  lock/hash checks reject stale overwrite;
-- completed application claims return the persisted revision idempotently without
-  another embedding generation;
-- the active promoted alias limit counts normalized APPLIED promotion aliases and
-  applicable candidates, not baseline `possible_questions`;
-- revision and runtime embedding dimensions are canonically fixed at 384;
-- batch partial failure semantics are explicitly per-target transactional;
-- application moves the run to `VERIFYING` /
-  `POST_PROMOTION_VERIFICATION` but does not execute verification.
-
-Verification:
-before/after verification dataset;
-baseline verification;
-holdout verification;
-neighbour/competitor regression checks;
-persisted verification metrics;
-regression-failed state.
-
-Accept/rollback:
-explicit accept;
-explicit rollback;
-restoration of previous aliases, embedding text and embedding vector.
-
-Full frontend progression:
-full phase progression;
-capacity-wait details;
-attempts, retries and fallback display;
-canonical retrieval outcomes;
-adjudication display;
-candidate approval/rejection;
-revision state;
-before/after verification metrics;
-accept/rollback actions;
-RAG Eval workflow-event/SSE invalidation.
-Final quality gates
-
-Current checkpoint validation:
-
-```text
-focused RAG Eval/backend slice: 200 passed
-full backend: 2676 passed, 2 skipped
-ruff: passed
-mypy: passed
-frontend type-check/build/tests: passed
-frontend tests: 56 passed
-changed RAG Eval frontend ESLint: no RAG Eval frontend changes in this checkpoint
-```
-
-Next exact implementation sequence
-
-Continue from the current working tree in this exact order.
-
-1. Implement post-promotion verification
-before/after verification dataset;
-baseline and holdout verification;
-neighbour/competitor regression checks;
-persisted metrics and regression decision.
-2. Implement revision terminal actions
-explicit accept;
-explicit rollback;
-restore previous aliases, embedding text and vector atomically.
-3. Complete frontend progression
-verification metrics;
-revision state;
-accept/rollback controls;
-workflow-event/SSE invalidation.
-4. Run all final gates
-
-Do not report the original RAG Eval V2 task as complete until every required
-backend and frontend gate passes.
-
-Continuation instruction
-
-Continue from the current working tree.
-
-Do not restart question generation.
-
-Do not recreate:
-
-workflow enums;
-qgen planner;
-qgen prepare;
-qgen execute;
-qgen reconcile;
-run progression migration;
-question-role migration;
-retrieval-outcome migration;
-production runtime composition foundation.
-
-The qgen, retrieval, adjudication, promotion review and reversible grouped
-application checkpoints are complete. The next unfinished vertical is
-post-promotion verification, followed by regression policy, explicit revision
-accept/rollback and full frontend progression.
-
-Do not commit or push without an explicit user request.
+- expected runtime entry and fact;
+- expected rank and score;
+- best competitor runtime entry and fact;
+- best competitor score;
+- score margin;
+- canonical classification.

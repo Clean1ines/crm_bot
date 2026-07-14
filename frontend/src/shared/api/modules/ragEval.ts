@@ -179,10 +179,99 @@ export type WorkbenchRagEvalEmbeddingRevision = {
   accepted_at: string | null;
   regression_failed_at: string | null;
   rolled_back_at: string | null;
+  available_actions: {
+    can_accept: boolean;
+    can_rollback: boolean;
+  };
 };
 
 export type WorkbenchRagEvalEmbeddingRevisionsResponse = {
   revisions: WorkbenchRagEvalEmbeddingRevision[];
+};
+
+export type WorkbenchRagEvalEmbeddingRevisionResponse = {
+  revision: WorkbenchRagEvalEmbeddingRevision;
+};
+
+export type WorkbenchRagEvalVerificationRoleMetrics = {
+  query_count: number;
+  top1_hits: number;
+  top3_hits: number;
+  top5_hits: number;
+  top1_rate: number;
+  top3_rate: number;
+  top5_rate: number;
+  mean_expected_rank: number;
+  mean_expected_score: number;
+  mean_score_margin: number;
+  miss_count: number;
+  confusion_count: number;
+  existing_alias_failure_count: number;
+  strong_pass_count: number;
+  weak_pass_count: number;
+  before_top1_hits: number;
+  before_top3_hits: number;
+  before_top5_hits: number;
+  before_top1_rate: number;
+  before_top3_rate: number;
+  before_top5_rate: number;
+  before_mean_expected_rank: number;
+  before_mean_score_margin: number;
+  top1_rate_delta: number;
+  top3_rate_delta: number;
+  top5_rate_delta: number;
+  mean_expected_rank_delta: number;
+  mean_score_margin_delta: number;
+  promoted_top3_improvement_count: number;
+  promoted_top3_regression_count: number;
+  promoted_mean_margin_delta: number;
+  holdout_top3_recall_before: number;
+  holdout_top3_recall_after: number;
+  holdout_top3_recall_delta: number;
+  holdout_mean_margin_delta: number;
+  baseline_top3_recall_before: number;
+  baseline_top3_recall_after: number;
+  baseline_top3_recall_delta: number;
+  baseline_regression_count: number;
+  neighbor_query_count: number;
+  neighbor_top1_regression_count: number;
+  neighbor_top3_regression_count: number;
+  neighbor_mean_margin_delta: number;
+};
+
+export type WorkbenchRagEvalVerificationMetrics = {
+  overall: WorkbenchRagEvalVerificationRoleMetrics;
+  promoted: WorkbenchRagEvalVerificationRoleMetrics;
+  holdout: WorkbenchRagEvalVerificationRoleMetrics;
+  baseline: WorkbenchRagEvalVerificationRoleMetrics;
+  neighbour: WorkbenchRagEvalVerificationRoleMetrics;
+};
+
+export type WorkbenchRagEvalVerification = {
+  verification_id: string;
+  revision_id: string;
+  project_id: string;
+  source_rag_eval_run_id: string;
+  runtime_entry_id: string;
+  status: string;
+  policy_version: string;
+  decision: string | null;
+  failure_reasons: string[];
+  metrics: WorkbenchRagEvalVerificationMetrics | null;
+  query_count: number;
+  outcome_count: number;
+  created_at: string;
+  completed_at: string | null;
+  failed_at: string | null;
+  error_message: string | null;
+};
+
+export type WorkbenchRagEvalVerificationsResponse = {
+  verifications: WorkbenchRagEvalVerification[];
+};
+
+export type WorkbenchRagEvalVerificationResponse = {
+  verification: WorkbenchRagEvalVerification;
 };
 
 const encode = (value: string): string => encodeURIComponent(value);
@@ -261,6 +350,54 @@ export const ragEvalApi = {
       authedJsonRequest<WorkbenchRagEvalEmbeddingRevisionsResponse>(
         `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}/embedding-revisions`,
         { method: 'GET' },
+      ),
+    );
+  },
+
+  async listWorkbenchPostPromotionVerifications(
+    projectId: string,
+    runId: string,
+  ): Promise<WorkbenchRagEvalVerificationsResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalVerificationsResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/runs/${encode(runId)}/post-promotion-verifications`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async getWorkbenchPostPromotionVerification(
+    projectId: string,
+    revisionId: string,
+  ): Promise<WorkbenchRagEvalVerificationResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalVerificationResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/embedding-revisions/${encode(revisionId)}/verification`,
+        { method: 'GET' },
+      ),
+    );
+  },
+
+  async acceptWorkbenchEmbeddingRevision(
+    projectId: string,
+    revisionId: string,
+  ): Promise<WorkbenchRagEvalEmbeddingRevisionResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalEmbeddingRevisionResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/embedding-revisions/${encode(revisionId)}/accept`,
+        { method: 'POST' },
+      ),
+    );
+  },
+
+  async rollbackWorkbenchEmbeddingRevision(
+    projectId: string,
+    revisionId: string,
+  ): Promise<WorkbenchRagEvalEmbeddingRevisionResponse> {
+    return unwrap(
+      authedJsonRequest<WorkbenchRagEvalEmbeddingRevisionResponse>(
+        `/api/projects/${encode(projectId)}/knowledge/rag-eval/workbench/embedding-revisions/${encode(revisionId)}/rollback`,
+        { method: 'POST' },
       ),
     );
   },

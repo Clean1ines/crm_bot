@@ -97,7 +97,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Knowledge Documents
+         * List Workbench Documents
          * @description Lists FAQ Workbench documents for a project.
          */
         get: operations["list_workbench_documents_api_projects__project_id__knowledge_get"];
@@ -129,6 +129,86 @@ export interface paths {
          * @description Returns persisted source units created by source ingestion first phase.
          */
         get: operations["source_ingestion_source_units_api_projects__project_id__knowledge_source_documents__source_document_ref__source_units_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/source-documents/{document_id}/workflows/{workflow_run_id}/frontend-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Knowledge Frontend Workflow Events
+         * @description Returns projection-only workflow events for one document workflow.
+         */
+        get: operations["list_knowledge_frontend_workflow_events_api_projects__project_id__knowledge_source_documents__document_id__workflows__workflow_run_id__frontend_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/frontend-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Project Workflow Frontend Events
+         * @description Returns projection-only workflow events for one project workflow.
+         */
+        get: operations["list_project_workflow_frontend_events_api_projects__project_id__knowledge_workflows__workflow_run_id__frontend_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/frontend-events/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Project Workflow Frontend Events
+         * @description Streams persisted frontend projection events for one project workflow.
+         */
+        get: operations["stream_project_workflow_frontend_events_api_projects__project_id__knowledge_workflows__workflow_run_id__frontend_events_stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/source-documents/{document_id}/workflows/{workflow_run_id}/frontend-events/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Knowledge Frontend Workflow Events
+         * @description Streams persisted frontend projection events with bounded polling.
+         */
+        get: operations["stream_knowledge_frontend_workflow_events_api_projects__project_id__knowledge_source_documents__document_id__workflows__workflow_run_id__frontend_events_stream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -169,6 +249,100 @@ export interface paths {
          * @description Returns draft claim observations extracted for one source unit.
          */
         get: operations["source_unit_draft_claims_api_projects__project_id__knowledge_source_units__source_unit_ref__draft_claims_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/draft-claim-compaction-frontier": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workflow Draft Claim Compaction Frontier */
+        get: operations["workflow_draft_claim_compaction_frontier_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claim_compaction_frontier_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/draft-claim-compaction-nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Workflow Draft Claim Compaction Nodes */
+        get: operations["workflow_draft_claim_compaction_nodes_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claim_compaction_nodes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/draft-claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workflow Draft Claims
+         * @description Returns draft claim observations for a workflow execution scope.
+         */
+        get: operations["workflow_draft_claims_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claims_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/draft-claim-clusters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workflow Draft Claim Clusters
+         * @description Returns DraftClaimClusterGroup rows for one workflow.
+         */
+        get: operations["workflow_draft_claim_clusters_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claim_clusters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/workflows/{workflow_run_id}/draft-claim-clusters/{group_ref}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workflow Draft Claim Cluster Members
+         * @description Returns member refs for an expanded DraftClaimClusterGroup row.
+         */
+        get: operations["workflow_draft_claim_cluster_members_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claim_clusters__group_ref__members_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -364,6 +538,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/knowledge/rag-eval/workbench/runs/{run_id}/promotion-candidates/{promotion_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Workbench Rag Eval Promotion Candidate */
+        post: operations["approve_workbench_rag_eval_promotion_candidate_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__promotion_candidates__promotion_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/rag-eval/workbench/runs/{run_id}/promotion-candidates/{promotion_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Workbench Rag Eval Promotion Candidate */
+        post: operations["reject_workbench_rag_eval_promotion_candidate_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__promotion_candidates__promotion_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/knowledge/rag-eval/workbench/runs/{run_id}/questions": {
         parameters: {
             query?: never;
@@ -398,6 +606,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/knowledge/rag-eval/workbench/runs/{run_id}/embedding-revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workbench Rag Eval Embedding Revisions */
+        get: operations["list_workbench_rag_eval_embedding_revisions_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__embedding_revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/rag-eval/workbench/runs/{run_id}/post-promotion-verifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workbench Rag Eval Post Promotion Verifications */
+        get: operations["list_workbench_rag_eval_post_promotion_verifications_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__post_promotion_verifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/rag-eval/workbench/embedding-revisions/{revision_id}/verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Workbench Rag Eval Post Promotion Verification */
+        get: operations["get_workbench_rag_eval_post_promotion_verification_api_projects__project_id__knowledge_rag_eval_workbench_embedding_revisions__revision_id__verification_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/rag-eval/workbench/embedding-revisions/{revision_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept Workbench Rag Eval Embedding Revision */
+        post: operations["accept_workbench_rag_eval_embedding_revision_api_projects__project_id__knowledge_rag_eval_workbench_embedding_revisions__revision_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{project_id}/knowledge/rag-eval/workbench/embedding-revisions/{revision_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Workbench Rag Eval Embedding Revision */
+        post: operations["rollback_workbench_rag_eval_embedding_revision_api_projects__project_id__knowledge_rag_eval_workbench_embedding_revisions__revision_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/knowledge/{document_id}/workflow-live-state": {
         parameters: {
             query?: never;
@@ -407,7 +700,10 @@ export interface paths {
         };
         /**
          * Knowledge Workflow Live State
-         * @description Returns frontend-facing Workbench workflow live state for one document.
+         * @description Returns bootstrap/recovery/debug Workbench workflow snapshot for one document.
+         *
+         *     This endpoint is intentionally read-only. Workflow liveness is owned by
+         *     upload/resume/lifespan/worker/admin command paths, never by frontend reads.
          */
         get: operations["knowledge_workflow_live_state_api_projects__project_id__knowledge__document_id__workflow_live_state_get"];
         put?: never;
@@ -626,6 +922,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/knowledge/{document_id}/workflow-live-state/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Knowledge Workflow Live State Events
+         * @description Compatibility-only snapshot SSE endpoint.
+         *
+         *     Projection SSE under /frontend-events/stream is the realtime transport.
+         *     This endpoint must not fetch full live-state snapshots, subscribe to
+         *     legacy PostgreSQL live-state notification channels, or drain workflow commands.
+         */
+        get: operations["stream_knowledge_workflow_live_state_events_api_projects__project_id__knowledge__document_id__workflow_live_state_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{project_id}/knowledge/{document_id}/resume-processing": {
         parameters: {
             query?: never;
@@ -657,7 +977,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel Knowledge Processing
-         * @description Cancels active Workbench processing and disables automatic recovery.
+         * @description Compatibility alias for pausing current source-ingestion workflow processing.
          */
         post: operations["cancel_knowledge_processing_api_projects__project_id__knowledge__document_id__cancel_post"];
         delete?: never;
@@ -2474,6 +2794,162 @@ export interface operations {
             };
         };
     };
+    list_knowledge_frontend_workflow_events_api_projects__project_id__knowledge_source_documents__document_id__workflows__workflow_run_id__frontend_events_get: {
+        parameters: {
+            query?: {
+                after_cursor?: string | null;
+                after_source_sequence?: number;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_workflow_frontend_events_api_projects__project_id__knowledge_workflows__workflow_run_id__frontend_events_get: {
+        parameters: {
+            query?: {
+                after_cursor?: string | null;
+                after_source_sequence?: number;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_project_workflow_frontend_events_api_projects__project_id__knowledge_workflows__workflow_run_id__frontend_events_stream_get: {
+        parameters: {
+            query?: {
+                after_cursor?: string | null;
+                after_source_sequence?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_knowledge_frontend_workflow_events_api_projects__project_id__knowledge_source_documents__document_id__workflows__workflow_run_id__frontend_events_stream_get: {
+        parameters: {
+            query?: {
+                after_cursor?: string | null;
+                after_source_sequence?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     source_document_draft_claims_api_projects__project_id__knowledge_source_documents__source_document_ref__draft_claims_get: {
         parameters: {
             query?: {
@@ -2523,6 +2999,201 @@ export interface operations {
             path: {
                 project_id: string;
                 source_unit_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workflow_draft_claim_compaction_frontier_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claim_compaction_frontier_get: {
+        parameters: {
+            query?: {
+                group_ref?: string | null;
+                include_inactive?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workflow_draft_claim_compaction_nodes_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claim_compaction_nodes_get: {
+        parameters: {
+            query?: {
+                group_ref?: string | null;
+                node_ref?: string | null;
+                active_only?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workflow_draft_claims_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claims_get: {
+        parameters: {
+            query?: {
+                source_unit_ref?: string | null;
+                work_item_id?: string | null;
+                dispatch_attempt_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workflow_draft_claim_clusters_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claim_clusters_get: {
+        parameters: {
+            query?: {
+                include_batches?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                workflow_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    workflow_draft_claim_cluster_members_api_projects__project_id__knowledge_workflows__workflow_run_id__draft_claim_clusters__group_ref__members_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                workflow_run_id: string;
+                group_ref: string;
             };
             cookie?: never;
         };
@@ -2946,6 +3617,82 @@ export interface operations {
             };
         };
     };
+    approve_workbench_rag_eval_promotion_candidate_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__promotion_candidates__promotion_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                run_id: string;
+                promotion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_workbench_rag_eval_promotion_candidate_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__promotion_candidates__promotion_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                run_id: string;
+                promotion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_workbench_rag_eval_questions_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__questions_get: {
         parameters: {
             query?: never;
@@ -2989,6 +3736,176 @@ export interface operations {
             path: {
                 project_id: string;
                 run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workbench_rag_eval_embedding_revisions_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__embedding_revisions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workbench_rag_eval_post_promotion_verifications_api_projects__project_id__knowledge_rag_eval_workbench_runs__run_id__post_promotion_verifications_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workbench_rag_eval_post_promotion_verification_api_projects__project_id__knowledge_rag_eval_workbench_embedding_revisions__revision_id__verification_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_workbench_rag_eval_embedding_revision_api_projects__project_id__knowledge_rag_eval_workbench_embedding_revisions__revision_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_workbench_rag_eval_embedding_revision_api_projects__project_id__knowledge_rag_eval_workbench_embedding_revisions__revision_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                revision_id: string;
             };
             cookie?: never;
         };
@@ -3085,11 +4002,21 @@ export interface operations {
     preview_knowledge_api_projects__project_id__knowledge_preview_post: {
         parameters: {
             query?: never;
-            header?: never;
-            path?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+            };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -3098,6 +4025,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -3384,6 +4320,40 @@ export interface operations {
             path: {
                 project_id: string;
                 source_document_ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_knowledge_workflow_live_state_events_api_projects__project_id__knowledge__document_id__workflow_live_state_events_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                project_id: string;
+                document_id: string;
             };
             cookie?: never;
         };

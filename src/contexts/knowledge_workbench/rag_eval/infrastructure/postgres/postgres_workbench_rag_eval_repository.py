@@ -42,6 +42,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
 )
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
     WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
+    WorkbenchRagEvalEmbeddingRevisionAvailableActions,
     WorkbenchRagEvalEmbeddingRevision,
     WorkbenchRagEvalEmbeddingRevisionReadModel,
     WorkbenchRagEvalEmbeddingRevisionStatus,
@@ -54,7 +55,24 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     stable_promotion_application_key,
     stable_runtime_snapshot_hash,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_verification import (
+    WORKBENCH_RAG_EVAL_VERIFICATION_POLICY_VERSION,
+    WorkbenchRagEvalVerificationDecision,
+    WorkbenchRagEvalVerificationDatasetRole,
+    WorkbenchRagEvalVerificationFailureReason,
+    WorkbenchRagEvalVerificationMetrics,
+    WorkbenchRagEvalVerificationOutcomePair,
+    WorkbenchRagEvalVerificationPolicyDecision,
+    WorkbenchRagEvalVerificationQuery,
+    WorkbenchRagEvalVerificationReadModel,
+    WorkbenchRagEvalVerificationSearchObservation,
+    WorkbenchRagEvalVerificationStatus,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_retrieval_outcome_policy import (
+    WorkbenchRagEvalRetrievalOutcomePolicy,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
+    WorkbenchRagEvalWorkflowCommandType,
     WorkbenchRagEvalWorkflowEventType,
 )
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.jsonb_payload_hydration import (
@@ -79,6 +97,7 @@ from src.contexts.knowledge_workbench.retrieval.application.models.published_wor
     PublishedWorkbenchRetrievalResult,
     PublishedWorkbenchRetrievalSourceRef,
 )
+from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 
 
 PUBLISHED_ENTRIES_FOR_WORKBENCH_RAG_EVAL_SQL = """
@@ -213,6 +232,31 @@ FOR UPDATE
 """
 )
 
+_VERIFICATION_READ_SQL = """
+SELECT
+    verification.verification_id,
+    verification.revision_id,
+    verification.project_id::text AS project_id,
+    verification.source_rag_eval_run_id,
+    verification.runtime_entry_id,
+    verification.status,
+    verification.policy_version,
+    verification.decision,
+    verification.failure_reasons,
+    verification.metrics,
+    verification.created_at,
+    verification.completed_at,
+    verification.failed_at,
+    verification.error_message,
+    COUNT(DISTINCT query.verification_query_id)::int AS query_count,
+    COUNT(DISTINCT outcome.verification_outcome_id)::int AS outcome_count
+FROM knowledge_workbench_rag_eval_verifications AS verification
+LEFT JOIN knowledge_workbench_rag_eval_verification_queries AS query
+  ON query.verification_id = verification.verification_id
+LEFT JOIN knowledge_workbench_rag_eval_verification_outcomes AS outcome
+  ON outcome.verification_id = verification.verification_id
+"""
+
 
 WORKBENCH_RAG_EVAL_PROMOTION_APPLICATION_TARGET_SQL = """
 SELECT
@@ -340,6 +384,50 @@ WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_COLUMNS_SQL = """
     status,
     previous_promoted_questions,
     new_promoted_questions,
+    created_at,
+    accepted_at,
+    regression_failed_at,
+    rolled_back_at,
+    EXISTS (
+        SELECT 1
+        FROM knowledge_workbench_rag_eval_verifications AS action_verification
+        WHERE action_verification.revision_id =
+            knowledge_workbench_rag_eval_embedding_revisions.revision_id
+          AND action_verification.status = 'passed'
+          AND action_verification.decision = 'acceptable'
+          AND knowledge_workbench_rag_eval_embedding_revisions.status =
+              'pending_verification'
+    ) AS can_accept,
+    (
+        knowledge_workbench_rag_eval_embedding_revisions.status = 'regression_failed'
+        OR EXISTS (
+            SELECT 1
+            FROM knowledge_workbench_rag_eval_verifications AS action_verification
+            WHERE action_verification.revision_id =
+                knowledge_workbench_rag_eval_embedding_revisions.revision_id
+              AND action_verification.status = 'regression_failed'
+              AND action_verification.decision = 'regression'
+        )
+    ) AS can_rollback
+"""
+
+WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_FULL_COLUMNS_SQL = """
+    revision_id,
+    project_id::text AS project_id,
+    runtime_entry_id,
+    source_rag_eval_run_id,
+    promotion_ids,
+    status,
+    previous_embedding_text,
+    new_embedding_text,
+    previous_embedding::text AS previous_embedding,
+    new_embedding::text AS new_embedding,
+    previous_promoted_questions,
+    new_promoted_questions,
+    embedding_model_id,
+    embedding_dimensions,
+    previous_runtime_hash,
+    new_runtime_hash,
     created_at,
     accepted_at,
     regression_failed_at,
@@ -2209,6 +2297,54 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     payload=event_payload,
                     revision=revision,
                 )
+                await connection.execute(
+                    """
+                    INSERT INTO workflow_runtime_command_log (
+                        command_id,
+                        command_type,
+                        workflow_run_id,
+                        idempotency_key,
+                        payload,
+                        status,
+                        run_after,
+                        created_at,
+                        updated_at,
+                        causation_event_id,
+                        correlation_id,
+                        attempt_count
+                    )
+                    VALUES (
+                        $1, $2, $3, $4, $5::jsonb, 'PENDING',
+                        $6, $6, $6, NULL, $7, 0
+                    )
+                    ON CONFLICT (idempotency_key) DO NOTHING
+                    """,
+                    (
+                        "workflow-command:"
+                        f"{revision.source_rag_eval_run_id}:"
+                        f"post-promotion-verification:{revision.revision_id}"
+                    ),
+                    (
+                        WorkbenchRagEvalWorkflowCommandType.RUN_POST_PROMOTION_VERIFICATION.value
+                    ),
+                    revision.source_rag_eval_run_id,
+                    (f"rag-eval-post-promotion-verification:{revision.revision_id}"),
+                    json.dumps(
+                        {
+                            "workflow_family": "workbench_rag_eval",
+                            "workflow_run_id": revision.source_rag_eval_run_id,
+                            "rag_eval_run_id": revision.source_rag_eval_run_id,
+                            "project_id": revision.project_id,
+                            "revision_id": revision.revision_id,
+                            "runtime_entry_id": revision.runtime_entry_id,
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                    revision.created_at,
+                    revision.revision_id,
+                )
 
                 claim_completion = await connection.execute(
                     """
@@ -2256,6 +2392,788 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
             )
         return tuple(_embedding_revision_read_model_from_row(row) for row in rows)
 
+    async def list_post_promotion_verifications(
+        self,
+        *,
+        project_id: str,
+        source_rag_eval_run_id: str,
+    ) -> tuple[WorkbenchRagEvalVerificationReadModel, ...]:
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                _VERIFICATION_READ_SQL
+                + """
+                WHERE verification.project_id = $1::uuid
+                  AND verification.source_rag_eval_run_id = $2
+                GROUP BY verification.verification_id
+                ORDER BY verification.created_at, verification.verification_id
+                """,
+                project_id,
+                source_rag_eval_run_id,
+            )
+        return tuple(_verification_read_model_from_row(row) for row in rows)
+
+    async def get_post_promotion_verification(
+        self,
+        *,
+        project_id: str,
+        revision_id: str,
+    ) -> WorkbenchRagEvalVerificationReadModel | None:
+        async with _connection(self._connection_or_pool) as connection:
+            row = await connection.fetchrow(
+                _VERIFICATION_READ_SQL
+                + """
+                WHERE verification.project_id = $1::uuid
+                  AND verification.revision_id = $2
+                GROUP BY verification.verification_id
+                """,
+                project_id,
+                revision_id,
+            )
+        return _verification_read_model_from_row(row) if row is not None else None
+
+    async def get_embedding_revision_for_verification(
+        self,
+        *,
+        project_id: str,
+        revision_id: str,
+    ) -> WorkbenchRagEvalEmbeddingRevision:
+        async with _connection(self._connection_or_pool) as connection:
+            return await _load_embedding_revision_full_for_update(
+                connection,
+                revision_id,
+                project_id,
+            )
+
+    async def start_post_promotion_verification(
+        self,
+        *,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+        started_at: datetime,
+    ) -> int:
+        verification_id = _verification_id(revision.revision_id)
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_rag_eval_verifications (
+                        verification_id,
+                        revision_id,
+                        project_id,
+                        source_rag_eval_run_id,
+                        runtime_entry_id,
+                        status,
+                        policy_version,
+                        created_at
+                    )
+                    VALUES ($1, $2, $3::uuid, $4, $5, 'running', $6, $7)
+                    ON CONFLICT (revision_id) DO UPDATE
+                    SET status = CASE
+                            WHEN knowledge_workbench_rag_eval_verifications.status
+                                 IN ('pending', 'running')
+                            THEN 'running'
+                            ELSE knowledge_workbench_rag_eval_verifications.status
+                        END
+                    """,
+                    verification_id,
+                    revision.revision_id,
+                    revision.project_id,
+                    revision.source_rag_eval_run_id,
+                    revision.runtime_entry_id,
+                    WORKBENCH_RAG_EVAL_VERIFICATION_POLICY_VERSION,
+                    started_at,
+                )
+                rows = await _verification_query_plan_rows(
+                    connection,
+                    revision=revision,
+                )
+                for row in rows:
+                    await connection.execute(
+                        """
+                        INSERT INTO knowledge_workbench_rag_eval_verification_queries (
+                            verification_query_id,
+                            verification_id,
+                            revision_id,
+                            source_rag_eval_run_id,
+                            project_id,
+                            question_id,
+                            promotion_id,
+                            query_text,
+                            dataset_role,
+                            expected_runtime_entry_id,
+                            expected_fact_id,
+                            source_runtime_entry_id,
+                            source_outcome_id,
+                            created_at
+                        )
+                        VALUES (
+                            $1, $2, $3, $4, $5::uuid, $6, $7, $8, $9,
+                            $10, $11, $12, $13, $14
+                        )
+                        ON CONFLICT (verification_query_id) DO NOTHING
+                        """,
+                        _verification_query_id(
+                            verification_id=verification_id,
+                            dataset_role=_text_from_row(row, "dataset_role"),
+                            query_text=_text_from_row(row, "query_text"),
+                            expected_runtime_entry_id=_text_from_row(
+                                row,
+                                "expected_runtime_entry_id",
+                            ),
+                        ),
+                        verification_id,
+                        revision.revision_id,
+                        revision.source_rag_eval_run_id,
+                        revision.project_id,
+                        _optional_text_from_row(row, "question_id"),
+                        _optional_text_from_row(row, "promotion_id"),
+                        _text_from_row(row, "query_text"),
+                        _text_from_row(row, "dataset_role"),
+                        _text_from_row(row, "expected_runtime_entry_id"),
+                        _text_from_row(row, "expected_fact_id"),
+                        _text_from_row(row, "source_runtime_entry_id"),
+                        _optional_text_from_row(row, "source_outcome_id"),
+                        started_at,
+                    )
+                total_query_count = await connection.fetchval(
+                    """
+                    SELECT count(*)::int
+                    FROM knowledge_workbench_rag_eval_verification_queries
+                    WHERE verification_id = $1
+                    """,
+                    verification_id,
+                )
+        return int(total_query_count or 0)
+
+    async def list_pending_post_promotion_verification_queries(
+        self,
+        *,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+        limit: int,
+    ) -> tuple[WorkbenchRagEvalVerificationQuery, ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        verification_id = _verification_id(revision.revision_id)
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                """
+                SELECT
+                    query.verification_query_id,
+                    query.revision_id,
+                    query.source_rag_eval_run_id AS run_id,
+                    query.project_id::text AS project_id,
+                    query.query_text,
+                    query.dataset_role,
+                    query.expected_runtime_entry_id,
+                    query.expected_fact_id,
+                    query.source_runtime_entry_id,
+                    query.question_id,
+                    query.source_outcome_id,
+                    query.promotion_id,
+                    query.created_at
+                FROM knowledge_workbench_rag_eval_verification_queries AS query
+                LEFT JOIN knowledge_workbench_rag_eval_verification_outcomes AS outcome
+                  ON outcome.verification_query_id = query.verification_query_id
+                WHERE query.verification_id = $1
+                  AND outcome.verification_outcome_id IS NULL
+                ORDER BY query.dataset_role, query.created_at, query.verification_query_id
+                LIMIT $2
+                """,
+                verification_id,
+                limit,
+            )
+        return tuple(_verification_query_from_row(row) for row in rows)
+
+    async def observe_post_promotion_verification_query(
+        self,
+        *,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+        query: WorkbenchRagEvalVerificationQuery,
+        query_embedding: tuple[float, ...],
+        use_new_embedding: bool,
+        limit: int,
+    ) -> WorkbenchRagEvalVerificationSearchObservation:
+        override_embedding = (
+            revision.new_embedding if use_new_embedding else revision.previous_embedding
+        )
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                """
+                WITH ranked AS (
+                    SELECT
+                        entry.runtime_entry_id,
+                        COALESCE(NULLIF(entry.fact_id, ''), entry.runtime_entry_id)
+                            AS fact_id,
+                        (1 - (
+                            CASE
+                                WHEN entry.runtime_entry_id = $2
+                                THEN $5::vector
+                                ELSE emb.embedding
+                            END <=> $4::vector
+                        )) AS score,
+                        row_number() OVER (
+                            ORDER BY
+                                CASE
+                                    WHEN entry.runtime_entry_id = $2
+                                    THEN $5::vector
+                                    ELSE emb.embedding
+                                END <=> $4::vector,
+                                entry.runtime_entry_id
+                        ) AS rank
+                    FROM knowledge_workbench_runtime_retrieval_entries AS entry
+                    JOIN knowledge_workbench_runtime_retrieval_entry_embeddings AS emb
+                      ON emb.runtime_entry_id = entry.runtime_entry_id
+                    WHERE entry.project_id = $1::uuid
+                      AND entry.visibility = 'published'
+                      AND entry.status = 'active'
+                      AND emb.embedding_model_id = $6
+                      AND emb.dimensions = $7
+                )
+                SELECT runtime_entry_id, fact_id, score, rank
+                FROM ranked
+                WHERE rank <= $8
+                   OR runtime_entry_id = $3
+                ORDER BY rank
+                """,
+                revision.project_id,
+                revision.runtime_entry_id,
+                query.expected_runtime_entry_id,
+                _pg_vector_text(query_embedding),
+                _pg_vector_text(override_embedding),
+                revision.embedding_model_id,
+                revision.embedding_dimensions,
+                limit,
+            )
+        return _verification_observation_from_rows(query=query, rows=rows)
+
+    async def persist_post_promotion_verification_outcomes(
+        self,
+        *,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+        outcome_pairs: tuple[WorkbenchRagEvalVerificationOutcomePair, ...],
+        observed_at: datetime,
+    ) -> None:
+        verification_id = _verification_id(revision.revision_id)
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                for pair in outcome_pairs:
+                    await connection.execute(
+                        """
+                        INSERT INTO knowledge_workbench_rag_eval_verification_outcomes (
+                            verification_outcome_id,
+                            verification_id,
+                            verification_query_id,
+                            revision_id,
+                            project_id,
+                            expected_runtime_entry_id,
+                            expected_fact_id,
+                            before_expected_rank,
+                            before_expected_score,
+                            before_best_competitor_runtime_entry_id,
+                            before_best_competitor_fact_id,
+                            before_best_competitor_score,
+                            before_score_margin,
+                            before_classification,
+                            after_expected_rank,
+                            after_expected_score,
+                            after_best_competitor_runtime_entry_id,
+                            after_best_competitor_fact_id,
+                            after_best_competitor_score,
+                            after_score_margin,
+                            after_classification,
+                            created_at
+                        )
+                        SELECT
+                            $1, $2, query.verification_query_id, $3,
+                            query.project_id, query.expected_runtime_entry_id,
+                            query.expected_fact_id, $4, $5, $6, NULL, NULL,
+                            $7, $8, $9, $10, $11, NULL, NULL, $12, $13, $14
+                        FROM knowledge_workbench_rag_eval_verification_queries AS query
+                        WHERE query.verification_query_id = $15
+                        ON CONFLICT (verification_query_id) DO UPDATE
+                        SET before_expected_rank = EXCLUDED.before_expected_rank,
+                            before_expected_score = EXCLUDED.before_expected_score,
+                            before_best_competitor_runtime_entry_id =
+                                EXCLUDED.before_best_competitor_runtime_entry_id,
+                            before_score_margin = EXCLUDED.before_score_margin,
+                            before_classification = EXCLUDED.before_classification,
+                            after_expected_rank = EXCLUDED.after_expected_rank,
+                            after_expected_score = EXCLUDED.after_expected_score,
+                            after_best_competitor_runtime_entry_id =
+                                EXCLUDED.after_best_competitor_runtime_entry_id,
+                            after_score_margin = EXCLUDED.after_score_margin,
+                            after_classification = EXCLUDED.after_classification
+                        """,
+                        _verification_outcome_id(pair.verification_query_id),
+                        verification_id,
+                        revision.revision_id,
+                        pair.before_expected_rank,
+                        pair.before_expected_score,
+                        pair.before_best_competitor_runtime_entry_id,
+                        pair.before_score_margin,
+                        pair.before_classification.value,
+                        pair.after_expected_rank,
+                        pair.after_expected_score,
+                        pair.after_best_competitor_runtime_entry_id,
+                        pair.after_score_margin,
+                        pair.after_classification.value,
+                        observed_at,
+                        pair.verification_query_id,
+                    )
+
+    async def count_remaining_post_promotion_verification_queries(
+        self,
+        *,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+    ) -> int:
+        verification_id = _verification_id(revision.revision_id)
+        async with _connection(self._connection_or_pool) as connection:
+            remaining = await connection.fetchval(
+                """
+                SELECT count(*)::int
+                FROM knowledge_workbench_rag_eval_verification_queries AS query
+                LEFT JOIN knowledge_workbench_rag_eval_verification_outcomes AS outcome
+                  ON outcome.verification_query_id = query.verification_query_id
+                WHERE query.verification_id = $1
+                  AND outcome.verification_outcome_id IS NULL
+                """,
+                verification_id,
+            )
+        return int(remaining or 0)
+
+    async def list_post_promotion_verification_outcome_pairs(
+        self,
+        *,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+    ) -> tuple[WorkbenchRagEvalVerificationOutcomePair, ...]:
+        verification_id = _verification_id(revision.revision_id)
+        async with _connection(self._connection_or_pool) as connection:
+            rows = await connection.fetch(
+                """
+                SELECT
+                    query.verification_query_id,
+                    query.dataset_role,
+                    query.expected_runtime_entry_id,
+                    outcome.before_expected_rank,
+                    outcome.after_expected_rank,
+                    outcome.before_expected_score,
+                    outcome.after_expected_score,
+                    outcome.before_best_competitor_runtime_entry_id,
+                    outcome.after_best_competitor_runtime_entry_id,
+                    outcome.before_score_margin,
+                    outcome.after_score_margin,
+                    outcome.before_classification,
+                    outcome.after_classification
+                FROM knowledge_workbench_rag_eval_verification_outcomes AS outcome
+                JOIN knowledge_workbench_rag_eval_verification_queries AS query
+                  ON query.verification_query_id = outcome.verification_query_id
+                WHERE outcome.verification_id = $1
+                ORDER BY query.dataset_role, query.created_at, query.verification_query_id
+                """,
+                verification_id,
+            )
+        return tuple(_verification_outcome_pair_from_row(row) for row in rows)
+
+    async def complete_post_promotion_verification(
+        self,
+        *,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+        metrics: WorkbenchRagEvalVerificationMetrics,
+        policy_decision: WorkbenchRagEvalVerificationPolicyDecision,
+        completed_at: datetime,
+    ) -> None:
+        verification_id = _verification_id(revision.revision_id)
+        status = (
+            WorkbenchRagEvalVerificationStatus.PASSED
+            if policy_decision.decision
+            is WorkbenchRagEvalVerificationDecision.ACCEPTABLE
+            else WorkbenchRagEvalVerificationStatus.REGRESSION_FAILED
+        )
+        revision_status = (
+            WorkbenchRagEvalEmbeddingRevisionStatus.PENDING_VERIFICATION
+            if status is WorkbenchRagEvalVerificationStatus.PASSED
+            else WorkbenchRagEvalEmbeddingRevisionStatus.REGRESSION_FAILED
+        )
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_verifications
+                    SET status = $2,
+                        decision = $3,
+                        failure_reasons = $4::jsonb,
+                        metrics = $5::jsonb,
+                        completed_at = $6
+                    WHERE verification_id = $1
+                      AND status IN ('pending', 'running')
+                    """,
+                    verification_id,
+                    status.value,
+                    policy_decision.decision.value,
+                    json.dumps(
+                        [reason.value for reason in policy_decision.failure_reasons],
+                        ensure_ascii=False,
+                    ),
+                    json.dumps(metrics.to_json_dict(), ensure_ascii=False),
+                    completed_at,
+                )
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_embedding_revisions
+                    SET status = $3,
+                        regression_failed_at = CASE
+                            WHEN $3 = 'regression_failed' THEN $4
+                            ELSE regression_failed_at
+                        END
+                    WHERE project_id = $1::uuid
+                      AND revision_id = $2
+                      AND status = 'pending_verification'
+                    """,
+                    revision.project_id,
+                    revision.revision_id,
+                    revision_status.value,
+                    completed_at,
+                )
+                if status is WorkbenchRagEvalVerificationStatus.REGRESSION_FAILED:
+                    await connection.execute(
+                        """
+                        UPDATE knowledge_workbench_rag_eval_promoted_questions
+                        SET status = 'regression_failed'
+                        WHERE project_id = $1::uuid
+                          AND promotion_id = ANY($2::text[])
+                          AND status = 'applied'
+                        """,
+                        revision.project_id,
+                        list(revision.promotion_ids),
+                    )
+
+    async def fail_post_promotion_verification(
+        self,
+        *,
+        revision: WorkbenchRagEvalEmbeddingRevision,
+        error_message: str,
+    ) -> None:
+        verification_id = _verification_id(revision.revision_id)
+        async with _connection(self._connection_or_pool) as connection:
+            await connection.execute(
+                """
+                UPDATE knowledge_workbench_rag_eval_verifications
+                SET status = 'failed',
+                    failed_at = $2,
+                    error_message = $3
+                WHERE verification_id = $1
+                  AND status IN ('pending', 'running')
+                """,
+                verification_id,
+                revision.created_at,
+                error_message.strip() or "post-promotion verification failed",
+            )
+
+    async def accept_embedding_revision(
+        self,
+        *,
+        project_id: str,
+        revision_id: str,
+        accepted_at: datetime,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                revision = await _load_embedding_revision_full_for_update(
+                    connection,
+                    revision_id,
+                    project_id,
+                )
+                if revision.status is WorkbenchRagEvalEmbeddingRevisionStatus.ACCEPTED:
+                    return _embedding_revision_read_model(revision)
+                if (
+                    revision.status
+                    is not WorkbenchRagEvalEmbeddingRevisionStatus.PENDING_VERIFICATION
+                ):
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "only PENDING_VERIFICATION revision can be accepted",
+                        code=WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT,
+                        promotion_ids=tuple(sorted(revision.promotion_ids)),
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+                verification_row = await connection.fetchrow(
+                    """
+                    SELECT verification_id
+                    FROM knowledge_workbench_rag_eval_verifications
+                    WHERE revision_id = $1
+                      AND project_id = $2::uuid
+                      AND status = 'passed'
+                      AND decision = 'acceptable'
+                    """,
+                    revision.revision_id,
+                    revision.project_id,
+                )
+                if verification_row is None:
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "revision requires passed verification before accept",
+                        code=WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT,
+                        promotion_ids=tuple(sorted(revision.promotion_ids)),
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+                update = await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_embedding_revisions
+                    SET status = 'accepted',
+                        accepted_at = $3
+                    WHERE revision_id = $1
+                      AND project_id = $2::uuid
+                      AND status = 'pending_verification'
+                    """,
+                    revision.revision_id,
+                    revision.project_id,
+                    accepted_at,
+                )
+                _require_affected_rows(
+                    update,
+                    expected=1,
+                    operation="embedding revision accept",
+                )
+                accepted = WorkbenchRagEvalEmbeddingRevision(
+                    revision_id=revision.revision_id,
+                    project_id=revision.project_id,
+                    runtime_entry_id=revision.runtime_entry_id,
+                    source_rag_eval_run_id=revision.source_rag_eval_run_id,
+                    promotion_ids=revision.promotion_ids,
+                    status=WorkbenchRagEvalEmbeddingRevisionStatus.ACCEPTED,
+                    previous_embedding_text=revision.previous_embedding_text,
+                    new_embedding_text=revision.new_embedding_text,
+                    previous_embedding=revision.previous_embedding,
+                    new_embedding=revision.new_embedding,
+                    previous_promoted_questions=revision.previous_promoted_questions,
+                    new_promoted_questions=revision.new_promoted_questions,
+                    embedding_model_id=revision.embedding_model_id,
+                    embedding_dimensions=revision.embedding_dimensions,
+                    previous_runtime_hash=revision.previous_runtime_hash,
+                    new_runtime_hash=revision.new_runtime_hash,
+                    created_at=accepted_at,
+                    accepted_at=accepted_at,
+                    regression_failed_at=None,
+                    rolled_back_at=None,
+                )
+                await _append_promotion_revision_event(
+                    connection,
+                    event_type=(
+                        WorkbenchRagEvalWorkflowEventType.EMBEDDING_REVISION_ACCEPTED.value
+                    ),
+                    message="RAG Eval embedding revision accepted",
+                    payload={
+                        "workflow_run_id": revision.source_rag_eval_run_id,
+                        "rag_eval_run_id": revision.source_rag_eval_run_id,
+                        "project_id": revision.project_id,
+                        "runtime_entry_id": revision.runtime_entry_id,
+                        "revision_id": revision.revision_id,
+                        "promotion_ids": list(sorted(revision.promotion_ids)),
+                        "status": "accepted",
+                    },
+                    revision=accepted,
+                )
+                return _embedding_revision_read_model(accepted)
+
+    async def rollback_embedding_revision(
+        self,
+        *,
+        project_id: str,
+        revision_id: str,
+        rolled_back_at: datetime,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel:
+        async with _connection(self._connection_or_pool) as connection:
+            async with connection.transaction():
+                revision = await _load_embedding_revision_full_for_update(
+                    connection,
+                    revision_id,
+                    project_id,
+                )
+                if (
+                    revision.status
+                    is WorkbenchRagEvalEmbeddingRevisionStatus.ROLLED_BACK
+                ):
+                    return _embedding_revision_read_model(revision)
+                if revision.status is WorkbenchRagEvalEmbeddingRevisionStatus.ACCEPTED:
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "ACCEPTED revision cannot be rolled back",
+                        code=WorkbenchRagEvalPromotionConflictCode.PERSISTENCE_CONFLICT,
+                        promotion_ids=tuple(sorted(revision.promotion_ids)),
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+
+                runtime_row = await connection.fetchrow(
+                    """
+                    SELECT
+                        entry.possible_questions,
+                        entry.embedding_text,
+                        emb.embedding::text AS current_embedding,
+                        emb.embedding_model_id,
+                        emb.dimensions AS embedding_dimensions
+                    FROM knowledge_workbench_runtime_retrieval_entries AS entry
+                    JOIN knowledge_workbench_runtime_retrieval_entry_embeddings AS emb
+                      ON emb.runtime_entry_id = entry.runtime_entry_id
+                     AND emb.embedding_model_id = $3
+                    WHERE entry.project_id = $1::uuid
+                      AND entry.runtime_entry_id = $2
+                      AND entry.visibility = 'published'
+                      AND entry.status = 'active'
+                    FOR UPDATE OF entry
+                    """,
+                    revision.project_id,
+                    revision.runtime_entry_id,
+                    revision.embedding_model_id,
+                )
+                if runtime_row is None:
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "runtime entry not found for rollback",
+                        code=WorkbenchRagEvalPromotionConflictCode.TARGET_NOT_ACTIVE,
+                        promotion_ids=tuple(sorted(revision.promotion_ids)),
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+                current_hash = stable_runtime_snapshot_hash(
+                    possible_questions=_text_tuple(
+                        runtime_row.get("possible_questions")
+                    ),
+                    embedding_text=_text_from_row(runtime_row, "embedding_text"),
+                    embedding=_vector_tuple(runtime_row.get("current_embedding")),
+                    embedding_model_id=_text_from_row(
+                        runtime_row,
+                        "embedding_model_id",
+                    ),
+                    embedding_dimensions=_int_from_row(
+                        runtime_row,
+                        "embedding_dimensions",
+                    ),
+                )
+                if current_hash != revision.new_runtime_hash:
+                    raise WorkbenchRagEvalPromotionConflictError(
+                        "stale runtime state blocks rollback",
+                        code=(
+                            WorkbenchRagEvalPromotionConflictCode.STALE_RUNTIME_SNAPSHOT
+                        ),
+                        promotion_ids=tuple(sorted(revision.promotion_ids)),
+                        runtime_entry_id=revision.runtime_entry_id,
+                    )
+
+                runtime_update = await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_runtime_retrieval_entries
+                    SET possible_questions = $3::jsonb,
+                        embedding_text = $4
+                    WHERE project_id = $1::uuid
+                      AND runtime_entry_id = $2
+                      AND visibility = 'published'
+                      AND status = 'active'
+                    """,
+                    revision.project_id,
+                    revision.runtime_entry_id,
+                    _json_text_list(revision.previous_promoted_questions),
+                    revision.previous_embedding_text,
+                )
+                _require_affected_rows(
+                    runtime_update,
+                    expected=1,
+                    operation="runtime entry rollback update",
+                )
+                await connection.execute(
+                    """
+                    DELETE FROM knowledge_workbench_runtime_retrieval_entry_embeddings
+                    WHERE runtime_entry_id = $1
+                      AND embedding_model_id = $2
+                    """,
+                    revision.runtime_entry_id,
+                    revision.embedding_model_id,
+                )
+                await connection.execute(
+                    """
+                    INSERT INTO knowledge_workbench_runtime_retrieval_entry_embeddings (
+                        runtime_entry_id,
+                        embedding_model_id,
+                        dimensions,
+                        embedding,
+                        embedding_text_hash,
+                        created_at
+                    )
+                    VALUES ($1, $2, $3, $4::vector, $5, $6)
+                    """,
+                    revision.runtime_entry_id,
+                    revision.embedding_model_id,
+                    WORKBENCH_RUNTIME_EMBEDDING_DIMENSIONS,
+                    _pg_vector_text(revision.previous_embedding),
+                    sha256(
+                        revision.previous_embedding_text.encode("utf-8")
+                    ).hexdigest(),
+                    rolled_back_at,
+                )
+                revision_update = await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_embedding_revisions
+                    SET status = 'rolled_back',
+                        rolled_back_at = $3
+                    WHERE revision_id = $1
+                      AND project_id = $2::uuid
+                      AND status IN ('pending_verification', 'regression_failed')
+                    """,
+                    revision.revision_id,
+                    revision.project_id,
+                    rolled_back_at,
+                )
+                _require_affected_rows(
+                    revision_update,
+                    expected=1,
+                    operation="embedding revision rollback",
+                )
+                await connection.execute(
+                    """
+                    UPDATE knowledge_workbench_rag_eval_promoted_questions
+                    SET status = 'rolled_back'
+                    WHERE project_id = $1::uuid
+                      AND promotion_id = ANY($2::text[])
+                      AND status IN ('applied', 'regression_failed')
+                    """,
+                    revision.project_id,
+                    list(revision.promotion_ids),
+                )
+
+                rolled_back = WorkbenchRagEvalEmbeddingRevision(
+                    revision_id=revision.revision_id,
+                    project_id=revision.project_id,
+                    runtime_entry_id=revision.runtime_entry_id,
+                    source_rag_eval_run_id=revision.source_rag_eval_run_id,
+                    promotion_ids=revision.promotion_ids,
+                    status=WorkbenchRagEvalEmbeddingRevisionStatus.ROLLED_BACK,
+                    previous_embedding_text=revision.previous_embedding_text,
+                    new_embedding_text=revision.new_embedding_text,
+                    previous_embedding=revision.previous_embedding,
+                    new_embedding=revision.new_embedding,
+                    previous_promoted_questions=revision.previous_promoted_questions,
+                    new_promoted_questions=revision.new_promoted_questions,
+                    embedding_model_id=revision.embedding_model_id,
+                    embedding_dimensions=revision.embedding_dimensions,
+                    previous_runtime_hash=revision.previous_runtime_hash,
+                    new_runtime_hash=revision.new_runtime_hash,
+                    created_at=rolled_back_at,
+                    accepted_at=None,
+                    regression_failed_at=revision.regression_failed_at,
+                    rolled_back_at=rolled_back_at,
+                )
+                await _append_promotion_revision_event(
+                    connection,
+                    event_type=(
+                        WorkbenchRagEvalWorkflowEventType.EMBEDDING_REVISION_ROLLED_BACK.value
+                    ),
+                    message="RAG Eval embedding revision rolled back",
+                    payload={
+                        "workflow_run_id": revision.source_rag_eval_run_id,
+                        "rag_eval_run_id": revision.source_rag_eval_run_id,
+                        "project_id": revision.project_id,
+                        "runtime_entry_id": revision.runtime_entry_id,
+                        "revision_id": revision.revision_id,
+                        "promotion_ids": list(sorted(revision.promotion_ids)),
+                        "status": "rolled_back",
+                    },
+                    revision=rolled_back,
+                )
+                return _embedding_revision_read_model(rolled_back)
+
 
 class _DirectConnectionContext:
     def __init__(self, connection: WorkbenchRagEvalConnectionLike) -> None:
@@ -2279,6 +3197,268 @@ def _connection(connection_or_pool: object):
         return cast(WorkbenchRagEvalPoolLike, connection_or_pool).acquire()
     return _DirectConnectionContext(
         cast(WorkbenchRagEvalConnectionLike, connection_or_pool)
+    )
+
+
+async def _verification_query_plan_rows(
+    connection: WorkbenchRagEvalConnectionLike,
+    *,
+    revision: WorkbenchRagEvalEmbeddingRevision,
+) -> tuple[Mapping[str, object], ...]:
+    rows = await connection.fetch(
+        """
+        SELECT
+            'promoted'::text AS dataset_role,
+            promotion.question_id,
+            promotion.promotion_id,
+            promotion.question AS query_text,
+            promotion.target_runtime_entry_id AS expected_runtime_entry_id,
+            promotion.target_fact_id AS expected_fact_id,
+            promotion.target_runtime_entry_id AS source_runtime_entry_id,
+            promotion.outcome_id AS source_outcome_id
+        FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
+        WHERE promotion.project_id = $1::uuid
+          AND promotion.run_id = $2
+          AND promotion.promotion_id = ANY($3::text[])
+
+        UNION ALL
+
+        SELECT
+            question.evaluation_role::text AS dataset_role,
+            question.question_id,
+            NULL::text AS promotion_id,
+            question.question AS query_text,
+            question.expected_runtime_entry_id,
+            question.expected_fact_id,
+            question.expected_runtime_entry_id AS source_runtime_entry_id,
+            outcome.outcome_id AS source_outcome_id
+        FROM knowledge_workbench_rag_eval_questions AS question
+        LEFT JOIN knowledge_workbench_rag_eval_retrieval_outcomes AS outcome
+          ON outcome.run_id = question.run_id
+         AND outcome.question_id = question.question_id
+         AND outcome.evaluation_stage = 'initial'
+        WHERE question.project_id = $1::uuid
+          AND question.run_id = $2
+          AND question.evaluation_role IN ('baseline', 'holdout')
+
+        UNION ALL
+
+        SELECT
+            'neighbour'::text AS dataset_role,
+            promotion.question_id,
+            NULL::text AS promotion_id,
+            promotion.question AS query_text,
+            promotion.competitor_runtime_entry_id AS expected_runtime_entry_id,
+            promotion.competitor_fact_id AS expected_fact_id,
+            promotion.target_runtime_entry_id AS source_runtime_entry_id,
+            promotion.outcome_id AS source_outcome_id
+        FROM knowledge_workbench_rag_eval_promoted_questions AS promotion
+        WHERE promotion.project_id = $1::uuid
+          AND promotion.run_id = $2
+          AND promotion.promotion_id = ANY($3::text[])
+          AND promotion.competitor_runtime_entry_id IS NOT NULL
+          AND promotion.competitor_fact_id IS NOT NULL
+        ORDER BY dataset_role, query_text, expected_runtime_entry_id
+        """,
+        revision.project_id,
+        revision.source_rag_eval_run_id,
+        list(revision.promotion_ids),
+    )
+    return tuple(rows)
+
+
+def _verification_observation_from_rows(
+    *,
+    query: WorkbenchRagEvalVerificationQuery,
+    rows: Sequence[Mapping[str, object]],
+) -> WorkbenchRagEvalVerificationSearchObservation:
+    expected_row = next(
+        (
+            row
+            for row in rows
+            if _text_from_row(row, "runtime_entry_id")
+            == query.expected_runtime_entry_id
+        ),
+        None,
+    )
+    competitor_row = next(
+        (
+            row
+            for row in rows
+            if _text_from_row(row, "runtime_entry_id")
+            != query.expected_runtime_entry_id
+        ),
+        None,
+    )
+    expected_rank = (
+        _int_from_row(expected_row, "rank") if expected_row is not None else None
+    )
+    expected_score = (
+        _float_from_row(expected_row, "score") if expected_row is not None else None
+    )
+    competitor_score = (
+        _float_from_row(competitor_row, "score") if competitor_row is not None else None
+    )
+    outcome = WorkbenchRagEvalRetrievalOutcomePolicy().build(
+        outcome_id=_verification_outcome_id(query.verification_query_id),
+        run_id=query.run_id,
+        question_id=query.verification_query_id,
+        project_id=query.project_id,
+        evaluation_stage="verification",
+        expected_runtime_entry_id=query.expected_runtime_entry_id,
+        expected_fact_id=query.expected_fact_id,
+        expected_rank=expected_rank,
+        expected_score=expected_score,
+        best_competitor_runtime_entry_id=_text_from_row(
+            competitor_row,
+            "runtime_entry_id",
+        )
+        if competitor_row is not None
+        else None,
+        best_competitor_fact_id=_text_from_row(competitor_row, "fact_id")
+        if competitor_row is not None
+        else None,
+        best_competitor_score=competitor_score,
+        competitor_same_document=bool(
+            competitor_row is not None
+            and (
+                expected_rank is None
+                or _int_from_row(competitor_row, "rank") < expected_rank
+            )
+        ),
+        created_at=query.created_at,
+    )
+    classification = outcome.classification
+    if query.dataset_role is WorkbenchRagEvalVerificationDatasetRole.BASELINE and (
+        expected_rank is None or expected_rank > 3
+    ):
+        classification = (
+            WorkbenchRagEvalRetrievalClassification.EXISTING_ALIAS_RETRIEVAL_FAILURE
+        )
+    return WorkbenchRagEvalVerificationSearchObservation(
+        expected_rank=expected_rank,
+        expected_score=expected_score,
+        best_competitor_runtime_entry_id=outcome.best_competitor_runtime_entry_id,
+        best_competitor_fact_id=outcome.best_competitor_fact_id,
+        best_competitor_score=outcome.best_competitor_score,
+        score_margin=outcome.score_margin,
+        classification=classification,
+    )
+
+
+def _verification_read_model_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalVerificationReadModel:
+    decision_text = _optional_text_from_row(row, "decision")
+    return WorkbenchRagEvalVerificationReadModel(
+        verification_id=_text_from_row(row, "verification_id"),
+        revision_id=_text_from_row(row, "revision_id"),
+        project_id=_text_from_row(row, "project_id"),
+        source_rag_eval_run_id=_text_from_row(row, "source_rag_eval_run_id"),
+        runtime_entry_id=_text_from_row(row, "runtime_entry_id"),
+        status=WorkbenchRagEvalVerificationStatus(_text_from_row(row, "status")),
+        policy_version=_text_from_row(row, "policy_version"),
+        decision=WorkbenchRagEvalVerificationDecision(decision_text)
+        if decision_text is not None
+        else None,
+        failure_reasons=tuple(
+            WorkbenchRagEvalVerificationFailureReason(reason)
+            for reason in _text_tuple(row.get("failure_reasons"))
+        ),
+        metrics=_json_object_from_row(row, "metrics"),
+        query_count=_int_from_row_default_zero(row, "query_count"),
+        outcome_count=_int_from_row_default_zero(row, "outcome_count"),
+        created_at=_datetime_from_row(row, "created_at"),
+        completed_at=_optional_datetime_from_row(row, "completed_at"),
+        failed_at=_optional_datetime_from_row(row, "failed_at"),
+        error_message=_optional_text_from_row(row, "error_message"),
+    )
+
+
+def _verification_id(revision_id: str) -> str:
+    return "rag-eval-verification:" + sha256(revision_id.encode("utf-8")).hexdigest()
+
+
+def _verification_query_id(
+    *,
+    verification_id: str,
+    dataset_role: str,
+    query_text: str,
+    expected_runtime_entry_id: str,
+) -> str:
+    return (
+        "rag-eval-verification-query:"
+        + sha256(
+            "\x1f".join(
+                (
+                    verification_id,
+                    dataset_role,
+                    " ".join(query_text.casefold().split()),
+                    expected_runtime_entry_id,
+                )
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+
+
+def _verification_outcome_id(verification_query_id: str) -> str:
+    return (
+        "rag-eval-verification-outcome:"
+        + sha256(verification_query_id.encode("utf-8")).hexdigest()
+    )
+
+
+def _verification_query_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalVerificationQuery:
+    return WorkbenchRagEvalVerificationQuery(
+        verification_query_id=_text_from_row(row, "verification_query_id"),
+        revision_id=_text_from_row(row, "revision_id"),
+        run_id=_text_from_row(row, "run_id"),
+        project_id=_text_from_row(row, "project_id"),
+        query_text=_text_from_row(row, "query_text"),
+        dataset_role=WorkbenchRagEvalVerificationDatasetRole(
+            _text_from_row(row, "dataset_role")
+        ),
+        expected_runtime_entry_id=_text_from_row(row, "expected_runtime_entry_id"),
+        expected_fact_id=_text_from_row(row, "expected_fact_id"),
+        source_runtime_entry_id=_text_from_row(row, "source_runtime_entry_id"),
+        question_id=_optional_text_from_row(row, "question_id"),
+        source_outcome_id=_optional_text_from_row(row, "source_outcome_id"),
+        promotion_id=_optional_text_from_row(row, "promotion_id"),
+        created_at=_datetime_from_row(row, "created_at"),
+    )
+
+
+def _verification_outcome_pair_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalVerificationOutcomePair:
+    return WorkbenchRagEvalVerificationOutcomePair(
+        verification_query_id=_text_from_row(row, "verification_query_id"),
+        dataset_role=WorkbenchRagEvalVerificationDatasetRole(
+            _text_from_row(row, "dataset_role")
+        ),
+        expected_runtime_entry_id=_text_from_row(row, "expected_runtime_entry_id"),
+        before_expected_rank=_optional_int_from_row(row, "before_expected_rank"),
+        after_expected_rank=_optional_int_from_row(row, "after_expected_rank"),
+        before_expected_score=_optional_float_from_row(row, "before_expected_score"),
+        after_expected_score=_optional_float_from_row(row, "after_expected_score"),
+        before_best_competitor_runtime_entry_id=_optional_text_from_row(
+            row,
+            "before_best_competitor_runtime_entry_id",
+        ),
+        after_best_competitor_runtime_entry_id=_optional_text_from_row(
+            row,
+            "after_best_competitor_runtime_entry_id",
+        ),
+        before_score_margin=_optional_float_from_row(row, "before_score_margin"),
+        after_score_margin=_optional_float_from_row(row, "after_score_margin"),
+        before_classification=WorkbenchRagEvalRetrievalClassification(
+            _text_from_row(row, "before_classification")
+        ),
+        after_classification=WorkbenchRagEvalRetrievalClassification(
+            _text_from_row(row, "after_classification")
+        ),
     )
 
 
@@ -2594,6 +3774,10 @@ def _embedding_revision_read_model_from_row(
             "regression_failed_at",
         ),
         rolled_back_at=_optional_datetime_from_row(row, "rolled_back_at"),
+        available_actions=WorkbenchRagEvalEmbeddingRevisionAvailableActions(
+            can_accept=_bool_from_row_default_false(row, "can_accept"),
+            can_rollback=_bool_from_row_default_false(row, "can_rollback"),
+        ),
     )
 
 
@@ -2613,6 +3797,13 @@ def _embedding_revision_read_model(
         accepted_at=revision.accepted_at,
         regression_failed_at=revision.regression_failed_at,
         rolled_back_at=revision.rolled_back_at,
+        available_actions=WorkbenchRagEvalEmbeddingRevisionAvailableActions(
+            can_accept=False,
+            can_rollback=(
+                revision.status
+                is WorkbenchRagEvalEmbeddingRevisionStatus.REGRESSION_FAILED
+            ),
+        ),
     )
 
 
@@ -2630,6 +3821,58 @@ async def _load_embedding_revision_by_id(
         revision_id,
     )
     return _embedding_revision_read_model_from_row(row) if row is not None else None
+
+
+async def _load_embedding_revision_full_for_update(
+    connection: WorkbenchRagEvalConnectionLike,
+    revision_id: str,
+    project_id: str,
+) -> WorkbenchRagEvalEmbeddingRevision:
+    row = await connection.fetchrow(
+        "SELECT "
+        + WORKBENCH_RAG_EVAL_EMBEDDING_REVISION_FULL_COLUMNS_SQL
+        + """
+        FROM knowledge_workbench_rag_eval_embedding_revisions
+        WHERE revision_id = $1
+          AND project_id = $2::uuid
+        FOR UPDATE
+        """,
+        revision_id,
+        project_id,
+    )
+    if row is None:
+        raise WorkbenchRagEvalPromotionNotFoundError("Embedding revision not found")
+    return _embedding_revision_full_from_row(row)
+
+
+def _embedding_revision_full_from_row(
+    row: Mapping[str, object],
+) -> WorkbenchRagEvalEmbeddingRevision:
+    return WorkbenchRagEvalEmbeddingRevision(
+        revision_id=_text_from_row(row, "revision_id"),
+        project_id=_text_from_row(row, "project_id"),
+        runtime_entry_id=_text_from_row(row, "runtime_entry_id"),
+        source_rag_eval_run_id=_text_from_row(row, "source_rag_eval_run_id"),
+        promotion_ids=_text_tuple(row.get("promotion_ids")),
+        status=WorkbenchRagEvalEmbeddingRevisionStatus(_text_from_row(row, "status")),
+        previous_embedding_text=_text_from_row(row, "previous_embedding_text"),
+        new_embedding_text=_text_from_row(row, "new_embedding_text"),
+        previous_embedding=_vector_tuple(row.get("previous_embedding")),
+        new_embedding=_vector_tuple(row.get("new_embedding")),
+        previous_promoted_questions=_text_tuple(row.get("previous_promoted_questions")),
+        new_promoted_questions=_text_tuple(row.get("new_promoted_questions")),
+        embedding_model_id=_text_from_row(row, "embedding_model_id"),
+        embedding_dimensions=_int_from_row(row, "embedding_dimensions"),
+        previous_runtime_hash=_text_from_row(row, "previous_runtime_hash"),
+        new_runtime_hash=_text_from_row(row, "new_runtime_hash"),
+        created_at=_datetime_from_row(row, "created_at"),
+        accepted_at=_optional_datetime_from_row(row, "accepted_at"),
+        regression_failed_at=_optional_datetime_from_row(
+            row,
+            "regression_failed_at",
+        ),
+        rolled_back_at=_optional_datetime_from_row(row, "rolled_back_at"),
+    )
 
 
 def _assert_revision_matches_snapshot(
@@ -3141,6 +4384,13 @@ def _optional_float_from_row(row: Mapping[str, object], key: str) -> float | Non
     return float(value)
 
 
+def _json_object_from_row(row: Mapping[str, object], key: str) -> JsonObject | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    return json_object_from_unknown(value)
+
+
 async def _insert_promotion_candidate(
     connection: WorkbenchRagEvalConnectionLike,
     promotion: WorkbenchRagEvalPromotedQuestion,
@@ -3289,6 +4539,13 @@ def _float_from_row(row: Mapping[str, object], key: str) -> float:
 
 def _bool_from_row(row: Mapping[str, object], key: str) -> bool:
     value = row.get(key)
+    if not isinstance(value, bool):
+        raise TypeError(f"{key} must be bool")
+    return value
+
+
+def _bool_from_row_default_false(row: Mapping[str, object], key: str) -> bool:
+    value = row.get(key, False)
     if not isinstance(value, bool):
         raise TypeError(f"{key} must be bool")
     return value

@@ -216,8 +216,14 @@ from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.approve_workbench_rag_eval_promotion_candidate import (
     ApproveWorkbenchRagEvalPromotionCandidateCommand,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.accept_workbench_rag_eval_embedding_revision import (
+    AcceptWorkbenchRagEvalEmbeddingRevisionCommand,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.reject_workbench_rag_eval_promotion_candidate import (
     RejectWorkbenchRagEvalPromotionCandidateCommand,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.rollback_workbench_rag_eval_embedding_revision import (
+    RollbackWorkbenchRagEvalEmbeddingRevisionCommand,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.use_cases.apply_workbench_rag_eval_promotion import (
     WorkbenchRagEvalPromotionConflictError,
@@ -1487,6 +1493,180 @@ def _next_frontend_workflow_event_cursor(
     return FrontendWorkflowEventCursor.from_event(events[-1]).serialize()
 
 
+async def _list_frontend_workflow_events_response(
+    *,
+    project_id: str,
+    workflow_run_id: str,
+    cursor: FrontendWorkflowEventCursor,
+    limit: int,
+    pool: object,
+    document_id: str | None = None,
+) -> dict[str, object]:
+    async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
+        repository = PostgresFrontendWorkflowEventRepository(
+            cast(asyncpg.Connection, raw_connection)
+        )
+        events = await repository.list_frontend_events(
+            workflow_run_id,
+            cursor,
+            limit,
+        )
+
+    visible_events = _visible_frontend_workflow_events(
+        events=events,
+        project_id=project_id,
+        workflow_run_id=workflow_run_id,
+        document_id=document_id,
+    )
+    return {
+        "workflow_run_id": workflow_run_id,
+        "after_source_sequence": cursor.source_sequence_number,
+        "after_cursor": None if cursor.sequence_only else cursor.serialize(),
+        "next_cursor": _next_frontend_workflow_event_cursor(visible_events),
+        "events": [
+            _frontend_workflow_event_read_model(event) for event in visible_events
+        ],
+    }
+
+
+def _visible_frontend_workflow_events(
+    *,
+    events: tuple[FrontendWorkflowEvent, ...],
+    project_id: str,
+    workflow_run_id: str,
+    document_id: str | None,
+) -> tuple[FrontendWorkflowEvent, ...]:
+    return tuple(
+        event
+        for event in events
+        if event.project_id == project_id
+        and event.workflow_run_id == workflow_run_id
+        and (document_id is None or event.document_id == document_id)
+    )
+
+
+@router.get("/workflows/{workflow_run_id}/frontend-events")
+async def list_project_workflow_frontend_events(
+    project_id: str,
+    workflow_run_id: str,
+    after_cursor: str | None = Query(default=None),
+    after_source_sequence: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> dict[str, object]:
+    """Returns projection-only workflow events for one project workflow."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    try:
+        cursor = _resolve_frontend_workflow_event_cursor(
+            after_cursor=after_cursor,
+            after_source_sequence=after_source_sequence,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return await _list_frontend_workflow_events_response(
+        project_id=project_id,
+        workflow_run_id=workflow_run_id,
+        cursor=cursor,
+        limit=limit,
+        pool=pool,
+    )
+
+
+@router.get("/workflows/{workflow_run_id}/frontend-events/stream")
+async def stream_project_workflow_frontend_events(
+    project_id: str,
+    workflow_run_id: str,
+    request: Request,
+    after_cursor: str | None = Query(default=None),
+    after_source_sequence: int = Query(0, ge=0),
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+) -> StreamingResponse:
+    """Streams persisted frontend projection events for one project workflow."""
+
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    try:
+        cursor = _resolve_frontend_workflow_event_cursor(
+            after_cursor=after_cursor,
+            after_source_sequence=after_source_sequence,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def event_stream():
+        replay_cursor = cursor
+        async with cast(asyncpg.Pool, pool).acquire() as raw_connection:
+            repository = PostgresFrontendWorkflowEventRepository(
+                cast(asyncpg.Connection, raw_connection)
+            )
+            replay_events = await repository.list_frontend_events(
+                workflow_run_id,
+                replay_cursor,
+                200,
+            )
+
+        for event in replay_events:
+            replay_cursor = FrontendWorkflowEventCursor.from_event(event)
+            if (
+                event.project_id == project_id
+                and event.workflow_run_id == workflow_run_id
+            ):
+                yield _frontend_workflow_event_sse(event)
+
+        if await request.is_disconnected():
+            return
+
+        try:
+            async with subscribe_frontend_workflow_events(
+                workflow_run_id=workflow_run_id,
+            ) as subscription:
+                while True:
+                    if await request.is_disconnected():
+                        return
+
+                    event = await subscription.next_event(timeout_seconds=15.0)
+                    if event is None:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    if (
+                        event.project_id == project_id
+                        and event.workflow_run_id == workflow_run_id
+                        and event.source_sequence_number
+                        > replay_cursor.source_sequence_number
+                    ):
+                        replay_cursor = FrontendWorkflowEventCursor.from_event(event)
+                        yield _frontend_workflow_event_sse(event)
+        except Exception as exc:
+            logger.warning(
+                "frontend_workflow_project_stream_degraded",
+                project_id=project_id,
+                workflow_run_id=workflow_run_id,
+                error=str(exc),
+            )
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.get(
     "/source-documents/{document_id}/workflows/{workflow_run_id}/frontend-events/stream"
 )
@@ -2637,6 +2817,139 @@ async def list_workbench_rag_eval_embedding_revisions(
         source_rag_eval_run_id=run_id,
     )
     return {"revisions": [revision.to_json_dict() for revision in revisions]}
+
+
+@router.get("/rag-eval/workbench/runs/{run_id}/post-promotion-verifications")
+async def list_workbench_rag_eval_post_promotion_verifications(
+    project_id: str,
+    run_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    repository = PostgresWorkbenchRagEvalRepository(pool)
+    summary = await repository.get_run(run_id=run_id, project_id=project_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Workbench RAG Eval run not found")
+    verifications = await repository.list_post_promotion_verifications(
+        project_id=project_id,
+        source_rag_eval_run_id=run_id,
+    )
+    return {
+        "verifications": [verification.to_json_dict() for verification in verifications]
+    }
+
+
+@router.get("/rag-eval/workbench/embedding-revisions/{revision_id}/verification")
+async def get_workbench_rag_eval_post_promotion_verification(
+    project_id: str,
+    revision_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+    repository = PostgresWorkbenchRagEvalRepository(pool)
+    verification = await repository.get_post_promotion_verification(
+        project_id=project_id,
+        revision_id=revision_id,
+    )
+    if verification is None:
+        raise HTTPException(status_code=404, detail="RAG Eval verification not found")
+    return {"verification": verification.to_json_dict()}
+
+
+@router.post("/rag-eval/workbench/embedding-revisions/{revision_id}/accept")
+async def accept_workbench_rag_eval_embedding_revision(
+    project_id: str,
+    revision_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.interfaces.composition.workbench_rag_eval import (
+        make_accept_workbench_rag_eval_embedding_revision,
+    )
+
+    try:
+        revision = await make_accept_workbench_rag_eval_embedding_revision(
+            pool=pool,
+        ).execute(
+            AcceptWorkbenchRagEvalEmbeddingRevisionCommand(
+                project_id=project_id,
+                revision_id=revision_id,
+                now=datetime.now(timezone.utc),
+            )
+        )
+    except WorkbenchRagEvalPromotionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WorkbenchRagEvalPromotionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"revision": revision.to_json_dict()}
+
+
+@router.post("/rag-eval/workbench/embedding-revisions/{revision_id}/rollback")
+async def rollback_workbench_rag_eval_embedding_revision(
+    project_id: str,
+    revision_id: str,
+    authorization: str | None = Header(default=None),
+    pool=Depends(get_pool),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
+):
+    await _require_project_access(
+        project_id=project_id,
+        authorization=authorization,
+        project_repo=project_repo,
+        user_repo=user_repo,
+    )
+
+    from src.interfaces.composition.workbench_rag_eval import (
+        make_rollback_workbench_rag_eval_embedding_revision,
+    )
+
+    try:
+        revision = await make_rollback_workbench_rag_eval_embedding_revision(
+            pool=pool,
+        ).execute(
+            RollbackWorkbenchRagEvalEmbeddingRevisionCommand(
+                project_id=project_id,
+                revision_id=revision_id,
+                now=datetime.now(timezone.utc),
+            )
+        )
+    except WorkbenchRagEvalPromotionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WorkbenchRagEvalPromotionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"revision": revision.to_json_dict()}
 
 
 @router.get("/{document_id}/workflow-live-state")

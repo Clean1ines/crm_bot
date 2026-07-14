@@ -33,8 +33,14 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reco
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_run_workbench_rag_eval_retrieval_evaluation_command import (
     PublishedWorkbenchSearchPort,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_run_workbench_rag_eval_post_promotion_verification_command import (
+    RunWorkbenchRagEvalPostPromotionVerificationPort,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.ports.workbench_rag_eval_repository_port import (
     WorkbenchRagEvalRepositoryPort,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 
 
@@ -89,6 +95,10 @@ class DrainWorkbenchRagEvalWorkflowCommands:
         search_published_workbench_runtime: PublishedWorkbenchSearchPort | None = None,
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort | None = None,
         adjudication_provider_messages_builder: object | None = None,
+        post_promotion_verification_executor: (
+            RunWorkbenchRagEvalPostPromotionVerificationPort | None
+        ) = None,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> DrainWorkbenchRagEvalWorkflowCommandsResult:
         pending_commands = (
             await workflow_unit_of_work.command_log.list_pending_commands(
@@ -123,6 +133,10 @@ class DrainWorkbenchRagEvalWorkflowCommands:
                 adjudication_provider_messages_builder=(
                     adjudication_provider_messages_builder
                 ),
+                post_promotion_verification_executor=(
+                    post_promotion_verification_executor
+                ),
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             if not result.dispatched:
                 blocked_count = 1

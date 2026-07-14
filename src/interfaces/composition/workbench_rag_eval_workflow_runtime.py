@@ -41,6 +41,12 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.drain_workb
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_execute_workbench_rag_eval_question_generation import (
     ExecuteWorkbenchRagEvalQuestionGeneration,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_rag_eval_promotion_verification_policy import (
+    WorkbenchRagEvalPromotionVerificationPolicy,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.use_cases.run_workbench_rag_eval_post_promotion_verification import (
+    RunWorkbenchRagEvalPostPromotionVerification,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_execute_workbench_rag_eval_adjudication import (
     ExecuteWorkbenchRagEvalAdjudication,
 )
@@ -61,6 +67,15 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_
 )
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.workbench_rag_eval_frontend_workflow_event_projector import (
+    WorkbenchRagEvalFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
+    PostgresFrontendWorkflowEventRepository,
 )
 from src.contexts.knowledge_workbench.retrieval.application.use_cases.search_published_workbench_runtime import (
     SearchPublishedWorkbenchRuntime,
@@ -102,6 +117,12 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
     AsyncPool as PrepareAsyncPool,
     DispatchPreparationBuilderRegistry,
     PrepareLlmDispatchBatch,
+)
+from src.interfaces.realtime.collecting_frontend_workflow_event_repository import (
+    CollectingFrontendWorkflowEventRepository,
+)
+from src.interfaces.realtime.redis_frontend_workflow_event_bus import (
+    publish_frontend_workflow_events,
 )
 
 
@@ -201,6 +222,13 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
             unit_of_work = PostgresWorkflowRuntimeUnitOfWork(asyncpg_connection)
             await unit_of_work.start()
             repository = PostgresWorkbenchRagEvalRepository(asyncpg_connection)
+            frontend_event_repository = CollectingFrontendWorkflowEventRepository(
+                PostgresFrontendWorkflowEventRepository(asyncpg_connection)
+            )
+            frontend_event_projection_writer = ProjectFrontendWorkflowEvent(
+                projector=WorkbenchRagEvalFrontendWorkflowEventProjector(),
+                repository=frontend_event_repository,
+            )
             result = await DrainWorkbenchRagEvalWorkflowCommands().execute(
                 DrainWorkbenchRagEvalWorkflowCommandsCommand(
                     workflow_run_id=workflow_run_id,
@@ -238,8 +266,27 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
                 search_published_workbench_runtime=(
                     self.search_published_workbench_runtime
                 ),
+                post_promotion_verification_executor=(
+                    RunWorkbenchRagEvalPostPromotionVerification(
+                        repository=repository,
+                        embedding_generation_port=(
+                            self.search_published_workbench_runtime.embedding_generation_port
+                        ),
+                        embedding_model_id=(
+                            self.search_published_workbench_runtime.embedding_model_id
+                        ),
+                        embedding_dimensions=(
+                            self.search_published_workbench_runtime.embedding_dimensions
+                        ),
+                        policy=WorkbenchRagEvalPromotionVerificationPolicy(),
+                    )
+                ),
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             await unit_of_work.commit()
+            await publish_frontend_workflow_events(
+                frontend_event_repository.persisted_events()
+            )
             return result
         except Exception:
             if unit_of_work is not None:

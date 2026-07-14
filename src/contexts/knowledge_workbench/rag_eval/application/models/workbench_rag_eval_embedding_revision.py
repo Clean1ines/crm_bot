@@ -41,6 +41,24 @@ class WorkbenchRagEvalPromotionApplicationClaimDecisionCode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class WorkbenchRagEvalEmbeddingRevisionAvailableActions:
+    can_accept: bool
+    can_rollback: bool
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.can_accept, bool):
+            raise TypeError("can_accept must be bool")
+        if not isinstance(self.can_rollback, bool):
+            raise TypeError("can_rollback must be bool")
+
+    def to_json_dict(self) -> JsonObject:
+        return {
+            "can_accept": self.can_accept,
+            "can_rollback": self.can_rollback,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalPromotionApplicationCandidate:
     promotion_id: str
     run_id: str
@@ -234,6 +252,12 @@ class WorkbenchRagEvalEmbeddingRevisionReadModel:
     accepted_at: datetime | None
     regression_failed_at: datetime | None
     rolled_back_at: datetime | None
+    available_actions: WorkbenchRagEvalEmbeddingRevisionAvailableActions = (
+        WorkbenchRagEvalEmbeddingRevisionAvailableActions(
+            can_accept=False,
+            can_rollback=False,
+        )
+    )
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -261,6 +285,14 @@ class WorkbenchRagEvalEmbeddingRevisionReadModel:
             "regression_failed_at",
         )
         _require_optional_datetime(self.rolled_back_at, "rolled_back_at")
+        if not isinstance(
+            self.available_actions,
+            WorkbenchRagEvalEmbeddingRevisionAvailableActions,
+        ):
+            raise TypeError(
+                "available_actions must be "
+                "WorkbenchRagEvalEmbeddingRevisionAvailableActions"
+            )
 
     def to_json_dict(self) -> JsonObject:
         return {
@@ -286,6 +318,7 @@ class WorkbenchRagEvalEmbeddingRevisionReadModel:
                 if self.rolled_back_at is not None
                 else None
             ),
+            "available_actions": self.available_actions.to_json_dict(),
         }
 
 

@@ -626,6 +626,57 @@ const streamFrontendWorkflowEvents = (
   return () => controller.abort();
 };
 
+const streamProjectWorkflowEvents = (
+  projectId: string,
+  workflowRunId: string,
+  query: FrontendWorkflowEventsQuery | undefined,
+  onMessage: FrontendWorkflowEventStreamMessageHandler,
+  onError?: FrontendWorkflowEventStreamErrorHandler,
+): FrontendWorkflowEventStreamStop => {
+  const controller = new AbortController();
+  const queryString = frontendWorkflowEventsQueryString(query);
+
+  void (async () => {
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/frontend-events/stream${queryString}`,
+        {
+          method: 'GET',
+          headers: createAuthHeaders(null),
+          signal: controller.signal,
+        },
+      );
+
+      if (!response.ok || !response.body) {
+        throw new Error(`Project workflow event stream failed: ${response.status}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parsed = parseSsePayloads(buffer);
+        buffer = parsed.rest;
+
+        for (const payload of parsed.payloads) {
+          onMessage(JSON.parse(payload) as FrontendWorkflowEventEnvelope);
+        }
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        onError?.(error);
+      }
+    }
+  })();
+
+  return () => controller.abort();
+};
+
 
 
 export type DraftClaimCurationEditablePayload = {
@@ -1416,9 +1467,22 @@ export const knowledgeApi = {
       {
         method: 'GET',
       },
+	    ),
+
+  getProjectWorkflowEvents: (
+    projectId: string,
+    workflowRunId: string,
+    query: FrontendWorkflowEventsQuery = {},
+  ) =>
+    authedJsonRequest<FrontendWorkflowEventsResponse>(
+      `/api/projects/${projectId}/knowledge/workflows/${encodeURIComponent(workflowRunId)}/frontend-events${frontendWorkflowEventsQueryString(query)}`,
+      {
+        method: 'GET',
+      },
     ),
 
   streamFrontendWorkflowEvents,
+  streamProjectWorkflowEvents,
 
   progress: (projectId: string, documentId: string) =>
     authedJsonRequest<KnowledgeProcessingReport>(

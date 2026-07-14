@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useState } from 'react';
 import { BarChart3, Loader2, Play, Search, ShieldCheck, XCircle } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -12,9 +12,17 @@ import {
   type WorkbenchRagEvalPromotionCandidateDetails,
   type WorkbenchRagEvalQuestionDetails,
   type WorkbenchRagEvalRetrievalResultDetails,
+  type WorkbenchRagEvalEmbeddingRevision,
   type WorkbenchRagEvalRunSummary,
+  type WorkbenchRagEvalVerification,
+  type WorkbenchRagEvalVerificationMetrics,
+  type WorkbenchRagEvalVerificationRoleMetrics,
 } from '@shared/api/modules/ragEval';
 import { ragEvalQueryKeys } from './ragEvalQueryKeys';
+import {
+  createInitialRagEvalProjectionState,
+  reduceRagEvalFrontendProjectionEvent,
+} from './ragEvalFrontendProjectionReducer';
 import { RagEvalRetrievalProgress } from './RagEvalRetrievalProgress';
 import { acceptStartedRagEvalRun } from './ragEvalRunStart';
 
@@ -423,6 +431,118 @@ const CandidatesPanel: React.FC<{
   </section>
 );
 
+const RevisionPanel: React.FC<{
+  revisions: WorkbenchRagEvalEmbeddingRevision[];
+  loading: boolean;
+  error: unknown;
+  acceptingRevisionId: string | null;
+  rollingBackRevisionId: string | null;
+  onAccept: (revision: WorkbenchRagEvalEmbeddingRevision) => void;
+  onRollback: (revision: WorkbenchRagEvalEmbeddingRevision) => void;
+  onRetry: () => void;
+}> = ({
+  revisions,
+  loading,
+  error,
+  acceptingRevisionId,
+  rollingBackRevisionId,
+  onAccept,
+  onRollback,
+  onRetry,
+}) => (
+  <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
+    <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+      Ревизии поиска
+    </h2>
+    <p className="mt-1 text-sm text-[var(--text-muted)]">
+      Применённые улучшения проходят проверку перед окончательным принятием.
+    </p>
+
+    {loading && (
+      <div className="mt-4 rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+        <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+        Загружаю ревизии…
+      </div>
+    )}
+
+    {Boolean(error) && !loading && (
+      <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-500">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span>Не удалось загрузить ревизии поиска.</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold"
+          >
+            Повторить
+          </button>
+        </div>
+      </div>
+    )}
+
+    {!loading && !error && revisions.length === 0 && (
+      <div className="mt-4 rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+        Ревизий пока нет.
+      </div>
+    )}
+
+    <div className="mt-4 space-y-3">
+      {revisions.map((revision) => {
+        const canAccept = revision.available_actions.can_accept;
+        const canRollback = revision.available_actions.can_rollback;
+        return (
+          <div
+            key={revision.revision_id}
+            className="rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-4"
+          >
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-[var(--text-primary)]">
+                  {shortId(revision.revision_id)}
+                </div>
+                <div className="mt-1 text-xs text-[var(--text-muted)]">
+                  Статус: {revision.status} · создано {formatDateTime(revision.created_at)}
+                </div>
+                <div className="mt-2 text-xs text-[var(--text-secondary)]">
+                  Вопросов в ревизии: {formatNumber(revision.promotion_ids.length)}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onAccept(revision)}
+                  disabled={!canAccept || acceptingRevisionId === revision.revision_id}
+                  className="rounded-lg bg-[var(--accent-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {acceptingRevisionId === revision.revision_id ? 'Принимаю…' : 'Принять'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRollback(revision)}
+                  disabled={!canRollback || rollingBackRevisionId === revision.revision_id}
+                  className="rounded-lg border border-red-500/40 px-3 py-1.5 text-xs font-semibold text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {rollingBackRevisionId === revision.revision_id ? 'Откатываю…' : 'Откатить'}
+                </button>
+              </div>
+            </div>
+            <details className="mt-3 text-xs text-[var(--text-secondary)]">
+              <summary className="cursor-pointer font-medium text-[var(--text-primary)]">
+                Применённые вопросы
+              </summary>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {revision.new_promoted_questions.map((question) => (
+                  <li key={question}>{question}</li>
+                ))}
+              </ul>
+            </details>
+          </div>
+        );
+      })}
+    </div>
+  </section>
+);
+
 const MetricCard: React.FC<{ label: string; value: string | number; hint?: string }> = ({
   label,
   value,
@@ -433,6 +553,184 @@ const MetricCard: React.FC<{ label: string; value: string | number; hint?: strin
     <div className="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{value}</div>
     {hint && <div className="mt-1 text-xs text-[var(--text-muted)]">{hint}</div>}
   </div>
+);
+
+const verificationRoles = [
+  ['promoted', 'Promoted'],
+  ['holdout', 'Holdout'],
+  ['baseline', 'Baseline'],
+  ['neighbour', 'Neighbour'],
+] satisfies ReadonlyArray<readonly [keyof WorkbenchRagEvalVerificationMetrics, string]>;
+
+const metricNumber = (
+  metrics: WorkbenchRagEvalVerificationMetrics | null,
+  role: keyof WorkbenchRagEvalVerificationMetrics,
+  key: keyof WorkbenchRagEvalVerificationRoleMetrics,
+): number | null => {
+  const value = metrics?.[role][key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
+
+const metricText = (
+  metrics: WorkbenchRagEvalVerificationMetrics | null,
+  role: keyof WorkbenchRagEvalVerificationMetrics,
+  key: keyof WorkbenchRagEvalVerificationRoleMetrics,
+  digits = 2,
+): string => {
+  const value = metricNumber(metrics, role, key);
+  return value === null ? '—' : value.toFixed(digits);
+};
+
+const rateText = (
+  metrics: WorkbenchRagEvalVerificationMetrics | null,
+  role: keyof WorkbenchRagEvalVerificationMetrics,
+  key: keyof WorkbenchRagEvalVerificationRoleMetrics,
+): string => {
+  const value = metricNumber(metrics, role, key);
+  return value === null ? '—' : `${Math.round(value * 100)}%`;
+};
+
+const VerificationMetricsTable: React.FC<{ metrics: WorkbenchRagEvalVerificationMetrics | null }> = ({
+  metrics,
+}) => {
+  if (!metrics) {
+    return (
+      <div className="mt-3 rounded-lg bg-[var(--surface-elevated)] p-3 text-xs text-[var(--text-muted)]">
+        Метрики ещё не сохранены.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 overflow-x-auto">
+      <table className="min-w-[980px] text-left text-xs">
+        <thead className="text-[var(--text-muted)]">
+          <tr>
+            <th className="py-2 pr-3 font-medium">Срез</th>
+            <th className="px-3 py-2 font-medium">Top1 до/после/Δ</th>
+            <th className="px-3 py-2 font-medium">Top3 до/после/Δ</th>
+            <th className="px-3 py-2 font-medium">Top5 до/после/Δ</th>
+            <th className="px-3 py-2 font-medium">Mean rank до/после/Δ</th>
+            <th className="px-3 py-2 font-medium">Mean margin до/после/Δ</th>
+            <th className="px-3 py-2 font-medium">Miss / confusion</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[var(--border-primary)] text-[var(--text-secondary)]">
+          {verificationRoles.map(([role, label]) => (
+            <tr key={role}>
+              <td className="py-2 pr-3 font-medium text-[var(--text-primary)]">
+                {label}
+              </td>
+              <td className="px-3 py-2">
+                {rateText(metrics, role, 'before_top1_rate')} / {rateText(metrics, role, 'top1_rate')} / {rateText(metrics, role, 'top1_rate_delta')}
+              </td>
+              <td className="px-3 py-2">
+                {rateText(metrics, role, 'before_top3_rate')} / {rateText(metrics, role, 'top3_rate')} / {rateText(metrics, role, 'top3_rate_delta')}
+              </td>
+              <td className="px-3 py-2">
+                {rateText(metrics, role, 'before_top5_rate')} / {rateText(metrics, role, 'top5_rate')} / {rateText(metrics, role, 'top5_rate_delta')}
+              </td>
+              <td className="px-3 py-2">
+                {metricText(metrics, role, 'before_mean_expected_rank')} / {metricText(metrics, role, 'mean_expected_rank')} / {metricText(metrics, role, 'mean_expected_rank_delta')}
+              </td>
+              <td className="px-3 py-2">
+                {metricText(metrics, role, 'before_mean_score_margin')} / {metricText(metrics, role, 'mean_score_margin')} / {metricText(metrics, role, 'mean_score_margin_delta')}
+              </td>
+              <td className="px-3 py-2">
+                {metricText(metrics, role, 'miss_count', 0)} / {metricText(metrics, role, 'confusion_count', 0)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const VerificationPanel: React.FC<{
+  verifications: WorkbenchRagEvalVerification[];
+  loading: boolean;
+  error: unknown;
+  onRetry: () => void;
+}> = ({ verifications, loading, error, onRetry }) => (
+  <section className="rounded-2xl bg-[var(--surface-elevated)] p-5 shadow-[var(--shadow-card)] sm:p-6">
+    <div className="mb-4 flex items-start gap-3">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--control-bg)] text-[var(--text-secondary)]">
+        <ShieldCheck className="h-5 w-5" />
+      </div>
+      <div>
+        <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+          Проверка после применения
+        </h2>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">
+          Сравнение поиска до и после обновления формулировок опубликованных фактов.
+        </p>
+      </div>
+    </div>
+
+    {loading && (
+      <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+        <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+        Загружаю результаты проверки ревизий…
+      </div>
+    )}
+    {Boolean(error) && !loading && (
+      <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4 text-sm text-red-500">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span>Не удалось загрузить проверки ревизий.</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs font-semibold"
+          >
+            Повторить
+          </button>
+        </div>
+      </div>
+    )}
+    {!loading && !error && verifications.length === 0 && (
+      <div className="rounded-xl bg-[var(--control-bg)] p-4 text-sm text-[var(--text-muted)]">
+        Применённые ревизии ещё не проверялись.
+      </div>
+    )}
+    <div className="space-y-3">
+      {verifications.map((verification) => (
+        <div
+          key={verification.verification_id}
+          className="rounded-xl border border-[var(--border-primary)] bg-[var(--control-bg)] p-4"
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="font-mono text-sm text-[var(--text-primary)]">
+                {shortId(verification.revision_id)}
+              </div>
+              <div className="mt-1 text-xs text-[var(--text-muted)]">
+                {verification.decision ?? verification.status}
+                {verification.failure_reasons.length > 0
+                  ? ` · ${verification.failure_reasons.join(', ')}`
+                  : ''}
+              </div>
+            </div>
+            <div className="grid gap-2 text-xs text-[var(--text-secondary)] sm:grid-cols-3 lg:min-w-[420px]">
+              <div>
+                <div className="text-[var(--text-muted)]">Запросы</div>
+                <div>{verification.outcome_count} / {verification.query_count}</div>
+              </div>
+              <div>
+                <div className="text-[var(--text-muted)]">Статус</div>
+                <div>{verification.status}</div>
+              </div>
+              <div>
+                <div className="text-[var(--text-muted)]">Завершена</div>
+                <div>{formatDateTime(verification.completed_at)}</div>
+              </div>
+	            </div>
+	          </div>
+	          <VerificationMetricsTable metrics={verification.metrics} />
+	        </div>
+	      ))}
+    </div>
+  </section>
 );
 
 const SummaryPanel: React.FC<{ run: WorkbenchRagEvalRunSummary | null; loading?: boolean }> = ({
@@ -589,6 +887,10 @@ export const RagEvalPage: React.FC = () => {
   const [topK, setTopK] = useState(5);
   const [maxEntries, setMaxEntries] = useState(20);
   const [selectedPromotionIds, setSelectedPromotionIds] = useState<string[]>([]);
+  const [projectionState, dispatchProjectionEvent] = useReducer(
+    reduceRagEvalFrontendProjectionEvent,
+    createInitialRagEvalProjectionState(),
+  );
 
   const documentsQuery = useQuery({
     queryKey: ragEvalQueryKeys.documents(projectId),
@@ -645,6 +947,51 @@ export const RagEvalPage: React.FC = () => {
     retry: false,
   });
 
+  const revisionsQuery = useQuery({
+    queryKey: ragEvalQueryKeys.embeddingRevisions(projectId, visibleRun?.run_id),
+    queryFn: async () => {
+      if (!projectId || !visibleRun) return { revisions: [] };
+      return ragEvalApi.listWorkbenchEmbeddingRevisions(projectId, visibleRun.run_id);
+    },
+    enabled: Boolean(projectId && visibleRun?.run_id),
+    retry: false,
+  });
+
+  const verificationsQuery = useQuery({
+    queryKey: ragEvalQueryKeys.verifications(projectId, visibleRun?.run_id),
+    queryFn: async () => {
+      if (!projectId || !visibleRun) return { verifications: [] };
+      return ragEvalApi.listWorkbenchPostPromotionVerifications(projectId, visibleRun.run_id);
+    },
+    enabled: Boolean(projectId && visibleRun?.run_id),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (!projectId || !visibleRun?.run_id) return undefined;
+    return knowledgeApi.streamProjectWorkflowEvents(
+      projectId,
+      visibleRun.run_id,
+      { limit: 100 },
+      (event) => {
+        if (event.project_id !== projectId || event.workflow_run_id !== visibleRun.run_id) {
+          return;
+        }
+        if (!event.projection_type.startsWith('rag_eval_')) {
+          return;
+        }
+        dispatchProjectionEvent(event);
+      },
+    );
+  }, [projectId, visibleRun?.run_id]);
+
+  useEffect(() => {
+    if (projectionState.invalidation_keys.length === 0) return;
+    for (const key of projectionState.invalidation_keys) {
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
+  }, [projectionState.invalidation_keys, queryClient]);
+
   const validationError = useMemo(() => {
     if (topK < 5) return 'Количество результатов должно быть не меньше 5';
     if (maxEntries < 1 || maxEntries > 50) return 'Количество фактов должно быть от 1 до 50';
@@ -696,6 +1043,44 @@ export const RagEvalPage: React.FC = () => {
     },
     onError: (error) => {
       toast.error(getErrorMessage(error, 'Не удалось применить выбранные предложения'));
+    },
+  });
+
+  const acceptRevisionMutation = useMutation({
+    mutationFn: async (revision: WorkbenchRagEvalEmbeddingRevision) => {
+      if (!projectId) throw new Error('project_id не найден в маршруте');
+      return ragEvalApi.acceptWorkbenchEmbeddingRevision(projectId, revision.revision_id);
+    },
+    onSuccess: async (response) => {
+      toast.success(`Ревизия принята: ${shortId(response.revision.revision_id)}`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.latest(projectId) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.embeddingRevisions(projectId, visibleRun?.run_id) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.embeddingRevision(projectId, response.revision.revision_id) }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, 'Не удалось принять ревизию'));
+    },
+  });
+
+  const rollbackRevisionMutation = useMutation({
+    mutationFn: async (revision: WorkbenchRagEvalEmbeddingRevision) => {
+      if (!projectId) throw new Error('project_id не найден в маршруте');
+      return ragEvalApi.rollbackWorkbenchEmbeddingRevision(projectId, revision.revision_id);
+    },
+    onSuccess: async (response) => {
+      toast.success(`Ревизия откатана: ${shortId(response.revision.revision_id)}`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.latest(projectId) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.questions(projectId, visibleRun?.run_id) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.promotionCandidates(projectId, visibleRun?.run_id) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.embeddingRevisions(projectId, visibleRun?.run_id) }),
+        queryClient.invalidateQueries({ queryKey: ragEvalQueryKeys.embeddingRevision(projectId, response.revision.revision_id) }),
+      ]);
+    },
+    onError: (error) => {
+      toast.error(getErrorMessage(error, 'Не удалось откатить ревизию'));
     },
   });
 
@@ -930,6 +1315,30 @@ export const RagEvalPage: React.FC = () => {
             onApplySelected={applySelectedPromotions}
             onApplyAllForRun={applyAllPromotionsForRun}
             onRetry={() => { void candidatesQuery.refetch(); }}
+          />
+          <RevisionPanel
+            revisions={revisionsQuery.data?.revisions ?? []}
+            loading={revisionsQuery.isLoading}
+            error={revisionsQuery.error}
+            acceptingRevisionId={
+              acceptRevisionMutation.isPending
+                ? acceptRevisionMutation.variables?.revision_id ?? null
+                : null
+            }
+            rollingBackRevisionId={
+              rollbackRevisionMutation.isPending
+                ? rollbackRevisionMutation.variables?.revision_id ?? null
+                : null
+            }
+            onAccept={(revision) => acceptRevisionMutation.mutate(revision)}
+            onRollback={(revision) => rollbackRevisionMutation.mutate(revision)}
+            onRetry={() => { void revisionsQuery.refetch(); }}
+          />
+          <VerificationPanel
+            verifications={verificationsQuery.data?.verifications ?? []}
+            loading={verificationsQuery.isLoading}
+            error={verificationsQuery.error}
+            onRetry={() => { void verificationsQuery.refetch(); }}
           />
         </>
       )}

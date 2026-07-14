@@ -23,6 +23,19 @@ describe('ragEvalQueryKeys', () => {
       'run-1',
       'promotion-candidates',
     ]);
+    expect(ragEvalQueryKeys.embeddingRevisions('project-1', 'run-1')).toEqual([
+      'workbench-rag-eval',
+      'project-1',
+      'runs',
+      'run-1',
+      'embedding-revisions',
+    ]);
+    expect(ragEvalQueryKeys.embeddingRevision('project-1', 'revision-1')).toEqual([
+      'workbench-rag-eval',
+      'project-1',
+      'embedding-revisions',
+      'revision-1',
+    ]);
   });
 
   it('provides a project prefix suitable for event-driven invalidation', () => {

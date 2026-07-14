@@ -38,6 +38,11 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_run_
     HandleRunWorkbenchRagEvalRetrievalEvaluationCommandHandler,
     PublishedWorkbenchSearchPort,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_run_workbench_rag_eval_post_promotion_verification_command import (
+    HandleRunWorkbenchRagEvalPostPromotionVerificationCommand,
+    HandleRunWorkbenchRagEvalPostPromotionVerificationCommandHandler,
+    RunWorkbenchRagEvalPostPromotionVerificationPort,
+)
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -55,6 +60,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_r
     WorkbenchRagEvalWorkflowCommandType,
     command_type_from_value,
     operation_for_command_type,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
@@ -123,6 +131,10 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
         search_published_workbench_runtime: PublishedWorkbenchSearchPort | None = None,
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort | None = None,
         adjudication_provider_messages_builder: object | None = None,
+        post_promotion_verification_executor: (
+            RunWorkbenchRagEvalPostPromotionVerificationPort | None
+        ) = None,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> DispatchWorkbenchRagEvalWorkflowCommandResult:
         workflow_command = command.workflow_command
         command_type = command_type_from_value(workflow_command.command_type)
@@ -287,6 +299,42 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
                 operation_key=operation.operation_key,
                 phase=operation.phase.value,
                 handler_name="HandleRunWorkbenchRagEvalRetrievalEvaluationCommandHandler",
+                dispatched=True,
+                blocked_reason=None,
+            )
+
+        if (
+            command_type
+            is WorkbenchRagEvalWorkflowCommandType.RUN_POST_PROMOTION_VERIFICATION
+        ):
+            if post_promotion_verification_executor is None:
+                return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                    workflow_run_id=workflow_command.workflow_run_id,
+                    command_type=command_type.value,
+                    operation_key=operation.operation_key,
+                    phase=operation.phase.value,
+                    handler_name=None,
+                    dispatched=False,
+                    blocked_reason=RAG_EVAL_COMMAND_HANDLER_NOT_IMPLEMENTED,
+                )
+            await HandleRunWorkbenchRagEvalPostPromotionVerificationCommandHandler().execute(
+                HandleRunWorkbenchRagEvalPostPromotionVerificationCommand(
+                    workflow_command
+                ),
+                post_promotion_verification_executor=(
+                    post_promotion_verification_executor
+                ),
+                workflow_unit_of_work=workflow_unit_of_work,
+                frontend_event_projection_writer=frontend_event_projection_writer,
+            )
+            return DispatchWorkbenchRagEvalWorkflowCommandResult(
+                workflow_run_id=workflow_command.workflow_run_id,
+                command_type=command_type.value,
+                operation_key=operation.operation_key,
+                phase=operation.phase.value,
+                handler_name=(
+                    "HandleRunWorkbenchRagEvalPostPromotionVerificationCommandHandler"
+                ),
                 dispatched=True,
                 blocked_reason=None,
             )

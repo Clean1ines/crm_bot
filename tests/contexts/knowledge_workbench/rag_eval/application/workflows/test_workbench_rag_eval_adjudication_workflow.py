@@ -36,6 +36,10 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reco
     WorkbenchRagEvalAdjudicationProgressDecision,
     WorkbenchRagEvalAdjudicationProgressDecisionPolicy,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_run_workbench_rag_eval_post_promotion_verification_command import (
+    RunWorkbenchRagEvalPostPromotionVerificationCommand,
+    RunWorkbenchRagEvalPostPromotionVerificationResult,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_schedule_workbench_rag_eval_adjudication_work_command import (
     HandleScheduleWorkbenchRagEvalAdjudicationWorkCommand,
     HandleScheduleWorkbenchRagEvalAdjudicationWorkCommandHandler,
@@ -45,6 +49,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_r
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
     WorkbenchRagEvalWorkflowCommandType,
+    WorkbenchRagEvalWorkflowEventType,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
@@ -75,6 +80,8 @@ def _command(command_type: WorkbenchRagEvalWorkflowCommandType) -> WorkflowComma
             "scheduled_work_item_count": 1,
             "dispatch_attempt_id": "attempt-1",
             "work_item_id": "work-item-1",
+            "revision_id": "revision-1",
+            "runtime_entry_id": "runtime-entry-1",
         },
         status=WorkflowCommandStatus.PENDING,
         run_after=NOW,
@@ -107,6 +114,31 @@ def _planning_input() -> WorkbenchRagEvalAdjudicationPlanningInput:
         target_exclusion_scope=None,
         target_evidence_block="Источник",
         retrieved=(),
+    )
+
+
+def _verification_result(
+    *,
+    workflow_run_id: str = "run-1",
+    processed_count: int,
+    remaining_count: int,
+    total_query_count: int,
+    terminal: bool,
+    status: str,
+    decision: str | None = None,
+) -> RunWorkbenchRagEvalPostPromotionVerificationResult:
+    return RunWorkbenchRagEvalPostPromotionVerificationResult(
+        workflow_run_id=workflow_run_id,
+        revision_id="revision-1",
+        runtime_entry_id="runtime-entry-1",
+        batch_key="revision-1:batch",
+        batch_limit=20,
+        processed_count=processed_count,
+        remaining_count=remaining_count,
+        total_query_count=total_query_count,
+        terminal=terminal,
+        status=status,
+        decision=decision,
     )
 
 
@@ -181,6 +213,33 @@ class FakeScheduler:
         self.hashes[item.work_item_id] = payload_hash
 
 
+@dataclass(slots=True)
+class FakePostPromotionVerificationExecutor:
+    results: list[RunWorkbenchRagEvalPostPromotionVerificationResult] = field(
+        default_factory=list
+    )
+    commands: list[RunWorkbenchRagEvalPostPromotionVerificationCommand] = field(
+        default_factory=list
+    )
+
+    async def execute(
+        self,
+        command: RunWorkbenchRagEvalPostPromotionVerificationCommand,
+    ) -> RunWorkbenchRagEvalPostPromotionVerificationResult:
+        self.commands.append(command)
+        if self.results:
+            return self.results.pop(0)
+        return _verification_result(
+            workflow_run_id=command.workflow_command.workflow_run_id,
+            processed_count=1,
+            remaining_count=0,
+            total_query_count=1,
+            terminal=True,
+            status="passed",
+            decision="acceptable",
+        )
+
+
 @pytest.mark.asyncio
 async def test_schedule_adjudication_creates_one_work_item_per_eligible_question() -> (
     None
@@ -215,6 +274,113 @@ async def test_schedule_adjudication_creates_one_work_item_per_eligible_question
     assert uow.command_log.appended[0].command_type == (
         WorkbenchRagEvalWorkflowCommandType.PREPARE_ADJUDICATION_DISPATCH_BATCH.value
     )
+
+
+@pytest.mark.asyncio
+async def test_dispatch_post_promotion_verification_uses_registered_handler() -> None:
+    executor = FakePostPromotionVerificationExecutor()
+    uow = FakeUow()
+
+    result = await DispatchWorkbenchRagEvalWorkflowCommandHandler().execute(
+        DispatchWorkbenchRagEvalWorkflowCommand(
+            _command(
+                WorkbenchRagEvalWorkflowCommandType.RUN_POST_PROMOTION_VERIFICATION
+            )
+        ),
+        workflow_unit_of_work=uow,
+        prepare_llm_dispatch_batch=None,
+        post_promotion_verification_executor=executor,
+    )
+
+    assert result.dispatched is True
+    assert result.blocked_reason is None
+    assert result.handler_name == (
+        "HandleRunWorkbenchRagEvalPostPromotionVerificationCommandHandler"
+    )
+    assert executor.commands[0].workflow_command.command_type == (
+        WorkbenchRagEvalWorkflowCommandType.RUN_POST_PROMOTION_VERIFICATION.value
+    )
+    assert uow.command_log.completed == [
+        executor.commands[0].workflow_command.command_id
+    ]
+    assert [event.event_type for event in uow.outbox.events] == [
+        WorkbenchRagEvalWorkflowEventType.VERIFICATION_BATCH_COMPLETED.value,
+        WorkbenchRagEvalWorkflowEventType.VERIFICATION_COMPLETED.value,
+    ]
+    assert uow.progress_snapshots.snapshots
+    assert uow.timeline.entries
+
+
+@pytest.mark.asyncio
+async def test_dispatch_post_promotion_verification_appends_bounded_continuations() -> (
+    None
+):
+    executor = FakePostPromotionVerificationExecutor(
+        results=[
+            _verification_result(
+                processed_count=20,
+                remaining_count=25,
+                total_query_count=45,
+                terminal=False,
+                status="running",
+            ),
+            _verification_result(
+                processed_count=20,
+                remaining_count=5,
+                total_query_count=45,
+                terminal=False,
+                status="running",
+            ),
+            _verification_result(
+                processed_count=5,
+                remaining_count=0,
+                total_query_count=45,
+                terminal=True,
+                status="passed",
+                decision="acceptable",
+            ),
+        ]
+    )
+    uow = FakeUow()
+    first_command = _command(
+        WorkbenchRagEvalWorkflowCommandType.RUN_POST_PROMOTION_VERIFICATION
+    )
+
+    await DispatchWorkbenchRagEvalWorkflowCommandHandler().execute(
+        DispatchWorkbenchRagEvalWorkflowCommand(first_command),
+        workflow_unit_of_work=uow,
+        prepare_llm_dispatch_batch=None,
+        post_promotion_verification_executor=executor,
+    )
+    await DispatchWorkbenchRagEvalWorkflowCommandHandler().execute(
+        DispatchWorkbenchRagEvalWorkflowCommand(uow.command_log.appended[-1]),
+        workflow_unit_of_work=uow,
+        prepare_llm_dispatch_batch=None,
+        post_promotion_verification_executor=executor,
+    )
+    await DispatchWorkbenchRagEvalWorkflowCommandHandler().execute(
+        DispatchWorkbenchRagEvalWorkflowCommand(uow.command_log.appended[-1]),
+        workflow_unit_of_work=uow,
+        prepare_llm_dispatch_batch=None,
+        post_promotion_verification_executor=executor,
+    )
+
+    assert [event.event_type for event in uow.outbox.events] == [
+        WorkbenchRagEvalWorkflowEventType.VERIFICATION_BATCH_COMPLETED.value,
+        WorkbenchRagEvalWorkflowEventType.VERIFICATION_BATCH_COMPLETED.value,
+        WorkbenchRagEvalWorkflowEventType.VERIFICATION_BATCH_COMPLETED.value,
+        WorkbenchRagEvalWorkflowEventType.VERIFICATION_COMPLETED.value,
+    ]
+    continuation_commands = uow.command_log.appended
+    assert [command.payload["batch_index"] for command in continuation_commands] == [
+        1,
+        2,
+    ]
+    assert [command.idempotency_key.value for command in continuation_commands] == [
+        "rag-eval-post-promotion-verification:revision-1:batch:1",
+        "rag-eval-post-promotion-verification:revision-1:batch:2",
+    ]
+    assert len(uow.timeline.entries) == 1
 
 
 @pytest.mark.asyncio

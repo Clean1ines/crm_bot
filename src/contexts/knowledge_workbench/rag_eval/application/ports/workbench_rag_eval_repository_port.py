@@ -26,6 +26,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalPromotionApplicationClaimDecision,
     WorkbenchRagEvalPromotionApplicationSnapshot,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_verification import (
+    WorkbenchRagEvalVerificationReadModel,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_adjudication_work import (
     WorkbenchRagEvalAdjudicationPlanningInput,
 )
@@ -300,3 +303,33 @@ class WorkbenchRagEvalRepositoryPort(Protocol):
         project_id: str,
         source_rag_eval_run_id: str,
     ) -> tuple[WorkbenchRagEvalEmbeddingRevisionReadModel, ...]: ...
+
+    async def list_post_promotion_verifications(
+        self,
+        *,
+        project_id: str,
+        source_rag_eval_run_id: str,
+    ) -> tuple[WorkbenchRagEvalVerificationReadModel, ...]: ...
+
+    async def get_post_promotion_verification(
+        self,
+        *,
+        project_id: str,
+        revision_id: str,
+    ) -> WorkbenchRagEvalVerificationReadModel | None: ...
+
+    async def accept_embedding_revision(
+        self,
+        *,
+        project_id: str,
+        revision_id: str,
+        accepted_at: datetime,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel: ...
+
+    async def rollback_embedding_revision(
+        self,
+        *,
+        project_id: str,
+        revision_id: str,
+        rolled_back_at: datetime,
+    ) -> WorkbenchRagEvalEmbeddingRevisionReadModel: ...

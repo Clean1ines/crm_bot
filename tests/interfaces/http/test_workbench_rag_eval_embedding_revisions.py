@@ -11,6 +11,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.errors.workbench_rag_
     WorkbenchRagEvalPromotionConflictError,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval_embedding_revision import (
+    WorkbenchRagEvalEmbeddingRevisionAvailableActions,
     WorkbenchRagEvalEmbeddingRevisionReadModel,
     WorkbenchRagEvalEmbeddingRevisionStatus,
     WorkbenchRagEvalPromotionApplicationError,
@@ -125,6 +126,10 @@ class FakeRevisionReadRepository:
                 accepted_at=None,
                 regression_failed_at=None,
                 rolled_back_at=None,
+                available_actions=WorkbenchRagEvalEmbeddingRevisionAvailableActions(
+                    can_accept=True,
+                    can_rollback=False,
+                ),
             ),
         )
 
@@ -152,6 +157,128 @@ def test_revision_read_projection_omits_raw_vectors(monkeypatch) -> None:
     revision = response.json()["revisions"][0]
     assert revision["revision_id"] == "revision-1"
     assert revision["status"] == "pending_verification"
+    assert revision["available_actions"] == {
+        "can_accept": True,
+        "can_rollback": False,
+    }
+    assert "previous_embedding" not in revision
+    assert "new_embedding" not in revision
+
+
+class FakeAcceptRevisionUseCase:
+    async def execute(self, command):
+        assert command.project_id == PROJECT_ID
+        assert command.revision_id == "revision-1"
+        assert command.now.tzinfo is not None
+        return WorkbenchRagEvalEmbeddingRevisionReadModel(
+            revision_id="revision-1",
+            project_id=PROJECT_ID,
+            runtime_entry_id="entry-1",
+            source_rag_eval_run_id="run-1",
+            promotion_ids=("promotion-1",),
+            status=WorkbenchRagEvalEmbeddingRevisionStatus.ACCEPTED,
+            previous_promoted_questions=("Existing?",),
+            new_promoted_questions=("Existing?", "New?"),
+            created_at=NOW,
+            accepted_at=command.now,
+            regression_failed_at=None,
+            rolled_back_at=None,
+        )
+
+
+class FakeRollbackRevisionUseCase:
+    async def execute(self, command):
+        assert command.project_id == PROJECT_ID
+        assert command.revision_id == "revision-1"
+        assert command.now.tzinfo is not None
+        return WorkbenchRagEvalEmbeddingRevisionReadModel(
+            revision_id="revision-1",
+            project_id=PROJECT_ID,
+            runtime_entry_id="entry-1",
+            source_rag_eval_run_id="run-1",
+            promotion_ids=("promotion-1",),
+            status=WorkbenchRagEvalEmbeddingRevisionStatus.ROLLED_BACK,
+            previous_promoted_questions=("Existing?",),
+            new_promoted_questions=("Existing?", "New?"),
+            created_at=NOW,
+            accepted_at=None,
+            regression_failed_at=None,
+            rolled_back_at=command.now,
+        )
+
+
+def test_accept_revision_endpoint_returns_revision_without_vectors(monkeypatch) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    def fake_factory(**kwargs):
+        assert "pool" in kwargs
+        return FakeAcceptRevisionUseCase()
+
+    composition_module = ModuleType("src.interfaces.composition.workbench_rag_eval")
+    setattr(
+        composition_module,
+        "make_accept_workbench_rag_eval_embedding_revision",
+        fake_factory,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "src.interfaces.composition.workbench_rag_eval",
+        composition_module,
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access",
+        allow_access,
+    )
+
+    response = _client().post(
+        f"/api/projects/{PROJECT_ID}/knowledge/rag-eval/workbench/"
+        "embedding-revisions/revision-1/accept",
+    )
+
+    assert response.status_code == 200
+    revision = response.json()["revision"]
+    assert revision["status"] == "accepted"
+    assert "previous_embedding" not in revision
+    assert "new_embedding" not in revision
+
+
+def test_rollback_revision_endpoint_returns_revision_without_vectors(
+    monkeypatch,
+) -> None:
+    async def allow_access(**kwargs):
+        del kwargs
+        return None
+
+    def fake_factory(**kwargs):
+        assert "pool" in kwargs
+        return FakeRollbackRevisionUseCase()
+
+    composition_module = ModuleType("src.interfaces.composition.workbench_rag_eval")
+    setattr(
+        composition_module,
+        "make_rollback_workbench_rag_eval_embedding_revision",
+        fake_factory,
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "src.interfaces.composition.workbench_rag_eval",
+        composition_module,
+    )
+    monkeypatch.setattr(
+        "src.interfaces.http.knowledge._require_project_access",
+        allow_access,
+    )
+
+    response = _client().post(
+        f"/api/projects/{PROJECT_ID}/knowledge/rag-eval/workbench/"
+        "embedding-revisions/revision-1/rollback",
+    )
+
+    assert response.status_code == 200
+    revision = response.json()["revision"]
+    assert revision["status"] == "rolled_back"
     assert "previous_embedding" not in revision
     assert "new_embedding" not in revision
 

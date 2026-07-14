@@ -162,6 +162,10 @@ class AtomicFakeConnection:
             return f"UPDATE {len(promotion_ids)}"
         if "UPDATE knowledge_workbench_rag_eval_runs" in query:
             return "UPDATE 1"
+        if "INSERT INTO workflow_runtime_command_log" in query:
+            assert str(args[1]) == "RunRagEvalPostPromotionVerification"
+            assert str(args[3]).startswith("rag-eval-post-promotion-verification:")
+            return "INSERT 0 1"
         if (
             "UPDATE knowledge_workbench_rag_eval_promotion_application_claims" in query
             and "status = 'COMPLETED'" in query

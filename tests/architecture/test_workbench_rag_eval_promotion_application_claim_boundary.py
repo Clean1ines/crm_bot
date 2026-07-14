@@ -100,6 +100,8 @@ def test_only_claim_owner_can_generate_and_persist_revision() -> None:
     assert "lease_owner = $2" in persist_source
     assert "embedding_generation_port" not in repository
     assert "EmbeddingGenerationRequest" not in repository
+    assert "RUN_POST_PROMOTION_VERIFICATION" in repository
+    assert "rag-eval-post-promotion-verification:" in repository
 
     assert "knowledge_workbench_rag_eval_promotion_application_claims" in migration
     assert "WHERE status = 'PREPARING'" in migration

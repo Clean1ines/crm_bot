@@ -129,7 +129,11 @@ def _runtime(pool: FakeRuntimePool) -> WorkbenchRagEvalWorkflowRuntimeCompositio
         llm_executor=SimpleNamespace(),
         prepare_llm_dispatch_batch=SimpleNamespace(),
         execute_prepared_llm_dispatch_attempt=SimpleNamespace(),
-        search_published_workbench_runtime=SimpleNamespace(),
+        search_published_workbench_runtime=SimpleNamespace(
+            embedding_generation_port=SimpleNamespace(),
+            embedding_model_id="model-1",
+            embedding_dimensions=384,
+        ),
     )
 
 
