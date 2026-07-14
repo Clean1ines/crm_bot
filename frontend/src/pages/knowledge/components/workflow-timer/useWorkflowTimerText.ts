@@ -96,18 +96,15 @@ export const useWorkflowTimerText = (
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    setNowMs(Date.now());
-  }, [baseKey]);
-
-  useEffect(() => {
     if (!isTicking) return undefined;
 
-    setNowMs(Date.now());
     const intervalId = window.setInterval(() => {
       setNowMs(Date.now());
     }, 1000);
 
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [isTicking, baseKey]);
 
   const elapsedSeconds = useMemo(() => {

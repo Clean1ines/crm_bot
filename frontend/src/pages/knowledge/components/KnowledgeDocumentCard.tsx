@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import {
   normalize,
@@ -52,6 +52,11 @@ type ProcessingControlOverride = {
   frozenElapsedSeconds: number;
 };
 
+type ProcessingControlOverrideState = {
+  key: string;
+  override: ProcessingControlOverride;
+};
+
 const formatNumber = (value: number): string =>
   new Intl.NumberFormat('ru-RU').format(Math.max(0, Math.floor(value || 0)));
 
@@ -70,21 +75,32 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
 }) => {
   const workflow = workflowProjectionState?.workflow ?? null;
   const timer = workflow?.timer ?? null;
-  const [processingControlOverride, setProcessingControlOverride] =
-    useState<ProcessingControlOverride | null>(null);
+  const [processingControlOverrideState, setProcessingControlOverrideState] =
+    useState<ProcessingControlOverrideState | null>(null);
 
   const workflowStatus = workflow?.workflow_status ?? null;
   const currentPhase = workflow?.current_phase ?? null;
-  const stages = workflow?.stages ?? [];
-  const lanes = workflow?.section_lanes ?? [];
-  const attempts = workflow?.llm_attempts ?? [];
-  const actions = workflow?.actions ?? [];
+  const stages = useMemo(() => [...(workflow?.stages ?? [])], [workflow?.stages]);
+  const lanes = useMemo(
+    () => [...(workflow?.section_lanes ?? [])],
+    [workflow?.section_lanes],
+  );
+  const attempts = useMemo(
+    () => [...(workflow?.llm_attempts ?? [])],
+    [workflow?.llm_attempts],
+  );
+  const actions = useMemo(() => [...(workflow?.actions ?? [])], [workflow?.actions]);
   const workflowTimerMode = normalize(timer?.mode);
   const workflowState = normalize(workflowStatus);
-
-  useEffect(() => {
-    setProcessingControlOverride(null);
-  }, [workflowTimerMode, workflowState, workflow?.workflow_run_id]);
+  const processingControlKey = [
+    workflow?.workflow_run_id ?? '',
+    workflowTimerMode,
+    workflowState,
+  ].join('|');
+  const processingControlOverride =
+    processingControlOverrideState?.key === processingControlKey
+      ? processingControlOverrideState.override
+      : null;
 
   const isTerminalWorkflow = [
     'completed',
@@ -162,7 +178,6 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     () => selectSourceIngestionProgress(workflowProjectionState),
     [workflowProjectionState],
   );
-  const sourceStage = stages.find((stage) => stage.id === 'source_ingestion') ?? null;
   const claimStage =
     stages.find((stage) => stage.id === 'prompt_a_claim_extraction') ?? null;
   const embeddingStage =
@@ -171,7 +186,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     stages.find((stage) => stage.id === 'draft_claim_clustering') ?? null;
   const compactionStage =
     stages.find((stage) => stage.id === 'draft_claim_compaction') ?? null;
-  const startedStageIds = useMemo(() => {
+  const startedStageIds = (() => {
     const ids: string[] = [];
     const hasStageProgress = (
       stage: typeof embeddingStage,
@@ -204,37 +219,17 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     }
 
     return ids;
-  }, [
-    clustersView.hasClusters,
-    clustersView.hasComparisons,
-    clustersView.finalFacts.length,
-    embeddingStage,
-    clusterStage,
-  ]);
-  const workflowStageRows = useMemo(
-    () =>
-      selectWorkflowStageRows(stages, {
-        hasClaimClusters: clustersView.hasClusters,
-        embeddedClaimCount: clustersView.embeddedClaimCount,
-        clusteredClaimCount: clustersView.clusteredClaimCount,
-        claimClusterCount: clustersView.clusters.length,
-        hasCompactionComparisons: clustersView.hasComparisons,
-        compactedClusterCount: clustersView.compactedClusterCount,
-        finalCompactedFactCount: clustersView.finalFacts.length,
-        startedStageIds,
-      }),
-    [
-      stages,
-      clustersView.hasClusters,
-      clustersView.embeddedClaimCount,
-      clustersView.clusteredClaimCount,
-      clustersView.clusters.length,
-      clustersView.hasComparisons,
-      clustersView.compactedClusterCount,
-      clustersView.finalFacts.length,
-      startedStageIds,
-    ],
-  );
+  })();
+  const workflowStageRows = selectWorkflowStageRows(stages, {
+    hasClaimClusters: clustersView.hasClusters,
+    embeddedClaimCount: clustersView.embeddedClaimCount,
+    clusteredClaimCount: clustersView.clusteredClaimCount,
+    claimClusterCount: clustersView.clusters.length,
+    hasCompactionComparisons: clustersView.hasComparisons,
+    compactedClusterCount: clustersView.compactedClusterCount,
+    finalCompactedFactCount: clustersView.finalFacts.length,
+    startedStageIds,
+  });
 
   const sectionItems = lanes
     .flatMap((lane) => lane.items)
@@ -362,19 +357,25 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
     const frozenElapsedSeconds = elapsedSecondsAt(effectiveTimer, Date.parse(occurredAt));
 
     if (actionId === 'pause_processing') {
-      setProcessingControlOverride({
-        state: 'paused',
-        occurredAt,
-        frozenElapsedSeconds,
+      setProcessingControlOverrideState({
+        key: processingControlKey,
+        override: {
+          state: 'paused',
+          occurredAt,
+          frozenElapsedSeconds,
+        },
       });
       return;
     }
 
     if (actionId === 'resume_processing') {
-      setProcessingControlOverride({
-        state: 'running',
-        occurredAt,
-        frozenElapsedSeconds,
+      setProcessingControlOverrideState({
+        key: processingControlKey,
+        override: {
+          state: 'running',
+          occurredAt,
+          frozenElapsedSeconds,
+        },
       });
     }
   };
@@ -431,7 +432,7 @@ export const KnowledgeDocumentCard: React.FC<KnowledgeDocumentCardProps> = ({
         )}
 
         <ClaimClustersPanel view={clustersView} formatNumber={formatNumber}>
-          {({ summary, details }) => (
+          {({ details }) => (
             <>
               <div className="grid gap-2 text-xs [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
           <WorkflowTimerCard

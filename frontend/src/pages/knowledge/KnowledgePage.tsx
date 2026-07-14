@@ -6,10 +6,9 @@ import { useParams } from "react-router-dom";
 import { getErrorMessage } from "@shared/api/core/errors";
 
 import {
-  KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
-  knowledgeApi,
-  type FrontendWorkflowEventEnvelope,
-  type KnowledgePreprocessingMode,
+	  KNOWLEDGE_PREPROCESSING_MODE_OPTIONS,
+	  knowledgeApi,
+	  type KnowledgePreprocessingMode,
   type KnowledgePreviewDebugFact,
   type KnowledgePreviewResponse,
   type KnowledgeProcessingReport,
@@ -33,6 +32,7 @@ import {
   optimisticWorkflowRunId,
   type UploadKnowledgeVariables,
 } from "./optimisticUpload";
+import { isCurationReadyLiveEvent } from "./curationReadyLiveEvent";
 
 type KnowledgeProcessingMetrics = Record<string, unknown>;
 
@@ -54,14 +54,6 @@ type DraftClaimCurationTarget = {
   workflowRunId: string;
   documentName: string;
 };
-
-const CURATION_READY_LIVE_PROJECTION_TYPE =
-  "workflow_draft_claim_compaction_all_groups_compacted";
-
-export const isCurationReadyLiveEvent = (
-  event: FrontendWorkflowEventEnvelope,
-): boolean =>
-  event.projection_type === CURATION_READY_LIVE_PROJECTION_TYPE;
 
 interface Document {
   id: string;
@@ -371,17 +363,16 @@ export const KnowledgePage: React.FC = () => {
     () => (Array.isArray(documentsQuery.data) ? documentsQuery.data : []),
     [documentsQuery.data],
   );
-  const optimisticDocuments = useMemo(
-    () => Object.values(optimisticUploadDocuments),
-    [optimisticUploadDocuments],
-  );
-  const baseDocumentIdKey = baseDocuments
-    .map((doc) => doc.id)
-    .sort()
-    .join(",");
   const baseDocumentIds = useMemo(
     () => new Set(baseDocuments.map((doc) => doc.id)),
     [baseDocuments],
+  );
+  const optimisticDocuments = useMemo(
+    () =>
+      Object.values(optimisticUploadDocuments).filter(
+        (doc) => !baseDocumentIds.has(doc.id),
+      ),
+    [baseDocumentIds, optimisticUploadDocuments],
   );
   const documents = useMemo(
     () => [
@@ -392,23 +383,6 @@ export const KnowledgePage: React.FC = () => {
   );
   const baseHasProcessingDocuments = baseDocuments.some(isDocumentProcessing);
 
-  useEffect(() => {
-    if (baseDocuments.length === 0) return;
-
-    setOptimisticUploadDocuments((current) => {
-      let changed = false;
-      const next = { ...current };
-
-      for (const documentId of Object.keys(next)) {
-        if (baseDocumentIds.has(documentId)) {
-          delete next[documentId];
-          changed = true;
-        }
-      }
-
-      return changed ? next : current;
-    });
-  }, [baseDocumentIds, baseDocuments, baseDocumentIdKey]);
   const workflowProjectionTargets = useMemo(
     () =>
       documents

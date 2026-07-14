@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -7,28 +7,22 @@ import { BaseModal } from '@shared/ui';
 import { getErrorMessage } from '@shared/api/core/errors';
 import {
   knowledgeApi,
-  type DraftClaimCurationEditablePayload,
   type DraftClaimCurationItem,
   type DraftClaimCurationItemUpdatePayload,
   type DraftClaimCurationWorkspaceResponse,
 } from '@shared/api/modules/knowledge';
+import {
+  draftFromPayload,
+  resolveDraftForSelectedItem,
+  type EditableDraft,
+  type EditableDraftState,
+} from './DraftClaimCurationWorkspaceModalState';
 
 type DraftClaimCurationWorkspaceModalProps = {
   projectId: string;
   workflowRunId: string;
   documentName: string;
   onClose: () => void;
-};
-
-type EditableDraft = {
-  key: string;
-  claim: string;
-  claimKind: string;
-  granularity: string;
-  possibleQuestionsText: string;
-  exclusionScope: string;
-  evidenceBlock: string;
-  triplesText: string;
 };
 
 const formatNumber = (value: number): string =>
@@ -59,17 +53,6 @@ const humanText = (value: string | null | undefined): string => {
     .replace(/\s+/g, ' ')
     .replace(/^./, (letter) => letter.toUpperCase());
 };
-
-const draftFromPayload = (payload: DraftClaimCurationEditablePayload): EditableDraft => ({
-  key: payload.key,
-  claim: payload.claim,
-  claimKind: payload.claim_kind,
-  granularity: payload.granularity,
-  possibleQuestionsText: payload.possible_questions.join('\n'),
-  exclusionScope: payload.exclusion_scope,
-  evidenceBlock: payload.evidence_block,
-  triplesText: JSON.stringify(payload.triples, null, 2),
-});
 
 const parseTriples = (value: string): Record<string, unknown>[] => {
   const parsed: unknown = JSON.parse(value);
@@ -138,7 +121,7 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
   const [selectedItemRef, setSelectedItemRef] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [excludeReason, setExcludeReason] = useState('');
-  const [draft, setDraft] = useState<EditableDraft | null>(null);
+  const [draftState, setDraftState] = useState<EditableDraftState | null>(null);
 
   const queryKey = ['draft-claim-curation-workspace', projectId, workflowRunId];
 
@@ -161,10 +144,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
     },
     enabled: Boolean(projectId && workflowRunId),
     retry: false,
-  });
+	  });
 
-  const workspace = workspaceQuery.data ?? null;
-  const items = workspace?.items ?? [];
+	  const workspace = workspaceQuery.data ?? null;
+	  const items = useMemo(() => workspace?.items ?? [], [workspace]);
   const filteredItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return items;
@@ -176,19 +159,22 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
     filteredItems[0] ??
     items[0] ??
     null;
+  const draft = resolveDraftForSelectedItem(selectedItem, draftState);
 
-  useEffect(() => {
-    if (!selectedItem && selectedItemRef !== null) {
-      setSelectedItemRef(null);
-      setDraft(null);
-      return;
-    }
+  const updateDraft = (updater: (current: EditableDraft) => EditableDraft): void => {
+    if (!selectedItem) return;
 
-    if (selectedItem && selectedItem.item_ref !== selectedItemRef) {
-      setSelectedItemRef(selectedItem.item_ref);
-      setDraft(draftFromPayload(selectedItem.editable_payload));
-    }
-  }, [selectedItem, selectedItemRef]);
+    setDraftState((current) => {
+      const currentDraft =
+        current?.itemRef === selectedItem.item_ref
+          ? current.draft
+          : draftFromPayload(selectedItem.editable_payload);
+      return {
+        itemRef: selectedItem.item_ref,
+        draft: updater(currentDraft),
+      };
+    });
+  };
 
   const refreshWorkspace = async (): Promise<void> => {
     await queryClient.invalidateQueries({ queryKey });
@@ -373,7 +359,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     type="button"
                     onClick={() => {
                       setSelectedItemRef(item.item_ref);
-                      setDraft(draftFromPayload(item.editable_payload));
+                      setDraftState({
+                        itemRef: item.item_ref,
+                        draft: draftFromPayload(item.editable_payload),
+                      });
                     }}
                     className={`w-full rounded-xl border p-3 text-left transition-colors ${
                       selectedItem?.item_ref === item.item_ref
@@ -459,9 +448,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     <input
                       value={draft.key}
                       onChange={(event) =>
-                        setDraft((current) =>
-                          current ? { ...current, key: event.target.value } : current,
-                        )
+                        updateDraft((current) => ({
+                          ...current,
+                          key: event.target.value,
+                        }))
                       }
                       className="mt-1 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
                     />
@@ -471,11 +461,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     <input
                       value={draft.claimKind}
                       onChange={(event) =>
-                        setDraft((current) =>
-                          current
-                            ? { ...current, claimKind: event.target.value }
-                            : current,
-                        )
+                        updateDraft((current) => ({
+                          ...current,
+                          claimKind: event.target.value,
+                        }))
                       }
                       className="mt-1 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
                     />
@@ -485,11 +474,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     <input
                       value={draft.granularity}
                       onChange={(event) =>
-                        setDraft((current) =>
-                          current
-                            ? { ...current, granularity: event.target.value }
-                            : current,
-                        )
+                        updateDraft((current) => ({
+                          ...current,
+                          granularity: event.target.value,
+                        }))
                       }
                       className="mt-1 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
                     />
@@ -499,11 +487,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                     <input
                       value={draft.exclusionScope}
                       onChange={(event) =>
-                        setDraft((current) =>
-                          current
-                            ? { ...current, exclusionScope: event.target.value }
-                            : current,
-                        )
+                        updateDraft((current) => ({
+                          ...current,
+                          exclusionScope: event.target.value,
+                        }))
                       }
                       className="mt-1 w-full rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
                     />
@@ -515,9 +502,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                   <textarea
                     value={draft.claim}
                     onChange={(event) =>
-                      setDraft((current) =>
-                        current ? { ...current, claim: event.target.value } : current,
-                      )
+                      updateDraft((current) => ({
+                        ...current,
+                        claim: event.target.value,
+                      }))
                     }
                     rows={4}
                     className="mt-1 w-full resize-y rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"
@@ -529,11 +517,10 @@ export const DraftClaimCurationWorkspaceModal: React.FC<
                   <textarea
                     value={draft.possibleQuestionsText}
                     onChange={(event) =>
-                      setDraft((current) =>
-                        current
-                          ? { ...current, possibleQuestionsText: event.target.value }
-                          : current,
-                      )
+                      updateDraft((current) => ({
+                        ...current,
+                        possibleQuestionsText: event.target.value,
+                      }))
                     }
                     rows={4}
                     className="mt-1 w-full resize-y rounded-lg bg-[var(--control-bg)] px-3 py-2 text-sm text-[var(--text-primary)]"

@@ -11,7 +11,7 @@ import {
   startWorkflowProjectionEventStream,
   type WorkflowProjectionTarget,
 } from "./workflowProjectionHydration";
-import { isCurationReadyLiveEvent } from "./KnowledgePage";
+import { isCurationReadyLiveEvent } from "./curationReadyLiveEvent";
 
 const target: WorkflowProjectionTarget = {
   documentId: "source-document:project-1:doc-1",
