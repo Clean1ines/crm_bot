@@ -37,6 +37,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.drain_workb
     DrainWorkbenchRagEvalWorkflowCommands,
     DrainWorkbenchRagEvalWorkflowCommandsCommand,
     DrainWorkbenchRagEvalWorkflowCommandsResult,
+    WorkbenchRagEvalWorkflowCommandHandlerFailed,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_execute_workbench_rag_eval_question_generation import (
     ExecuteWorkbenchRagEvalQuestionGeneration,
@@ -292,6 +293,14 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
                 frontend_event_repository.persisted_events()
             )
             return result
+        except WorkbenchRagEvalWorkflowCommandHandlerFailed as exc:
+            if unit_of_work is not None:
+                await unit_of_work.rollback()
+            await _mark_workflow_command_failed_after_rollback(
+                connection=asyncpg_connection,
+                failure=exc,
+            )
+            raise
         except Exception:
             if unit_of_work is not None:
                 await unit_of_work.rollback()
@@ -417,6 +426,24 @@ def make_workbench_rag_eval_workflow_runtime(
         execute_prepared_llm_dispatch_attempt=transactional_execute,
         search_published_workbench_runtime=search,
     )
+
+
+async def _mark_workflow_command_failed_after_rollback(
+    *,
+    connection: asyncpg.Connection,
+    failure: WorkbenchRagEvalWorkflowCommandHandlerFailed,
+) -> None:
+    failure_unit_of_work = PostgresWorkflowRuntimeUnitOfWork(connection)
+    await failure_unit_of_work.start()
+    try:
+        await failure_unit_of_work.command_log.mark_command_failed(
+            command_id=failure.workflow_command.command_id,
+            failed_at=failure.workflow_command.updated_at,
+        )
+        await failure_unit_of_work.commit()
+    except Exception:
+        await failure_unit_of_work.rollback()
+        raise
 
 
 def _due_workflow_from_row(row: Mapping[str, object]) -> DueWorkbenchRagEvalWorkflow:

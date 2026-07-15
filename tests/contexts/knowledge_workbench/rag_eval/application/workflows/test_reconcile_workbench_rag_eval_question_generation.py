@@ -16,6 +16,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reco
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.drain_workbench_rag_eval_workflow_commands import (
     DrainWorkbenchRagEvalWorkflowCommands,
     DrainWorkbenchRagEvalWorkflowCommandsCommand,
+    WorkbenchRagEvalWorkflowCommandHandlerFailed,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalCurrentPhase,
@@ -303,7 +304,7 @@ async def test_handler_persists_transition_matrix(
 
 
 @pytest.mark.asyncio
-async def test_drain_marks_poison_reconcile_command_failed_and_does_not_reclaim_immediately() -> (
+async def test_drain_reports_poison_reconcile_command_without_mutating_current_transaction() -> (
     None
 ):
     workflow_id, rag_id = "workflow-run-poison", "rag-run-poison"
@@ -331,45 +332,25 @@ async def test_drain_marks_poison_reconcile_command_failed_and_does_not_reclaim_
         timeline=SimpleNamespace(append_entry=AsyncMock()),
     )
 
-    first = await DrainWorkbenchRagEvalWorkflowCommands().execute(
-        DrainWorkbenchRagEvalWorkflowCommandsCommand(
-            workflow_run_id=workflow_id,
-            max_commands=10,
-        ),
-        workflow_unit_of_work=uow,
-        prepare_llm_dispatch_batch=SimpleNamespace(),
-        work_item_progress_read_repository=SimpleNamespace(
-            summarize_by_work_kind_and_workflow=AsyncMock(
-                return_value=_summary(completed_count=1, total_count=1)
-            )
-        ),
-        question_coverage_repository=coverage,
-        rag_eval_repository=SimpleNamespace(transition_run_progress=AsyncMock()),
-    )
-    second = await DrainWorkbenchRagEvalWorkflowCommands().execute(
-        DrainWorkbenchRagEvalWorkflowCommandsCommand(
-            workflow_run_id=workflow_id,
-            max_commands=10,
-        ),
-        workflow_unit_of_work=uow,
-        prepare_llm_dispatch_batch=SimpleNamespace(),
-        work_item_progress_read_repository=SimpleNamespace(
-            summarize_by_work_kind_and_workflow=AsyncMock(
-                return_value=_summary(completed_count=1, total_count=1)
-            )
-        ),
-        question_coverage_repository=coverage,
-        rag_eval_repository=SimpleNamespace(transition_run_progress=AsyncMock()),
-    )
+    with pytest.raises(WorkbenchRagEvalWorkflowCommandHandlerFailed) as exc_info:
+        await DrainWorkbenchRagEvalWorkflowCommands().execute(
+            DrainWorkbenchRagEvalWorkflowCommandsCommand(
+                workflow_run_id=workflow_id,
+                max_commands=10,
+            ),
+            workflow_unit_of_work=uow,
+            prepare_llm_dispatch_batch=SimpleNamespace(),
+            work_item_progress_read_repository=SimpleNamespace(
+                summarize_by_work_kind_and_workflow=AsyncMock(
+                    return_value=_summary(completed_count=1, total_count=1)
+                )
+            ),
+            question_coverage_repository=coverage,
+            rag_eval_repository=SimpleNamespace(transition_run_progress=AsyncMock()),
+        )
 
-    assert command_log.command.status is WorkflowCommandStatus.FAILED
-    assert tuple(command_log.failed_commands) == (current.command_id,)
+    assert exc_info.value.workflow_command.command_id == current.command_id
+    assert isinstance(exc_info.value.cause, TypeError)
+    assert command_log.command.status is WorkflowCommandStatus.PENDING
+    assert command_log.failed_commands == []
     assert coverage.calls == 1
-    assert first.inspected_count == 1
-    assert first.dispatched_count == 0
-    assert first.blocked_count == 1
-    assert first.last_blocked_command_type == current.command_type
-    assert first.last_blocked_reason == "handler_failed:TypeError"
-    assert second.inspected_count == 0
-    assert second.dispatched_count == 0
-    assert second.blocked_count == 0

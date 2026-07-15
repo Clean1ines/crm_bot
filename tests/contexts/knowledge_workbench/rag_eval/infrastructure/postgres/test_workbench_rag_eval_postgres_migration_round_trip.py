@@ -5,6 +5,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
@@ -34,9 +35,15 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_question_generation_work import (
     WorkbenchRagEvalQuestionGenerationWorkPlanner,
 )
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.drain_workbench_rag_eval_workflow_commands import (
+    WorkbenchRagEvalWorkflowCommandHandlerFailed,
+)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
     make_question_generation_dispatch_preparation_builder,
     workbench_rag_eval_route_catalog,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
+    WorkbenchRagEvalWorkflowCommandType,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_work_kinds import (
     WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND,
@@ -75,6 +82,25 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
     DispatchPreparationBuilderRegistry,
     PrepareLlmDispatchBatch,
     PrepareLlmDispatchBatchCommand,
+)
+from src.contexts.workflow_runtime.domain.entities.workflow_command import (
+    WorkflowCommand,
+    WorkflowCommandStatus,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_command_id import (
+    WorkflowCommandId,
+)
+from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
+    WorkflowIdempotencyKey,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_command_log_repository import (
+    PostgresCommandLogRepository,
+)
+from src.interfaces.composition import (
+    workbench_rag_eval_workflow_runtime as runtime_module,
+)
+from src.interfaces.composition.workbench_rag_eval_workflow_runtime import (
+    WorkbenchRagEvalWorkflowRuntimeComposition,
 )
 
 
@@ -127,6 +153,15 @@ REQUIRED_RAG_EVAL_RUN_COLUMNS = {
     "adjudication_failed",
     "promotion_candidate_count",
 }
+RAG_EVAL_V2_GENERATED_QUESTION_KINDS = (
+    WorkbenchRagEvalQuestionKind.DIRECT_PARAPHRASE,
+    WorkbenchRagEvalQuestionKind.LEXICAL_VARIANT,
+    WorkbenchRagEvalQuestionKind.NAIVE_USER,
+    WorkbenchRagEvalQuestionKind.ENTITY_FIRST,
+    WorkbenchRagEvalQuestionKind.ACTION_FIRST,
+    WorkbenchRagEvalQuestionKind.CONSTRAINT_FIRST,
+    WorkbenchRagEvalQuestionKind.DOMAIN_SPECIFIC,
+)
 
 
 class FakeGroqTransport:
@@ -491,6 +526,231 @@ async def test_has_complete_question_sets_uses_integer_sql_boundary(
             )
 
             assert complete is expected_complete
+        finally:
+            await pool.close()
+    finally:
+        await _drop_database(base_database_url, database_name)
+
+
+@pytest.mark.asyncio
+async def test_migrated_postgres_accepts_all_v2_generated_question_kinds() -> None:
+    base_database_url = os.getenv("DATABASE_URL")
+    if not base_database_url:
+        pytest.skip("DATABASE_URL is required for question kind constraint test")
+
+    database_name = f"tmp_rag_eval_question_kinds_{uuid.uuid4().hex}"
+    maintenance_url = _database_url_with_database(base_database_url, "postgres")
+    conn = await asyncpg.connect(maintenance_url)
+    try:
+        await conn.execute(f'CREATE DATABASE "{database_name}"')
+    except asyncpg.PostgresError as exc:
+        pytest.skip(f"test database user cannot create temporary databases: {exc}")
+    finally:
+        await conn.close()
+
+    temp_database_url = _database_url_with_database(base_database_url, database_name)
+    try:
+        await _apply_canonical_migration_chain(temp_database_url)
+        pool = await asyncpg.create_pool(temp_database_url, min_size=1, max_size=2)
+        try:
+            repository = PostgresWorkbenchRagEvalRepository(pool)
+            project_id = str(uuid.uuid4())
+            run_id = f"run-question-kinds-{uuid.uuid4().hex}"
+            created_at = datetime(2026, 7, 15, 13, 0, tzinfo=timezone.utc)
+            await repository.create_run(
+                run=WorkbenchRagEvalRun(
+                    run_id=run_id,
+                    project_id=project_id,
+                    publication_id=None,
+                    source_document_ref=None,
+                    status=WorkbenchRagEvalRunStatus.RUNNING,
+                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_prompt_version="rag-eval-v2",
+                    total_entries=len(RAG_EVAL_V2_GENERATED_QUESTION_KINDS),
+                    total_questions=0,
+                    completed_questions=0,
+                    top1_hits=0,
+                    top3_hits=0,
+                    top5_hits=0,
+                    misses=0,
+                    created_at=created_at,
+                    started_at=created_at,
+                    completed_at=None,
+                    error_message=None,
+                    current_phase=WorkbenchRagEvalCurrentPhase.QUESTION_GENERATION,
+                    updated_at=created_at,
+                )
+            )
+
+            await repository.save_generated_questions(
+                questions=tuple(
+                    WorkbenchRagEvalQuestion(
+                        question_id=f"question-kind:{kind.value}",
+                        run_id=run_id,
+                        project_id=project_id,
+                        expected_runtime_entry_id=f"runtime-entry:{kind.value}",
+                        expected_fact_id=f"fact:{kind.value}",
+                        question=f"Question for {kind.value}?",
+                        question_kind=kind,
+                        source=WorkbenchRagEvalQuestionSource.GENERATED,
+                        generation_model="qwen/qwen3-32b",
+                        prompt_version="rag-eval-v2",
+                        contract_version="workbench_rag_eval_questions.v2",
+                        promotion_eligible=True,
+                        ambiguity_risk=WorkbenchRagEvalQuestionAmbiguityRisk.LOW,
+                        generation_rationale="constraint regression",
+                        generation_account_ref="groq_org_primary",
+                        generation_slot_index=0,
+                        status=WorkbenchRagEvalQuestionStatus.CREATED,
+                        created_at=created_at,
+                        evaluation_role=WorkbenchRagEvalQuestionRole.PROMOTION_POOL,
+                    )
+                    for kind in RAG_EVAL_V2_GENERATED_QUESTION_KINDS
+                )
+            )
+
+            rows = await pool.fetch(
+                """
+                SELECT question_kind
+                FROM knowledge_workbench_rag_eval_questions
+                WHERE run_id = $1
+                ORDER BY question_kind
+                """,
+                run_id,
+            )
+            assert {row["question_kind"] for row in rows} == {
+                kind.value for kind in RAG_EVAL_V2_GENERATED_QUESTION_KINDS
+            }
+        finally:
+            await pool.close()
+    finally:
+        await _drop_database(base_database_url, database_name)
+
+
+@pytest.mark.asyncio
+async def test_workflow_command_failure_is_marked_after_aborted_transaction_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base_database_url = os.getenv("DATABASE_URL")
+    if not base_database_url:
+        pytest.skip("DATABASE_URL is required for workflow command failure test")
+
+    class AbortingDrain:
+        async def execute(self, command, *, workflow_unit_of_work, **kwargs):
+            del kwargs
+            pending = await workflow_unit_of_work.command_log.list_pending_commands(
+                workflow_run_id=command.workflow_run_id,
+                limit=command.max_commands,
+            )
+            workflow_command = pending[0]
+            try:
+                await workflow_unit_of_work._connection.execute("SELECT 1 / 0")
+            except Exception as exc:
+                raise WorkbenchRagEvalWorkflowCommandHandlerFailed(
+                    workflow_command=workflow_command,
+                    cause=exc,
+                ) from exc
+            raise AssertionError("expected PostgreSQL error")
+
+    database_name = f"tmp_rag_eval_command_failure_{uuid.uuid4().hex}"
+    maintenance_url = _database_url_with_database(base_database_url, "postgres")
+    conn = await asyncpg.connect(maintenance_url)
+    try:
+        await conn.execute(f'CREATE DATABASE "{database_name}"')
+    except asyncpg.PostgresError as exc:
+        pytest.skip(f"test database user cannot create temporary databases: {exc}")
+    finally:
+        await conn.close()
+
+    temp_database_url = _database_url_with_database(base_database_url, database_name)
+    try:
+        await _apply_canonical_migration_chain(temp_database_url)
+        pool = await asyncpg.create_pool(temp_database_url, min_size=1, max_size=2)
+        try:
+            monkeypatch.setattr(
+                runtime_module,
+                "DrainWorkbenchRagEvalWorkflowCommands",
+                AbortingDrain,
+            )
+            runtime = WorkbenchRagEvalWorkflowRuntimeComposition(
+                pool=pool,
+                llm_executor=SimpleNamespace(),
+                prepare_llm_dispatch_batch=SimpleNamespace(),
+                execute_prepared_llm_dispatch_attempt=SimpleNamespace(),
+                search_published_workbench_runtime=SimpleNamespace(
+                    embedding_generation_port=SimpleNamespace(),
+                    embedding_model_id="test-embedding-model",
+                    embedding_dimensions=384,
+                ),
+            )
+            project_id = str(uuid.uuid4())
+            run_id = f"run-command-failure-{uuid.uuid4().hex}"
+            created_at = datetime(2026, 1, 1, 14, 0, tzinfo=timezone.utc)
+            command_id = WorkflowCommandId(f"workflow-command:{run_id}:poison")
+            await PostgresWorkbenchRagEvalRepository(pool).create_run(
+                run=WorkbenchRagEvalRun(
+                    run_id=run_id,
+                    project_id=project_id,
+                    publication_id=None,
+                    source_document_ref=None,
+                    status=WorkbenchRagEvalRunStatus.RUNNING,
+                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_prompt_version="rag-eval-v2",
+                    total_entries=1,
+                    total_questions=0,
+                    completed_questions=0,
+                    top1_hits=0,
+                    top3_hits=0,
+                    top5_hits=0,
+                    misses=0,
+                    created_at=created_at,
+                    started_at=created_at,
+                    completed_at=None,
+                    error_message=None,
+                    current_phase=WorkbenchRagEvalCurrentPhase.QUESTION_GENERATION,
+                    updated_at=created_at,
+                )
+            )
+            connection = await pool.acquire()
+            try:
+                await PostgresCommandLogRepository(connection).append_pending_command(
+                    WorkflowCommand(
+                        command_id=command_id,
+                        command_type=(
+                            WorkbenchRagEvalWorkflowCommandType.RECONCILE_QUESTION_GENERATION_PROGRESS.value
+                        ),
+                        workflow_run_id=run_id,
+                        idempotency_key=WorkflowIdempotencyKey(
+                            f"rag-eval:{run_id}:poison"
+                        ),
+                        payload={
+                            "workflow_run_id": run_id,
+                            "rag_eval_run_id": run_id,
+                            "project_id": project_id,
+                        },
+                        status=WorkflowCommandStatus.PENDING,
+                        run_after=created_at,
+                        created_at=created_at,
+                        updated_at=created_at,
+                    )
+                )
+            finally:
+                await pool.release(connection)
+
+            with pytest.raises(WorkbenchRagEvalWorkflowCommandHandlerFailed):
+                await runtime.execute(workflow_run_id=run_id, max_commands=1)
+
+            row = await pool.fetchrow(
+                """
+                SELECT status
+                FROM workflow_runtime_command_log
+                WHERE command_id = $1
+                """,
+                command_id.value,
+            )
+            assert row is not None
+            assert row["status"] == WorkflowCommandStatus.FAILED.value
+            assert await runtime._list_due_workflows(limit=10) == ()
         finally:
             await pool.close()
     finally:

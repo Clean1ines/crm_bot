@@ -21,6 +21,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_prep
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
+from src.contexts.workflow_runtime.domain.entities.workflow_command import (
+    WorkflowCommand,
+)
 from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
@@ -72,6 +75,20 @@ class DrainWorkbenchRagEvalWorkflowCommandsResult:
     blocked_count: int
     last_blocked_command_type: str | None
     last_blocked_reason: str | None
+
+
+class WorkbenchRagEvalWorkflowCommandHandlerFailed(RuntimeError):
+    def __init__(
+        self,
+        *,
+        workflow_command: WorkflowCommand,
+        cause: BaseException,
+    ) -> None:
+        self.workflow_command = workflow_command
+        self.cause = cause
+        super().__init__(
+            f"{workflow_command.command_type} failed: {type(cause).__name__}: {cause}"
+        )
 
 
 class DrainWorkbenchRagEvalWorkflowCommands:
@@ -145,14 +162,10 @@ class DrainWorkbenchRagEvalWorkflowCommands:
                     frontend_event_projection_writer=frontend_event_projection_writer,
                 )
             except Exception as exc:
-                await workflow_unit_of_work.command_log.mark_command_failed(
-                    command_id=workflow_command.command_id,
-                    failed_at=workflow_command.updated_at,
-                )
-                blocked_count = 1
-                last_blocked_command_type = workflow_command.command_type
-                last_blocked_reason = f"handler_failed:{type(exc).__name__}"
-                break
+                raise WorkbenchRagEvalWorkflowCommandHandlerFailed(
+                    workflow_command=workflow_command,
+                    cause=exc,
+                ) from exc
             if not result.dispatched:
                 blocked_count = 1
                 last_blocked_command_type = result.command_type
