@@ -651,7 +651,7 @@ class PostgresWorkbenchRagEvalRepository(WorkbenchRagEvalRepositoryPort):
                     COALESCE(
                         SUM(question_count),
                         0
-                    ) AS total_questions,
+                    )::bigint AS total_questions,
                     COUNT(*) AS represented_entry_count,
                     COUNT(*) FILTER (
                         WHERE question_count = $2

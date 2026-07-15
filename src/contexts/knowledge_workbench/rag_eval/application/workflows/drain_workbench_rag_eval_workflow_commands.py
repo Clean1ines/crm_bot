@@ -118,29 +118,41 @@ class DrainWorkbenchRagEvalWorkflowCommands:
 
         for workflow_command in pending_commands:
             inspected_count += 1
-            result = await dispatcher.execute(
-                DispatchWorkbenchRagEvalWorkflowCommand(
-                    workflow_command=workflow_command,
-                ),
-                workflow_unit_of_work=workflow_unit_of_work,
-                prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
-                question_generation_executor=(question_generation_executor),
-                adjudication_executor=adjudication_executor,
-                capacity_observation_repository=(capacity_observation_repository),
-                work_item_progress_read_repository=work_item_progress_read_repository,
-                question_coverage_repository=question_coverage_repository,
-                rag_eval_repository=rag_eval_repository,
-                search_published_workbench_runtime=search_published_workbench_runtime,
-                work_item_scheduling_repository=work_item_scheduling_repository,
-                adjudication_provider_messages_builder=(
-                    adjudication_provider_messages_builder
-                ),
-                adjudication_model_profile=adjudication_model_profile,
-                post_promotion_verification_executor=(
-                    post_promotion_verification_executor
-                ),
-                frontend_event_projection_writer=frontend_event_projection_writer,
-            )
+            try:
+                result = await dispatcher.execute(
+                    DispatchWorkbenchRagEvalWorkflowCommand(
+                        workflow_command=workflow_command,
+                    ),
+                    workflow_unit_of_work=workflow_unit_of_work,
+                    prepare_llm_dispatch_batch=prepare_llm_dispatch_batch,
+                    question_generation_executor=(question_generation_executor),
+                    adjudication_executor=adjudication_executor,
+                    capacity_observation_repository=(capacity_observation_repository),
+                    work_item_progress_read_repository=work_item_progress_read_repository,
+                    question_coverage_repository=question_coverage_repository,
+                    rag_eval_repository=rag_eval_repository,
+                    search_published_workbench_runtime=(
+                        search_published_workbench_runtime
+                    ),
+                    work_item_scheduling_repository=work_item_scheduling_repository,
+                    adjudication_provider_messages_builder=(
+                        adjudication_provider_messages_builder
+                    ),
+                    adjudication_model_profile=adjudication_model_profile,
+                    post_promotion_verification_executor=(
+                        post_promotion_verification_executor
+                    ),
+                    frontend_event_projection_writer=frontend_event_projection_writer,
+                )
+            except Exception as exc:
+                await workflow_unit_of_work.command_log.mark_command_failed(
+                    command_id=workflow_command.command_id,
+                    failed_at=workflow_command.updated_at,
+                )
+                blocked_count = 1
+                last_blocked_command_type = workflow_command.command_type
+                last_blocked_reason = f"handler_failed:{type(exc).__name__}"
+                break
             if not result.dispatched:
                 blocked_count = 1
                 last_blocked_command_type = result.command_type

@@ -21,6 +21,12 @@ from src.contexts.execution_runtime.infrastructure.postgres.postgres_work_item_s
 )
 from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
     WorkbenchRagEvalCurrentPhase,
+    WorkbenchRagEvalQuestion,
+    WorkbenchRagEvalQuestionAmbiguityRisk,
+    WorkbenchRagEvalQuestionKind,
+    WorkbenchRagEvalQuestionRole,
+    WorkbenchRagEvalQuestionSource,
+    WorkbenchRagEvalQuestionStatus,
     WorkbenchRagEvalRun,
     WorkbenchRagEvalRunProgress,
     WorkbenchRagEvalRunStatus,
@@ -334,6 +340,157 @@ async def test_migrated_postgres_supports_rag_eval_create_and_latest_round_trip(
             assert latest.progress.adjudication_failed == 0
             assert latest.progress.promotion_candidate_count == 2
             assert latest.promotion_candidate_count == 2
+        finally:
+            await pool.close()
+    finally:
+        await _drop_database(base_database_url, database_name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("question_counts_by_entry", "expected_complete"),
+    [
+        pytest.param((), False, id="zero-generated-questions"),
+        pytest.param((10,), True, id="complete-set"),
+        pytest.param((9,), False, id="incomplete-set"),
+        pytest.param((10, 10, 7), False, id="multiple-entries-with-sum"),
+    ],
+)
+async def test_has_complete_question_sets_uses_integer_sql_boundary(
+    question_counts_by_entry: tuple[int, ...],
+    expected_complete: bool,
+) -> None:
+    base_database_url = os.getenv("DATABASE_URL")
+    if not base_database_url:
+        pytest.skip("DATABASE_URL is required for question coverage test")
+
+    database_name = f"tmp_rag_eval_question_coverage_{uuid.uuid4().hex}"
+    maintenance_url = _database_url_with_database(base_database_url, "postgres")
+    conn = await asyncpg.connect(maintenance_url)
+    try:
+        await conn.execute(f'CREATE DATABASE "{database_name}"')
+    except asyncpg.PostgresError as exc:
+        pytest.skip(f"test database user cannot create temporary databases: {exc}")
+    finally:
+        await conn.close()
+
+    temp_database_url = _database_url_with_database(base_database_url, database_name)
+    try:
+        await _apply_canonical_migration_chain(temp_database_url)
+        pool = await asyncpg.create_pool(temp_database_url, min_size=1, max_size=2)
+        try:
+            repository = PostgresWorkbenchRagEvalRepository(pool)
+            project_id = str(uuid.uuid4())
+            run_id = f"run-question-coverage-{uuid.uuid4().hex}"
+            created_at = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+            await repository.create_run(
+                run=WorkbenchRagEvalRun(
+                    run_id=run_id,
+                    project_id=project_id,
+                    publication_id=None,
+                    source_document_ref=None,
+                    status=WorkbenchRagEvalRunStatus.RUNNING,
+                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_prompt_version="rag-eval-v2",
+                    total_entries=len(question_counts_by_entry),
+                    total_questions=0,
+                    completed_questions=0,
+                    top1_hits=0,
+                    top3_hits=0,
+                    top5_hits=0,
+                    misses=0,
+                    created_at=created_at,
+                    started_at=created_at,
+                    completed_at=None,
+                    error_message=None,
+                    current_phase=WorkbenchRagEvalCurrentPhase.QUESTION_GENERATION,
+                    updated_at=created_at,
+                )
+            )
+            questions: list[WorkbenchRagEvalQuestion] = []
+            for entry_index, question_count in enumerate(
+                question_counts_by_entry,
+                start=1,
+            ):
+                entry_ref = f"runtime-entry-{entry_index}"
+                for question_index in range(question_count):
+                    questions.append(
+                        WorkbenchRagEvalQuestion(
+                            question_id=(
+                                f"question:{run_id}:{entry_ref}:{question_index}"
+                            ),
+                            run_id=run_id,
+                            project_id=project_id,
+                            expected_runtime_entry_id=entry_ref,
+                            expected_fact_id=f"fact-{entry_index}",
+                            question=f"Question {entry_index}-{question_index}?",
+                            question_kind=WorkbenchRagEvalQuestionKind.PARAPHRASE,
+                            source=WorkbenchRagEvalQuestionSource.GENERATED,
+                            generation_model="qwen/qwen3-32b",
+                            prompt_version="rag-eval-v2",
+                            contract_version="workbench_rag_eval_questions.v2",
+                            promotion_eligible=True,
+                            ambiguity_risk=WorkbenchRagEvalQuestionAmbiguityRisk.LOW,
+                            generation_rationale="coverage regression",
+                            generation_account_ref=None,
+                            generation_slot_index=None,
+                            status=WorkbenchRagEvalQuestionStatus.CREATED,
+                            created_at=created_at,
+                            evaluation_role=WorkbenchRagEvalQuestionRole.PROMOTION_POOL,
+                        )
+                    )
+            if questions:
+                await repository.save_generated_questions(questions=tuple(questions))
+
+            row = await pool.fetchrow(
+                """
+                WITH generated_per_entry AS (
+                    SELECT
+                        expected_runtime_entry_id,
+                        COUNT(*) AS question_count
+                    FROM knowledge_workbench_rag_eval_questions
+                    WHERE run_id = $1
+                      AND source = 'generated'
+                    GROUP BY expected_runtime_entry_id
+                )
+                SELECT
+                    COALESCE(SUM(question_count), 0) AS total_questions,
+                    pg_typeof(COALESCE(SUM(question_count), 0))::text
+                        AS total_questions_pg_type,
+                    COUNT(*) AS represented_entry_count,
+                    pg_typeof(COUNT(*))::text AS represented_entry_count_pg_type,
+                    COUNT(*) FILTER (
+                        WHERE question_count = $2
+                    ) AS complete_entry_count,
+                    pg_typeof(COUNT(*) FILTER (WHERE question_count = $2))::text
+                        AS complete_entry_count_pg_type,
+                    COUNT(*) FILTER (
+                        WHERE question_count <> $2
+                    ) AS incomplete_entry_count,
+                    pg_typeof(COUNT(*) FILTER (WHERE question_count <> $2))::text
+                        AS incomplete_entry_count_pg_type
+                FROM generated_per_entry
+                """,
+                run_id,
+                10,
+            )
+            assert row is not None
+            assert row["total_questions_pg_type"] == "numeric"
+            assert type(row["total_questions"]).__name__ == "Decimal"
+            assert row["represented_entry_count_pg_type"] == "bigint"
+            assert type(row["represented_entry_count"]).__name__ == "int"
+            assert row["complete_entry_count_pg_type"] == "bigint"
+            assert type(row["complete_entry_count"]).__name__ == "int"
+            assert row["incomplete_entry_count_pg_type"] == "bigint"
+            assert type(row["incomplete_entry_count"]).__name__ == "int"
+
+            complete = await repository.has_complete_question_sets(
+                rag_eval_run_id=run_id,
+                expected_entry_count=len(question_counts_by_entry),
+                questions_per_entry=10,
+            )
+
+            assert complete is expected_complete
         finally:
             await pool.close()
     finally:
