@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from datetime import datetime
 
@@ -81,6 +82,73 @@ class PostgresWorkItemProgressReadRepository(WorkItemProgressReadRepositoryPort)
 
         return _summary_from_row(row)
 
+    async def prepare_iteration_revision(
+        self,
+        *,
+        workflow_run_id: str,
+        work_kind: WorkKind,
+        requested_items: int,
+        now: datetime,
+        include_future_retryable: bool = False,
+    ) -> str:
+        if not workflow_run_id.strip():
+            raise ValueError("workflow_run_id must be non-empty")
+        if not isinstance(requested_items, int):
+            raise TypeError("requested_items must be int")
+        if requested_items <= 0:
+            raise ValueError("requested_items must be > 0")
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("now must be timezone-aware")
+
+        rows = await self._connection.fetch(
+            """
+            SELECT
+                wi.work_item_id,
+                wi.status,
+                wi.attempt_count
+            FROM execution_work_items wi
+            JOIN execution_work_item_schedules wis
+              ON wis.work_item_id = wi.work_item_id
+            WHERE wi.work_kind = $1
+              AND wis.payload->>'workflow_run_id' = $2
+              AND (
+                wi.status = 'ready'
+                OR (
+                  wi.status = 'retryable_failed'
+                  AND (
+                    $5::boolean
+                    OR wi.next_attempt_at IS NULL
+                    OR wi.next_attempt_at <= $3
+                  )
+                )
+              )
+            ORDER BY
+              CASE wi.status
+                WHEN 'retryable_failed' THEN 0
+                WHEN 'ready' THEN 1
+                ELSE 2
+              END,
+              wi.next_attempt_at NULLS FIRST,
+              wi.updated_at,
+              wi.work_item_id
+            LIMIT $4
+            """,
+            work_kind.value,
+            workflow_run_id,
+            now,
+            requested_items,
+            include_future_retryable,
+        )
+        if len(rows) < requested_items:
+            raise ValueError("prepare iteration revision has fewer rows than requested")
+        material = "|".join(
+            sorted(
+                f"{_row_text(row, 'work_item_id')}:{_row_text(row, 'status')}:{_row_int(row, 'attempt_count')}"
+                for row in rows
+            )
+        )
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
 
 def _summary_from_row(row: Mapping[str, object]) -> WorkItemProgressSummary:
     return WorkItemProgressSummary(
@@ -104,6 +172,13 @@ def _row_int(row: Mapping[str, object], key: str) -> int:
     value = row[key]
     if not isinstance(value, int):
         raise TypeError(f"{key} must be int")
+    return value
+
+
+def _row_text(row: Mapping[str, object], key: str) -> str:
+    value = row[key]
+    if not isinstance(value, str):
+        raise TypeError(f"{key} must be str")
     return value
 
 

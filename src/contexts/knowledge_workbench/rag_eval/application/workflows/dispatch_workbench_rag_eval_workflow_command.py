@@ -403,6 +403,7 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
                 question_coverage_repository=question_coverage_repository,
                 workflow_unit_of_work=workflow_unit_of_work,
                 rag_eval_repository=rag_eval_repository,
+                frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchWorkbenchRagEvalWorkflowCommandResult(
                 workflow_run_id=workflow_command.workflow_run_id,

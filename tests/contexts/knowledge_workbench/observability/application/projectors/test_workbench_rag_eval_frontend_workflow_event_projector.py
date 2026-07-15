@@ -44,6 +44,33 @@ def test_rag_eval_projector_projects_allowlisted_event_without_vectors() -> None
     assert projected.projection_event_id.endswith(":rag_eval_verification_completed:v1")
 
 
+def test_rag_eval_projector_projects_qgen_progress_to_synthetic_document() -> None:
+    event = WorkflowEvent(
+        event_id=WorkflowEventId("workflow-event:qgen-progress"),
+        event_type=(
+            WorkbenchRagEvalWorkflowEventType.QUESTION_GENERATION_PROGRESS_RECONCILED.value
+        ),
+        workflow_run_id="run-1",
+        payload={
+            "workflow_run_id": "run-1",
+            "rag_eval_run_id": "run-1",
+            "project_id": "project-1",
+            "decision": "QUESTION_GENERATION_DRAINED",
+        },
+        occurred_at=datetime(2026, 7, 14, 12, tzinfo=timezone.utc),
+        sequence_number=43,
+    )
+
+    projected = WorkbenchRagEvalFrontendWorkflowEventProjector().project(event)
+
+    assert projected is not None
+    assert (
+        projected.projection_type == "rag_eval_question_generation_progress_reconciled"
+    )
+    assert projected.document_id == "rag-eval:project-1:run-1"
+    assert projected.payload["decision"] == "QUESTION_GENERATION_DRAINED"
+
+
 def test_rag_eval_projector_ignores_unknown_events() -> None:
     event = WorkflowEvent(
         event_id=WorkflowEventId("workflow-event:other"),

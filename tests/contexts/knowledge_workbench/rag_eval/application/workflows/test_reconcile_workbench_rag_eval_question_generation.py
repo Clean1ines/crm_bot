@@ -60,6 +60,17 @@ def _summary(**overrides: object) -> WorkItemProgressSummary:
     return WorkItemProgressSummary(**values)  # type: ignore[arg-type]
 
 
+def _progress_repo(
+    summary: WorkItemProgressSummary,
+    *,
+    revision: str = "revision-alpha",
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        summarize_by_work_kind_and_workflow=AsyncMock(return_value=summary),
+        prepare_iteration_revision=AsyncMock(return_value=revision),
+    )
+
+
 class FakeCommandLog:
     def __init__(self, command: WorkflowCommand) -> None:
         self.command = command
@@ -132,6 +143,49 @@ class FakeCommandLog:
         return self.command
 
 
+class StrictIdempotentCommandLog:
+    def __init__(self) -> None:
+        self.commands_by_key: dict[str, WorkflowCommand] = {}
+        self.appended_commands: list[WorkflowCommand] = []
+        self.completed_commands: list[WorkflowCommandId] = []
+
+    async def append_pending_command(self, command: WorkflowCommand) -> WorkflowCommand:
+        existing = self.commands_by_key.get(command.idempotency_key.value)
+        if existing is not None:
+            if existing.command_type != command.command_type:
+                raise ValueError("idempotency_key conflict has different command_type")
+            if existing.workflow_run_id != command.workflow_run_id:
+                raise ValueError(
+                    "idempotency_key conflict has different workflow_run_id"
+                )
+            if dict(existing.payload) != dict(command.payload):
+                raise ValueError("idempotency_key conflict has different payload")
+            return existing
+        self.commands_by_key[command.idempotency_key.value] = command
+        self.appended_commands.append(command)
+        return command
+
+    async def mark_command_completed(
+        self,
+        *,
+        command_id: WorkflowCommandId,
+        completed_at: datetime,
+    ) -> WorkflowCommand:
+        del completed_at
+        self.completed_commands.append(command_id)
+        return WorkflowCommand(
+            command_id=command_id,
+            command_type="completed-placeholder",
+            workflow_run_id="workflow-run-1",
+            idempotency_key=WorkflowIdempotencyKey(f"completed:{command_id.value}"),
+            payload={"workflow_run_id": "workflow-run-1"},
+            status=WorkflowCommandStatus.COMPLETED,
+            run_after=NOW,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+
+
 class FailingCoverageRepository:
     def __init__(self) -> None:
         self.calls = 0
@@ -146,6 +200,38 @@ class FailingCoverageRepository:
         del rag_eval_run_id, expected_entry_count, questions_per_entry
         self.calls += 1
         raise TypeError("total_questions must be int")
+
+
+def _qgen_reconcile_command(
+    *,
+    command_id: str,
+    causation_dispatch_attempt_id: str,
+    causation_work_item_id: str,
+    outcome_status: str = "succeeded",
+    updated_at: datetime = NOW,
+) -> WorkflowCommand:
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(command_id),
+        command_type=WorkbenchRagEvalWorkflowCommandType.RECONCILE_QUESTION_GENERATION_PROGRESS.value,
+        workflow_run_id="workflow-run-1",
+        idempotency_key=WorkflowIdempotencyKey(command_id),
+        payload={
+            "workflow_family": "workbench_rag_eval",
+            "workflow_run_id": "workflow-run-1",
+            "rag_eval_run_id": "workflow-run-1",
+            "project_id": "project-1",
+            "publication_id": "publication-1",
+            "source_document_ref": "source-document-1",
+            "work_kind": "knowledge_workbench.rag_eval.question_generation",
+            "causation_dispatch_attempt_id": causation_dispatch_attempt_id,
+            "causation_work_item_id": causation_work_item_id,
+            "outcome_status": outcome_status,
+        },
+        status=WorkflowCommandStatus.PENDING,
+        run_after=updated_at,
+        created_at=updated_at,
+        updated_at=updated_at,
+    )
 
 
 @pytest.mark.parametrize(
@@ -286,9 +372,7 @@ async def test_handler_persists_transition_matrix(
     )
     await HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler().execute(
         HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand(current),
-        work_item_progress_read_repository=SimpleNamespace(
-            summarize_by_work_kind_and_workflow=AsyncMock(return_value=summary)
-        ),
+        work_item_progress_read_repository=_progress_repo(summary),
         question_coverage_repository=SimpleNamespace(
             has_complete_question_sets=AsyncMock(return_value=complete)
         ),
@@ -301,6 +385,241 @@ async def test_handler_persists_transition_matrix(
         transition["status"],
         transition["current_phase"],
     ) == (rag_id, status, phase)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_next_prepare_is_idempotent_across_attempt_signal_payloads() -> (
+    None
+):
+    command_log = StrictIdempotentCommandLog()
+    uow = SimpleNamespace(
+        command_log=command_log,
+        outbox=SimpleNamespace(append_event=AsyncMock(side_effect=lambda event: event)),
+        progress_snapshots=SimpleNamespace(save_snapshot=AsyncMock()),
+        timeline=SimpleNamespace(append_entry=AsyncMock()),
+    )
+    summary = _summary(ready_count=8, total_count=8)
+    handler = HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler()
+
+    for index in range(2):
+        await handler.execute(
+            HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand(
+                _qgen_reconcile_command(
+                    command_id=f"command:reconcile:{index}",
+                    causation_dispatch_attempt_id=f"attempt-{index}",
+                    causation_work_item_id=f"work-item-{index}",
+                )
+            ),
+            work_item_progress_read_repository=_progress_repo(summary),
+            question_coverage_repository=SimpleNamespace(
+                has_complete_question_sets=AsyncMock(return_value=False)
+            ),
+            rag_eval_repository=SimpleNamespace(transition_run_progress=AsyncMock()),
+            workflow_unit_of_work=uow,
+        )
+
+    assert len(command_log.appended_commands) == 1
+    next_command = command_log.appended_commands[0]
+    assert (
+        next_command.command_type
+        == WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH.value
+    )
+    assert next_command.payload["scheduled_work_item_count"] == 8
+    assert "causation_dispatch_attempt_id" not in next_command.payload
+    assert "causation_work_item_id" not in next_command.payload
+    assert "outcome_status" not in next_command.payload
+
+
+@pytest.mark.asyncio
+async def test_reconcile_next_prepare_keys_requested_count_revision() -> None:
+    command_log = StrictIdempotentCommandLog()
+    uow = SimpleNamespace(
+        command_log=command_log,
+        outbox=SimpleNamespace(append_event=AsyncMock(side_effect=lambda event: event)),
+        progress_snapshots=SimpleNamespace(save_snapshot=AsyncMock()),
+        timeline=SimpleNamespace(append_entry=AsyncMock()),
+    )
+    handler = HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler()
+
+    for index, summary in enumerate(
+        (
+            _summary(ready_count=8, total_count=8),
+            _summary(ready_count=4, completed_count=4, total_count=8),
+        )
+    ):
+        await handler.execute(
+            HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand(
+                _qgen_reconcile_command(
+                    command_id=f"command:reconcile:progress:{index}",
+                    causation_dispatch_attempt_id=f"attempt-progress-{index}",
+                    causation_work_item_id=f"work-item-progress-{index}",
+                )
+            ),
+            work_item_progress_read_repository=_progress_repo(
+                summary, revision=f"revision-progress-{index}"
+            ),
+            question_coverage_repository=SimpleNamespace(
+                has_complete_question_sets=AsyncMock(return_value=False)
+            ),
+            rag_eval_repository=SimpleNamespace(transition_run_progress=AsyncMock()),
+            workflow_unit_of_work=uow,
+        )
+
+    assert len(command_log.appended_commands) == 2
+    assert {
+        command.payload["scheduled_work_item_count"]
+        for command in command_log.appended_commands
+    } == {8, 4}
+    assert len(command_log.commands_by_key) == 2
+
+
+@pytest.mark.asyncio
+async def test_reconcile_next_prepare_deduplicates_same_count_across_reconcile_times() -> (
+    None
+):
+    command_log = StrictIdempotentCommandLog()
+    uow = SimpleNamespace(
+        command_log=command_log,
+        outbox=SimpleNamespace(append_event=AsyncMock(side_effect=lambda event: event)),
+        progress_snapshots=SimpleNamespace(save_snapshot=AsyncMock()),
+        timeline=SimpleNamespace(append_entry=AsyncMock()),
+    )
+    handler = HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler()
+
+    for index, updated_at in enumerate((NOW, NOW + timedelta(seconds=37))):
+        await handler.execute(
+            HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand(
+                _qgen_reconcile_command(
+                    command_id=f"command:reconcile:same-count:{index}",
+                    causation_dispatch_attempt_id=f"attempt-same-count-{index}",
+                    causation_work_item_id=f"work-item-same-count-{index}",
+                    updated_at=updated_at,
+                )
+            ),
+            work_item_progress_read_repository=_progress_repo(
+                _summary(ready_count=8, total_count=8),
+                revision="same-due-set-attempt-generation",
+            ),
+            question_coverage_repository=SimpleNamespace(
+                has_complete_question_sets=AsyncMock(return_value=False)
+            ),
+            rag_eval_repository=SimpleNamespace(transition_run_progress=AsyncMock()),
+            workflow_unit_of_work=uow,
+        )
+
+    assert len(command_log.appended_commands) == 1
+    assert len(command_log.commands_by_key) == 1
+    next_command = command_log.appended_commands[0]
+    assert next_command.idempotency_key.value.endswith(
+        ":PrepareRagEvalQuestionGenerationDispatchBatch:"
+        "scheduled:8:revision:same-due-set-attempt-generation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_next_prepare_allows_repeated_count_after_new_attempt_generation() -> (
+    None
+):
+    command_log = StrictIdempotentCommandLog()
+    uow = SimpleNamespace(
+        command_log=command_log,
+        outbox=SimpleNamespace(append_event=AsyncMock(side_effect=lambda event: event)),
+        progress_snapshots=SimpleNamespace(save_snapshot=AsyncMock()),
+        timeline=SimpleNamespace(append_entry=AsyncMock()),
+    )
+    handler = HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler()
+    summary = _summary(ready_count=4, completed_count=4, total_count=8)
+
+    for revision in ("work-items-attempt-1", "work-items-attempt-2"):
+        await handler.execute(
+            HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand(
+                _qgen_reconcile_command(
+                    command_id=f"command:reconcile:{revision}",
+                    causation_dispatch_attempt_id=f"attempt:{revision}",
+                    causation_work_item_id=f"work-item:{revision}",
+                )
+            ),
+            work_item_progress_read_repository=_progress_repo(
+                summary, revision=revision
+            ),
+            question_coverage_repository=SimpleNamespace(
+                has_complete_question_sets=AsyncMock(return_value=False)
+            ),
+            rag_eval_repository=SimpleNamespace(transition_run_progress=AsyncMock()),
+            workflow_unit_of_work=uow,
+        )
+        await command_log.mark_command_completed(
+            command_id=command_log.appended_commands[-1].command_id,
+            completed_at=NOW,
+        )
+
+    assert len(command_log.appended_commands) == 2
+    assert [
+        command.payload["scheduled_work_item_count"]
+        for command in command_log.appended_commands
+    ] == [4, 4]
+    assert len(command_log.commands_by_key) == 2
+    assert {
+        command.idempotency_key.value.rsplit(":revision:", maxsplit=1)[1]
+        for command in command_log.appended_commands
+    } == {"work-items-attempt-1", "work-items-attempt-2"}
+
+
+@pytest.mark.asyncio
+async def test_reconcile_lifecycle_partial_then_complete_moves_to_retrieval() -> None:
+    command_log = StrictIdempotentCommandLog()
+    repo = SimpleNamespace(transition_run_progress=AsyncMock())
+    projected_events: list[object] = []
+    uow = SimpleNamespace(
+        command_log=command_log,
+        outbox=SimpleNamespace(append_event=AsyncMock(side_effect=lambda event: event)),
+        progress_snapshots=SimpleNamespace(save_snapshot=AsyncMock()),
+        timeline=SimpleNamespace(append_entry=AsyncMock()),
+    )
+    frontend_projection_writer = SimpleNamespace(
+        execute=AsyncMock(side_effect=lambda event: projected_events.append(event))
+    )
+    handler = HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler()
+    scenarios = (
+        (_summary(ready_count=8, total_count=8), False),
+        (_summary(ready_count=4, completed_count=4, total_count=8), False),
+        (_summary(completed_count=8, total_count=8), True),
+    )
+
+    for index, (summary, complete) in enumerate(scenarios):
+        await handler.execute(
+            HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand(
+                _qgen_reconcile_command(
+                    command_id=f"command:reconcile:lifecycle:{index}",
+                    causation_dispatch_attempt_id=f"attempt-lifecycle-{index}",
+                    causation_work_item_id=f"work-item-lifecycle-{index}",
+                )
+            ),
+            work_item_progress_read_repository=_progress_repo(
+                summary, revision=f"revision-lifecycle-{index}"
+            ),
+            question_coverage_repository=SimpleNamespace(
+                has_complete_question_sets=AsyncMock(return_value=complete)
+            ),
+            rag_eval_repository=repo,
+            workflow_unit_of_work=uow,
+            frontend_event_projection_writer=frontend_projection_writer,
+        )
+
+    assert [command.command_type for command in command_log.appended_commands] == [
+        WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH.value,
+        WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH.value,
+        WorkbenchRagEvalWorkflowCommandType.RUN_RETRIEVAL_EVALUATION.value,
+    ]
+    final_transition = repo.transition_run_progress.await_args_list[-1].kwargs
+    assert final_transition["current_phase"] is (
+        WorkbenchRagEvalCurrentPhase.RETRIEVAL_EVALUATION
+    )
+    assert frontend_projection_writer.execute.await_count == 4
+    assert all(
+        getattr(event, "payload")["project_id"] == "project-1"
+        for event in projected_events
+    )
 
 
 @pytest.mark.asyncio

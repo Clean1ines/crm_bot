@@ -26,6 +26,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_r
     WorkbenchRagEvalWorkflowEventType,
     WorkbenchRagEvalWorkflowPhase,
 )
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
@@ -127,6 +130,7 @@ class HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler:
         question_coverage_repository: QuestionGenerationPersistenceCoveragePort,
         rag_eval_repository: WorkbenchRagEvalRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
+        frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleReconcileWorkbenchRagEvalQuestionGenerationProgressResult:
         current = command.workflow_command
         if (
@@ -175,7 +179,20 @@ class HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler:
             blocked_reason=blocked_reason,
             capacity_next_due_at=result.next_due_at,
         )
-        next_command = _next_command(current, result, summary, now)
+        prepare_iteration_revision = await _prepare_iteration_revision(
+            result=result,
+            summary=summary,
+            workflow_run_id=run_id,
+            now=now,
+            work_item_progress_read_repository=work_item_progress_read_repository,
+        )
+        next_command = _next_command(
+            current,
+            result,
+            summary,
+            now,
+            prepare_iteration_revision=prepare_iteration_revision,
+        )
         if next_command is not None:
             await workflow_unit_of_work.command_log.append_pending_command(next_command)
         event = WorkflowEvent(
@@ -186,29 +203,41 @@ class HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler:
             workflow_run_id=run_id,
             payload={
                 "workflow_run_id": run_id,
+                "rag_eval_run_id": rag_eval_run_id,
+                "project_id": project_id,
                 "decision": result.decision.value,
                 "summary": summary.to_payload(),
             },
             occurred_at=now,
             causation_command_id=current.command_id,
         )
-        await workflow_unit_of_work.outbox.append_event(event)
+        persisted_event = await workflow_unit_of_work.outbox.append_event(event)
+        if frontend_event_projection_writer is not None:
+            await frontend_event_projection_writer.execute(persisted_event)
         if (
             result.decision
             is WorkbenchRagEvalQuestionGenerationProgressDecision.QUESTION_GENERATION_DRAINED
         ):
-            await workflow_unit_of_work.outbox.append_event(
+            persisted_completed_event = await workflow_unit_of_work.outbox.append_event(
                 WorkflowEvent(
                     event_id=WorkflowEventId(
                         f"workflow-event:{run_id}:qgen-completed:{current.command_id.value}"
                     ),
                     event_type=WorkbenchRagEvalWorkflowEventType.QUESTION_GENERATION_COMPLETED.value,
                     workflow_run_id=run_id,
-                    payload={"workflow_run_id": run_id},
+                    payload={
+                        "workflow_run_id": run_id,
+                        "rag_eval_run_id": rag_eval_run_id,
+                        "project_id": project_id,
+                    },
                     occurred_at=now,
                     causation_command_id=current.command_id,
                 )
             )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(
+                    persisted_completed_event
+                )
         phase = (
             WorkbenchRagEvalWorkflowPhase.BLOCKED
             if result.decision
@@ -261,11 +290,37 @@ class HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler:
         )
 
 
+async def _prepare_iteration_revision(
+    *,
+    result: WorkbenchRagEvalQuestionGenerationProgressDecisionResult,
+    summary: WorkItemProgressSummary,
+    workflow_run_id: str,
+    now: datetime,
+    work_item_progress_read_repository: WorkItemProgressReadRepositoryPort,
+) -> str | None:
+    if result.decision not in (
+        WorkbenchRagEvalQuestionGenerationProgressDecision.PREPARE_NEXT_BATCH_NOW,
+        WorkbenchRagEvalQuestionGenerationProgressDecision.PREPARE_NEXT_BATCH_LATER,
+    ):
+        return None
+    count = summary.due_waiting_count or summary.retryable_failed_count
+    return await work_item_progress_read_repository.prepare_iteration_revision(
+        workflow_run_id=workflow_run_id,
+        work_kind=WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND,
+        requested_items=count,
+        now=now,
+        include_future_retryable=result.decision
+        is WorkbenchRagEvalQuestionGenerationProgressDecision.PREPARE_NEXT_BATCH_LATER,
+    )
+
+
 def _next_command(
     current: WorkflowCommand,
     result: WorkbenchRagEvalQuestionGenerationProgressDecisionResult,
     summary: WorkItemProgressSummary,
     now: datetime,
+    *,
+    prepare_iteration_revision: str | None,
 ) -> WorkflowCommand | None:
     if result.decision in (
         WorkbenchRagEvalQuestionGenerationProgressDecision.PREPARE_NEXT_BATCH_NOW,
@@ -285,10 +340,23 @@ def _next_command(
         )
     else:
         return None
-    key = f"rag-eval:{current.workflow_run_id}:{command_type.value}:{run_after.isoformat()}"
-    payload = dict(current.payload)
-    payload.update(
-        {"workflow_run_id": current.workflow_run_id, "scheduled_work_item_count": count}
+    if (
+        command_type
+        is WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH
+        and prepare_iteration_revision is None
+    ):
+        raise ValueError("prepare_iteration_revision is required for prepare commands")
+    key_scope = (
+        f"scheduled:{count}:revision:{prepare_iteration_revision}"
+        if command_type
+        is WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH
+        else run_after.isoformat()
+    )
+    key = f"rag-eval:{current.workflow_run_id}:{command_type.value}:{key_scope}"
+    payload = _next_command_payload(
+        current,
+        command_type=command_type,
+        scheduled_work_item_count=count,
     )
     return WorkflowCommand(
         command_id=WorkflowCommandId(f"workflow-command:{key}"),
@@ -301,6 +369,40 @@ def _next_command(
         created_at=now,
         updated_at=now,
     )
+
+
+def _next_command_payload(
+    current: WorkflowCommand,
+    *,
+    command_type: WorkbenchRagEvalWorkflowCommandType,
+    scheduled_work_item_count: int,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "workflow_family": "workbench_rag_eval",
+        "workflow_run_id": current.workflow_run_id,
+        "rag_eval_run_id": _text(
+            current.payload, "rag_eval_run_id", current.workflow_run_id
+        ),
+        "project_id": _text(current.payload, "project_id", ""),
+    }
+    for key in (
+        "publication_id",
+        "source_document_ref",
+        "top_k",
+        "active_model_ref",
+        "capacity_window_provider",
+        "capacity_window_provider_account_refs",
+        "capacity_window_model_ref",
+    ):
+        if key in current.payload:
+            payload[key] = current.payload[key]
+    if (
+        command_type
+        is WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH
+    ):
+        payload["work_kind"] = WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND.value
+        payload["scheduled_work_item_count"] = scheduled_work_item_count
+    return payload
 
 
 def _run_transition(

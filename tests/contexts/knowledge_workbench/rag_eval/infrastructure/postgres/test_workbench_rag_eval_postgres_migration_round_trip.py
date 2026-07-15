@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
@@ -51,9 +52,28 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_r
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
 )
+from src.contexts.knowledge_workbench.observability.application.models.frontend_workflow_event_cursor import (
+    FrontendWorkflowEventCursor,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.project_frontend_workflow_event import (
+    ProjectFrontendWorkflowEvent,
+)
+from src.contexts.knowledge_workbench.observability.application.projectors.workbench_rag_eval_frontend_workflow_event_projector import (
+    WorkbenchRagEvalFrontendWorkflowEventProjector,
+)
+from src.contexts.knowledge_workbench.observability.infrastructure.postgres.postgres_frontend_workflow_event_repository import (
+    PostgresFrontendWorkflowEventRepository,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_reconcile_workbench_rag_eval_question_generation_progress_command import (
+    HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand,
+    HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler,
+)
 from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
     PublishedWorkbenchRetrievalResult,
     PublishedWorkbenchRetrievalSourceRef,
+)
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressSummary,
 )
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     ProjectLlmCapacityToCapacityRuntime,
@@ -95,6 +115,9 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key
 )
 from src.contexts.workflow_runtime.infrastructure.postgres.postgres_command_log_repository import (
     PostgresCommandLogRepository,
+)
+from src.contexts.workflow_runtime.infrastructure.postgres.postgres_workflow_runtime_unit_of_work import (
+    PostgresWorkflowRuntimeUnitOfWork,
 )
 from src.interfaces.composition import (
     workbench_rag_eval_workflow_runtime as runtime_module,
@@ -870,6 +893,274 @@ async def test_rag_eval_question_generation_dispatch_payload_round_trips_through
 
             assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
             assert transport.payloads
+        finally:
+            await pool.close()
+    finally:
+        await _drop_database(base_database_url, database_name)
+
+
+@pytest.mark.asyncio
+async def test_postgres_command_log_keeps_rag_eval_reconcile_prepare_idempotent() -> (
+    None
+):
+    base_database_url = os.environ.get("DATABASE_URL")
+    if not base_database_url:
+        pytest.skip("DATABASE_URL is required for command-log idempotency test")
+
+    maintenance_url = _database_url_with_database(base_database_url, "postgres")
+    conn = await asyncpg.connect(maintenance_url)
+    database_name = f"test_rag_eval_idempotency_{uuid.uuid4().hex[:12]}"
+    try:
+        try:
+            await conn.execute(f'CREATE DATABASE "{database_name}"')
+        except asyncpg.PostgresError as exc:
+            pytest.skip(f"test database user cannot create temporary databases: {exc}")
+    finally:
+        await conn.close()
+
+    temp_database_url = _database_url_with_database(base_database_url, database_name)
+    try:
+        await _apply_canonical_migration_chain(temp_database_url)
+        pool = await asyncpg.create_pool(temp_database_url, min_size=1, max_size=2)
+        try:
+            occurred_at = datetime(2026, 7, 10, 12, tzinfo=timezone.utc)
+            command_type = WorkbenchRagEvalWorkflowCommandType.PREPARE_QUESTION_GENERATION_DISPATCH_BATCH.value
+            key = f"rag-eval:workflow-run-1:{command_type}:scheduled:8"
+            payload = {
+                "workflow_family": "workbench_rag_eval",
+                "workflow_run_id": "workflow-run-1",
+                "rag_eval_run_id": "workflow-run-1",
+                "project_id": "project-1",
+                "publication_id": "publication-1",
+                "source_document_ref": "source-document-1",
+                "work_kind": WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND.value,
+                "scheduled_work_item_count": 8,
+            }
+            async with pool.acquire() as connection:
+                repository = PostgresCommandLogRepository(connection)
+                first = await repository.append_pending_command(
+                    WorkflowCommand(
+                        command_id=WorkflowCommandId(f"workflow-command:{key}"),
+                        command_type=command_type,
+                        workflow_run_id="workflow-run-1",
+                        idempotency_key=WorkflowIdempotencyKey(key),
+                        payload=payload,
+                        status=WorkflowCommandStatus.PENDING,
+                        run_after=occurred_at,
+                        created_at=occurred_at,
+                        updated_at=occurred_at,
+                    )
+                )
+                second = await repository.append_pending_command(
+                    WorkflowCommand(
+                        command_id=WorkflowCommandId(f"workflow-command:{key}:repeat"),
+                        command_type=command_type,
+                        workflow_run_id="workflow-run-1",
+                        idempotency_key=WorkflowIdempotencyKey(key),
+                        payload=payload,
+                        status=WorkflowCommandStatus.PENDING,
+                        run_after=occurred_at,
+                        created_at=occurred_at,
+                        updated_at=occurred_at,
+                    )
+                )
+                with pytest.raises(ValueError, match="different payload"):
+                    await repository.append_pending_command(
+                        WorkflowCommand(
+                            command_id=WorkflowCommandId(
+                                f"workflow-command:{key}:mismatch"
+                            ),
+                            command_type=command_type,
+                            workflow_run_id="workflow-run-1",
+                            idempotency_key=WorkflowIdempotencyKey(key),
+                            payload={
+                                **payload,
+                                "causation_dispatch_attempt_id": "must-not-be-here",
+                            },
+                            status=WorkflowCommandStatus.PENDING,
+                            run_after=occurred_at,
+                            created_at=occurred_at,
+                            updated_at=occurred_at,
+                        )
+                    )
+
+            assert second == first
+        finally:
+            await pool.close()
+    finally:
+        await _drop_database(base_database_url, database_name)
+
+
+@pytest.mark.asyncio
+async def test_qgen_reconcile_projects_frontend_event_and_updates_read_sides() -> None:
+    base_database_url = os.environ.get("DATABASE_URL")
+    if not base_database_url:
+        pytest.skip("DATABASE_URL is required for qgen projection integration test")
+
+    maintenance_url = _database_url_with_database(base_database_url, "postgres")
+    conn = await asyncpg.connect(maintenance_url)
+    database_name = f"test_rag_eval_qgen_projection_{uuid.uuid4().hex[:12]}"
+    try:
+        try:
+            await conn.execute(f'CREATE DATABASE "{database_name}"')
+        except asyncpg.PostgresError as exc:
+            pytest.skip(f"test database user cannot create temporary databases: {exc}")
+    finally:
+        await conn.close()
+
+    temp_database_url = _database_url_with_database(base_database_url, database_name)
+    try:
+        await _apply_canonical_migration_chain(temp_database_url)
+        pool = await asyncpg.create_pool(temp_database_url, min_size=1, max_size=2)
+        try:
+            repository = PostgresWorkbenchRagEvalRepository(pool)
+            project_id = str(uuid.uuid4())
+            run_id = f"run-qgen-projection-{uuid.uuid4().hex}"
+            occurred_at = datetime(2026, 7, 15, 14, 0, tzinfo=timezone.utc)
+            await repository.create_run(
+                run=WorkbenchRagEvalRun(
+                    run_id=run_id,
+                    project_id=project_id,
+                    publication_id="publication-1",
+                    source_document_ref=None,
+                    status=WorkbenchRagEvalRunStatus.RUNNING,
+                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_prompt_version="rag-eval-v2",
+                    total_entries=1,
+                    total_questions=0,
+                    completed_questions=0,
+                    top1_hits=0,
+                    top3_hits=0,
+                    top5_hits=0,
+                    misses=0,
+                    created_at=occurred_at,
+                    started_at=occurred_at,
+                    completed_at=None,
+                    error_message=None,
+                    current_phase=WorkbenchRagEvalCurrentPhase.QUESTION_GENERATION,
+                    updated_at=occurred_at,
+                )
+            )
+            await repository.save_generated_questions(
+                questions=tuple(
+                    WorkbenchRagEvalQuestion(
+                        question_id=f"question:{run_id}:runtime-entry-1:{index}",
+                        run_id=run_id,
+                        project_id=project_id,
+                        expected_runtime_entry_id="runtime-entry-1",
+                        expected_fact_id="fact-1",
+                        question=f"Generated question {index}?",
+                        question_kind=WorkbenchRagEvalQuestionKind.DIRECT_PARAPHRASE,
+                        source=WorkbenchRagEvalQuestionSource.GENERATED,
+                        generation_model="qwen/qwen3-32b",
+                        prompt_version="rag-eval-v2",
+                        contract_version="workbench_rag_eval_questions.v2",
+                        promotion_eligible=True,
+                        ambiguity_risk=WorkbenchRagEvalQuestionAmbiguityRisk.LOW,
+                        generation_rationale="projection regression",
+                        generation_account_ref="groq_org_primary",
+                        generation_slot_index=index,
+                        status=WorkbenchRagEvalQuestionStatus.CREATED,
+                        created_at=occurred_at,
+                        evaluation_role=WorkbenchRagEvalQuestionRole.PROMOTION_POOL,
+                    )
+                    for index in range(10)
+                )
+            )
+
+            current = WorkflowCommand(
+                command_id=WorkflowCommandId(
+                    f"workflow-command:{run_id}:qgen-reconcile"
+                ),
+                command_type=(
+                    WorkbenchRagEvalWorkflowCommandType.RECONCILE_QUESTION_GENERATION_PROGRESS.value
+                ),
+                workflow_run_id=run_id,
+                idempotency_key=WorkflowIdempotencyKey(
+                    f"reconcile-rag-eval-question-generation:{run_id}:attempt-1"
+                ),
+                payload={
+                    "workflow_family": "workbench_rag_eval",
+                    "workflow_run_id": run_id,
+                    "rag_eval_run_id": run_id,
+                    "project_id": project_id,
+                    "publication_id": "publication-1",
+                    "work_kind": WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND.value,
+                    "causation_dispatch_attempt_id": "attempt-1",
+                    "causation_work_item_id": "work-item-1",
+                    "outcome_status": "succeeded",
+                },
+                status=WorkflowCommandStatus.PENDING,
+                run_after=occurred_at,
+                created_at=occurred_at,
+                updated_at=occurred_at,
+            )
+
+            async with pool.acquire() as connection:
+                unit_of_work = PostgresWorkflowRuntimeUnitOfWork(connection)
+                await unit_of_work.start()
+                await unit_of_work.command_log.append_pending_command(current)
+                frontend_repository = PostgresFrontendWorkflowEventRepository(
+                    connection
+                )
+                await HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommandHandler().execute(
+                    HandleReconcileWorkbenchRagEvalQuestionGenerationProgressCommand(
+                        current
+                    ),
+                    work_item_progress_read_repository=SimpleNamespace(
+                        summarize_by_work_kind_and_workflow=AsyncMock(
+                            return_value=WorkItemProgressSummary(
+                                ready_count=0,
+                                leased_count=0,
+                                deferred_count=0,
+                                retryable_failed_count=0,
+                                completed_count=1,
+                                terminal_failed_count=0,
+                                cancelled_count=0,
+                                split_superseded_count=0,
+                                user_action_required_count=0,
+                                total_count=1,
+                                next_due_at=None,
+                            )
+                        )
+                    ),
+                    question_coverage_repository=repository,
+                    rag_eval_repository=repository,
+                    workflow_unit_of_work=unit_of_work,
+                    frontend_event_projection_writer=ProjectFrontendWorkflowEvent(
+                        projector=WorkbenchRagEvalFrontendWorkflowEventProjector(),
+                        repository=frontend_repository,
+                    ),
+                )
+                await unit_of_work.commit()
+
+            questions = await repository.list_run_questions(
+                project_id=project_id,
+                run_id=run_id,
+            )
+            latest = await repository.get_latest_run(project_id=project_id)
+            synthetic_document_id = f"rag-eval:{project_id}:{run_id}"
+            async with pool.acquire() as connection:
+                events = await PostgresFrontendWorkflowEventRepository(
+                    connection
+                ).list_frontend_events(
+                    workflow_run_id=run_id,
+                    after_cursor=FrontendWorkflowEventCursor.beginning(),
+                    limit=20,
+                )
+
+            assert len(questions) == 10
+            assert latest is not None
+            assert (
+                latest.current_phase
+                is WorkbenchRagEvalCurrentPhase.RETRIEVAL_EVALUATION
+            )
+            assert any(
+                event.projection_type
+                == "rag_eval_question_generation_progress_reconciled"
+                and event.document_id == synthetic_document_id
+                for event in events
+            )
         finally:
             await pool.close()
     finally:

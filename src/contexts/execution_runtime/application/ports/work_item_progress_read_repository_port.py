@@ -111,6 +111,16 @@ class WorkItemProgressReadRepositoryPort(Protocol):
         now: datetime,
     ) -> WorkItemProgressSummary: ...
 
+    async def prepare_iteration_revision(
+        self,
+        *,
+        workflow_run_id: str,
+        work_kind: WorkKind,
+        requested_items: int,
+        now: datetime,
+        include_future_retryable: bool = False,
+    ) -> str: ...
+
 
 def _require_non_negative_int(value: int, field_name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int):
