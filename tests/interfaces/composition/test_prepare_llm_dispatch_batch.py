@@ -21,6 +21,10 @@ from src.contexts.execution_runtime.domain.value_objects.work_item_status import
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.execution_runtime.domain.value_objects.worker_ref import WorkerRef
+from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
+    LlmDispatchExecutionInput,
+    LlmDispatchExecutionStatus,
+)
 from src.contexts.llm_runtime.application.capacity.project_llm_capacity_to_capacity_runtime import (
     ProjectLlmCapacityToCapacityRuntime,
 )
@@ -35,6 +39,45 @@ from src.contexts.llm_runtime.domain.capacity.llm_task_capacity_profile import (
 )
 from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
     default_groq_llm_model_route_catalog,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_dispatch_executor import (
+    GroqDispatchExecutor,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_chat_request_builder import (
+    JsonValue,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    build_groq_free_plan_model_profiles,
+    model_budget_profile_for_ref,
+)
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_transport_port import (
+    GroqTransportResponse,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_eval import (
+    WorkbenchRagEvalQuestionAmbiguityRisk,
+    WorkbenchRagEvalQuestionRole,
+    WorkbenchRagEvalRetrievalClassification,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_adjudication_work import (
+    WorkbenchRagEvalAdjudicationPlanningInput,
+    WorkbenchRagEvalAdjudicationRetrievedClaimSnapshot,
+    WorkbenchRagEvalAdjudicationWorkPlanner,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.plan_workbench_rag_eval_question_generation_work import (
+    WorkbenchRagEvalQuestionGenerationWorkPlanner,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
+    make_adjudication_dispatch_preparation_builder,
+    make_question_generation_dispatch_preparation_builder,
+    workbench_rag_eval_route_catalog,
+)
+from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_work_kinds import (
+    WORKBENCH_RAG_EVAL_ADJUDICATION_WORK_KIND,
+    WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND,
+)
+from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
+    PublishedWorkbenchRetrievalResult,
+    PublishedWorkbenchRetrievalSourceRef,
 )
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     DispatchPreparationBuilderRegistry,
@@ -475,6 +518,145 @@ def _runner(pool: FakePool) -> PrepareLlmDispatchBatch:
     )
 
 
+class FakeGroqTransport:
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, JsonValue]] = []
+
+    def post_chat_completions(
+        self,
+        *,
+        payload: dict[str, JsonValue],
+    ) -> GroqTransportResponse:
+        self.payloads.append(payload)
+        return GroqTransportResponse(
+            status_code=200,
+            headers={},
+            body={
+                "choices": [{"message": {"content": '{"ok": true}'}}],
+                "usage": {"prompt_tokens": 7, "completion_tokens": 11},
+            },
+        )
+
+
+def _rag_eval_runner(pool: FakePool) -> PrepareLlmDispatchBatch:
+    return PrepareLlmDispatchBatch(
+        pool=pool,
+        capacity_policy=CapacityAdmissionPolicy(),
+        active_model_capacity_selector=SelectActiveLlmModelCapacity(
+            projector=ProjectLlmCapacityToCapacityRuntime(),
+        ),
+        route_catalog=workbench_rag_eval_route_catalog(),
+        provider_account_refs=("groq_org_primary",),
+        model_profiles=build_groq_free_plan_model_profiles(),
+        dispatch_preparation_builder_registry=DispatchPreparationBuilderRegistry(
+            builders_by_work_kind={
+                WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND: (
+                    make_question_generation_dispatch_preparation_builder()
+                ),
+                WORKBENCH_RAG_EVAL_ADJUDICATION_WORK_KIND: (
+                    make_adjudication_dispatch_preparation_builder()
+                ),
+            }
+        ),
+    )
+
+
+def _rag_eval_connection_with_plan(
+    plan_work_item_id: str,
+    *,
+    work_kind: WorkKind,
+    schedule_payload: dict[str, object],
+) -> FakeConnection:
+    connection = FakeConnection()
+    connection.work_items[plan_work_item_id] = {
+        **_work_item_row(plan_work_item_id, ordinal=1),
+        "work_kind": work_kind.value,
+    }
+    connection.schedules[plan_work_item_id] = schedule_payload
+    return connection
+
+
+def _rag_eval_entry() -> PublishedWorkbenchRetrievalResult:
+    return PublishedWorkbenchRetrievalResult(
+        runtime_entry_id="runtime-entry-1",
+        publication_id="pub-1",
+        project_id="project-1",
+        source_document_ref="doc-1",
+        fact_id="fact-1",
+        curation_item_ref=None,
+        claim="Claim one",
+        possible_questions=("Question one?",),
+        exclusion_scope=None,
+        evidence_block="Evidence one",
+        source_claim_refs=("claim-1",),
+        embedding_text="Embedding text one",
+        score=1.0,
+        rank=1,
+        source_ref=PublishedWorkbenchRetrievalSourceRef(
+            workflow_run_id=None,
+            source_document_ref="doc-1",
+            curation_item_ref=None,
+            source_claim_refs=("claim-1",),
+        ),
+    )
+
+
+def _adjudication_input() -> WorkbenchRagEvalAdjudicationPlanningInput:
+    return WorkbenchRagEvalAdjudicationPlanningInput(
+        run_id="run-1",
+        project_id="project-1",
+        question_id="question-1",
+        question="Question one?",
+        evaluation_role=WorkbenchRagEvalQuestionRole.PROMOTION_POOL,
+        promotion_eligible=True,
+        ambiguity_risk=WorkbenchRagEvalQuestionAmbiguityRisk.LOW,
+        outcome_id="outcome-1",
+        classification=WorkbenchRagEvalRetrievalClassification.MISS,
+        expected_runtime_entry_id="runtime-entry-1",
+        expected_fact_id="fact-1",
+        expected_rank=None,
+        expected_score=None,
+        best_competitor_runtime_entry_id=None,
+        best_competitor_fact_id=None,
+        best_competitor_score=None,
+        score_margin=None,
+        target_claim="Claim one",
+        target_possible_questions=("Question one?",),
+        target_exclusion_scope=None,
+        target_evidence_block="Evidence one",
+        retrieved=(
+            WorkbenchRagEvalAdjudicationRetrievedClaimSnapshot(
+                rank=1,
+                runtime_entry_id="runtime-entry-2",
+                fact_id="fact-2",
+                claim="Wrong claim",
+                score=0.9,
+            ),
+        ),
+    )
+
+
+async def _assert_groq_executor_accepts_dispatch_payload(
+    dispatch_payload: dict[str, object],
+) -> None:
+    transport = FakeGroqTransport()
+    result = await GroqDispatchExecutor(
+        transport=transport,
+        model_profiles=build_groq_free_plan_model_profiles(),
+    ).execute_dispatch(
+        LlmDispatchExecutionInput(
+            attempt_id="attempt-1",
+            work_item_id="work-1",
+            attempt_number=1,
+            dispatch_payload=dispatch_payload,
+            started_at=_started_at(),
+        )
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
+    assert transport.payloads
+
+
 @dataclass(slots=True)
 class RecordingDispatchPreparationBuilder:
     profile: LlmTaskCapacityProfile
@@ -589,6 +771,87 @@ async def test_prepare_uses_work_kind_specific_dispatch_preparation_builder() ->
         ]
         == _profile().required_window_tokens
     )
+
+
+@pytest.mark.asyncio
+async def test_rag_eval_question_generation_preparation_persists_groq_parseable_contract() -> (
+    None
+):
+    plan = WorkbenchRagEvalQuestionGenerationWorkPlanner(
+        prompt_version="prompt-v1",
+        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+    ).plan(
+        workflow_run_id="run-1",
+        project_id="project-1",
+        entries=(_rag_eval_entry(),),
+        provider_messages_by_runtime_entry_id={
+            "runtime-entry-1": (
+                {"role": "system", "content": "Generate eval questions."},
+                {"role": "user", "content": "Claim one with evidence."},
+            )
+        },
+    )[0]
+    connection = _rag_eval_connection_with_plan(
+        plan.work_item_id,
+        work_kind=WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND,
+        schedule_payload=dict(plan.payload),
+    )
+
+    result = await _rag_eval_runner(FakePool(connection=connection)).execute(
+        _command(
+            work_kind=WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND,
+            account_capacities=(),
+            requested_items=1,
+        )
+    )
+
+    assert len(result.attempt_result.started_attempts) == 1
+    dispatch = next(iter(connection.dispatches.values()))
+    dispatch_payload = dispatch["dispatch_payload"]
+    assert isinstance(dispatch_payload, dict)
+    estimate = dispatch_payload["schedule_payload"]["llm_capacity_estimate"]
+    assert estimate["budget_contract_version"] == "v3"
+    assert estimate["model_tpm_limit"] == 6_000
+    await _assert_groq_executor_accepts_dispatch_payload(dispatch_payload)
+
+
+@pytest.mark.asyncio
+async def test_rag_eval_adjudication_preparation_persists_groq_parseable_contract() -> (
+    None
+):
+    plan = WorkbenchRagEvalAdjudicationWorkPlanner(
+        adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+    ).plan(
+        inputs=(_adjudication_input(),),
+        provider_messages_by_question_id={
+            "question-1": (
+                {"role": "system", "content": "Adjudicate eval retrieval."},
+                {"role": "user", "content": "Question one?"},
+            )
+        },
+    )[0]
+    connection = _rag_eval_connection_with_plan(
+        plan.work_item_id,
+        work_kind=WORKBENCH_RAG_EVAL_ADJUDICATION_WORK_KIND,
+        schedule_payload=dict(plan.payload),
+    )
+
+    result = await _rag_eval_runner(FakePool(connection=connection)).execute(
+        _command(
+            work_kind=WORKBENCH_RAG_EVAL_ADJUDICATION_WORK_KIND,
+            account_capacities=(),
+            requested_items=1,
+        )
+    )
+
+    assert len(result.attempt_result.started_attempts) == 1
+    dispatch = next(iter(connection.dispatches.values()))
+    dispatch_payload = dispatch["dispatch_payload"]
+    assert isinstance(dispatch_payload, dict)
+    estimate = dispatch_payload["schedule_payload"]["llm_capacity_estimate"]
+    assert estimate["budget_contract_version"] == "v3"
+    assert estimate["model_tpm_limit"] == 6_000
+    await _assert_groq_executor_accepts_dispatch_payload(dispatch_payload)
 
 
 @pytest.mark.asyncio

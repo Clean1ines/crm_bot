@@ -101,6 +101,7 @@ from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacit
 )
 from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
     build_groq_free_plan_model_profiles,
+    model_budget_profile_for_ref,
 )
 from src.contexts.workflow_runtime.infrastructure.postgres.postgres_workflow_runtime_unit_of_work import (
     PostgresWorkflowRuntimeUnitOfWork,
@@ -262,6 +263,9 @@ class WorkbenchRagEvalWorkflowRuntimeComposition:
                 ),
                 adjudication_provider_messages_builder=(
                     WorkbenchRagEvalAdjudicationPrompt.from_prompt_file()
+                ),
+                adjudication_model_profile=model_budget_profile_for_ref(
+                    workbench_rag_eval_route_catalog().primary_model_ref()
                 ),
                 search_published_workbench_runtime=(
                     self.search_published_workbench_runtime

@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 
 import pytest
 
@@ -258,7 +259,6 @@ def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() ->
         "EnsureWorkItemsScheduled",
         "WorkItemSchedulingRepositoryPort",
         "capacity_runtime",
-        "llm_runtime",
         "artifact_runtime",
         "execution_runtime.infrastructure",
         "Postgres",
@@ -280,3 +280,24 @@ def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() ->
 
     for marker in forbidden_markers:
         assert marker not in source
+
+    allowed_llm_runtime_imports = {
+        "src.contexts.llm_runtime.application.capacity.llm_capacity_estimate_payload",
+    }
+    llm_runtime_imports = {
+        module_name
+        for module_name in _imported_module_names(source)
+        if module_name.startswith("src.contexts.llm_runtime.")
+    }
+    assert llm_runtime_imports <= allowed_llm_runtime_imports
+
+
+def _imported_module_names(source: str) -> set[str]:
+    tree = ast.parse(source)
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.add(node.module)
+        elif isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+    return names

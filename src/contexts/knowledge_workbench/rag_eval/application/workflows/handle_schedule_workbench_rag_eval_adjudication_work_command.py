@@ -51,6 +51,7 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import
 from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
     WorkflowIdempotencyKey,
 )
+from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +75,7 @@ class HandleScheduleWorkbenchRagEvalAdjudicationWorkCommandHandler:
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort,
         workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
         provider_messages_builder: object,
+        adjudication_model_profile: ModelProfile,
     ) -> HandleScheduleWorkbenchRagEvalAdjudicationWorkResult:
         current = command.workflow_command
         if (
@@ -131,7 +133,9 @@ class HandleScheduleWorkbenchRagEvalAdjudicationWorkCommandHandler:
             )
             for item in eligible
         }
-        plans = WorkbenchRagEvalAdjudicationWorkPlanner().plan(
+        plans = WorkbenchRagEvalAdjudicationWorkPlanner(
+            adjudication_model_profile=adjudication_model_profile,
+        ).plan(
             inputs=eligible,
             provider_messages_by_question_id=provider_messages_by_question_id,
         )

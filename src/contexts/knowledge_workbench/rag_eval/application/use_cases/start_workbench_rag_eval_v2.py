@@ -51,6 +51,7 @@ from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_
     WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION,
     WorkbenchRagEvalQuestionGenerator,
 )
+from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +60,7 @@ class StartWorkbenchRagEvalV2:
     work_item_scheduling_repository: WorkItemSchedulingRepositoryPort
     workflow_command_log: CommandLogRepositoryPort
     question_generator: WorkbenchRagEvalQuestionGenerator
+    question_generation_model_profile: ModelProfile
     question_generation_prompt_version: str = WORKBENCH_RAG_EVAL_QUESTION_PROMPT_VERSION
 
     async def execute(
@@ -136,7 +138,7 @@ class StartWorkbenchRagEvalV2:
         }
         plans = WorkbenchRagEvalQuestionGenerationWorkPlanner(
             prompt_version=self.question_generation_prompt_version,
-            generation_model_ref=self.question_generator.generation_model,
+            generation_model_profile=self.question_generation_model_profile,
         ).plan(
             workflow_run_id=run_id,
             project_id=project_id,

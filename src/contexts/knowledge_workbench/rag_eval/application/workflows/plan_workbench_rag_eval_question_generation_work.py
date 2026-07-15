@@ -13,12 +13,18 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_r
 from src.contexts.knowledge_workbench.retrieval.application.models.published_workbench_retrieval import (
     PublishedWorkbenchRetrievalResult,
 )
+from src.contexts.llm_runtime.application.capacity.llm_capacity_estimate_payload import (
+    build_llm_capacity_estimate_payload,
+)
+from src.contexts.llm_runtime.domain.entities.model_profile import (
+    ModelProfile,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalQuestionGenerationWorkPlanner:
     prompt_version: str
-    generation_model_ref: str
+    generation_model_profile: ModelProfile
     planned_output_tokens: int = 1200
 
     def plan(
@@ -35,10 +41,8 @@ class WorkbenchRagEvalQuestionGenerationWorkPlanner:
         _require_non_empty_text(workflow_run_id, field_name="workflow_run_id")
         _require_non_empty_text(project_id, field_name="project_id")
         _require_non_empty_text(self.prompt_version, field_name="prompt_version")
-        _require_non_empty_text(
-            self.generation_model_ref,
-            field_name="generation_model_ref",
-        )
+        if not isinstance(self.generation_model_profile, ModelProfile):
+            raise TypeError("generation_model_profile must be ModelProfile")
         return tuple(
             self._plan_entry(
                 workflow_run_id=workflow_run_id,
@@ -47,6 +51,7 @@ class WorkbenchRagEvalQuestionGenerationWorkPlanner:
                 provider_messages=provider_messages_by_runtime_entry_id[
                     entry.runtime_entry_id
                 ],
+                generation_model_profile=self.generation_model_profile,
                 entry_index=index,
             )
             for index, entry in enumerate(entries)
@@ -59,6 +64,7 @@ class WorkbenchRagEvalQuestionGenerationWorkPlanner:
         project_id: str,
         entry: PublishedWorkbenchRetrievalResult,
         provider_messages: tuple[Mapping[str, str], ...],
+        generation_model_profile: ModelProfile,
         entry_index: int,
     ) -> WorkItemSchedulePlan:
         work_item_id = _stable_id(
@@ -86,7 +92,7 @@ class WorkbenchRagEvalQuestionGenerationWorkPlanner:
             "llm_capacity_estimate": _capacity_estimate(
                 provider_messages=provider_messages,
                 planned_output_tokens=self.planned_output_tokens,
-                model_ref=self.generation_model_ref,
+                model_profile=generation_model_profile,
             ),
         }
         return WorkItemSchedulePlan(
@@ -101,26 +107,23 @@ def _capacity_estimate(
     *,
     provider_messages: tuple[Mapping[str, str], ...],
     planned_output_tokens: int,
-    model_ref: str,
+    model_profile: ModelProfile,
 ) -> dict[str, object]:
     prompt_text = "\n".join(
         str(message.get("content", "")) for message in provider_messages
     )
     input_tokens = max(1, len(prompt_text) // 4)
-    return {
-        "budget_contract_version": "rag_eval_v2",
-        "estimator": "provider_message_char_div_4",
-        "provider": "groq",
-        "model_ref": model_ref,
-        "phase": "question_generation",
-        "operation": "prepare_workbench_rag_eval_question_generation",
-        "prompt_tokens": input_tokens,
-        "artifact_tokens": 0,
-        "input_tokens": input_tokens,
-        "planned_output_tokens": planned_output_tokens,
-        "safety_gap_tokens": 0,
-        "required_window_tokens": input_tokens + planned_output_tokens,
-    }
+    return build_llm_capacity_estimate_payload(
+        model_profile=model_profile,
+        phase="question_generation",
+        operation="prepare_workbench_rag_eval_question_generation",
+        estimator="provider_message_char_div_4",
+        prompt_tokens=input_tokens,
+        artifact_tokens=0,
+        input_tokens=input_tokens,
+        planned_output_tokens=planned_output_tokens,
+        safety_gap_tokens=0,
+    )
 
 
 def _stable_id(*parts: str) -> str:

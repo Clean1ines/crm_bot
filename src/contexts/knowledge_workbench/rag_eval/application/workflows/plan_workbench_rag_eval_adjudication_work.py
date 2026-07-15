@@ -13,11 +13,14 @@ from src.contexts.knowledge_workbench.rag_eval.application.models.workbench_rag_
     WorkbenchRagEvalQuestionRole,
     WorkbenchRagEvalRetrievalClassification,
 )
-from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
-    WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF,
-)
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_work_kinds import (
     WORKBENCH_RAG_EVAL_ADJUDICATION_WORK_KIND,
+)
+from src.contexts.llm_runtime.application.capacity.llm_capacity_estimate_payload import (
+    build_llm_capacity_estimate_payload,
+)
+from src.contexts.llm_runtime.domain.entities.model_profile import (
+    ModelProfile,
 )
 
 
@@ -101,8 +104,8 @@ class WorkbenchRagEvalAdjudicationPlanningInput:
 
 @dataclass(frozen=True, slots=True)
 class WorkbenchRagEvalAdjudicationWorkPlanner:
+    adjudication_model_profile: ModelProfile
     prompt_version: str = ADJUDICATION_PROMPT_VERSION
-    model_ref: str = WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF
     planned_output_tokens: int = 700
     eligibility_policy: WorkbenchRagEvalAdjudicationEligibilityPolicy = (
         WorkbenchRagEvalAdjudicationEligibilityPolicy()
@@ -117,8 +120,13 @@ class WorkbenchRagEvalAdjudicationWorkPlanner:
             tuple[Mapping[str, str], ...],
         ],
     ) -> tuple[WorkItemSchedulePlan, ...]:
+        model_profile = self._adjudication_model_profile()
         return tuple(
-            self._plan_one(item, provider_messages_by_question_id[item.question_id])
+            self._plan_one(
+                item,
+                provider_messages_by_question_id[item.question_id],
+                model_profile,
+            )
             for item in inputs
             if self.eligibility_policy.is_eligible(
                 evaluation_role=item.evaluation_role,
@@ -132,6 +140,7 @@ class WorkbenchRagEvalAdjudicationWorkPlanner:
         self,
         item: WorkbenchRagEvalAdjudicationPlanningInput,
         provider_messages: tuple[Mapping[str, str], ...],
+        model_profile: ModelProfile,
     ) -> WorkItemSchedulePlan:
         work_item_id = _stable_id(
             item.run_id,
@@ -165,7 +174,7 @@ class WorkbenchRagEvalAdjudicationWorkPlanner:
             "llm_capacity_estimate": _capacity_estimate(
                 provider_messages=provider_messages,
                 planned_output_tokens=self.planned_output_tokens,
-                model_ref=self.model_ref,
+                model_profile=model_profile,
             ),
         }
         return WorkItemSchedulePlan(
@@ -174,6 +183,11 @@ class WorkbenchRagEvalAdjudicationWorkPlanner:
             idempotency_key=work_item_id,
             payload=payload,
         )
+
+    def _adjudication_model_profile(self) -> ModelProfile:
+        if not isinstance(self.adjudication_model_profile, ModelProfile):
+            raise TypeError("adjudication_model_profile must be ModelProfile")
+        return self.adjudication_model_profile
 
 
 def build_adjudication_prompt_payload(
@@ -227,26 +241,23 @@ def _capacity_estimate(
     *,
     provider_messages: tuple[Mapping[str, str], ...],
     planned_output_tokens: int,
-    model_ref: str,
+    model_profile: ModelProfile,
 ) -> dict[str, object]:
     prompt_text = "\n".join(
         str(message.get("content", "")) for message in provider_messages
     )
     input_tokens = max(1, len(prompt_text) // 4)
-    return {
-        "budget_contract_version": "rag_eval_v2",
-        "estimator": "provider_message_char_div_4",
-        "provider": "groq",
-        "model_ref": model_ref,
-        "phase": "adjudication",
-        "operation": "prepare_workbench_rag_eval_adjudication",
-        "prompt_tokens": input_tokens,
-        "artifact_tokens": 0,
-        "input_tokens": input_tokens,
-        "planned_output_tokens": planned_output_tokens,
-        "safety_gap_tokens": 0,
-        "required_window_tokens": input_tokens + planned_output_tokens,
-    }
+    return build_llm_capacity_estimate_payload(
+        model_profile=model_profile,
+        phase="adjudication",
+        operation="prepare_workbench_rag_eval_adjudication",
+        estimator="provider_message_char_div_4",
+        prompt_tokens=input_tokens,
+        artifact_tokens=0,
+        input_tokens=input_tokens,
+        planned_output_tokens=planned_output_tokens,
+        safety_gap_tokens=0,
+    )
 
 
 def _stable_id(*parts: str) -> str:

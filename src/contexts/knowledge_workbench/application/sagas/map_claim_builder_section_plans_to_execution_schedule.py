@@ -22,6 +22,9 @@ from src.contexts.knowledge_workbench.extraction.application.policies.claim_buil
 from src.contexts.knowledge_workbench.application.sagas.model_budget_profile import (
     model_budget_profile_for_ref,
 )
+from src.contexts.llm_runtime.application.capacity.llm_capacity_estimate_payload import (
+    build_llm_capacity_estimate_payload,
+)
 
 CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 1_953
 CLAIM_BUILDER_PROMPT_TOKENS_ENV = "CLAIM_BUILDER_PROMPT_TOKENS"
@@ -135,32 +138,27 @@ def _claim_builder_token_estimate(
     source_unit_token_count = max(1, estimate_tokens_roughly(plan.source_unit_text))
     input_tokens = prompt_token_count + source_unit_token_count
     planned_output_tokens = source_unit_token_count
-    required_window_tokens = (
-        input_tokens + planned_output_tokens + CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS
-    )
     model_profile = model_budget_profile_for_ref(CLAIM_BUILDER_MODEL_REF)
 
-    return {
-        "budget_contract_version": "v3",
-        "estimator": (
+    return build_llm_capacity_estimate_payload(
+        model_profile=model_profile,
+        phase=CLAIM_BUILDER_PHASE,
+        operation="section_extraction",
+        estimator=(
             f"measured_prompt_{prompt_token_count}_"
             "source_char_div_3_3_conservative_section_output"
         ),
-        "provider": "groq",
-        "model_ref": CLAIM_BUILDER_MODEL_REF,
-        "model_tpm_limit": model_profile.rate_limits.tokens_per_minute,
-        "model_char_to_token_multiplier": str(
-            model_profile.model_char_to_token_multiplier
-        ),
-        "phase": CLAIM_BUILDER_PHASE,
-        "operation": "section_extraction",
-        "prompt_tokens": prompt_token_count,
-        "artifact_tokens": source_unit_token_count,
-        "input_tokens": input_tokens,
-        "planned_output_tokens": planned_output_tokens,
-        "safety_gap_tokens": CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS,
-        "required_window_tokens": required_window_tokens,
-    }
+        prompt_tokens=prompt_token_count,
+        artifact_tokens=source_unit_token_count,
+        input_tokens=input_tokens,
+        planned_output_tokens=planned_output_tokens,
+        safety_gap_tokens=CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS,
+        metadata={
+            "model_char_to_token_multiplier": str(
+                model_profile.model_char_to_token_multiplier
+            ),
+        },
+    )
 
 
 def _claim_builder_prompt_tokens_from_env() -> int:

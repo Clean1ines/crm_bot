@@ -44,6 +44,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_r
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_workflow_definition import (
     WorkbenchRagEvalWorkflowCommandType,
 )
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    model_budget_profile_for_ref,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
     WorkflowCommandStatus,
@@ -182,11 +185,16 @@ def test_planner_creates_stable_adjudication_work_items_with_immutable_snapshot(
         for item in inputs
     }
 
-    first = WorkbenchRagEvalAdjudicationWorkPlanner().plan(
+    model_profile = model_budget_profile_for_ref("qwen/qwen3-32b")
+    first = WorkbenchRagEvalAdjudicationWorkPlanner(
+        adjudication_model_profile=model_profile,
+    ).plan(
         inputs=inputs,
         provider_messages_by_question_id=messages,
     )
-    second = WorkbenchRagEvalAdjudicationWorkPlanner().plan(
+    second = WorkbenchRagEvalAdjudicationWorkPlanner(
+        adjudication_model_profile=model_profile,
+    ).plan(
         inputs=inputs,
         provider_messages_by_question_id=messages,
     )

@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 
 
 def test_source_ingestion_application_sagas_do_not_import_interfaces_or_infrastructure() -> (
@@ -97,7 +98,7 @@ def test_draft_observation_plan_mapper_imports_only_execution_schedule_dto() -> 
         "WorkItemSchedulingRepositoryPort",
         "execution_runtime.infrastructure",
         "capacity_runtime",
-        "llm_runtime",
+        "llm_runtime.infrastructure",
         "artifact_runtime",
         "Postgres",
         "asyncpg",
@@ -108,9 +109,21 @@ def test_draft_observation_plan_mapper_imports_only_execution_schedule_dto() -> 
 
     missing = [marker for marker in required_markers if marker not in text]
     offenders = [marker for marker in forbidden_markers if marker in text]
+    allowed_llm_runtime_imports = {
+        "src.contexts.llm_runtime.application.capacity.llm_capacity_estimate_payload",
+    }
+    llm_runtime_imports = {
+        module_name
+        for module_name in _imported_module_names(text)
+        if module_name.startswith("src.contexts.llm_runtime.")
+    }
+    unexpected_llm_runtime_imports = sorted(
+        llm_runtime_imports - allowed_llm_runtime_imports
+    )
 
     assert not missing, "\n".join(missing)
     assert not offenders, "\n".join(offenders)
+    assert not unexpected_llm_runtime_imports, "\n".join(unexpected_llm_runtime_imports)
 
 
 def test_draft_observation_scheduler_service_imports_only_application_boundaries() -> (
@@ -247,3 +260,14 @@ def test_knowledge_extraction_saga_wires_scheduling_phase_without_infrastructure
 
     assert not missing, "\n".join(missing)
     assert not offenders, "\n".join(offenders)
+
+
+def _imported_module_names(source: str) -> set[str]:
+    tree = ast.parse(source)
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.add(node.module)
+        elif isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+    return names

@@ -51,6 +51,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_r
     WorkbenchRagEvalWorkflowCommandType,
     WorkbenchRagEvalWorkflowEventType,
 )
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    model_budget_profile_for_ref,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
     WorkflowCommandStatus,
@@ -197,6 +200,7 @@ class FakeUow:
 @dataclass(slots=True)
 class FakeScheduler:
     plans: list[object] = field(default_factory=list)
+    payloads: list[object] = field(default_factory=list)
     hashes: dict[str, str] = field(default_factory=dict)
 
     async def get_work_item(self, work_item_id: str):
@@ -208,8 +212,9 @@ class FakeScheduler:
     async def save_scheduled_work_item(
         self, *, item, idempotency_key: str, payload_hash: str, payload
     ) -> None:
-        del idempotency_key, payload
+        del idempotency_key
         self.plans.append(item)
+        self.payloads.append(payload)
         self.hashes[item.work_item_id] = payload_hash
 
 
@@ -266,11 +271,35 @@ async def test_schedule_adjudication_creates_one_work_item_per_eligible_question
                     {"role": "user", "content": item.question},
                 )
             ),
+            adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
         )
     )
 
     assert result.scheduled_count == 1
     assert scheduler.plans[0].work_kind == WORKBENCH_RAG_EVAL_ADJUDICATION_WORK_KIND
+    payload = scheduler.payloads[0]
+    assert isinstance(payload, dict)
+    estimate = payload["llm_capacity_estimate"]
+    assert isinstance(estimate, dict)
+    assert set(estimate) >= {
+        "budget_contract_version",
+        "provider",
+        "model_ref",
+        "model_tpm_limit",
+        "phase",
+        "operation",
+        "estimator",
+        "prompt_tokens",
+        "artifact_tokens",
+        "input_tokens",
+        "planned_output_tokens",
+        "safety_gap_tokens",
+        "required_window_tokens",
+    }
+    assert estimate["budget_contract_version"] == "v3"
+    assert estimate["provider"] == "groq"
+    assert estimate["model_ref"] == "qwen/qwen3-32b"
+    assert estimate["model_tpm_limit"] == 6_000
     assert uow.command_log.appended[0].command_type == (
         WorkbenchRagEvalWorkflowCommandType.PREPARE_ADJUDICATION_DISPATCH_BATCH.value
     )
@@ -402,6 +431,7 @@ async def test_schedule_adjudication_zero_eligible_goes_to_promotion_review() ->
             provider_messages_builder=SimpleNamespace(
                 provider_messages=lambda item: ()
             ),
+            adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
         )
     )
 
@@ -588,6 +618,7 @@ async def test_dispatcher_runs_schedule_adjudication_when_dependencies_exist() -
         adjudication_provider_messages_builder=SimpleNamespace(
             provider_messages=lambda item: ()
         ),
+        adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
     )
 
     assert result.dispatched is True

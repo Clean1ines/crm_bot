@@ -32,6 +32,9 @@ from src.contexts.knowledge_workbench.retrieval.application.models.published_wor
     PublishedWorkbenchRetrievalResult,
     PublishedWorkbenchRetrievalSourceRef,
 )
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    model_budget_profile_for_ref,
+)
 
 
 @dataclass(slots=True)
@@ -138,6 +141,9 @@ async def test_start_v2_creates_running_run_and_schedules_one_qgen_item_per_entr
         work_item_scheduling_repository=scheduling_repository,
         workflow_command_log=command_log,
         question_generator=WorkbenchRagEvalQuestionGenerator.from_prompt_file(),
+        question_generation_model_profile=model_budget_profile_for_ref(
+            "qwen/qwen3-32b"
+        ),
     ).execute(
         project_id="project-1",
         publication_id="pub-1",

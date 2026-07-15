@@ -21,6 +21,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_prep
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
+from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.execution_runtime.application.ports.work_item_scheduling_repository_port import (
     WorkItemSchedulingRepositoryPort,
 )
@@ -95,6 +96,7 @@ class DrainWorkbenchRagEvalWorkflowCommands:
         search_published_workbench_runtime: PublishedWorkbenchSearchPort | None = None,
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort | None = None,
         adjudication_provider_messages_builder: object | None = None,
+        adjudication_model_profile: ModelProfile | None = None,
         post_promotion_verification_executor: (
             RunWorkbenchRagEvalPostPromotionVerificationPort | None
         ) = None,
@@ -133,6 +135,7 @@ class DrainWorkbenchRagEvalWorkflowCommands:
                 adjudication_provider_messages_builder=(
                     adjudication_provider_messages_builder
                 ),
+                adjudication_model_profile=adjudication_model_profile,
                 post_promotion_verification_executor=(
                     post_promotion_verification_executor
                 ),

@@ -17,6 +17,9 @@ from src.contexts.knowledge_workbench.retrieval.application.models.published_wor
     PublishedWorkbenchRetrievalResult,
     PublishedWorkbenchRetrievalSourceRef,
 )
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    model_budget_profile_for_ref,
+)
 
 
 def _entry(index: int) -> PublishedWorkbenchRetrievalResult:
@@ -56,7 +59,7 @@ def test_qgen_planner_creates_one_work_item_per_runtime_entry() -> None:
 
     plans = WorkbenchRagEvalQuestionGenerationWorkPlanner(
         prompt_version="prompt-v1",
-        generation_model_ref="qwen/qwen3-32b",
+        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
     ).plan(
         workflow_run_id="run-1",
         project_id="project-1",
@@ -80,7 +83,7 @@ def test_qgen_planner_creates_one_work_item_per_runtime_entry() -> None:
 def test_qgen_dispatch_preparation_builder_uses_due_item_estimates() -> None:
     plans = WorkbenchRagEvalQuestionGenerationWorkPlanner(
         prompt_version="prompt-v1",
-        generation_model_ref="qwen/qwen3-32b",
+        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
     ).plan(
         workflow_run_id="run-1",
         project_id="project-1",
@@ -106,6 +109,25 @@ def test_qgen_dispatch_preparation_builder_uses_due_item_estimates() -> None:
 
     estimate = plans[0].payload["llm_capacity_estimate"]
     assert isinstance(estimate, dict)
+    assert set(estimate) >= {
+        "budget_contract_version",
+        "provider",
+        "model_ref",
+        "model_tpm_limit",
+        "phase",
+        "operation",
+        "estimator",
+        "prompt_tokens",
+        "artifact_tokens",
+        "input_tokens",
+        "planned_output_tokens",
+        "safety_gap_tokens",
+        "required_window_tokens",
+    }
+    assert estimate["budget_contract_version"] == "v3"
+    assert estimate["provider"] == "groq"
+    assert estimate["model_ref"] == "qwen/qwen3-32b"
+    assert estimate["model_tpm_limit"] == 6_000
     assert profile.profile_id == "workbench_rag_eval.question_generation.real_due_batch"
     assert profile.estimated_requests == 1
     assert profile.estimated_prompt_tokens == estimate["input_tokens"]

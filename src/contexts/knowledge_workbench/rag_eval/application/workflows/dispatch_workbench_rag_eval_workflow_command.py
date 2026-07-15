@@ -50,6 +50,7 @@ from src.contexts.knowledge_workbench.rag_eval.application.workflows.handle_sche
     HandleScheduleWorkbenchRagEvalAdjudicationWorkCommand,
     HandleScheduleWorkbenchRagEvalAdjudicationWorkCommandHandler,
 )
+from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
 )
@@ -131,6 +132,7 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
         search_published_workbench_runtime: PublishedWorkbenchSearchPort | None = None,
         work_item_scheduling_repository: WorkItemSchedulingRepositoryPort | None = None,
         adjudication_provider_messages_builder: object | None = None,
+        adjudication_model_profile: ModelProfile | None = None,
         post_promotion_verification_executor: (
             RunWorkbenchRagEvalPostPromotionVerificationPort | None
         ) = None,
@@ -148,6 +150,7 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
                 rag_eval_repository is None
                 or work_item_scheduling_repository is None
                 or adjudication_provider_messages_builder is None
+                or adjudication_model_profile is None
             ):
                 return DispatchWorkbenchRagEvalWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
@@ -167,6 +170,7 @@ class DispatchWorkbenchRagEvalWorkflowCommandHandler:
                     work_item_scheduling_repository=work_item_scheduling_repository,
                     workflow_unit_of_work=workflow_unit_of_work,
                     provider_messages_builder=adjudication_provider_messages_builder,
+                    adjudication_model_profile=adjudication_model_profile,
                 )
             )
             return DispatchWorkbenchRagEvalWorkflowCommandResult(

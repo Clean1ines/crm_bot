@@ -72,6 +72,9 @@ from src.contexts.knowledge_workbench.rag_eval.application.use_cases.start_workb
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.llm.workbench_rag_eval_question_generator import (
     WorkbenchRagEvalQuestionGenerator,
 )
+from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_seed import (
+    model_budget_profile_for_ref,
+)
 from src.contexts.knowledge_workbench.rag_eval.infrastructure.postgres.postgres_workbench_rag_eval_repository import (
     PostgresWorkbenchRagEvalRepository,
 )
@@ -140,6 +143,9 @@ class StartWorkbenchRagEvalV2Composition:
         try:
             async with connection.transaction():
                 asyncpg_connection = cast(asyncpg.Connection, connection)
+                question_generator = (
+                    WorkbenchRagEvalQuestionGenerator.from_prompt_file()
+                )
                 return await StartWorkbenchRagEvalV2(
                     rag_eval_repository=PostgresWorkbenchRagEvalRepository(
                         asyncpg_connection,
@@ -150,8 +156,11 @@ class StartWorkbenchRagEvalV2Composition:
                     workflow_command_log=PostgresCommandLogRepository(
                         asyncpg_connection
                     ),
-                    question_generator=(
-                        WorkbenchRagEvalQuestionGenerator.from_prompt_file()
+                    question_generator=question_generator,
+                    question_generation_model_profile=(
+                        model_budget_profile_for_ref(
+                            question_generator.generation_model
+                        )
                     ),
                 ).execute(
                     project_id=project_id,
