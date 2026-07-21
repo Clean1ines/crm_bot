@@ -6,6 +6,10 @@ from typing import Protocol, cast
 from uuid import UUID
 
 from src.agent.state import AgentState
+from src.domain.runtime.cta import (
+    CONTINUE_EXPLANATION_CTA,
+    normalize_cta,
+)
 from src.domain.runtime.policy.decision_engine import get_decision
 from src.domain.runtime.policy.handoff_confirmation import (
     build_handoff_confirmation_text,
@@ -23,6 +27,11 @@ from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 
 logger = get_logger(__name__)
+
+ACTION_CTA_DECLINED_TEXT = "Хорошо, не передаю менеджеру. Продолжу помогать здесь."
+CONTINUATION_DECLINED_TEXT = (
+    "Хорошо, без дополнительных подробностей. Если появится вопрос, напишите его здесь."
+)
 
 
 def _handoff_confirmation_result(
@@ -44,6 +53,7 @@ def _handoff_confirmation_result(
         ),
         lifecycle=context.lifecycle,
     )
+
     next_dialog_state = with_handoff_confirmation_pending(next_dialog_state)
     return PolicyDecisionResult(
         lifecycle=context.lifecycle,
@@ -96,6 +106,144 @@ def _template_policy_result(
         dialog_state=next_dialog_state,
         requires_human=False,
     )
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _resolved_cta_reply(state: AgentState) -> str | None:
+    value = str(state.get("resolved_cta_reply") or "").strip().lower()
+    return value if value in {"affirmative", "negative"} else None
+
+
+def _resolved_cta(state: AgentState) -> str | None:
+    return normalize_cta(state.get("resolved_cta"))
+
+
+def _merge_intent_and_policy_state(
+    state: AgentState,
+    policy_patch: dict[str, object],
+) -> dict[str, object]:
+    """Apply explicit current-turn intent signals over derived policy signals."""
+    resolved_cta = _resolved_cta(state)
+    resolved_reply = _resolved_cta_reply(state)
+
+    if resolved_cta == "call_manager":
+        if resolved_reply == "affirmative":
+            patch = dict(policy_patch)
+            patch.update(
+                {
+                    "decision": "ESCALATE",
+                    "requires_human": True,
+                    "cta": resolved_cta,
+                    "turn_relation": state.get("turn_relation"),
+                    "knowledge_query": None,
+                    "should_search_kb": False,
+                    "should_generate_answer": False,
+                    "should_offer_manager": False,
+                }
+            )
+            return patch
+
+        if resolved_reply == "negative":
+            patch = dict(policy_patch)
+            patch.update(
+                {
+                    "decision": "RESPOND",
+                    "response_text": ACTION_CTA_DECLINED_TEXT,
+                    "requires_human": False,
+                    "cta": "none",
+                    "turn_relation": state.get("turn_relation"),
+                    "knowledge_query": None,
+                    "should_search_kb": False,
+                    "should_generate_answer": False,
+                    "should_offer_manager": False,
+                }
+            )
+            return patch
+
+    if resolved_cta == "book_consultation":
+        if resolved_reply == "affirmative":
+            patch = dict(policy_patch)
+            patch.update(
+                {
+                    "decision": "ESCALATE",
+                    "requires_human": True,
+                    "cta": resolved_cta,
+                    "turn_relation": state.get("turn_relation"),
+                    "knowledge_query": None,
+                    "should_search_kb": False,
+                    "should_generate_answer": False,
+                    "should_offer_manager": False,
+                }
+            )
+            return patch
+
+        if resolved_reply == "negative":
+            patch = dict(policy_patch)
+            patch.update(
+                {
+                    "decision": "RESPOND",
+                    "response_text": ACTION_CTA_DECLINED_TEXT,
+                    "requires_human": False,
+                    "cta": "none",
+                    "turn_relation": state.get("turn_relation"),
+                    "knowledge_query": None,
+                    "should_search_kb": False,
+                    "should_generate_answer": False,
+                    "should_offer_manager": False,
+                }
+            )
+            return patch
+
+    if resolved_cta == CONTINUE_EXPLANATION_CTA:
+        if resolved_reply == "affirmative":
+            patch = dict(policy_patch)
+            patch.update(
+                {
+                    "decision": "LLM_GENERATE",
+                    "cta": CONTINUE_EXPLANATION_CTA,
+                    "topic": state.get("topic") or policy_patch.get("topic"),
+                    "turn_relation": "continuation",
+                    "knowledge_query": _optional_text(state.get("knowledge_query")),
+                    "should_search_kb": True,
+                    "should_generate_answer": True,
+                    "should_offer_manager": False,
+                    "requires_human": False,
+                }
+            )
+            return patch
+
+        if resolved_reply == "negative":
+            patch = dict(policy_patch)
+            patch.update(
+                {
+                    "decision": "RESPOND",
+                    "response_text": CONTINUATION_DECLINED_TEXT,
+                    "requires_human": False,
+                    "cta": "none",
+                    "turn_relation": "short_reply",
+                    "knowledge_query": None,
+                    "should_search_kb": False,
+                    "should_generate_answer": False,
+                    "should_offer_manager": False,
+                }
+            )
+            return patch
+
+    patch = dict(policy_patch)
+    patch["knowledge_query"] = None
+    if "turn_relation" in state:
+        patch["turn_relation"] = state.get("turn_relation")
+    if patch.get("decision") != "LLM_GENERATE":
+        patch["should_search_kb"] = False
+        patch["should_generate_answer"] = False
+        patch["should_offer_manager"] = False
+    return patch
 
 
 class PolicyEventAppender(Protocol):
@@ -204,6 +352,12 @@ def create_policy_engine_node(
                 cta=cta,
             )
 
+        policy_patch = dict(result.to_state_patch(previous_lifecycle=context.lifecycle))
+        final_patch = _merge_intent_and_policy_state(state, policy_patch)
+        final_dialog_state = final_patch.get("dialog_state")
+        if not isinstance(final_dialog_state, dict):
+            final_dialog_state = result.dialog_state
+
         if event_repo and context.thread_id and context.project_id:
             try:
                 appendable_event_repo = cast(PolicyEventAppender, event_repo)
@@ -212,7 +366,16 @@ def create_policy_engine_node(
                     project_id=_event_id_for_append(context.project_id),
                     event_type="policy_decision",
                     payload=json_object_from_unknown(
-                        result.to_event_payload(confidence=context.confidence)
+                        {
+                            "decision": final_patch.get("decision"),
+                            "intent": final_dialog_state.get("last_intent"),
+                            "lifecycle": final_patch.get("lifecycle", result.lifecycle),
+                            "cta": final_patch.get("cta"),
+                            "topic": final_patch.get("topic"),
+                            "repeat_count": final_dialog_state.get("repeat_count"),
+                            "lead_status": final_patch.get("lead_status"),
+                            "confidence": context.confidence,
+                        }
                     ),
                 )
                 logger.debug(
@@ -228,16 +391,16 @@ def create_policy_engine_node(
             "Policy decision finalized",
             extra={
                 "old_lifecycle": context.lifecycle,
-                "new_lifecycle": result.lifecycle,
+                "new_lifecycle": final_patch.get("lifecycle", result.lifecycle),
                 "intent": normalized_intent,
-                "topic": result.topic,
-                "decision": result.decision,
-                "cta": result.cta,
-                "repeat_count": result.dialog_state.get("repeat_count"),
-                "lead_status": result.lead_status,
+                "topic": final_patch.get("topic"),
+                "decision": final_patch.get("decision"),
+                "cta": final_patch.get("cta"),
+                "repeat_count": final_dialog_state.get("repeat_count"),
+                "lead_status": final_patch.get("lead_status"),
             },
         )
-        return dict(result.to_state_patch(previous_lifecycle=context.lifecycle))
+        return final_patch
 
     def _get_policy_input_size(state: AgentState) -> int:
         return (

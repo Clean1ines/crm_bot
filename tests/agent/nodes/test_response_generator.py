@@ -85,6 +85,170 @@ async def test_response_generator_uses_base_llm_when_no_project_override():
 
 
 @pytest.mark.asyncio
+async def test_response_generator_sets_structured_continuation_cta_for_product_answer():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content="Axole помогает автоматизировать ответы клиентам."
+        )
+    )
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "decision": "RESPOND_KB",
+                "user_input": "Что умеет сервис?",
+                "topic": "product",
+                "turn_relation": "new_topic",
+                "cta": "none",
+                "project_configuration": {},
+            }
+        )
+
+    assert result["cta"] == "continue_explanation"
+    assert result["topic"] == "product"
+    assert "Хотите узнать больше о том, как это работает?" in result["response_text"]
+
+
+@pytest.mark.asyncio
+async def test_response_generator_does_not_add_continuation_when_answer_is_question():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content="Что именно хотите автоматизировать?")
+    )
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "decision": "RESPOND_KB",
+                "user_input": "Что умеет сервис?",
+                "topic": "product",
+                "turn_relation": "new_topic",
+                "cta": "none",
+                "project_configuration": {},
+            }
+        )
+
+    assert result["response_text"] == "Что именно хотите автоматизировать?"
+    assert "cta" not in result
+
+
+@pytest.mark.asyncio
+async def test_response_generator_does_not_add_continuation_for_action_cta_state():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content="Могу передать вопрос менеджеру.")
+    )
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "decision": "RESPOND_KB",
+                "user_input": "Позовите менеджера",
+                "topic": "product",
+                "turn_relation": "new_topic",
+                "cta": "call_manager",
+                "project_configuration": {},
+            }
+        )
+
+    assert result["response_text"] == "Могу передать вопрос менеджеру."
+    assert "cta" not in result
+
+
+@pytest.mark.asyncio
+async def test_response_generator_does_not_add_continuation_on_continuation_turn():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content="Сервис подключается к базе знаний.")
+    )
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "decision": "RESPOND_KB",
+                "user_input": "Да",
+                "topic": "product",
+                "turn_relation": "continuation",
+                "cta": "continue_explanation",
+                "project_configuration": {},
+            }
+        )
+
+    assert result["response_text"] == "Сервис подключается к базе знаний."
+    assert "cta" not in result
+
+
+@pytest.mark.asyncio
+async def test_response_generator_does_not_add_continuation_after_language_fallback():
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content="I can explain how the product works.")
+    )
+    node = create_response_generator_node(
+        llm=fake_llm, model_name="llama-3.3-70b-versatile"
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.response_generator.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "decision": "RESPOND_KB",
+                "user_input": "Что умеет сервис?",
+                "topic": "product",
+                "turn_relation": "new_topic",
+                "cta": "none",
+                "project_configuration": {},
+            }
+        )
+
+    assert "Хочу ответить на вашем языке корректно" in result["response_text"]
+    assert "Хотите узнать больше" not in result["response_text"]
+    assert "cta" not in result
+
+
+@pytest.mark.asyncio
 async def test_response_generator_builds_project_override_llm():
     created_models = []
 

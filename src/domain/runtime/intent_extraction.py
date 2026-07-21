@@ -1,7 +1,19 @@
 from dataclasses import dataclass, field, replace
 from typing import Mapping
 
+from src.domain.runtime.cta import (
+    ACTION_CTAS,
+    CONTINUE_EXPLANATION_CTA,
+    normalize_cta,
+    normalize_short_reply_language,
+    normalize_short_reply_kind,
+)
 from src.domain.runtime.dialog_state import DialogState
+from src.domain.runtime.language_policy import (
+    LanguageHint,
+    detect_language_hint,
+    normalize_project_language,
+)
 from src.domain.runtime.state_contracts import (
     RuntimeHistoryMessage,
     RuntimeMemory,
@@ -9,12 +21,8 @@ from src.domain.runtime.state_contracts import (
     RuntimeStatePatch,
 )
 
-AFFIRMATIVE_REPLIES = frozenset({"да", "ага", "угу", "ок", "окей", "yes", "yep"})
-NEGATIVE_REPLIES = frozenset({"нет", "неа", "не", "no", "nope"})
 PRICE_OBJECTION_MARKERS = ("дорого", "слишком дорого", "expensive", "too expensive")
 ISSUE_MARKERS = ("не работает", "ошибка", "сломалось", "error", "issue", "problem")
-ACTION_CTAS = frozenset({"call_manager", "book_consultation"})
-
 KNOWN_DOMAINS = frozenset(
     {"business", "out_of_domain", "greeting", "ambiguous", "technical_failure"}
 )
@@ -36,7 +44,9 @@ KNOWN_TOPICS = frozenset(
         "angry",
     }
 )
-KNOWN_CTAS = frozenset({"call_manager", "book_consultation", "none"})
+KNOWN_CTAS = frozenset(
+    {"call_manager", "book_consultation", CONTINUE_EXPLANATION_CTA, "none"}
+)
 KNOWN_EMOTIONS = frozenset({"neutral", "positive", "negative", "angry"})
 
 
@@ -54,6 +64,7 @@ class IntentExtractionPayload:
     should_search_kb: bool = True
     should_generate_answer: bool = True
     should_offer_manager: bool = False
+    knowledge_query: str | None = None
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> "IntentExtractionPayload":
@@ -108,6 +119,7 @@ class IntentExtractionPayload:
                 payload.get("should_offer_manager"),
                 default=False,
             ),
+            knowledge_query=None,
         )
 
 
@@ -120,6 +132,7 @@ class IntentExtractionContext:
     topic: str | None = None
     cta: str | None = None
     dialog_state: DialogState | None = None
+    target_language: LanguageHint = "unknown"
 
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "IntentExtractionContext":
@@ -129,8 +142,9 @@ class IntentExtractionContext:
             history=list(state.get("history") or []),
             user_memory=state.get("user_memory"),
             topic=_optional_text(state.get("topic")),
-            cta=_optional_text(state.get("cta")),
+            cta=normalize_cta(state.get("cta")),
             dialog_state=_dialog_state_or_none(state.get("dialog_state")),
+            target_language=_target_language_from_state(state),
         )
 
 
@@ -148,6 +162,9 @@ class IntentExtractionResult:
     should_search_kb: bool
     should_generate_answer: bool
     should_offer_manager: bool
+    knowledge_query: str | None = None
+    resolved_cta: str | None = None
+    resolved_cta_reply: str | None = None
 
     @classmethod
     def from_llm_payload(
@@ -167,6 +184,9 @@ class IntentExtractionResult:
             should_search_kb=validated.should_search_kb,
             should_generate_answer=validated.should_generate_answer,
             should_offer_manager=validated.should_offer_manager,
+            knowledge_query=validated.knowledge_query,
+            resolved_cta=None,
+            resolved_cta_reply=None,
         )
 
     def normalized_for_context(
@@ -185,6 +205,7 @@ class IntentExtractionResult:
                 self,
                 previous_topic=previous_topic,
                 previous_cta=previous_cta,
+                language=_continuation_language(context),
             )
         if reply_kind == "negative":
             return _normalize_negative_reply(
@@ -219,7 +240,7 @@ class IntentExtractionResult:
         return self
 
     def to_state_patch(self) -> RuntimeStatePatch:
-        return {
+        patch: RuntimeStatePatch = {
             "intent": self.intent,
             "cta": self.cta,
             "features": self.features,
@@ -233,6 +254,10 @@ class IntentExtractionResult:
             "should_generate_answer": self.should_generate_answer,
             "should_offer_manager": self.should_offer_manager,
         }
+        patch["knowledge_query"] = self.knowledge_query
+        patch["resolved_cta"] = self.resolved_cta
+        patch["resolved_cta_reply"] = self.resolved_cta_reply
+        return patch
 
 
 def _coerce_bool(value: object, *, default: bool) -> bool:
@@ -273,7 +298,7 @@ def _dialog_state_or_none(value: object) -> DialogState | None:
         return None
     return DialogState(
         last_intent=_optional_text(value.get("last_intent")),
-        last_cta=_optional_text(value.get("last_cta")),
+        last_cta=normalize_cta(value.get("last_cta")),
         last_topic=_optional_text(value.get("last_topic")),
         repeat_count=int(value.get("repeat_count") or 0),
         lead_status=str(value.get("lead_status") or "cold"),
@@ -284,14 +309,22 @@ def _dialog_state_or_none(value: object) -> DialogState | None:
     )
 
 
+def _target_language_from_state(state: RuntimeStateInput) -> LanguageHint:
+    configuration = state.get("project_configuration")
+    if not isinstance(configuration, Mapping):
+        return "unknown"
+    settings = configuration.get("settings")
+    if not isinstance(settings, Mapping):
+        return "unknown"
+    return normalize_project_language(str(settings.get("target_language") or ""))
+
+
 def _short_reply_kind(text: str) -> str | None:
     normalized = _normalized_reply_text(text)
     if normalized is None:
         return None
-    if normalized in AFFIRMATIVE_REPLIES:
-        return "affirmative"
-    if normalized in NEGATIVE_REPLIES:
-        return "negative"
+    if reply_kind := normalize_short_reply_kind(normalized):
+        return reply_kind
     if any(marker in normalized for marker in PRICE_OBJECTION_MARKERS):
         return "price_objection"
     if any(marker in normalized for marker in ISSUE_MARKERS):
@@ -323,10 +356,11 @@ def _previous_topic(context: IntentExtractionContext) -> str | None:
 
 
 def _previous_cta(context: IntentExtractionContext) -> str | None:
-    if context.cta:
-        return context.cta
+    state_cta = normalize_cta(context.cta)
+    if state_cta:
+        return state_cta
     if context.dialog_state:
-        dialog_cta = context.dialog_state.get("last_cta")
+        dialog_cta = normalize_cta(context.dialog_state.get("last_cta"))
         if dialog_cta:
             return dialog_cta
     return _cta_from_last_assistant_message(context.history)
@@ -352,6 +386,7 @@ def _normalize_affirmative_reply(
     *,
     previous_topic: str | None,
     previous_cta: str | None,
+    language: LanguageHint = "unknown",
 ) -> IntentExtractionResult:
     if previous_cta in ACTION_CTAS:
         return replace(
@@ -360,9 +395,30 @@ def _normalize_affirmative_reply(
             intent="sales",
             topic=previous_topic or result.topic,
             cta=previous_cta,
+            resolved_cta=previous_cta,
+            resolved_cta_reply="affirmative",
+            turn_relation="short_reply",
             should_search_kb=False,
             should_generate_answer=True,
             should_offer_manager=False,
+        )
+    if previous_cta == CONTINUE_EXPLANATION_CTA:
+        return replace(
+            result,
+            domain="business",
+            intent="sales",
+            topic=previous_topic or result.topic,
+            cta=CONTINUE_EXPLANATION_CTA,
+            resolved_cta=CONTINUE_EXPLANATION_CTA,
+            resolved_cta_reply="affirmative",
+            turn_relation="continuation",
+            should_search_kb=True,
+            should_generate_answer=True,
+            should_offer_manager=False,
+            knowledge_query=_continuation_knowledge_query(
+                previous_topic,
+                language=language,
+            ),
         )
     if result.intent in {"other", "unknown"} and previous_topic:
         return replace(result, domain="business", intent="sales", topic=previous_topic)
@@ -381,6 +437,71 @@ def _normalize_negative_reply(
             domain="business",
             topic=previous_topic or result.topic,
             cta="none",
+            resolved_cta=previous_cta,
+            resolved_cta_reply="negative",
+            turn_relation="short_reply",
+            should_search_kb=False,
+            should_generate_answer=True,
             should_offer_manager=False,
         )
+    if previous_cta == CONTINUE_EXPLANATION_CTA:
+        return replace(
+            result,
+            domain="business",
+            topic=previous_topic or result.topic,
+            cta="none",
+            resolved_cta=CONTINUE_EXPLANATION_CTA,
+            resolved_cta_reply="negative",
+            turn_relation="short_reply",
+            should_search_kb=False,
+            should_generate_answer=True,
+            should_offer_manager=False,
+            knowledge_query=None,
+        )
     return result
+
+
+def _continuation_language(context: IntentExtractionContext) -> LanguageHint:
+    reply_language = normalize_short_reply_language(context.user_input)
+    if reply_language != "unknown":
+        return reply_language
+
+    detected_language = detect_language_hint(context.user_input)
+    if detected_language != "unknown":
+        return detected_language
+
+    return context.target_language
+
+
+def _continuation_knowledge_query(
+    previous_topic: str | None,
+    *,
+    language: LanguageHint = "ru",
+) -> str:
+    topic = (previous_topic or "product").strip().lower()
+    language = language if language in {"ru", "en", "de", "es"} else "ru"
+    localized_queries = {
+        "ru": {
+            "product": "подробнее как работает продукт и его возможности",
+            "integration": "подробнее как работает интеграция",
+        },
+        "en": {
+            "product": "more details about how the product works and its capabilities",
+            "integration": "more details about how the integration works",
+        },
+        "de": {
+            "product": "weitere Einzelheiten zur Funktionsweise und zu den Möglichkeiten des Produkts",
+            "integration": "weitere Einzelheiten zur Funktionsweise der Integration",
+        },
+        "es": {
+            "product": "más detalles sobre cómo funciona el producto y sus capacidades",
+            "integration": "más detalles sobre cómo funciona la integración",
+        },
+    }
+    fallback_queries = {
+        "ru": f"подробнее по теме {topic}",
+        "en": f"more details about {topic}",
+        "de": f"weitere Einzelheiten zu {topic}",
+        "es": f"más detalles sobre {topic}",
+    }
+    return localized_queries[language].get(topic, fallback_queries[language])

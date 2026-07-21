@@ -1,6 +1,11 @@
 from dataclasses import dataclass
 from typing import Mapping, cast
 
+from src.domain.runtime.cta import (
+    is_pending_cta,
+    normalize_cta,
+    normalize_short_reply_kind,
+)
 from src.domain.runtime.dialog_state import (
     DialogState,
     dialog_state_from_memory,
@@ -119,7 +124,7 @@ class PersistenceContext:
         dialog_state = _dialog_state_or_none(state.get("dialog_state"))
         tool_args = _tool_args_or_none(state.get("tool_args"))
 
-        return cls(
+        context = cls(
             thread_id=state.get("thread_id"),
             project_id=state.get("project_id"),
             response_text=state.get("response_text"),
@@ -160,6 +165,8 @@ class PersistenceContext:
             state_payload=state_copy,
             user_memory=state.get("user_memory"),
         )
+        context.state_payload["dialog_state"] = context.normalized_dialog_state()
+        return context
 
     def normalized_dialog_state(self) -> DialogState:
         fallback_lifecycle = self._fallback_lifecycle()
@@ -179,7 +186,7 @@ class PersistenceContext:
     def _dialog_state_from_existing(self, existing: DialogState) -> DialogState:
         dialog_state: DialogState = {
             "last_intent": existing.get("last_intent") or self.intent,
-            "last_cta": existing.get("last_cta") or self.cta,
+            "last_cta": self._next_last_cta(existing),
             "last_topic": existing.get("last_topic")
             or infer_topic_from_intent(self.intent),
             "repeat_count": coerce_int(existing.get("repeat_count"), 0),
@@ -190,6 +197,39 @@ class PersistenceContext:
             ),
         }
         return _ensure_repeat_count(dialog_state)
+
+    def _next_last_cta(self, existing: DialogState) -> str | None:
+        existing_cta = normalize_cta(existing.get("last_cta"))
+        current_cta = normalize_cta(self.cta)
+
+        if not existing_cta:
+            return current_cta if is_pending_cta(current_cta) else None
+
+        if not self._has_substantive_user_turn() or self._is_technical_replay():
+            return current_cta if is_pending_cta(current_cta) else existing_cta
+
+        if self._resolves_existing_pending_cta(existing_cta):
+            return None
+
+        return current_cta if is_pending_cta(current_cta) else None
+
+    def _resolves_existing_pending_cta(self, existing_cta: str) -> bool:
+        if not is_pending_cta(existing_cta):
+            return False
+        return normalize_short_reply_kind(self.user_input) in {
+            "affirmative",
+            "negative",
+        }
+
+    def _has_substantive_user_turn(self) -> bool:
+        return bool(" ".join(str(self.user_input).split()))
+
+    def _is_technical_replay(self) -> bool:
+        return (
+            self.domain == "technical_failure"
+            or self.technical_failure_stage is not None
+            or self.technical_failure_error is not None
+        )
 
     def _lead_status(self, existing: DialogState) -> str:
         return (

@@ -1,9 +1,10 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.agent.nodes.intent_extractor import create_intent_extractor_node
+from src.agent.nodes.kb_search import create_kb_search_node
 
 
 @pytest.mark.asyncio
@@ -82,3 +83,211 @@ async def test_intent_extractor_normalizes_short_affirmative_reply_using_context
     assert result["intent"] == "sales"
     assert result["topic"] == "pricing"
     assert result["cta"] == "call_manager"
+
+
+@pytest.mark.asyncio
+async def test_intent_extractor_resolves_short_affirmative_from_persisted_cta_without_rewriting_input():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content="""{"intent":"other","cta":"none","features":{},"topic":"other","cta_hint":null,"emotion":"neutral","is_repeat_like":false}"""
+        )
+    )
+    node = create_intent_extractor_node(llm=llm)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    state = {
+        "user_input": "Да",
+        "topic": "pricing",
+        "cta": "none",
+        "dialog_state": {
+            "last_intent": "pricing",
+            "last_cta": "call_manager",
+            "last_topic": "pricing",
+            "repeat_count": 1,
+            "lead_status": "warm",
+            "lifecycle": "warm",
+        },
+    }
+    with patch(
+        "src.agent.nodes.intent_extractor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(state)
+
+    assert state["user_input"] == "Да"
+    assert result["intent"] == "sales"
+    assert result["topic"] == "pricing"
+    assert result["cta"] == "call_manager"
+    assert result["should_search_kb"] is False
+
+
+@pytest.mark.asyncio
+async def test_production_continuation_yes_uses_resolved_query_not_literal_yes():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content="""{"intent":"other","cta":"none","features":{},"topic":"other","cta_hint":null,"emotion":"neutral","is_repeat_like":false}"""
+        )
+    )
+    intent_node = create_intent_extractor_node(llm=llm)
+
+    tool_registry = MagicMock()
+    tool_registry.execute = AsyncMock(return_value={"results": []})
+    kb_node = create_kb_search_node(tool_registry=tool_registry)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    state = {
+        "project_id": "project-1",
+        "thread_id": "thread-1",
+        "user_input": "Да",
+        "dialog_state": {
+            "last_cta": "continue_explanation",
+            "last_topic": "product",
+            "lead_status": "warm",
+            "lifecycle": "warm",
+        },
+    }
+    with (
+        patch(
+            "src.agent.nodes.intent_extractor.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch(
+            "src.agent.nodes.kb_search.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+    ):
+        intent_patch = await intent_node(state)
+        assert state["user_input"] == "Да"
+        assert intent_patch["turn_relation"] == "continuation"
+        assert intent_patch["cta"] == "continue_explanation"
+        assert intent_patch["should_search_kb"] is True
+
+        await kb_node({**state, **intent_patch})
+
+    called_args = tool_registry.execute.await_args.args[1]
+    assert called_args["query"] != "Да"
+    assert "продукт" in called_args["query"]
+
+
+@pytest.mark.asyncio
+async def test_stale_continuation_query_cannot_leak_into_next_independent_turn():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                content="""{"intent":"other","cta":"none","features":{},"topic":"other","cta_hint":null,"emotion":"neutral","is_repeat_like":false}"""
+            ),
+            SimpleNamespace(
+                content="""{"intent":"pricing","cta":"none","features":{},"topic":"pricing","cta_hint":null,"emotion":"neutral","is_repeat_like":false,"turn_relation":"new_topic"}"""
+            ),
+        ]
+    )
+    intent_node = create_intent_extractor_node(llm=llm)
+
+    tool_registry = MagicMock()
+    tool_registry.execute = AsyncMock(return_value={"results": []})
+    kb_node = create_kb_search_node(tool_registry=tool_registry)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    first_state = {
+        "project_id": "project-1",
+        "thread_id": "thread-1",
+        "user_input": "Да",
+        "dialog_state": {
+            "last_cta": "continue_explanation",
+            "last_topic": "product",
+        },
+    }
+    second_state = {
+        "project_id": "project-1",
+        "thread_id": "thread-1",
+        "user_input": "Сколько это стоит?",
+        "knowledge_query": "подробнее как работает продукт и его возможности",
+        "turn_relation": "new_topic",
+        "cta": "none",
+        "topic": "pricing",
+    }
+    with (
+        patch(
+            "src.agent.nodes.intent_extractor.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch(
+            "src.agent.nodes.kb_search.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+    ):
+        first_patch = await intent_node(first_state)
+        assert first_patch["knowledge_query"] != "Да"
+        await kb_node({**first_state, **first_patch})
+
+        second_patch = await intent_node(second_state)
+        assert second_patch["knowledge_query"] is None
+        await kb_node({**second_state, **second_patch})
+
+    second_call_args = tool_registry.execute.await_args_list[1].args[1]
+    assert second_call_args["query"] == "Сколько это стоит?"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("user_input", "expected_query_part"),
+    (
+        ("Да", "подробнее как работает продукт"),
+        ("Yes", "more details about how the product works"),
+        ("Ja", "weitere Einzelheiten zur Funktionsweise"),
+        ("Sí", "más detalles sobre cómo funciona"),
+    ),
+)
+async def test_continuation_search_query_is_localized_for_short_reply(
+    user_input,
+    expected_query_part,
+):
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content="""{"intent":"other","cta":"none","features":{},"topic":"other","cta_hint":null,"emotion":"neutral","is_repeat_like":false}"""
+        )
+    )
+    intent_node = create_intent_extractor_node(llm=llm)
+
+    tool_registry = MagicMock()
+    tool_registry.execute = AsyncMock(return_value={"results": []})
+    kb_node = create_kb_search_node(tool_registry=tool_registry)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    state = {
+        "project_id": "project-1",
+        "thread_id": "thread-1",
+        "user_input": user_input,
+        "dialog_state": {
+            "last_cta": "continue_explanation",
+            "last_topic": "product",
+        },
+    }
+    with (
+        patch(
+            "src.agent.nodes.intent_extractor.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch(
+            "src.agent.nodes.kb_search.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+    ):
+        intent_patch = await intent_node(state)
+        await kb_node({**state, **intent_patch})
+
+    called_args = tool_registry.execute.await_args.args[1]
+    assert called_args["query"] != user_input
+    assert expected_query_part in called_args["query"]

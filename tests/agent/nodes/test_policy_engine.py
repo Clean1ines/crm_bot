@@ -139,3 +139,46 @@ async def test_policy_engine_requests_handoff_confirmation_before_escalation():
     assert "requires_human" not in result
     assert result["dialog_state"]["handoff_confirmation_pending"] is True
     assert "менеджер" in str(result["response_text"]).lower()
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_ordinary_merge_keeps_policy_route_over_intent_flags():
+    node = create_policy_engine_node(event_repo=None)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "lifecycle": "cold",
+                "intent": "handoff_request",
+                "user_input": "Позовите менеджера",
+                "turn_relation": "new_topic",
+                "knowledge_query": "stale resolved query",
+                "should_search_kb": True,
+                "should_generate_answer": True,
+                "should_offer_manager": True,
+                "dialog_state": {
+                    "last_intent": "sales",
+                    "last_cta": None,
+                    "last_topic": "product",
+                    "repeat_count": 1,
+                    "lead_status": "cold",
+                    "lifecycle": "cold",
+                    "handoff_confirmation_pending": False,
+                },
+            }
+        )
+
+    assert result["decision"] == "RESPOND"
+    assert result["should_search_kb"] is False
+    assert result["should_generate_answer"] is False
+    assert result["knowledge_query"] is None
+    assert result["turn_relation"] == "new_topic"
+    assert result["should_offer_manager"] is False

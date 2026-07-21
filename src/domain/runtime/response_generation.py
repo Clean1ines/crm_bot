@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Mapping, cast
 
+from src.domain.runtime.cta import normalize_cta
 from src.domain.runtime.dialog_state import DialogState
 from src.domain.runtime.state_contracts import (
     KnowledgeChunkPayload,
@@ -26,6 +27,8 @@ class ResponseGenerationContext:
     intent: str = ""
     lifecycle: str = ""
     cta: str = ""
+    topic: str = ""
+    turn_relation: str = ""
 
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "ResponseGenerationContext":
@@ -43,7 +46,9 @@ class ResponseGenerationContext:
             ),
             intent=str(state.get("intent") or ""),
             lifecycle=str(state.get("lifecycle") or ""),
-            cta=str(state.get("cta") or ""),
+            cta=normalize_cta(state.get("cta")) or "",
+            topic=str(state.get("topic") or ""),
+            turn_relation=str(state.get("turn_relation") or ""),
         )
 
     def prompt_payload(self) -> Mapping[str, object]:
@@ -63,9 +68,19 @@ class ResponseGenerationContext:
 class ResponseGenerationResult:
     response_text: str
     metadata: Mapping[str, object] = field(default_factory=dict)
+    cta: str | None = None
+    topic: str | None = None
 
     def to_state_patch(self) -> RuntimeStatePatch:
-        return {"response_text": self.response_text, "metadata": self.metadata}
+        patch: RuntimeStatePatch = {
+            "response_text": self.response_text,
+            "metadata": self.metadata,
+        }
+        if self.cta is not None:
+            patch["cta"] = self.cta
+        if self.topic is not None:
+            patch["topic"] = self.topic
+        return patch
 
 
 def _dialog_state_or_none(value: object) -> DialogState | None:

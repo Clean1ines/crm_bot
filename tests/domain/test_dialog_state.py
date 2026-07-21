@@ -56,3 +56,9 @@ def test_dialog_state_from_memory_reads_and_normalizes_snapshot():
         "lifecycle": "interested",
         "handoff_confirmation_pending": False,
     }
+
+
+def test_dialog_state_normalizes_none_cta_as_absent():
+    state = merge_dialog_state({"last_cta": "none"}, lifecycle="warm")
+
+    assert state["last_cta"] is None

@@ -74,6 +74,7 @@ class AgentState(TypedDict):
 
     # New pipeline fields (all optional for backward compatibility)
     user_input: str | None
+    knowledge_query: str | None
     client_profile: ClientProfileState | None
     conversation_summary: str | None
     history: list[HistoryMessage] | None
@@ -105,6 +106,8 @@ class AgentState(TypedDict):
     # Analytics fields
     intent: str | None  # Detected intent (e.g., "pricing", "support", "sales")
     cta: str | None  # Call-to-action type (e.g., "call_manager")
+    resolved_cta: str | None
+    resolved_cta_reply: str | None
     lifecycle: str | None  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
     features: (
         dict[str, object] | None

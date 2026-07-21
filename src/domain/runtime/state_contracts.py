@@ -80,6 +80,7 @@ class RuntimeStateInput(TypedDict, total=False):
     client_id: str | None
     chat_id: int | str | None
     user_input: str
+    knowledge_query: str | None
     response_text: str | None
     conversation_summary: str | None
     history: list[RuntimeHistoryMessage]
@@ -92,6 +93,8 @@ class RuntimeStateInput(TypedDict, total=False):
     lifecycle: str | None
     lead_status: str | None
     cta: str | None
+    resolved_cta: str | None
+    resolved_cta_reply: str | None
     topic: str | None
     cta_hint: str | None
     emotion: str | None
@@ -123,6 +126,7 @@ class RuntimeStatePatch(TypedDict, total=False):
     project_id: str | None
     client_id: str | None
     response_text: str | None
+    knowledge_query: str | None
     metadata: Mapping[str, object]
     conversation_summary: str | None
     history: list[RuntimeHistoryMessage] | list[Mapping[str, object]]
@@ -135,6 +139,8 @@ class RuntimeStatePatch(TypedDict, total=False):
     lifecycle: str | None
     lead_status: str | None
     cta: str | None
+    resolved_cta: str | None
+    resolved_cta_reply: str | None
     topic: str | None
     cta_hint: str | None
     emotion: str

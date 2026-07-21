@@ -1,5 +1,6 @@
 from collections.abc import Mapping
 
+from src.domain.runtime.cta import is_pending_cta, normalize_cta
 from src.domain.runtime.dialog_state import default_dialog_state
 from src.domain.runtime.value_parsing import coerce_int
 from .intent_topic import FeatureMap
@@ -60,8 +61,9 @@ def _remember_latest_signals(
     if topic:
         dialog_state["last_topic"] = topic
 
-    if cta and cta != "none":
-        dialog_state["last_cta"] = cta
+    normalized_cta = normalize_cta(cta)
+    if is_pending_cta(normalized_cta):
+        dialog_state["last_cta"] = normalized_cta
 
 
 def _initial_lead_status(dialog_state: DialogStateMap, lifecycle: str) -> str:

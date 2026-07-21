@@ -1,5 +1,6 @@
 from typing import Mapping, NotRequired, TypedDict, cast
 
+from src.domain.runtime.cta import normalize_cta
 from src.domain.runtime.state_contracts import RuntimeMemory, RuntimeMemoryEntry
 from src.domain.runtime.value_parsing import coerce_bool
 from src.domain.runtime.value_parsing import coerce_int
@@ -55,7 +56,7 @@ def dialog_state_from_mapping(
 
     patch: PartialDialogState = {}
     patch["last_intent"] = _optional_text(value.get("last_intent"))
-    patch["last_cta"] = _optional_text(value.get("last_cta"))
+    patch["last_cta"] = normalize_cta(value.get("last_cta"))
     patch["last_topic"] = _optional_text(value.get("last_topic"))
     patch["repeat_count"] = coerce_int(value.get("repeat_count"), 0)
     patch["lead_status"] = _optional_text(value.get("lead_status")) or lifecycle
