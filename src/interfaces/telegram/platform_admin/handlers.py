@@ -641,6 +641,12 @@ async def _verify_token(token: str) -> str | None:
 
 
 async def _set_project_token(project_id: str, token: str, pool) -> None:
+    admin_token = settings.ADMIN_BOT_TOKEN.strip()
+    if admin_token and token.strip() == admin_token:
+        raise ValueError(
+            "Platform admin bot token cannot be used as client bot token"
+        )
+
     secret_token = uuid.uuid4().hex
     project_repo = ProjectRepository(pool)
     await project_repo.set_bot_token(project_id, token)
@@ -670,6 +676,12 @@ async def _set_project_token(project_id: str, token: str, pool) -> None:
 async def _set_manager_token(
     project_id: str, token: str, admin_chat_id: str, pool
 ) -> None:
+    admin_token = settings.ADMIN_BOT_TOKEN.strip()
+    if admin_token and token.strip() == admin_token:
+        raise ValueError(
+            "Platform admin bot token cannot be used as manager bot token"
+        )
+
     project_repo = ProjectRepository(pool)
     await project_repo.set_manager_bot_token(project_id, token)
     user_repo = UserRepository(pool)

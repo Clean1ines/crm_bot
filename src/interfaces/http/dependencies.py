@@ -48,6 +48,7 @@ from src.infrastructure.db.repositories.event_repository import EventRepository
 from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.db.repositories.metrics_repository import MetricsRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
+from src.infrastructure.telegram.http_client import HttpTelegramClient
 from src.application.services.client_query_service import ClientQueryService
 from src.application.services.project_command_service import ProjectCommandService
 from src.application.services.project_query_service import ProjectQueryService
@@ -210,7 +211,12 @@ def get_project_command_service(
     project_query_service: ProjectQueryService = Depends(get_project_query_service),
 ) -> ProjectCommandService:
     """Return the application command service for project control-plane writes."""
-    return ProjectCommandService(project_repo, project_service, project_query_service)
+    return ProjectCommandService(
+        project_repo,
+        project_service,
+        project_query_service,
+        telegram_client=HttpTelegramClient(),
+    )
 
 
 def get_client_repo(pool: object = Depends(get_pool)) -> ClientRepository:

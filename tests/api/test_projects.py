@@ -439,6 +439,7 @@ class TestProjectsAPI:
             mock_repo.get_project_view = AsyncMock(
                 return_value=_project_view(project_id, user_id)
             )
+            mock_repo.get_bot_token = AsyncMock(return_value=None)
             mock_repo.set_bot_token = AsyncMock()
             mock_repo.upsert_project_channel = AsyncMock()
 
@@ -521,6 +522,7 @@ class TestProjectsAPI:
             mock_repo.get_project_view = AsyncMock(
                 return_value=_project_view(project_id, user_id)
             )
+            mock_repo.get_manager_bot_token = AsyncMock(return_value=None)
             mock_repo.set_manager_bot_token = AsyncMock()
             mock_repo.upsert_project_channel = AsyncMock()
 

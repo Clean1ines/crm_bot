@@ -7,8 +7,11 @@ from src.application.dto.project_dto import (
     ProjectSummaryDto,
 )
 from src.application.errors import InternalServiceError, NotFoundError, ValidationError
+from src.application.ports.telegram_port import NullTelegramClient, TelegramClientPort
 from src.application.ports.project_port import ProjectAccessPort, ProjectControlPort
 from src.application.services.project_query_service import ProjectQueryService
+from src.infrastructure.config.settings import settings
+from src.infrastructure.logging.logger import get_logger
 from src.domain.control_plane.project_views import ProjectSummaryView
 from src.domain.control_plane.roles import (
     ALLOWED_CHANNEL_KINDS,
@@ -19,6 +22,8 @@ from src.domain.control_plane.roles import (
     PROJECT_WRITE_ROLES,
 )
 
+logger = get_logger(__name__)
+
 
 class ProjectCommandService:
     def __init__(
@@ -26,10 +31,12 @@ class ProjectCommandService:
         repo: ProjectControlPort,
         access_service: ProjectAccessPort,
         query_service: ProjectQueryService,
+        telegram_client: TelegramClientPort | None = None,
     ) -> None:
         self.repo = repo
         self.access_service = access_service
         self.query_service = query_service
+        self.telegram_client = telegram_client or NullTelegramClient()
 
     @staticmethod
     def _ensure_project_payload(project: ProjectSummaryView | None) -> dict:
@@ -43,6 +50,46 @@ class ProjectCommandService:
         if not normalized:
             raise ValidationError("Bot token is required")
         return normalized
+
+    @staticmethod
+    def _ensure_not_platform_bot_token(token: str, *, channel: str) -> None:
+        admin_token = settings.ADMIN_BOT_TOKEN.strip()
+        if admin_token and token.strip() == admin_token:
+            raise ValidationError(
+                f"Platform admin bot token cannot be used as {channel} bot token"
+            )
+
+    async def _delete_telegram_webhook(
+        self, token: str | None, *, channel: str
+    ) -> None:
+        if not token:
+            return
+        try:
+            response = await self.telegram_client.post_json(
+                token,
+                "deleteWebhook",
+                {"drop_pending_updates": True},
+            )
+        except Exception as exc:
+            logger.warning(
+                "Telegram webhook cleanup failed",
+                extra={
+                    "channel": channel,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return
+
+        if not response.get("ok"):
+            logger.warning(
+                "Telegram webhook cleanup returned non-ok response",
+                extra={
+                    "channel": channel,
+                    "status_code": response.get("status_code"),
+                    "description": response.get("description"),
+                },
+            )
 
     async def _require_existing_project(self, project_id: str) -> None:
         if not await self.repo.project_exists(project_id):
@@ -81,6 +128,7 @@ class ProjectCommandService:
             project_id, current_user_id, PROJECT_WRITE_ROLES
         )
         token = self._normalize_bot_token(token)
+        self._ensure_not_platform_bot_token(token, channel=CHANNEL_CLIENT)
         await self.repo.set_bot_token(project_id, token)
         await self.repo.upsert_project_channel(
             project_id,
@@ -99,6 +147,7 @@ class ProjectCommandService:
             project_id, current_user_id, PROJECT_WRITE_ROLES
         )
         token = self._normalize_bot_token(token)
+        self._ensure_not_platform_bot_token(token, channel=CHANNEL_MANAGER)
         await self.repo.set_manager_bot_token(project_id, token)
         await self.repo.upsert_project_channel(
             project_id,
@@ -114,6 +163,9 @@ class ProjectCommandService:
         await self.access_service.require_project_role(
             project_id, current_user_id, PROJECT_WRITE_ROLES
         )
+        get_token = getattr(self.repo, "get_bot_token", None)
+        old_token = await get_token(project_id) if get_token is not None else None
+        await self._delete_telegram_webhook(old_token, channel=CHANNEL_CLIENT)
         await self.repo.set_bot_token(project_id, None)
         await self.repo.upsert_project_channel(
             project_id,
@@ -129,6 +181,9 @@ class ProjectCommandService:
         await self.access_service.require_project_role(
             project_id, current_user_id, PROJECT_WRITE_ROLES
         )
+        get_token = getattr(self.repo, "get_manager_bot_token", None)
+        old_token = await get_token(project_id) if get_token is not None else None
+        await self._delete_telegram_webhook(old_token, channel=CHANNEL_MANAGER)
         await self.repo.set_manager_bot_token(project_id, None)
         await self.repo.upsert_project_channel(
             project_id,
@@ -174,6 +229,7 @@ class ProjectCommandService:
         )
         if bot_type == CHANNEL_CLIENT:
             token = self._normalize_bot_token(token)
+            self._ensure_not_platform_bot_token(token, channel=CHANNEL_CLIENT)
             await self.repo.set_bot_token(project_id, token)
             await self.repo.upsert_project_channel(
                 project_id,
@@ -184,6 +240,7 @@ class ProjectCommandService:
             )
         elif bot_type == CHANNEL_MANAGER:
             token = self._normalize_bot_token(token)
+            self._ensure_not_platform_bot_token(token, channel=CHANNEL_MANAGER)
             await self.repo.set_manager_bot_token(project_id, token)
             await self.repo.upsert_project_channel(
                 project_id,
