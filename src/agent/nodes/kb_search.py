@@ -5,10 +5,12 @@ Performs project-scoped knowledge retrieval through the tool registry and
 stores normalized chunks in graph state.
 """
 
+import os
 from typing import cast
 
 from src.agent.state import AgentState
 from src.domain.runtime.knowledge_search import (
+    KnowledgeChunk,
     KnowledgeSearchContext,
     KnowledgeSearchResult,
 )
@@ -17,6 +19,38 @@ from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
+
+
+def _rag_debug_enabled() -> bool:
+    return os.getenv("RAG_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _preview_text(value: object, limit: int = 160) -> str | None:
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    if not text:
+        return None
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _chunk_trace_payload(chunk: KnowledgeChunk, rank: int) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "rank": rank,
+        "id": chunk.chunk_id,
+        "score": chunk.score,
+        "method": chunk.method,
+        "entry_kind": chunk.entry_kind,
+        "title": chunk.title,
+        "source": chunk.source or chunk.document_id,
+        "text_preview": _preview_text(chunk.content),
+    }
+    source_excerpt = _preview_text(chunk.source_excerpt)
+    if source_excerpt:
+        payload["source_excerpt_preview"] = source_excerpt
+    if chunk.questions is not None:
+        payload["questions_preview"] = _preview_text(chunk.questions)
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 def create_kb_search_node(tool_registry: ToolRegistry):
@@ -38,9 +72,10 @@ def create_kb_search_node(tool_registry: ToolRegistry):
             "KB search start",
             extra={
                 "project_id": context.project_id,
-                "query": context.query,
                 "query_hash": context.query_hash,
                 "query_len": len(context.query),
+                "original_user_input_hash": context.original_user_input_hash,
+                "original_user_input_len": len(context.original_user_input),
             },
         )
 
@@ -65,6 +100,27 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                     "scores": result.scores(),
                 },
             )
+            if _rag_debug_enabled():
+                logger.info(
+                    "RAG semantic retrieval trace",
+                    extra={
+                        "project_id": context.project_id,
+                        "thread_id": context.thread_id,
+                        "original_user_input_hash": context.original_user_input_hash,
+                        "original_user_input_len": len(context.original_user_input),
+                        "resolved_query_hash": context.query_hash,
+                        "resolved_query_len": len(context.query),
+                        "resolved_query_preview": _preview_text(context.query),
+                        "turn_relation": state.get("turn_relation"),
+                        "topic": state.get("topic"),
+                        "cta": state.get("cta"),
+                        "entries_count": len(result.chunks),
+                        "top_entries": [
+                            _chunk_trace_payload(chunk, rank)
+                            for rank, chunk in enumerate(result.chunks[:5], start=1)
+                        ],
+                    },
+                )
             logger.info(
                 "KB order signature",
                 extra={
@@ -78,8 +134,9 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                     "KB empty result",
                     extra={
                         "project_id": context.project_id,
-                        "query": context.query,
                         "query_hash": context.query_hash,
+                        "query_len": len(context.query),
+                        "query_preview": _preview_text(context.query),
                     },
                 )
 
@@ -101,7 +158,9 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                 "KB search failed",
                 extra={
                     "project_id": context.project_id,
-                    "query": context.query,
+                    "query_hash": context.query_hash,
+                    "query_len": len(context.query),
+                    "query_preview": _preview_text(context.query),
                     "error": str(exc),
                 },
             )

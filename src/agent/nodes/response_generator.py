@@ -6,10 +6,17 @@ knowledge, memory, and project runtime configuration.
 """
 
 from collections.abc import Mapping
+from dataclasses import dataclass
+import os
 from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import build_response_prompt
 from src.agent.state import AgentState
+from src.domain.runtime.cta import (
+    CONTINUE_EXPLANATION_CTA,
+    is_action_cta,
+    is_conversational_cta,
+)
 from src.domain.runtime.language_policy import (
     detect_language_hint,
     normalize_project_language,
@@ -55,6 +62,8 @@ LANGUAGE_MISMATCH_FALLBACK_ES = (
     "Quiero responder correctamente en su idioma. "
     "Por favor, reformule su pregunta y le ayudaré."
 )
+CONTINUATION_TOPICS = frozenset({"product", "integration"})
+QUESTION_ENDINGS = ("?", "？")
 
 
 class ChatMessageResponse(Protocol):
@@ -78,6 +87,12 @@ class ChatGroqFactory(Protocol):
 
 class ChatGroqClientFactory(Protocol):
     def __call__(self, *, api_key: str) -> ChatGroqClient: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ContinuationOfferDecision:
+    should_offer: bool
+    cta: str | None = None
 
 
 # Test hook and lazy runtime cache.
@@ -220,6 +235,16 @@ def _coerce_int(value: object, default: int = 0) -> int:
     return default
 
 
+def _rag_debug_enabled() -> bool:
+    return os.getenv("RAG_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _knowledge_chunk_id(item: object) -> object:
+    if not isinstance(item, Mapping):
+        return None
+    return item.get("id")
+
+
 def _project_target_language(state: AgentState) -> str:
     configuration = state.get("project_configuration")
     settings_block: Mapping[str, object] = {}
@@ -248,6 +273,54 @@ def _language_mismatch_fallback(target_language: str) -> str:
     if target_language == "es":
         return LANGUAGE_MISMATCH_FALLBACK_ES
     return LANGUAGE_MISMATCH_FALLBACK_RU
+
+
+def _continuation_prompt(target_language: str) -> str:
+    if target_language == "en":
+        return "Would you like me to explain how it works in more detail?"
+    if target_language == "de":
+        return "Möchten Sie genauer wissen, wie das funktioniert?"
+    if target_language == "es":
+        return "¿Quieres que te explique con más detalle cómo funciona?"
+    return "Хотите узнать больше о том, как это работает?"
+
+
+def _with_continuation_prompt(response_text: str, target_language: str) -> str:
+    prompt = _continuation_prompt(target_language)
+    stripped = response_text.strip()
+    if not stripped:
+        return stripped
+    return f"{stripped}\n\n{prompt}"
+
+
+def _continuation_offer_decision(
+    context: ResponseGenerationContext,
+    *,
+    response_text: str,
+    is_fallback_response: bool,
+) -> ContinuationOfferDecision:
+    if is_fallback_response:
+        return ContinuationOfferDecision(False)
+    if response_text.strip().endswith(QUESTION_ENDINGS):
+        return ContinuationOfferDecision(False)
+    if context.decision not in {"LLM_GENERATE", "RESPOND_KB"}:
+        return ContinuationOfferDecision(False)
+    if context.topic not in CONTINUATION_TOPICS:
+        return ContinuationOfferDecision(False)
+    if is_action_cta(context.cta) or is_conversational_cta(context.cta):
+        return ContinuationOfferDecision(False)
+    if context.turn_relation in {"short_reply", "continuation"}:
+        return ContinuationOfferDecision(False)
+    if _dialog_repeat_count(context.dialog_state) > 1:
+        return ContinuationOfferDecision(False)
+    return ContinuationOfferDecision(True, CONTINUE_EXPLANATION_CTA)
+
+
+def _dialog_repeat_count(value: object) -> int:
+    if not isinstance(value, Mapping):
+        return 0
+    raw = value.get("repeat_count")
+    return _coerce_int(raw, default=0)
 
 
 def build_answer_preview_prompt(
@@ -398,6 +471,24 @@ def create_response_generator_node(
             project_configuration=context.project_configuration,
             target_language=_project_target_language(state),
         )
+        if _rag_debug_enabled():
+            logger.info(
+                "RAG generation context trace",
+                extra={
+                    "thread_id": state.get("thread_id"),
+                    "project_id": state.get("project_id"),
+                    "decision": context.decision,
+                    "history_count": len(context.history),
+                    "retrieved_entries_count": len(context.knowledge_chunks),
+                    "retrieved_entry_ids": [
+                        entry_id
+                        for item in context.knowledge_chunks[:5]
+                        if (entry_id := _knowledge_chunk_id(item)) is not None
+                    ],
+                    "prompt_chars": len(prompt),
+                    "user_input_len": len(context.user_input),
+                },
+            )
 
         try:
             selected_model = _resolve_response_model_name(state, base_model)
@@ -420,6 +511,7 @@ def create_response_generator_node(
                     messages=messages,
                 )
             response_text = (response.content or "").strip()
+            is_fallback_response = False
             input_lang = detect_language_hint(context.user_input)
             target_lang = _project_target_language(state)
             if target_lang == "unknown":
@@ -441,8 +533,20 @@ def create_response_generator_node(
                     },
                 )
                 response_text = _language_mismatch_fallback(target_lang)
+                is_fallback_response = True
 
             metadata: dict[str, object] = {}
+            response_cta: str | None = None
+            response_topic: str | None = None
+            continuation_decision = _continuation_offer_decision(
+                context,
+                response_text=response_text,
+                is_fallback_response=is_fallback_response,
+            )
+            if continuation_decision.should_offer:
+                response_text = _with_continuation_prompt(response_text, target_lang)
+                response_cta = continuation_decision.cta
+                response_topic = context.topic
 
             logger.debug(
                 "Response generated",
@@ -456,6 +560,8 @@ def create_response_generator_node(
                 ResponseGenerationResult(
                     response_text=response_text,
                     metadata=metadata,
+                    cta=response_cta,
+                    topic=response_topic,
                 ).to_state_patch()
             )
         except Exception as exc:

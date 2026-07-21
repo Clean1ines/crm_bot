@@ -14,6 +14,35 @@ def test_knowledge_search_context_hashes_query():
     assert len(context.query_hash) == 32
 
 
+def test_knowledge_search_context_uses_resolved_query_only_for_continuation_cta():
+    context = KnowledgeSearchContext.from_state(
+        {
+            "project_id": "project-1",
+            "user_input": "Да",
+            "knowledge_query": "подробнее как работает продукт и его возможности",
+            "turn_relation": "continuation",
+            "cta": "continue_explanation",
+        }
+    )
+
+    assert context.query == "подробнее как работает продукт и его возможности"
+    assert context.original_user_input == "Да"
+
+
+def test_knowledge_search_context_ignores_stale_resolved_query_on_new_topic():
+    context = KnowledgeSearchContext.from_state(
+        {
+            "project_id": "project-1",
+            "user_input": "Сколько это стоит?",
+            "knowledge_query": "подробнее как работает продукт и его возможности",
+            "turn_relation": "new_topic",
+            "cta": "none",
+        }
+    )
+
+    assert context.query == "Сколько это стоит?"
+
+
 def test_knowledge_search_result_normalizes_tool_payload():
     result = KnowledgeSearchResult.from_tool_payload(
         {
