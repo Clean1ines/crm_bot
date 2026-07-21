@@ -21,6 +21,28 @@ class _FakePlatformBotService:
         )
 
 
+class _FakeTelegramResponse:
+    status_code = 200
+
+    def json(self) -> dict[str, object]:
+        return {"ok": True, "result": {"username": "clean_bot"}}
+
+
+class _FakeAsyncClient:
+    requested_urls: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    async def get(self, url: str, timeout: int):
+        del timeout
+        self.requested_urls.append(url)
+        return _FakeTelegramResponse()
+
+
 @pytest.mark.asyncio
 async def test_help_token_button_has_a_callback_handler() -> None:
     text, keyboard = await handlers.handle_admin_callback(
@@ -31,6 +53,21 @@ async def test_help_token_button_has_a_callback_handler() -> None:
 
     assert "@BotFather" in text
     assert keyboard is not None
+
+
+@pytest.mark.asyncio
+async def test_verify_token_strips_copied_botfather_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _FakeAsyncClient.requested_urls = []
+    monkeypatch.setattr(handlers.httpx, "AsyncClient", _FakeAsyncClient)
+
+    username = await handlers._verify_token("123456:ABC\n")
+
+    assert username == "clean_bot"
+    assert _FakeAsyncClient.requested_urls == [
+        "https://api.telegram.org/bot123456:ABC/getMe"
+    ]
 
 
 @pytest.mark.asyncio
