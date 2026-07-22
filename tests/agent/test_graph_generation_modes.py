@@ -614,3 +614,115 @@ async def test_compiled_graph_status_failure_persists_partial_state_and_next_tur
     assert second["notification_degraded"] is False
     assert second.get("tool_result") is None
     repos["thread_lifecycle_repo"].update_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_compiled_graph_preserves_kb_retrieval_status_for_generator(
+    monkeypatch,
+):
+    response_seen = []
+
+    def load_state_node_factory(**_kwargs):
+        async def node(_state):
+            return {}
+
+        return node
+
+    def intent_node_factory(*_args, **_kwargs):
+        async def node(_state):
+            return {}
+
+        return node
+
+    def policy_node_factory(*_args, **_kwargs):
+        async def node(_state):
+            return {
+                "decision": "LLM_GENERATE",
+                "generation_mode": "KNOWLEDGE_ANSWER",
+                "should_search_kb": True,
+                "should_generate_answer": True,
+                "requires_human": False,
+            }
+
+        return node
+
+    def kb_node_factory(_registry):
+        async def node(_state):
+            return {
+                "knowledge_chunks": [
+                    {
+                        "id": "entry-1",
+                        "score": 0.9,
+                        "content": "Axole is a business knowledge and support platform.",
+                    }
+                ],
+                "knowledge_retrieval_status": "retrieved",
+                "knowledge_retrieval_error_type": None,
+            }
+
+        return node
+
+    def response_node_factory(*_args, **_kwargs):
+        async def node(state):
+            response_seen.append(dict(state))
+            return {
+                "response_text": "ok",
+                "requires_human": False,
+            }
+
+        return node
+
+    monkeypatch.setattr(
+        graph_module,
+        "create_load_state_node",
+        load_state_node_factory,
+    )
+    monkeypatch.setattr(
+        graph_module,
+        "create_intent_extractor_node",
+        intent_node_factory,
+    )
+    monkeypatch.setattr(
+        graph_module,
+        "create_policy_engine_node",
+        policy_node_factory,
+    )
+    monkeypatch.setattr(
+        graph_module,
+        "create_kb_search_node",
+        kb_node_factory,
+    )
+    monkeypatch.setattr(
+        graph_module,
+        "create_response_generator_node",
+        response_node_factory,
+    )
+
+    repos = _repo_bundle()
+    agent = graph_module.create_agent(
+        tool_registry=FakeToolRegistry(),
+        **repos,
+    )
+
+    await agent.ainvoke(
+        {
+            "project_id": "project-1",
+            "thread_id": "thread-1",
+            "client_id": "client-1",
+            "chat_id": 1,
+            "user_input": "Что такое Axole?",
+            "requires_human": False,
+        }
+    )
+
+    assert response_seen
+    assert response_seen[-1]["generation_mode"] == "KNOWLEDGE_ANSWER"
+    assert response_seen[-1]["knowledge_retrieval_status"] == "retrieved"
+    assert response_seen[-1]["knowledge_retrieval_error_type"] is None
+    assert response_seen[-1]["knowledge_chunks"] == [
+        {
+            "id": "entry-1",
+            "score": 0.9,
+            "content": "Axole is a business knowledge and support platform.",
+        }
+    ]

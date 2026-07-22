@@ -87,6 +87,8 @@ class AgentState(TypedDict):
     tool_execution_safe_error_code: str | None
     tool_response_text: str | None
     generation_mode: str | None
+    knowledge_retrieval_status: str | None
+    knowledge_retrieval_error_type: str | None
     user_memory: dict[str, object] | None  # Added hidden field discovered during audit
     response_text: str | None
     requires_human: bool
