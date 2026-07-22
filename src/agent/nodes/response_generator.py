@@ -10,7 +10,10 @@ from dataclasses import dataclass
 import os
 from typing import Protocol, cast
 
-from src.agent.router.prompt_builder import build_response_prompt
+from src.agent.router.prompt_builder import (
+    build_response_prompt,
+    format_kb_prompt_entry_traces,
+)
 from src.agent.state import AgentState
 from src.domain.runtime.cta import (
     CONTINUE_EXPLANATION_CTA,
@@ -237,6 +240,27 @@ def _coerce_int(value: object, default: int = 0) -> int:
 
 def _rag_debug_enabled() -> bool:
     return os.getenv("RAG_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _preview_text(value: object, limit: int = 160) -> str | None:
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    if not text:
+        return None
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _history_tail_preview(history: list[RuntimeHistoryMessage]) -> list[dict[str, str]]:
+    previews: list[dict[str, str]] = []
+    for item in history[-5:]:
+        previews.append(
+            {
+                "role": str(item.get("role") or "message"),
+                "content_preview": _preview_text(item.get("content"), 120) or "",
+            }
+        )
+    return previews
 
 
 def _knowledge_chunk_id(item: object) -> object:
@@ -471,24 +495,31 @@ def create_response_generator_node(
             project_configuration=context.project_configuration,
             target_language=_project_target_language(state),
         )
+        generation_trace_extra: dict[str, object] | None = None
         if _rag_debug_enabled():
-            logger.info(
-                "RAG generation context trace",
-                extra={
-                    "thread_id": state.get("thread_id"),
-                    "project_id": state.get("project_id"),
-                    "decision": context.decision,
-                    "history_count": len(context.history),
-                    "retrieved_entries_count": len(context.knowledge_chunks),
-                    "retrieved_entry_ids": [
-                        entry_id
-                        for item in context.knowledge_chunks[:5]
-                        if (entry_id := _knowledge_chunk_id(item)) is not None
-                    ],
-                    "prompt_chars": len(prompt),
-                    "user_input_len": len(context.user_input),
-                },
-            )
+            generation_trace_extra = {
+                "thread_id": state.get("thread_id"),
+                "project_id": state.get("project_id"),
+                "model_name": _resolve_response_model_name(state, base_model),
+                "decision": context.decision,
+                "user_input_preview": _preview_text(context.user_input),
+                "history_count": len(context.history),
+                "history_tail_preview": _history_tail_preview(context.history),
+                "conversation_summary_preview": _preview_text(
+                    context.conversation_summary
+                ),
+                "retrieved_entries_count": len(context.knowledge_chunks),
+                "retrieved_entry_ids": [
+                    entry_id
+                    for item in context.knowledge_chunks[:5]
+                    if (entry_id := _knowledge_chunk_id(item)) is not None
+                ],
+                "prompt_entries": format_kb_prompt_entry_traces(
+                    context.knowledge_chunks
+                ),
+                "prompt_chars": len(prompt),
+                "user_input_len": len(context.user_input),
+            }
 
         try:
             selected_model = _resolve_response_model_name(state, base_model)
@@ -548,6 +579,19 @@ def create_response_generator_node(
                 response_cta = continuation_decision.cta
                 response_topic = context.topic
 
+            if _rag_debug_enabled():
+                logger.info(
+                    "RAG generation context trace",
+                    extra={
+                        **generation_trace_extra,
+                        "generation_status": "success",
+                        "generated_response_preview": _preview_text(response_text),
+                        "response_cta": response_cta,
+                        "response_topic": response_topic,
+                        "is_fallback_response": is_fallback_response,
+                    },
+                )
+
             logger.debug(
                 "Response generated",
                 extra={
@@ -565,6 +609,28 @@ def create_response_generator_node(
                 ).to_state_patch()
             )
         except Exception as exc:
+            if _rag_debug_enabled():
+                fallback_patch = _technical_failure_patch(state, exc)
+                logger.info(
+                    "RAG generation context trace",
+                    extra={
+                        **(generation_trace_extra or {}),
+                        "thread_id": state.get("thread_id"),
+                        "project_id": state.get("project_id"),
+                        "model_name": _resolve_response_model_name(state, base_model),
+                        "decision": context.decision,
+                        "prompt_entries": format_kb_prompt_entry_traces(
+                            context.knowledge_chunks
+                        ),
+                        "prompt_chars": len(prompt),
+                        "generation_status": "failed",
+                        "error_type": type(exc).__name__,
+                        "error_preview": _preview_text(str(exc)),
+                        "fallback_response_preview": _preview_text(
+                            fallback_patch.get("response_text")
+                        ),
+                    },
+                )
             logger.exception(
                 "Response generation failed",
                 extra={

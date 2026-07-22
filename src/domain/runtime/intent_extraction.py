@@ -14,6 +14,7 @@ from src.domain.runtime.language_policy import (
     detect_language_hint,
     normalize_project_language,
 )
+from src.domain.runtime.policy.handoff_request import is_explicit_handoff_request
 from src.domain.runtime.state_contracts import (
     RuntimeHistoryMessage,
     RuntimeMemory,
@@ -165,6 +166,7 @@ class IntentExtractionResult:
     knowledge_query: str | None = None
     resolved_cta: str | None = None
     resolved_cta_reply: str | None = None
+    normalization_flags: Mapping[str, object] = field(default_factory=dict)
 
     @classmethod
     def from_llm_payload(
@@ -187,6 +189,7 @@ class IntentExtractionResult:
             knowledge_query=validated.knowledge_query,
             resolved_cta=None,
             resolved_cta_reply=None,
+            normalization_flags={},
         )
 
     def normalized_for_context(
@@ -195,7 +198,7 @@ class IntentExtractionResult:
     ) -> "IntentExtractionResult":
         reply_kind = _short_reply_kind(context.user_input)
         if reply_kind is None:
-            return self
+            return _normalize_handoff_classification(self, context)
 
         previous_topic = _previous_topic(context)
         previous_cta = _previous_cta(context)
@@ -379,6 +382,39 @@ def _cta_from_last_assistant_message(
             return "book_consultation"
         return None
     return None
+
+
+def _normalize_handoff_classification(
+    result: IntentExtractionResult,
+    context: IntentExtractionContext,
+) -> IntentExtractionResult:
+    has_handoff_classification = result.intent == "handoff_request" or (
+        result.topic == "handoff"
+        and normalize_cta(result.cta) == "call_manager"
+        and result.should_generate_answer is False
+    )
+    if not has_handoff_classification:
+        return result
+
+    if is_explicit_handoff_request(context.user_input):
+        return result
+
+    return replace(
+        result,
+        domain="business",
+        intent="support",
+        topic="support",
+        cta="none",
+        should_search_kb=True,
+        should_generate_answer=True,
+        should_offer_manager=False,
+        knowledge_query=None,
+        normalization_flags={
+            **dict(result.normalization_flags),
+            "handoff_intent_downgraded": True,
+            "handoff_intent_downgrade_reason": "mention_without_explicit_request",
+        },
+    )
 
 
 def _normalize_affirmative_reply(

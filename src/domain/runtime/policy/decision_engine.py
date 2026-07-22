@@ -4,7 +4,7 @@ from .intent_topic import (
     FeatureMap,
     feature_risk_detected,
     normalize_intent,
-    resolve_topic,
+    resolve_current_topic,
 )
 from .lifecycle import normalize_lifecycle
 from .repeat_detection import (
@@ -129,10 +129,15 @@ def get_decision(
     intent: str | None,
     features: FeatureMap | None = None,
     dialog_state: DialogStateMap | None = None,
+    current_topic: str | None = None,
 ) -> PolicyDecision:
     normalized_lifecycle = normalize_lifecycle(lifecycle)
     normalized_intent = normalize_intent(intent)
-    topic = resolve_topic(normalized_intent, features)
+    topic = resolve_current_topic(
+        normalized_intent,
+        features,
+        current_topic=current_topic,
+    )
 
     previous_dialog_state = _previous_dialog_state(dialog_state)
     repeat_count = calculate_repeat_count(

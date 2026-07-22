@@ -2,6 +2,7 @@
 Thin LangGraph adapter for the pure domain policy engine.
 """
 
+from collections.abc import Mapping
 from typing import Protocol, cast
 from uuid import UUID
 
@@ -16,7 +17,12 @@ from src.domain.runtime.policy.handoff_confirmation import (
     is_handoff_confirmation_pending,
     with_handoff_confirmation_pending,
 )
-from src.domain.runtime.policy.intent_topic import normalize_intent, resolve_topic
+from src.domain.runtime.policy.handoff_request import is_explicit_handoff_request
+from src.domain.runtime.policy.intent_topic import (
+    feature_risk_detected,
+    normalize_intent,
+    resolve_current_topic,
+)
 from src.domain.runtime.dialog_state import merge_dialog_state
 from src.domain.runtime.policy.repeat_detection import build_dialog_state_update
 from src.domain.runtime.policy.result import PolicyDecisionContext, PolicyDecisionResult
@@ -246,6 +252,51 @@ def _merge_intent_and_policy_state(
     return patch
 
 
+def _risk_features(features: object) -> list[str]:
+    if not isinstance(features, Mapping):
+        return []
+    return [
+        str(key)
+        for key, value in features.items()
+        if isinstance(value, (int, float)) and float(value) >= 0.8
+    ]
+
+
+def _handoff_signal_source(
+    *,
+    lifecycle: str,
+    normalized_intent: str,
+    resolved_topic: str,
+    previous_repeat_count: int,
+    final_repeat_count: object,
+    features: object,
+    decision: str,
+    resolved_cta: str | None,
+    resolved_reply: str | None,
+    user_input: str,
+) -> str:
+    if resolved_cta in {"call_manager", "book_consultation"} and resolved_reply:
+        return "resolved_action_cta"
+    if lifecycle in {"handoff_to_manager", "angry"}:
+        return "existing_handoff_lifecycle"
+    if is_explicit_handoff_request(user_input):
+        return "rules_explicit_request"
+    if normalized_intent == "handoff_request" or resolved_topic == "handoff":
+        return "intent_classified_handoff"
+    if normalized_intent == "angry" or resolved_topic == "angry":
+        return "anger"
+    if feature_risk_detected(features):
+        return "complaint_or_refund_risk"
+    try:
+        repeat_count = int(final_repeat_count or 0)
+    except (TypeError, ValueError):
+        repeat_count = 0
+    if decision in {"ESCALATE", "ESCALATE_TO_HUMAN", "RESPOND"}:
+        if previous_repeat_count >= 2 and repeat_count >= 3:
+            return "repeat_escalation"
+    return "none"
+
+
 class PolicyEventAppender(Protocol):
     async def append(
         self,
@@ -314,13 +365,20 @@ def create_policy_engine_node(
             return patch
 
         normalized_intent = normalize_intent(context.intent)
-        topic = resolve_topic(normalized_intent, context.features)
+        input_topic = state.get("topic")
+        topic = resolve_current_topic(
+            normalized_intent,
+            context.features,
+            current_topic=str(input_topic) if input_topic is not None else None,
+        )
+        previous_repeat_count = int(context.dialog_state.get("repeat_count") or 0)
 
         new_lifecycle, decision, cta = get_decision(
             context.lifecycle,
             normalized_intent,
             features=context.features,
             dialog_state=context.dialog_state,
+            current_topic=topic,
         )
 
         next_dialog_state = merge_dialog_state(
@@ -387,17 +445,42 @@ def create_policy_engine_node(
                     "Failed to emit policy_decision event", extra={"error": str(exc)}
                 )
 
-        logger.debug(
-            "Policy decision finalized",
+        logger.info(
+            "Policy routing trace",
             extra={
+                "thread_id": context.thread_id,
+                "project_id": context.project_id,
+                "domain": domain,
+                "normalized_intent": normalized_intent,
+                "input_topic": input_topic,
+                "resolved_topic": topic,
                 "old_lifecycle": context.lifecycle,
                 "new_lifecycle": final_patch.get("lifecycle", result.lifecycle),
-                "intent": normalized_intent,
-                "topic": final_patch.get("topic"),
-                "decision": final_patch.get("decision"),
+                "previous_repeat_count": previous_repeat_count,
+                "final_repeat_count": final_dialog_state.get("repeat_count"),
+                "risk_features": _risk_features(context.features),
+                "handoff_signal_source": _handoff_signal_source(
+                    lifecycle=context.lifecycle,
+                    normalized_intent=normalized_intent,
+                    resolved_topic=topic,
+                    previous_repeat_count=previous_repeat_count,
+                    final_repeat_count=final_dialog_state.get("repeat_count"),
+                    features=context.features,
+                    decision=str(final_patch.get("decision") or ""),
+                    resolved_cta=_resolved_cta(state),
+                    resolved_reply=_resolved_cta_reply(state),
+                    user_input=context.user_input,
+                ),
+                "raw_policy_decision": decision,
+                "final_decision": final_patch.get("decision"),
                 "cta": final_patch.get("cta"),
-                "repeat_count": final_dialog_state.get("repeat_count"),
-                "lead_status": final_patch.get("lead_status"),
+                "requires_human": final_patch.get("requires_human", False),
+                "should_search_kb": final_patch.get("should_search_kb"),
+                "should_generate_answer": final_patch.get("should_generate_answer"),
+                "should_offer_manager": final_patch.get("should_offer_manager"),
+                "response_kind": "template"
+                if final_patch.get("decision") == "RESPOND_TEMPLATE"
+                else ("deterministic" if final_patch.get("response_text") else "llm"),
             },
         )
         return final_patch

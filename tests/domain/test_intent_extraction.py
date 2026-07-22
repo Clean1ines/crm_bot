@@ -359,6 +359,91 @@ def test_intent_extraction_does_not_invent_action_cta_for_short_yes_without_pend
     assert result.should_search_kb is True
 
 
+def test_intent_extraction_downgrades_non_explicit_handoff_classification():
+    context = IntentExtractionContext.from_state(
+        {"user_input": "Как менеджер работает с обращениями?"}
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "handoff_request",
+            "cta": "call_manager",
+            "features": {"handoff": 0.9},
+            "topic": "handoff",
+            "cta_hint": None,
+            "emotion": "neutral",
+            "is_repeat_like": False,
+            "should_search_kb": False,
+            "should_generate_answer": False,
+            "should_offer_manager": True,
+        }
+    ).normalized_for_context(context)
+
+    assert result.intent == "support"
+    assert result.topic == "support"
+    assert result.cta == "none"
+    assert result.should_search_kb is True
+    assert result.should_generate_answer is True
+    assert result.should_offer_manager is False
+    assert result.normalization_flags == {
+        "handoff_intent_downgraded": True,
+        "handoff_intent_downgrade_reason": "mention_without_explicit_request",
+    }
+
+
+def test_intent_extraction_keeps_advisory_manager_offer_without_explicit_request():
+    context = IntentExtractionContext.from_state(
+        {"user_input": "Можно ли получить персональный расчёт?"}
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "support",
+            "cta": "call_manager",
+            "features": {},
+            "topic": "support",
+            "cta_hint": None,
+            "emotion": "neutral",
+            "is_repeat_like": False,
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "should_offer_manager": True,
+        }
+    ).normalized_for_context(context)
+
+    assert result.intent == "support"
+    assert result.topic == "support"
+    assert result.cta == "call_manager"
+    assert result.should_search_kb is True
+    assert result.should_generate_answer is True
+    assert result.should_offer_manager is True
+    assert result.normalization_flags == {}
+
+
+def test_intent_extraction_keeps_explicit_handoff_classification():
+    context = IntentExtractionContext.from_state({"user_input": "Позови менеджера"})
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "handoff_request",
+            "cta": "call_manager",
+            "features": {"handoff": 0.9},
+            "topic": "handoff",
+            "cta_hint": None,
+            "emotion": "neutral",
+            "is_repeat_like": False,
+            "should_search_kb": False,
+            "should_generate_answer": False,
+            "should_offer_manager": True,
+        }
+    ).normalized_for_context(context)
+
+    assert result.intent == "handoff_request"
+    assert result.topic == "handoff"
+    assert result.cta == "call_manager"
+    assert result.normalization_flags == {}
+
+
 def test_intent_extraction_later_yes_cannot_confirm_expired_cta():
     expired_dialog_state = {
         "last_intent": "pricing",

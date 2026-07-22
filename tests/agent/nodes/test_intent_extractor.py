@@ -50,6 +50,101 @@ async def test_intent_extractor_parses_json_block_into_state_patch():
 
 
 @pytest.mark.asyncio
+async def test_intent_extractor_downgrades_false_handoff_for_manager_information_question(
+    monkeypatch,
+):
+    monkeypatch.setenv("RAG_DEBUG", "true")
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content="""{"domain":"business","intent":"handoff_request","cta":"call_manager","features":{"handoff":0.9},"topic":"handoff","cta_hint":null,"emotion":"neutral","is_repeat_like":false,"should_search_kb":false,"should_generate_answer":false,"should_offer_manager":true}"""
+        )
+    )
+    node = create_intent_extractor_node(llm=llm)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with (
+        patch(
+            "src.agent.nodes.intent_extractor.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch("src.agent.nodes.intent_extractor.logger") as logger,
+    ):
+        result = await node({"user_input": "Как менеджер работает с обращениями?"})
+
+    assert result["intent"] != "handoff_request"
+    assert result["topic"] != "handoff"
+    assert result["cta"] == "none"
+    assert result["should_search_kb"] is True
+    assert result["should_generate_answer"] is True
+    assert result["should_offer_manager"] is False
+
+    trace = [
+        call
+        for call in logger.info.call_args_list
+        if call.args and call.args[0] == "Intent extraction trace"
+    ][-1]
+    assert trace.kwargs["extra"]["handoff_intent_downgraded"] is True
+    assert (
+        trace.kwargs["extra"]["handoff_intent_downgrade_reason"]
+        == "mention_without_explicit_request"
+    )
+
+
+@pytest.mark.asyncio
+async def test_intent_extractor_keeps_advisory_manager_offer():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content="""{"domain":"business","intent":"support","cta":"call_manager","features":{},"topic":"support","cta_hint":null,"emotion":"neutral","is_repeat_like":false,"should_search_kb":true,"should_generate_answer":true,"should_offer_manager":true}"""
+        )
+    )
+    node = create_intent_extractor_node(llm=llm)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.intent_extractor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node({"user_input": "Можно ли получить персональный расчёт?"})
+
+    assert result["intent"] == "support"
+    assert result["topic"] == "support"
+    assert result["cta"] == "call_manager"
+    assert result["should_search_kb"] is True
+    assert result["should_generate_answer"] is True
+    assert result["should_offer_manager"] is True
+
+
+@pytest.mark.asyncio
+async def test_intent_extractor_keeps_explicit_handoff_request():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(
+            content="""{"domain":"business","intent":"handoff_request","cta":"call_manager","features":{"handoff":0.9},"topic":"handoff","cta_hint":null,"emotion":"neutral","is_repeat_like":false,"should_search_kb":false,"should_generate_answer":false,"should_offer_manager":true}"""
+        )
+    )
+    node = create_intent_extractor_node(llm=llm)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.intent_extractor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node({"user_input": "Позови менеджера"})
+
+    assert result["intent"] == "handoff_request"
+    assert result["topic"] == "handoff"
+    assert result["cta"] == "call_manager"
+
+
+@pytest.mark.asyncio
 async def test_intent_extractor_normalizes_short_affirmative_reply_using_context():
     llm = AsyncMock()
     llm.ainvoke = AsyncMock(

@@ -89,3 +89,61 @@ async def test_rules_node_declines_handoff_and_requests_more_details():
     assert result["decision"] == "RESPOND"
     assert result["requires_human"] is False
     assert result["dialog_state"]["handoff_confirmation_pending"] is False
+
+
+@pytest.mark.asyncio
+async def test_rules_node_allows_human_in_the_loop_information_question():
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.rules.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await rules_node(
+            {"user_input": "Поддерживается ли human-in-the-loop?"}
+        )
+
+    assert result["decision"] == "PROCEED_TO_LLM"
+
+
+@pytest.mark.asyncio
+async def test_rules_node_allows_negative_handoff_request():
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.rules.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await rules_node({"user_input": "Не зови менеджера"})
+
+    assert result["decision"] == "PROCEED_TO_LLM"
+
+
+@pytest.mark.asyncio
+async def test_rules_node_allows_negative_handoff_request_with_positive_substring():
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.rules.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await rules_node({"user_input": "Не хочу поговорить с менеджером"})
+
+    assert result["decision"] == "PROCEED_TO_LLM"
+
+
+@pytest.mark.asyncio
+async def test_rules_node_escalates_explicit_handoff_request():
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.rules.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await rules_node({"user_input": "Позови менеджера"})
+
+    assert result["decision"] == "ESCALATE"

@@ -27,7 +27,6 @@ INTENT_TO_TOPIC = {
 RISK_FEATURE_KEYS = {
     "frustration",
     "anger",
-    "handoff",
     "complaint",
     "chargeback",
     "refund",
@@ -82,6 +81,23 @@ def resolve_topic(intent: str | None, features: FeatureMap | None = None) -> str
     normalized_intent = normalize_intent(intent)
     topic = INTENT_TO_TOPIC.get(normalized_intent, normalized_intent)
     return topic if topic in VALID_TOPICS else "other"
+
+
+def normalize_topic(value: str | None) -> str | None:
+    topic = (value or "").strip().lower()
+    return topic if topic in VALID_TOPICS else None
+
+
+def resolve_current_topic(
+    intent: str | None,
+    features: FeatureMap | None = None,
+    *,
+    current_topic: str | None = None,
+) -> str:
+    normalized_topic = normalize_topic(current_topic)
+    if normalized_topic:
+        return normalized_topic
+    return resolve_topic(intent, features)
 
 
 def _numeric_risk_detected(value: object) -> bool:

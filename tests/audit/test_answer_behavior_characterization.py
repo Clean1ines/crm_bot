@@ -501,7 +501,6 @@ async def test_audit_same_topic_different_question_should_not_increment_failed_r
     assert outcome["dialog_state"]["repeat_count"] == 1
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT BUG-004: broad handoff keyword")
 @pytest.mark.asyncio
 async def test_audit_human_in_the_loop_should_not_auto_escalate():
     outcome = await run_scenario(
@@ -513,6 +512,7 @@ async def test_audit_human_in_the_loop_should_not_auto_escalate():
     )
 
     assert outcome["nodes"] != ["rules", "escalate", "responder", "persist"]
+    assert "kb_search" in outcome["nodes"]
 
 
 @pytest.mark.xfail(

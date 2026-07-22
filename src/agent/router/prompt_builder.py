@@ -90,6 +90,38 @@ def format_kb_results(
     return "\n".join(lines), top_score, len(lines)
 
 
+def format_kb_prompt_entry_traces(
+    kb_results: Sequence[object],
+    limit: int = DEFAULT_KB_LIMIT,
+) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    for index, item in enumerate(kb_results[:limit], start=1):
+        entry_id = None
+        score = 0.0
+        text = extract_kb_text(item)
+        if isinstance(item, dict):
+            entry_id = item.get("id")
+            raw_score = item.get("score", 0.0)
+            try:
+                score = float(raw_score or 0.0)
+            except (TypeError, ValueError):
+                score = 0.0
+
+        prompt_text = truncate_text(text, 420) if text else ""
+        entries.append(
+            {
+                "rank": index,
+                "id": entry_id,
+                "score": score,
+                "content_preview": truncate_text(prompt_text, 160),
+                "content_chars_before_truncation": len(text),
+                "content_chars_in_prompt": len(prompt_text),
+                "was_truncated": len(prompt_text) < len(text),
+            }
+        )
+    return entries
+
+
 def format_history(history: Sequence[object], limit: int = 5) -> str:
     if not history:
         return "[]"

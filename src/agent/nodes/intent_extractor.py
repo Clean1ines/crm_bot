@@ -5,6 +5,7 @@ Uses a lightweight LLM to extract domain, intent, CTA, topic, emotion, and featu
 """
 
 import json
+import os
 from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import build_intent_prompt
@@ -128,6 +129,19 @@ def _coerce_int(value: object, default: int = 0) -> int:
     return default
 
 
+def _rag_debug_enabled() -> bool:
+    return os.getenv("RAG_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _preview_text(value: object, limit: int = 160) -> str | None:
+    if value is None:
+        return None
+    text = " ".join(str(value).split())
+    if not text:
+        return None
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, object]:
     previous_count = _coerce_int(state.get("technical_failure_count"), 0)
     next_count = previous_count + 1
@@ -198,6 +212,42 @@ def create_intent_extractor_node(
             result = IntentExtractionResult.from_llm_payload(
                 payload
             ).normalized_for_context(context)
+            trace_extra: dict[str, object] = {
+                "thread_id": state.get("thread_id"),
+                "project_id": state.get("project_id"),
+                "domain": result.domain,
+                "turn_relation": result.turn_relation,
+                "intent": result.intent,
+                "cta": result.cta,
+                "topic": result.topic,
+                "emotion": result.emotion,
+                "is_repeat_like": result.is_repeat_like,
+                "should_search_kb": result.should_search_kb,
+                "should_generate_answer": result.should_generate_answer,
+                "should_offer_manager": result.should_offer_manager,
+                "resolved_cta": result.resolved_cta,
+                "resolved_cta_reply": result.resolved_cta_reply,
+                "handoff_intent_downgraded": bool(
+                    result.normalization_flags.get("handoff_intent_downgraded")
+                ),
+            }
+            if _rag_debug_enabled():
+                trace_extra.update(
+                    {
+                        "user_input_preview": _preview_text(context.user_input),
+                        "knowledge_query_preview": _preview_text(
+                            result.knowledge_query
+                        ),
+                        "features": dict(result.features),
+                        "normalization_flags": dict(result.normalization_flags),
+                        "handoff_intent_downgrade_reason": (
+                            result.normalization_flags.get(
+                                "handoff_intent_downgrade_reason"
+                            )
+                        ),
+                    }
+                )
+            logger.info("Intent extraction trace", extra=trace_extra)
             logger.debug(
                 "Intent extracted",
                 extra={

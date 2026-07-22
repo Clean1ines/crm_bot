@@ -17,6 +17,7 @@ from src.domain.runtime.policy.handoff_confirmation import (
     resolve_handoff_confirmation_reply,
     with_handoff_confirmation_pending,
 )
+from src.domain.runtime.policy.handoff_request import is_explicit_handoff_request
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
@@ -40,27 +41,6 @@ ANGER_KEYWORDS = [
 ]
 
 CAPS_THRESHOLD = 0.5
-
-HANDOFF_REQUEST_KEYWORDS = (
-    "позвать менеджера",
-    "позови менеджера",
-    "позовите менеджера",
-    "менеджера",
-    "оператора",
-    "живого человека",
-    "человека",
-    "с менеджером",
-    "с оператором",
-    "call manager",
-    "human",
-    "operator",
-    "manager",
-)
-
-
-def _detect_handoff_request(text: str) -> bool:
-    text_lower = text.lower()
-    return any(keyword in text_lower for keyword in HANDOFF_REQUEST_KEYWORDS)
 
 
 def _detect_anger(text: str) -> bool:
@@ -90,7 +70,7 @@ async def _rules_node_impl(state: AgentState) -> dict[str, object]:
 
     dialog_state = merge_dialog_state(state.get("dialog_state"))
 
-    if _detect_handoff_request(user_input):
+    if is_explicit_handoff_request(user_input):
         logger.info("Rule triggered: explicit handoff request")
         return {
             "decision": "ESCALATE",

@@ -32,6 +32,19 @@ PENDING_MANAGER_TICKET_TEXT = (
 )
 MANAGER_HANDOFF_TEXT = PENDING_MANAGER_TICKET_TEXT
 GRAPH_FAILURE_TEXT = "Something went wrong while processing the request."
+RETURNED_TO_ASSISTANT_TEXT = "Вы вернулись к AI-ассистенту. Напишите ваш вопрос."
+MANAGER_TICKET_CLOSED_TEXT = "Обращение закрыто. AI-ассистент снова готов помочь."
+MANAGER_WAIT_RECORDED_TEXT = (
+    "Я зафиксировал, что менеджер долго не отвечает. Обращение остаётся у менеджера."
+)
+MANAGER_RECOVERY_FAILED_TEXT = (
+    "Не удалось вернуть диалог к AI-ассистенту. "
+    "Обращение остаётся у менеджера. Попробуйте ещё раз позже."
+)
+
+RETURN_TO_ASSISTANT_COMMAND = "вернуться к ассистенту"
+CLOSE_RESOLVED_COMMAND = "закрыть обращение: решено"
+WAITING_TOO_LONG_COMMAND = "долго жду"
 
 
 def split_questions(text: str) -> list[str]:
@@ -405,11 +418,46 @@ class ClientMessageService:
             thread_snapshot=thread_snapshot,
             manager_session=manager_session,
         )
+        recovery_response = await self._try_handle_waiting_manager_recovery_command(
+            redis=redis,
+            awaiting_reply_key=awaiting_reply_key,
+            project_id=project_id,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            thread_id_str=thread_id_str,
+            text=text,
+            thread_snapshot=thread_snapshot,
+            manager_session=manager_session,
+        )
+        if recovery_response is not None:
+            return recovery_response
+
         if manager_session is None:
             manager_session = self._manual_ticket_fallback_session(
                 thread_id=thread_id_str,
                 thread_snapshot=thread_snapshot,
             )
+        if manager_session is None and self._has_pending_manager_ticket(
+            thread_snapshot
+        ):
+            await self._record_user_message(
+                project_id=project_id,
+                chat_id=chat_id,
+                text=text,
+                thread_id=thread_id,
+                thread_id_str=thread_id_str,
+            )
+            self.logger.info(
+                "Message held for pending manager ticket without reply session",
+                extra={
+                    "project_id": project_id,
+                    "thread_id": thread_id_str,
+                    "thread_status": thread_snapshot.status
+                    if thread_snapshot
+                    else None,
+                },
+            )
+            return self.graph_executor.outcome(MANAGER_HANDOFF_TEXT).text
         if manager_session is None:
             return None
 
@@ -439,6 +487,149 @@ class ClientMessageService:
         else:
             return None
         return self.graph_executor.outcome(MANAGER_HANDOFF_TEXT).text
+
+    async def _try_handle_waiting_manager_recovery_command(
+        self,
+        *,
+        redis,
+        awaiting_reply_key: str,
+        project_id: str,
+        chat_id: int,
+        thread_id,
+        thread_id_str: str,
+        text: str,
+        thread_snapshot: ThreadRuntimeSnapshot | None,
+        manager_session: ManagerReplySession | None,
+    ) -> str | None:
+        if not self._has_pending_manager_ticket(thread_snapshot):
+            return None
+
+        command = _normalized_recovery_command(text)
+        if command not in {
+            RETURN_TO_ASSISTANT_COMMAND,
+            CLOSE_RESOLVED_COMMAND,
+            WAITING_TOO_LONG_COMMAND,
+        }:
+            return None
+
+        await self._record_user_message(
+            project_id=project_id,
+            chat_id=chat_id,
+            text=text,
+            thread_id=thread_id,
+            thread_id_str=thread_id_str,
+        )
+
+        if command == WAITING_TOO_LONG_COMMAND:
+            await self._record_waiting_manager_delay(
+                project_id=project_id,
+                thread_id_str=thread_id_str,
+                text=text,
+                manager_session=manager_session,
+            )
+            return self.graph_executor.outcome(MANAGER_WAIT_RECORDED_TEXT).text
+
+        reason = (
+            "client_returned_to_assistant"
+            if command == RETURN_TO_ASSISTANT_COMMAND
+            else "client_resolved"
+        )
+        closed = await self._close_waiting_manager_ticket(
+            thread_id=thread_id_str,
+            reason=reason,
+        )
+        if not closed:
+            return self.graph_executor.outcome(MANAGER_RECOVERY_FAILED_TEXT).text
+
+        await self._clear_manager_reply_session(
+            redis=redis,
+            awaiting_reply_key=awaiting_reply_key,
+            manager_session=manager_session,
+        )
+        response_text = (
+            RETURNED_TO_ASSISTANT_TEXT
+            if command == RETURN_TO_ASSISTANT_COMMAND
+            else MANAGER_TICKET_CLOSED_TEXT
+        )
+        return self.graph_executor.outcome(response_text).text
+
+    async def _clear_manager_reply_session(
+        self,
+        *,
+        redis,
+        awaiting_reply_key: str,
+        manager_session: ManagerReplySession | None,
+    ) -> None:
+        if manager_session and manager_session.manager_key:
+            await redis.delete(manager_session.manager_key)
+        await redis.delete(awaiting_reply_key)
+
+    async def _close_waiting_manager_ticket(
+        self, *, thread_id: str, reason: str
+    ) -> bool:
+        if self.manager_replies is None:
+            self.logger.error(
+                "Cannot close waiting manager ticket: manager reply service missing",
+                extra={"thread_id": thread_id, "reason": reason},
+            )
+            return False
+
+        try:
+            await self.manager_replies.close_thread_for_manager(
+                thread_id,
+                manually_closed=False,
+                close_reason=reason,
+            )
+        except Exception as exc:
+            self.logger.exception(
+                "Failed to close waiting manager ticket for recovery command",
+                extra={
+                    "thread_id": thread_id,
+                    "reason": reason,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return False
+        return True
+
+    async def _record_waiting_manager_delay(
+        self,
+        *,
+        project_id: str,
+        thread_id_str: str,
+        text: str,
+        manager_session: ManagerReplySession | None,
+    ) -> None:
+        await self.event_emitter.emit_event(
+            stream_id=thread_id_str,
+            project_id=project_id,
+            event_type="manager_waiting_reminder",
+            payload={
+                "message": text,
+                "manager_user_id": manager_session.manager_user_id
+                if manager_session
+                else None,
+                "manager_chat_id": manager_session.manager_chat_id
+                if manager_session
+                else None,
+            },
+        )
+        if manager_session and manager_session.manager_chat_id:
+            await self._enqueue_manager_notification(
+                project_id=project_id,
+                thread_id_str=thread_id_str,
+                text=text,
+                manager_session=manager_session,
+            )
+
+    @staticmethod
+    def _has_pending_manager_ticket(
+        thread_snapshot: ThreadRuntimeSnapshot | None,
+    ) -> bool:
+        return bool(
+            thread_snapshot
+            and thread_snapshot.status == ThreadStatus.WAITING_MANAGER.value
+        )
 
     def _manual_ticket_fallback_session(
         self,
@@ -644,3 +835,7 @@ class ClientMessageService:
             extra={"thread_id": thread_id, "response_count": len(responses)},
         )
         return self.graph_executor.outcome(combined_response).text
+
+
+def _normalized_recovery_command(text: str) -> str:
+    return " ".join(str(text).strip().lower().split())
