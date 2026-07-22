@@ -191,6 +191,10 @@ class PersistenceContext:
             "last_topic": existing.get("last_topic")
             or infer_topic_from_intent(self.intent),
             "repeat_count": coerce_int(existing.get("repeat_count"), 0),
+            "last_repeat_increment_reason": existing.get(
+                "last_repeat_increment_reason"
+            ),
+            "last_repeat_reset_reason": existing.get("last_repeat_reset_reason"),
             "lead_status": self._lead_status(existing),
             "lifecycle": self._lifecycle(existing),
             "handoff_confirmation_pending": bool(

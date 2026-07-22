@@ -24,6 +24,7 @@
 - should_search_kb: true только для бизнес-вопросов, где может понадобиться проектная база знаний.
 - should_generate_answer: true только когда после классификации нужно генерировать LLM-ответ.
 - should_offer_manager: true когда нужно предложить помощь человека, но не форсировать её сразу.
+- knowledge_query: contextual KB query или null. Используй только когда user_input является continuation/reopening и буквальный текст пользователя слишком короткий/зависит от контекста. Не копируй user_input как knowledge_query.
 
 Правила языка:
 - Не отвечай пользователю содержательно в этом prompt.
@@ -42,6 +43,10 @@
 - Для широких бизнес-вопросов вроде "что это?", "что умеет?", "как работает?", "что предлагаете?", ставь should_search_kb=true, если в базе знаний проекта могут быть детали продукта или услуги.
 - Для вопросов о цене, возврате, отмене, интеграции, наличии, документах, запуске, передаче менеджеру или правилах ставь should_search_kb=true.
 - Не отвечай из общих знаний модели, если могут существовать проектные знания.
+- Для new_topic оставляй knowledge_query=null: поиск должен идти по самому сообщению пользователя.
+- Для short_reply оставляй knowledge_query=null, если это ответ на action CTA или отказ.
+- Для continuation/reopening можно задать knowledge_query только как самостоятельный поисковый запрос, раскрывающий контекст предыдущей темы.
+- knowledge_query должен быть не длиннее 240 символов.
 
 Сообщение пользователя: {user_input}
 
@@ -63,7 +68,8 @@
   "is_repeat_like": true|false,
   "should_search_kb": true|false,
   "should_generate_answer": true|false,
-  "should_offer_manager": true|false
+  "should_offer_manager": true|false,
+  "knowledge_query": "string or null"
 }}
 
 Жёсткие правила для коротких ответов:

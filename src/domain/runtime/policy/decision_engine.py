@@ -47,8 +47,17 @@ def _handoff_lifecycle_for_signal(intent: str, topic: str) -> str:
     return "handoff_to_manager"
 
 
-def _is_repeat_escalation(topic: str, repeat_count: int) -> bool:
-    return topic in HIGH_INTENT_TOPICS and repeat_count >= REPEAT_ESCALATION_THRESHOLD
+def _is_repeat_escalation(
+    topic: str,
+    repeat_count: int,
+    *,
+    is_repeat_like: bool,
+) -> bool:
+    return (
+        is_repeat_like
+        and topic in HIGH_INTENT_TOPICS
+        and repeat_count >= REPEAT_ESCALATION_THRESHOLD
+    )
 
 
 def _requires_human_handoff(
@@ -57,6 +66,7 @@ def _requires_human_handoff(
     topic: str,
     repeat_count: int,
     features: FeatureMap | None,
+    is_repeat_like: bool,
 ) -> PolicyDecision | None:
     if _is_currently_handoff(lifecycle):
         return _human_handoff_decision(lifecycle)
@@ -67,7 +77,7 @@ def _requires_human_handoff(
     if feature_risk_detected(features):
         return _human_handoff_decision("handoff_to_manager")
 
-    if _is_repeat_escalation(topic, repeat_count):
+    if _is_repeat_escalation(topic, repeat_count, is_repeat_like=is_repeat_like):
         return _human_handoff_decision("handoff_to_manager")
 
     return None
@@ -78,7 +88,11 @@ def _apply_soft_repeat_progression(
     topic: str,
     repeat_count: int,
     decision: PolicyDecision,
+    is_repeat_like: bool,
 ) -> PolicyDecision:
+    if not is_repeat_like:
+        return decision
+
     if topic not in HIGH_INTENT_TOPICS:
         return decision
 
@@ -153,13 +167,18 @@ def get_decision(
         topic,
         repeat_count,
         features,
+        is_repeat_like=is_repeat_like,
     )
     if handoff_decision is not None:
         return handoff_decision
 
     decision = _transition_decision(normalized_lifecycle, topic)
     decision = _apply_soft_repeat_progression(
-        normalized_lifecycle, topic, repeat_count, decision
+        normalized_lifecycle,
+        topic,
+        repeat_count,
+        decision,
+        is_repeat_like=is_repeat_like,
     )
     decision = _active_client_decision(normalized_lifecycle, decision)
     decision = _llm_topic_decision(topic, decision)

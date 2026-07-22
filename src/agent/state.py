@@ -75,6 +75,7 @@ class AgentState(TypedDict):
     # New pipeline fields (all optional for backward compatibility)
     user_input: str | None
     knowledge_query: str | None
+    knowledge_query_source: str | None
     client_profile: ClientProfileState | None
     conversation_summary: str | None
     history: list[HistoryMessage] | None

@@ -85,7 +85,7 @@ async def test_tool_executor_success_flows_to_tool_result_generation_without_kb_
                 {
                     "answerability": "supported",
                     "answer": "Tool result: created record.",
-                    "supporting_entry_ids": [],
+                    "supporting_evidence_refs": [],
                     "unsupported_aspects": [],
                 }
             )

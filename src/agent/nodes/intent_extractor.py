@@ -246,6 +246,12 @@ def create_intent_extractor_node(
                         "knowledge_query_preview": _preview_text(
                             result.knowledge_query
                         ),
+                        "knowledge_query_source": result.knowledge_query_source.value,
+                        "knowledge_query_rejected_reason": (
+                            result.normalization_flags.get(
+                                "knowledge_query_rejected_reason"
+                            )
+                        ),
                         "features": dict(result.features),
                         "unrecognized_feature_keys": list(unrecognized_feature_keys),
                         "normalization_flags": dict(result.normalization_flags),

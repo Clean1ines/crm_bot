@@ -81,6 +81,7 @@ class RuntimeStateInput(TypedDict, total=False):
     chat_id: int | str | None
     user_input: str
     knowledge_query: str | None
+    knowledge_query_source: str | None
     response_text: str | None
     conversation_summary: str | None
     history: list[RuntimeHistoryMessage]
@@ -150,6 +151,7 @@ class RuntimeStatePatch(TypedDict, total=False):
     client_id: str | None
     response_text: str | None
     knowledge_query: str | None
+    knowledge_query_source: str | None
     metadata: Mapping[str, object]
     conversation_summary: str | None
     history: list[RuntimeHistoryMessage] | list[Mapping[str, object]]

@@ -16,18 +16,28 @@ def _structured_content(
     *,
     answerability: str = "supported",
     supporting_entry_ids: list[str] | None = None,
+    supporting_evidence_refs: list[str] | None = None,
     unsupported_aspects: list[str] | None = None,
 ) -> str:
+    refs = supporting_evidence_refs
+    if refs is None:
+        entry_ids = (
+            ["entry-1"]
+            if supporting_entry_ids is None
+            and answerability in {"supported", "partially_supported"}
+            else supporting_entry_ids or []
+        )
+        refs = [
+            f"E{entry_id.removeprefix('entry-')}"
+            if entry_id.startswith("entry-")
+            else entry_id
+            for entry_id in entry_ids
+        ]
     return json.dumps(
         {
             "answerability": answerability,
             "answer": answer,
-            "supporting_entry_ids": (
-                ["entry-1"]
-                if supporting_entry_ids is None
-                and answerability in {"supported", "partially_supported"}
-                else supporting_entry_ids or []
-            ),
+            "supporting_evidence_refs": refs,
             "unsupported_aspects": unsupported_aspects or [],
         },
         ensure_ascii=False,
@@ -81,7 +91,9 @@ def test_answer_preview_prompt_includes_clean_fact_without_internal_metadata() -
     )
 
     assert "Доставка занимает два дня после оплаты." in prompt
-    assert "id=runtime-entry-1" in prompt
+    assert "E1 | score=0.910 | method=runtime_hybrid" in prompt
+    assert "runtime-entry-1" not in prompt
+    assert "id=runtime-entry-1" not in prompt
     assert "workflow-run-1" not in prompt
     assert "source-doc-1" not in prompt
     assert "source_claim_refs" not in prompt
@@ -692,9 +704,9 @@ async def test_response_generator_rejects_invalid_supporting_entry_id():
         "Сейчас не получилось сформировать корректный ответ по доступной базе знаний."
     )
     assert result["generation_schema_status"] == "valid"
-    assert result["evidence_reference_status"] == "unknown_ids"
+    assert result["evidence_reference_status"] == "unknown_refs"
     assert result["semantic_grounding_status"] == "not_applicable"
-    assert result["fallback_reason"] == "invalid_supporting_entry_ids"
+    assert result["fallback_reason"] == "invalid_supporting_evidence_refs"
 
 
 @pytest.mark.asyncio
@@ -727,6 +739,11 @@ async def test_response_generator_existing_id_does_not_prove_semantic_support():
     assert result["generation_schema_status"] == "valid"
     assert result["evidence_reference_status"] == "valid"
     assert result["semantic_grounding_status"] == "unchecked"
+    assert result["metadata"]["generation_attempt_count"] == 1
+    assert result["metadata"]["initial_validation_failure_reason"] is None
+    assert result["metadata"]["repair_attempted"] is False
+    assert result["metadata"]["repair_validation_failure_reason"] is None
+    assert result["metadata"]["repair_succeeded"] is False
 
 
 @pytest.mark.asyncio
@@ -754,8 +771,8 @@ async def test_response_generator_rejects_supported_without_ids():
         }
     )
 
-    assert result["evidence_reference_status"] == "missing_required_ids"
-    assert result["fallback_reason"] == "missing_supporting_entry_ids"
+    assert result["evidence_reference_status"] == "missing_required_refs"
+    assert result["fallback_reason"] == "missing_supporting_evidence_refs"
     assert "Да, поддерживается" not in result["response_text"]
 
 
@@ -882,7 +899,7 @@ async def test_response_generator_rejects_conflict_without_two_valid_ids():
 
     assert result["evidence_reference_status"] == "invalid_for_answerability"
     assert (
-        result["fallback_reason"] == "conflicting_evidence_requires_two_supporting_ids"
+        result["fallback_reason"] == "conflicting_evidence_requires_two_supporting_refs"
     )
 
 
@@ -1408,7 +1425,7 @@ async def test_response_generator_rejects_requires_human_tool_status_in_generato
 
 
 @pytest.mark.asyncio
-async def test_response_generator_rejects_non_kb_response_with_supporting_ids():
+async def test_response_generator_rejects_non_kb_response_with_supporting_refs():
     llm = AsyncMock()
     llm.ainvoke = AsyncMock(
         return_value=SimpleNamespace(
@@ -1429,7 +1446,7 @@ async def test_response_generator_rejects_non_kb_response_with_supporting_ids():
         }
     )
 
-    assert result["fallback_reason"] == "non_kb_response_with_supporting_ids"
+    assert result["fallback_reason"] == "non_kb_response_with_supporting_refs"
     assert result["evidence_reference_status"] == "not_applicable"
 
 
@@ -1491,3 +1508,149 @@ async def test_response_generator_accepts_valid_tool_supported_response_with_no_
 
     assert result["response_text"] == "Done."
     assert result["evidence_reference_status"] == "not_applicable"
+
+
+@pytest.mark.asyncio
+async def test_response_generator_repairs_legacy_supporting_entry_ids_once():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                content=json.dumps(
+                    {
+                        "answerability": "supported",
+                        "answer": "Факт подтверждён.",
+                        "supporting_entry_ids": ["entry-1"],
+                        "unsupported_aspects": [],
+                    },
+                    ensure_ascii=False,
+                )
+            ),
+            SimpleNamespace(content=_structured_content("Факт подтверждён.")),
+        ]
+    )
+    node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    result = await node(
+        {
+            "decision": "LLM_GENERATE",
+            "generation_mode": "KNOWLEDGE_ANSWER",
+            "user_input": "Что известно?",
+            "project_configuration": {"settings": {"target_language": "ru"}},
+            **_retrieved_state("Факт подтверждён в базе знаний."),
+        }
+    )
+
+    assert result["response_text"] == "Факт подтверждён."
+    assert result["model_evidence_refs"] == ["E1"]
+    assert result["supporting_entry_ids"] == ["entry-1"]
+    assert result["metadata"]["generation_attempt_count"] == 2
+    assert result["metadata"]["initial_validation_failure_reason"] == (
+        "legacy supporting_entry_ids field is forbidden"
+    )
+    assert result["metadata"]["repair_attempted"] is True
+    assert result["metadata"]["repair_succeeded"] is True
+    assert result["metadata"]["repair_validation_failure_reason"] is None
+    llm.ainvoke.assert_awaited()
+    assert llm.ainvoke.await_count == 2
+    repair_prompt = llm.ainvoke.await_args_list[1].args[0][0][1]
+    assert "Allowed evidence refs: E1" in repair_prompt
+    repair_section = repair_prompt.split("The previous response did not satisfy", 1)[1]
+    assert "entry-1" not in repair_section
+    assert "supporting_entry_ids" in repair_section
+
+
+@pytest.mark.asyncio
+async def test_response_generator_repairs_unknown_evidence_ref_once():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                content=_structured_content(
+                    "Факт подтверждён.",
+                    supporting_evidence_refs=["E9"],
+                )
+            ),
+            SimpleNamespace(content=_structured_content("Факт подтверждён.")),
+        ]
+    )
+    node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    result = await node(
+        {
+            "decision": "LLM_GENERATE",
+            "generation_mode": "KNOWLEDGE_ANSWER",
+            "user_input": "Что известно?",
+            "project_configuration": {"settings": {"target_language": "ru"}},
+            **_retrieved_state("Факт подтверждён в базе знаний."),
+        }
+    )
+
+    assert result["response_text"] == "Факт подтверждён."
+    assert result["evidence_reference_status"] == "valid"
+    assert result["metadata"]["initial_validation_failure_reason"] == (
+        "invalid_supporting_evidence_refs"
+    )
+    assert result["metadata"]["repair_attempted"] is True
+    assert result["metadata"]["repair_succeeded"] is True
+    assert llm.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_response_generator_fallback_after_failed_repair_has_attempt_metadata():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        side_effect=[
+            SimpleNamespace(content="{not json"),
+            SimpleNamespace(
+                content=_structured_content(
+                    "Факт без refs.", supporting_evidence_refs=[]
+                )
+            ),
+        ]
+    )
+    node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    result = await node(
+        {
+            "decision": "LLM_GENERATE",
+            "generation_mode": "KNOWLEDGE_ANSWER",
+            "user_input": "Что известно?",
+            "project_configuration": {"settings": {"target_language": "ru"}},
+            **_retrieved_state("Факт подтверждён в базе знаний."),
+        }
+    )
+
+    assert result["fallback_reason"] == "missing_supporting_evidence_refs"
+    assert result["metadata"]["generation_attempt_count"] == 2
+    assert result["metadata"]["initial_validation_failure_reason"] == "invalid_json"
+    assert result["metadata"]["repair_attempted"] is True
+    assert result["metadata"]["repair_succeeded"] is False
+    assert result["metadata"]["repair_validation_failure_reason"] == (
+        "missing_supporting_evidence_refs"
+    )
+    assert llm.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_response_generator_language_fallback_does_not_trigger_repair():
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content=_structured_content("Answer in English."))
+    )
+    node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    result = await node(
+        {
+            "decision": "LLM_GENERATE",
+            "generation_mode": "KNOWLEDGE_ANSWER",
+            "user_input": "Расскажите",
+            "project_configuration": {"settings": {"target_language": "ru"}},
+            **_retrieved_state("Факт подтверждён в базе знаний."),
+        }
+    )
+
+    assert result["fallback_reason"] == "language_validation_failed"
+    assert result["metadata"]["repair_attempted"] is False
+    assert result["metadata"]["generation_attempt_count"] == 1
+    assert llm.ainvoke.await_count == 1

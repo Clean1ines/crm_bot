@@ -11,6 +11,8 @@ class DialogState(TypedDict):
     last_cta: str | None
     last_topic: str | None
     repeat_count: int
+    last_repeat_increment_reason: str | None
+    last_repeat_reset_reason: str | None
     lead_status: str
     lifecycle: str
     handoff_confirmation_pending: bool
@@ -21,6 +23,8 @@ class PartialDialogState(TypedDict, total=False):
     last_cta: NotRequired[str | None]
     last_topic: NotRequired[str | None]
     repeat_count: NotRequired[int]
+    last_repeat_increment_reason: NotRequired[str | None]
+    last_repeat_reset_reason: NotRequired[str | None]
     lead_status: NotRequired[str]
     lifecycle: NotRequired[str]
     handoff_confirmation_pending: NotRequired[bool]
@@ -32,6 +36,8 @@ def default_dialog_state(*, lifecycle: str = "cold") -> DialogState:
         "last_cta": None,
         "last_topic": None,
         "repeat_count": 0,
+        "last_repeat_increment_reason": None,
+        "last_repeat_reset_reason": None,
         "lead_status": lifecycle,
         "lifecycle": lifecycle,
         "handoff_confirmation_pending": False,
@@ -59,6 +65,12 @@ def dialog_state_from_mapping(
     patch["last_cta"] = normalize_cta(value.get("last_cta"))
     patch["last_topic"] = _optional_text(value.get("last_topic"))
     patch["repeat_count"] = coerce_int(value.get("repeat_count"), 0)
+    patch["last_repeat_increment_reason"] = _repeat_increment_reason(
+        value.get("last_repeat_increment_reason")
+    )
+    patch["last_repeat_reset_reason"] = _repeat_reset_reason(
+        value.get("last_repeat_reset_reason")
+    )
     patch["lead_status"] = _optional_text(value.get("lead_status")) or lifecycle
     patch["lifecycle"] = _optional_text(value.get("lifecycle")) or lifecycle
     patch["handoff_confirmation_pending"] = coerce_bool(
@@ -67,6 +79,18 @@ def dialog_state_from_mapping(
 
     result.update(patch)
     return result
+
+
+def _repeat_increment_reason(value: object) -> str | None:
+    text = _optional_text(value)
+    return text if text == "explicit_repeat_like" else None
+
+
+def _repeat_reset_reason(value: object) -> str | None:
+    text = _optional_text(value)
+    if text in {"not_repeat_like", "new_topic", "topic_changed", "intent_changed"}:
+        return text
+    return None
 
 
 def merge_dialog_state(

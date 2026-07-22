@@ -2,7 +2,11 @@ from dataclasses import dataclass, field
 from typing import Mapping, cast
 import hashlib
 
-from src.domain.runtime.cta import CONTINUE_EXPLANATION_CTA, normalize_cta
+from src.domain.runtime.cta import normalize_cta
+from src.domain.runtime.knowledge_query import (
+    KnowledgeQuerySource,
+    normalize_knowledge_query_source,
+)
 from src.domain.runtime.state_contracts import (
     KnowledgeChunkPayload,
     RuntimeStateInput,
@@ -21,20 +25,31 @@ class KnowledgeSearchContext:
     thread_id: str | None = None
     query: str = ""
     original_user_input: str = ""
+    query_source: KnowledgeQuerySource = KnowledgeQuerySource.NONE
+    resolved_query_used: bool = False
 
     @classmethod
     def from_state(cls, state: RuntimeStateInput) -> "KnowledgeSearchContext":
         original_user_input = str(state.get("user_input") or "")
-        query = (
+        resolved_query = (
             _optional_text(state.get("knowledge_query"))
             if _can_use_resolved_query(state)
             else None
-        ) or original_user_input
+        )
+        query = resolved_query or original_user_input
+        resolved_query_used = resolved_query is not None
+        query_source = (
+            normalize_knowledge_query_source(state.get("knowledge_query_source"))
+            if resolved_query_used
+            else KnowledgeQuerySource.NONE
+        )
         return cls(
             project_id=state.get("project_id"),
             thread_id=state.get("thread_id"),
             query=query,
             original_user_input=original_user_input,
+            query_source=query_source,
+            resolved_query_used=resolved_query_used,
         )
 
     @property
@@ -44,6 +59,14 @@ class KnowledgeSearchContext:
     @property
     def original_user_input_hash(self) -> str:
         return hash_query(self.original_user_input)
+
+    @property
+    def resolved_query_hash(self) -> str | None:
+        return self.query_hash if self.resolved_query_used else None
+
+    @property
+    def resolved_query_len(self) -> int:
+        return len(self.query) if self.resolved_query_used else 0
 
 
 @dataclass(slots=True)
@@ -125,7 +148,10 @@ def _optional_text(value: object) -> str | None:
 
 def _can_use_resolved_query(state: RuntimeStateInput) -> bool:
     return (
-        str(state.get("turn_relation") or "").strip().lower() == "continuation"
-        and normalize_cta(state.get("cta")) == CONTINUE_EXPLANATION_CTA
+        str(state.get("turn_relation") or "").strip().lower()
+        in {"continuation", "reopening"}
+        and state.get("should_search_kb") is True
+        and normalize_cta(state.get("cta")) not in {"call_manager", "book_consultation"}
+        and str(state.get("resolved_cta_reply") or "").strip().lower() != "negative"
         and _optional_text(state.get("knowledge_query")) is not None
     )

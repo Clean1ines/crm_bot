@@ -55,6 +55,29 @@ def _chunk_trace_payload(chunk: KnowledgeChunk, rank: int) -> dict[str, object]:
     return {key: value for key, value in payload.items() if value is not None}
 
 
+def _query_trace_payload(
+    context: KnowledgeSearchContext,
+    state: AgentState,
+) -> dict[str, object]:
+    return {
+        "query_source": context.query_source.value,
+        "resolved_query_used": context.resolved_query_used,
+        "original_user_input_preview": _preview_text(context.original_user_input),
+        "resolved_query_preview": (
+            _preview_text(context.query) if context.resolved_query_used else None
+        ),
+        "original_user_input_hash": context.original_user_input_hash,
+        "resolved_query_hash": context.resolved_query_hash,
+        "original_user_input_len": len(context.original_user_input),
+        "resolved_query_len": context.resolved_query_len,
+        "turn_relation": state.get("turn_relation"),
+        "topic": state.get("topic"),
+        "cta": state.get("cta"),
+        "resolved_cta": state.get("resolved_cta"),
+        "resolved_cta_reply": state.get("resolved_cta_reply"),
+    }
+
+
 def _knowledge_search_exception_code(exc: BaseException) -> str:
     if isinstance(exc, TimeoutError):
         return ToolSafeErrorCode.TOOL_TIMEOUT.value
@@ -85,8 +108,7 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                 "project_id": context.project_id,
                 "query_hash": context.query_hash,
                 "query_len": len(context.query),
-                "original_user_input_hash": context.original_user_input_hash,
-                "original_user_input_len": len(context.original_user_input),
+                **_query_trace_payload(context, state),
             },
         )
 
@@ -146,14 +168,7 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                     extra={
                         "project_id": context.project_id,
                         "thread_id": context.thread_id,
-                        "original_user_input_hash": context.original_user_input_hash,
-                        "original_user_input_len": len(context.original_user_input),
-                        "resolved_query_hash": context.query_hash,
-                        "resolved_query_len": len(context.query),
-                        "resolved_query_preview": _preview_text(context.query),
-                        "turn_relation": state.get("turn_relation"),
-                        "topic": state.get("topic"),
-                        "cta": state.get("cta"),
+                        **_query_trace_payload(context, state),
                         "entries_count": len(result.chunks),
                         "top_entries": [
                             _chunk_trace_payload(chunk, rank)

@@ -39,8 +39,8 @@ GenerationSchemaStatus = Literal[
 ]
 EvidenceReferenceStatus = Literal[
     "valid",
-    "missing_required_ids",
-    "unknown_ids",
+    "missing_required_refs",
+    "unknown_refs",
     "invalid_for_answerability",
     "not_applicable",
     "not_called",
@@ -159,11 +159,14 @@ class ResponseGenerationResult:
 class StructuredResponseResult:
     answerability: Answerability
     answer: str | None = None
+    supporting_evidence_refs: list[str] = field(default_factory=list)
     supporting_entry_ids: list[str] = field(default_factory=list)
     unsupported_aspects: list[str] = field(default_factory=list)
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> "StructuredResponseResult":
+        if "supporting_entry_ids" in payload:
+            raise ValueError("legacy supporting_entry_ids field is forbidden")
         raw_answerability = str(payload.get("answerability") or "").strip().lower()
         if raw_answerability not in ANSWERABILITY_VALUES:
             raise ValueError("invalid answerability")
@@ -176,14 +179,29 @@ class StructuredResponseResult:
         return cls(
             answerability=cast(Answerability, raw_answerability),
             answer=answer,
-            supporting_entry_ids=_string_list(payload.get("supporting_entry_ids")),
+            supporting_evidence_refs=_strict_string_list(
+                payload.get("supporting_evidence_refs")
+            ),
             unsupported_aspects=_string_list(payload.get("unsupported_aspects")),
+        )
+
+    def with_resolved_entry_ids(
+        self,
+        entry_ids: list[str],
+    ) -> "StructuredResponseResult":
+        return StructuredResponseResult(
+            answerability=self.answerability,
+            answer=self.answer,
+            supporting_evidence_refs=list(self.supporting_evidence_refs),
+            supporting_entry_ids=list(entry_ids),
+            unsupported_aspects=list(self.unsupported_aspects),
         )
 
     def metadata(self) -> dict[str, object]:
         return {
             "answerability": self.answerability,
             "answer": self.answer,
+            "supporting_evidence_refs": list(self.supporting_evidence_refs),
             "supporting_entry_ids": list(self.supporting_entry_ids),
             "unsupported_aspects": list(self.unsupported_aspects),
         }
@@ -244,6 +262,20 @@ def _string_list(value: object) -> list[str]:
         text = _text_or_none(item)
         if text:
             result.append(text)
+    return result
+
+
+def _strict_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("invalid supporting_evidence_refs")
+        text = item.strip()
+        if not text:
+            raise ValueError("invalid supporting_evidence_refs")
+        result.append(text)
     return result
 
 

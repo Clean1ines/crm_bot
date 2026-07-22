@@ -14,6 +14,9 @@ from src.domain.runtime.language_policy import (
     detect_language_hint,
     normalize_project_language,
 )
+from src.domain.runtime.knowledge_query import (
+    KnowledgeQuerySource,
+)
 from src.domain.runtime.policy.handoff_request import is_explicit_handoff_request
 from src.domain.runtime.policy.intent_topic import (
     recognized_feature_map,
@@ -53,6 +56,8 @@ KNOWN_CTAS = frozenset(
     {"call_manager", "book_consultation", CONTINUE_EXPLANATION_CTA, "none"}
 )
 KNOWN_EMOTIONS = frozenset({"neutral", "positive", "negative", "angry"})
+MAX_KNOWLEDGE_QUERY_CHARS = 240
+CONTEXTUAL_KNOWLEDGE_QUERY_TURN_RELATIONS = frozenset({"continuation", "reopening"})
 
 
 @dataclass(slots=True)
@@ -70,6 +75,8 @@ class IntentExtractionPayload:
     should_generate_answer: bool = True
     should_offer_manager: bool = False
     knowledge_query: str | None = None
+    knowledge_query_source: KnowledgeQuerySource = KnowledgeQuerySource.NONE
+    knowledge_query_rejected_reason: str | None = None
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> "IntentExtractionPayload":
@@ -104,6 +111,19 @@ class IntentExtractionPayload:
         if domain in {"out_of_domain", "greeting", "ambiguous"}:
             should_search_kb = False
             should_generate_answer = False
+        turn_relation = _normalized_enum_value(
+            payload.get("turn_relation"),
+            KNOWN_TURN_RELATIONS,
+            "unknown",
+        )
+        knowledge_query, knowledge_query_rejected_reason = (
+            _normalize_payload_knowledge_query(
+                payload.get("knowledge_query"),
+                domain=domain,
+                should_search_kb=should_search_kb,
+                turn_relation=turn_relation,
+            )
+        )
 
         return cls(
             intent=_normalized_enum_value(
@@ -118,18 +138,20 @@ class IntentExtractionPayload:
             ),
             is_repeat_like=_coerce_bool(payload.get("is_repeat_like"), default=False),
             domain=domain,
-            turn_relation=_normalized_enum_value(
-                payload.get("turn_relation"),
-                KNOWN_TURN_RELATIONS,
-                "unknown",
-            ),
+            turn_relation=turn_relation,
             should_search_kb=should_search_kb,
             should_generate_answer=should_generate_answer,
             should_offer_manager=_coerce_bool(
                 payload.get("should_offer_manager"),
                 default=False,
             ),
-            knowledge_query=None,
+            knowledge_query=knowledge_query,
+            knowledge_query_source=(
+                KnowledgeQuerySource.MODEL_CONTEXTUAL
+                if knowledge_query
+                else KnowledgeQuerySource.NONE
+            ),
+            knowledge_query_rejected_reason=knowledge_query_rejected_reason,
         )
 
 
@@ -173,6 +195,7 @@ class IntentExtractionResult:
     should_generate_answer: bool
     should_offer_manager: bool
     knowledge_query: str | None = None
+    knowledge_query_source: KnowledgeQuerySource = KnowledgeQuerySource.NONE
     resolved_cta: str | None = None
     resolved_cta_reply: str | None = None
     normalization_flags: Mapping[str, object] = field(default_factory=dict)
@@ -186,7 +209,7 @@ class IntentExtractionResult:
         unknown_feature_keys = unrecognized_feature_keys(
             raw_features if isinstance(raw_features, Mapping) else None
         )
-        return cls(
+        result = cls(
             intent=validated.intent,
             cta=validated.cta,
             features=validated.features,
@@ -200,6 +223,7 @@ class IntentExtractionResult:
             should_generate_answer=validated.should_generate_answer,
             should_offer_manager=validated.should_offer_manager,
             knowledge_query=validated.knowledge_query,
+            knowledge_query_source=validated.knowledge_query_source,
             resolved_cta=None,
             resolved_cta_reply=None,
             normalization_flags=(
@@ -208,6 +232,28 @@ class IntentExtractionResult:
                 else {}
             ),
         )
+        if validated.knowledge_query_rejected_reason:
+            return replace(
+                result,
+                normalization_flags={
+                    **dict(result.normalization_flags),
+                    "knowledge_query_rejected_reason": (
+                        validated.knowledge_query_rejected_reason
+                    ),
+                    "knowledge_query_source": KnowledgeQuerySource.NONE.value,
+                },
+            )
+        if validated.knowledge_query:
+            return replace(
+                result,
+                normalization_flags={
+                    **dict(result.normalization_flags),
+                    "knowledge_query_source": (
+                        KnowledgeQuerySource.MODEL_CONTEXTUAL.value
+                    ),
+                },
+            )
+        return result
 
     def normalized_for_context(
         self,
@@ -215,10 +261,11 @@ class IntentExtractionResult:
     ) -> "IntentExtractionResult":
         reply_kind = _short_reply_kind(context.user_input)
         if reply_kind is None:
-            return _normalize_business_question_route(
+            normalized = _normalize_contextual_knowledge_query(
                 _normalize_handoff_classification(self, context),
                 context,
             )
+            return _normalize_business_question_route(normalized, context)
 
         previous_topic = _previous_topic(context)
         previous_cta = _previous_cta(context)
@@ -278,6 +325,7 @@ class IntentExtractionResult:
             "should_offer_manager": self.should_offer_manager,
         }
         patch["knowledge_query"] = self.knowledge_query
+        patch["knowledge_query_source"] = self.knowledge_query_source.value
         patch["resolved_cta"] = self.resolved_cta
         patch["resolved_cta_reply"] = self.resolved_cta_reply
         patch["normalization_flags"] = dict(self.normalization_flags)
@@ -317,6 +365,34 @@ def _normalized_enum_value(
     return normalized if normalized in allowed else default
 
 
+def _same_normalized_text(left: str | None, right: str | None) -> bool:
+    return (
+        " ".join(str(left or "").split()).lower()
+        == " ".join(str(right or "").split()).lower()
+    )
+
+
+def _normalize_payload_knowledge_query(
+    value: object,
+    *,
+    domain: str,
+    should_search_kb: bool,
+    turn_relation: str,
+) -> tuple[str | None, str | None]:
+    query = _optional_text(value)
+    if query is None:
+        return None, None
+    if len(query) > MAX_KNOWLEDGE_QUERY_CHARS:
+        return None, "too_long"
+    if domain != "business":
+        return None, "non_business_domain"
+    if not should_search_kb:
+        return None, "search_disabled"
+    if turn_relation not in CONTEXTUAL_KNOWLEDGE_QUERY_TURN_RELATIONS:
+        return None, "not_contextual_turn"
+    return query, None
+
+
 def _dialog_state_or_none(value: object) -> DialogState | None:
     if not isinstance(value, Mapping):
         return None
@@ -325,12 +401,30 @@ def _dialog_state_or_none(value: object) -> DialogState | None:
         last_cta=normalize_cta(value.get("last_cta")),
         last_topic=_optional_text(value.get("last_topic")),
         repeat_count=int(value.get("repeat_count") or 0),
+        last_repeat_increment_reason=_repeat_increment_reason(
+            value.get("last_repeat_increment_reason")
+        ),
+        last_repeat_reset_reason=_repeat_reset_reason(
+            value.get("last_repeat_reset_reason")
+        ),
         lead_status=str(value.get("lead_status") or "cold"),
         lifecycle=str(value.get("lifecycle") or "cold"),
         handoff_confirmation_pending=bool(
             value.get("handoff_confirmation_pending", False)
         ),
     )
+
+
+def _repeat_increment_reason(value: object) -> str | None:
+    text = _optional_text(value)
+    return text if text == "explicit_repeat_like" else None
+
+
+def _repeat_reset_reason(value: object) -> str | None:
+    text = _optional_text(value)
+    if text in {"not_repeat_like", "new_topic", "topic_changed", "intent_changed"}:
+        return text
+    return None
 
 
 def _target_language_from_state(state: RuntimeStateInput) -> LanguageHint:
@@ -430,6 +524,7 @@ def _normalize_handoff_classification(
         should_generate_answer=True,
         should_offer_manager=False,
         knowledge_query=None,
+        knowledge_query_source=KnowledgeQuerySource.NONE,
         normalization_flags={
             **dict(result.normalization_flags),
             "handoff_intent_downgraded": True,
@@ -466,6 +561,55 @@ def _normalize_business_question_route(
             "routing_flag_override_reason": "ordinary_business_question",
         },
     )
+
+
+def _normalize_contextual_knowledge_query(
+    result: IntentExtractionResult,
+    context: IntentExtractionContext,
+) -> IntentExtractionResult:
+    if result.knowledge_query is None:
+        return result
+    if result.resolved_cta_reply == "negative":
+        return replace(
+            result,
+            knowledge_query=None,
+            knowledge_query_source=KnowledgeQuerySource.NONE,
+            normalization_flags={
+                **dict(result.normalization_flags),
+                "knowledge_query_rejected_reason": "negative_cta_reply",
+            },
+        )
+    if not result.should_search_kb:
+        return replace(
+            result,
+            knowledge_query=None,
+            knowledge_query_source=KnowledgeQuerySource.NONE,
+            normalization_flags={
+                **dict(result.normalization_flags),
+                "knowledge_query_rejected_reason": "search_disabled",
+            },
+        )
+    if result.turn_relation not in CONTEXTUAL_KNOWLEDGE_QUERY_TURN_RELATIONS:
+        return replace(
+            result,
+            knowledge_query=None,
+            knowledge_query_source=KnowledgeQuerySource.NONE,
+            normalization_flags={
+                **dict(result.normalization_flags),
+                "knowledge_query_rejected_reason": "not_contextual_turn",
+            },
+        )
+    if _same_normalized_text(result.knowledge_query, context.user_input):
+        return replace(
+            result,
+            knowledge_query=None,
+            knowledge_query_source=KnowledgeQuerySource.NONE,
+            normalization_flags={
+                **dict(result.normalization_flags),
+                "knowledge_query_rejected_reason": "same_as_user_input",
+            },
+        )
+    return result
 
 
 def _normalize_affirmative_reply(
@@ -506,6 +650,13 @@ def _normalize_affirmative_reply(
                 previous_topic,
                 language=language,
             ),
+            knowledge_query_source=KnowledgeQuerySource.CANONICAL_CONTINUE_EXPLANATION,
+            normalization_flags={
+                **dict(result.normalization_flags),
+                "knowledge_query_source": (
+                    KnowledgeQuerySource.CANONICAL_CONTINUE_EXPLANATION.value
+                ),
+            },
         )
     if result.intent in {"other", "unknown"} and previous_topic:
         return replace(result, domain="business", intent="sales", topic=previous_topic)
@@ -544,6 +695,7 @@ def _normalize_negative_reply(
             should_generate_answer=True,
             should_offer_manager=False,
             knowledge_query=None,
+            knowledge_query_source=KnowledgeQuerySource.NONE,
         )
     return result
 

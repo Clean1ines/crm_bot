@@ -20,11 +20,12 @@ async def _passthrough(_name, impl, state, **_kwargs):
 
 
 def _structured_content(answer: str, *, entry_id: str = "entry-1") -> str:
+    evidence_ref = f"E{entry_id.removeprefix('entry-')}"
     return json.dumps(
         {
             "answerability": "supported",
             "answer": answer,
-            "supporting_entry_ids": [entry_id],
+            "supporting_evidence_refs": [evidence_ref],
             "unsupported_aspects": [],
         },
         ensure_ascii=False,
@@ -111,7 +112,10 @@ async def test_rag_debug_true_emits_retrieval_and_generation_traces(monkeypatch)
     assert generation_trace
     assert kb_trace[-1].kwargs["extra"]["top_entries"][0]["id"] == "entry-1"
     assert generation_trace[-1].kwargs["extra"]["retrieved_entry_ids"] == ["entry-1"]
-    assert generation_trace[-1].kwargs["extra"]["prompt_entries"][0]["id"] == "entry-1"
+    assert (
+        generation_trace[-1].kwargs["extra"]["prompt_entries"][0]["canonical_entry_id"]
+        == "entry-1"
+    )
     assert generation_trace[-1].kwargs["extra"]["generation_status"] == "success"
     assert generation_trace[-1].kwargs["extra"]["model_answerability"] == "supported"
     assert "answerability" not in generation_trace[-1].kwargs["extra"]

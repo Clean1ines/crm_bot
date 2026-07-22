@@ -47,6 +47,7 @@ def test_intent_extraction_result_serializes_validated_payload():
         "should_generate_answer": True,
         "should_offer_manager": False,
         "knowledge_query": None,
+        "knowledge_query_source": "none",
         "resolved_cta": None,
         "resolved_cta_reply": None,
         "normalization_flags": {},
@@ -101,8 +102,94 @@ def test_intent_extraction_result_explicitly_clears_turn_scoped_knowledge_query(
 
     assert "knowledge_query" in result.to_state_patch()
     assert result.to_state_patch()["knowledge_query"] is None
+    assert result.to_state_patch()["knowledge_query_source"] == "none"
     assert result.to_state_patch()["resolved_cta"] is None
     assert result.to_state_patch()["resolved_cta_reply"] is None
+
+
+def test_intent_extraction_accepts_model_contextual_knowledge_query_for_continuation():
+    context = IntentExtractionContext.from_state(
+        {"user_input": "А роли?", "topic": "product"}
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "other",
+            "topic": "product",
+            "cta": "none",
+            "turn_relation": "continuation",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "knowledge_query": "какие роли есть в продукте",
+        }
+    ).normalized_for_context(context)
+
+    assert result.knowledge_query == "какие роли есть в продукте"
+    assert result.knowledge_query_source.value == "model_contextual"
+    assert result.normalization_flags["knowledge_query_source"] == "model_contextual"
+    assert result.to_state_patch()["knowledge_query_source"] == "model_contextual"
+
+
+def test_intent_extraction_rejects_llm_knowledge_query_for_new_topic():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "other",
+            "topic": "product",
+            "cta": "none",
+            "turn_relation": "new_topic",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "knowledge_query": "какие роли есть в продукте",
+        }
+    )
+
+    assert result.knowledge_query is None
+    assert result.knowledge_query_source.value == "none"
+    assert result.normalization_flags["knowledge_query_rejected_reason"] == (
+        "not_contextual_turn"
+    )
+
+
+def test_intent_extraction_rejects_llm_knowledge_query_equal_to_user_input():
+    context = IntentExtractionContext.from_state({"user_input": "Какие роли?"})
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "other",
+            "topic": "product",
+            "cta": "none",
+            "turn_relation": "continuation",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "knowledge_query": " Какие   роли? ",
+        }
+    ).normalized_for_context(context)
+
+    assert result.knowledge_query is None
+    assert result.knowledge_query_source.value == "none"
+    assert result.normalization_flags["knowledge_query_rejected_reason"] == (
+        "same_as_user_input"
+    )
+
+
+def test_intent_extraction_rejects_too_long_llm_knowledge_query():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "other",
+            "topic": "product",
+            "cta": "none",
+            "turn_relation": "continuation",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "knowledge_query": "x" * 241,
+        }
+    )
+
+    assert result.knowledge_query is None
+    assert result.knowledge_query_source.value == "none"
+    assert result.normalization_flags["knowledge_query_rejected_reason"] == "too_long"
 
 
 def test_intent_extraction_context_keeps_previous_topic_and_cta_signals():
@@ -308,6 +395,10 @@ def test_intent_extraction_normalizes_affirmative_reply_from_continuation_cta():
     assert result.knowledge_query is not None
     assert result.knowledge_query != "Да"
     assert "продукт" in result.knowledge_query
+    assert result.knowledge_query_source.value == "canonical_continue_explanation"
+    assert result.to_state_patch()["knowledge_query_source"] == (
+        "canonical_continue_explanation"
+    )
 
 
 def test_intent_extraction_localizes_continuation_knowledge_query():
@@ -343,6 +434,7 @@ def test_intent_extraction_localizes_continuation_knowledge_query():
         assert result.cta == "continue_explanation"
         assert result.turn_relation == "continuation"
         assert result.knowledge_query is not None
+        assert result.knowledge_query_source.value == "canonical_continue_explanation"
         assert expected_query_part in result.knowledge_query
 
 
@@ -374,6 +466,8 @@ def test_intent_extraction_normalizes_negative_reply_from_continuation_cta():
     assert result.turn_relation == "short_reply"
     assert result.should_search_kb is False
     assert result.should_offer_manager is False
+    assert result.knowledge_query is None
+    assert result.knowledge_query_source.value == "none"
 
 
 def test_intent_extraction_does_not_invent_action_cta_for_short_yes_without_pending_cta():

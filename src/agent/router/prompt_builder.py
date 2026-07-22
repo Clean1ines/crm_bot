@@ -13,6 +13,7 @@ from src.domain.runtime.prompting import (
     ProjectPromptContext,
     TruncateText,
 )
+from src.domain.runtime.evidence_references import EvidenceReferenceIndex
 from src.domain.runtime.state_contracts import (
     HistoryMessage,
     ProjectRuntimeConfigurationState,
@@ -56,15 +57,23 @@ def format_kb_results(
     if not kb_results:
         return "[]", 0.0, 0
 
+    evidence_index = EvidenceReferenceIndex.from_knowledge_chunks(
+        kb_results,
+        limit=limit,
+    )
     lines: list[str] = []
     top_score = 0.0
-    for index, item in enumerate(kb_results[:limit], start=1):
+    for item in kb_results:
         score = 0.0
         text = ""
-        question = ""
         method = ""
+        entry_id = ""
 
         if isinstance(item, dict):
+            entry_id = compact_whitespace(str(item.get("id", "")))
+            evidence_ref = evidence_index.entry_id_to_alias.get(entry_id)
+            if evidence_ref is None:
+                continue
             raw_score = item.get("score", 0.0)
             try:
                 score = float(raw_score or 0.0)
@@ -72,19 +81,12 @@ def format_kb_results(
                 score = 0.0
 
             text = extract_kb_text(item)
-            question = truncate_text(str(item.get("question", "")), 120)
             method = compact_whitespace(str(item.get("method", "")))
-            entry_id = compact_whitespace(str(item.get("id", "")))
         else:
-            text = extract_kb_text(item)
-            entry_id = ""
+            continue
 
         top_score = max(top_score, score)
-        parts: list[str] = [f"{index}. score={score:.3f}"]
-        if entry_id:
-            parts.append(f"id={entry_id}")
-        if question:
-            parts.append(f"question={question}")
+        parts: list[str] = [f"{evidence_ref} | score={score:.3f}"]
         if method:
             parts.append(f"method={method}")
         if text:
@@ -98,24 +100,34 @@ def format_kb_prompt_entry_traces(
     kb_results: Sequence[object],
     limit: int = DEFAULT_KB_LIMIT,
 ) -> list[dict[str, object]]:
+    evidence_index = EvidenceReferenceIndex.from_knowledge_chunks(
+        kb_results,
+        limit=limit,
+    )
     entries: list[dict[str, object]] = []
-    for index, item in enumerate(kb_results[:limit], start=1):
+    for item in kb_results:
         entry_id = None
         score = 0.0
         text = extract_kb_text(item)
         if isinstance(item, dict):
             entry_id = item.get("id")
+            evidence_ref = evidence_index.entry_id_to_alias.get(str(entry_id or ""))
+            if evidence_ref is None:
+                continue
             raw_score = item.get("score", 0.0)
             try:
                 score = float(raw_score or 0.0)
             except (TypeError, ValueError):
                 score = 0.0
+        else:
+            continue
 
         prompt_text = truncate_text(text, 420) if text else ""
         entries.append(
             {
-                "rank": index,
-                "id": entry_id,
+                "rank": len(entries) + 1,
+                "evidence_ref": evidence_ref,
+                "canonical_entry_id": entry_id,
                 "score": score,
                 "content_preview": truncate_text(prompt_text, 160),
                 "content_chars_before_truncation": len(text),

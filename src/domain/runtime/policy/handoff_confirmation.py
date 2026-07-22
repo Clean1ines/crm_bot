@@ -33,6 +33,10 @@ def clear_handoff_confirmation(dialog_state: DialogState) -> DialogState:
         "last_cta": dialog_state.get("last_cta"),
         "last_topic": dialog_state.get("last_topic"),
         "repeat_count": dialog_state.get("repeat_count", 0),
+        "last_repeat_increment_reason": dialog_state.get(
+            "last_repeat_increment_reason"
+        ),
+        "last_repeat_reset_reason": dialog_state.get("last_repeat_reset_reason"),
         "lead_status": str(dialog_state.get("lead_status") or "cold"),
         "lifecycle": str(dialog_state.get("lifecycle") or "cold"),
         "handoff_confirmation_pending": False,
@@ -45,6 +49,10 @@ def with_handoff_confirmation_pending(dialog_state: DialogState) -> DialogState:
         "last_cta": dialog_state.get("last_cta"),
         "last_topic": dialog_state.get("last_topic"),
         "repeat_count": dialog_state.get("repeat_count", 0),
+        "last_repeat_increment_reason": dialog_state.get(
+            "last_repeat_increment_reason"
+        ),
+        "last_repeat_reset_reason": dialog_state.get("last_repeat_reset_reason"),
         "lead_status": str(dialog_state.get("lead_status") or "cold"),
         "lifecycle": str(dialog_state.get("lifecycle") or "cold"),
         "handoff_confirmation_pending": True,

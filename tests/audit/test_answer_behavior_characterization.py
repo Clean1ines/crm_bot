@@ -132,8 +132,8 @@ async def run_scenario(scenario: Scenario) -> dict[str, object]:
         scenario.intent_payload or _payload(),
         exc=scenario.intent_exception,
     )
-    supporting_entry_ids = (
-        ["entry-1"]
+    supporting_evidence_refs = (
+        ["E1"]
         if scenario.response_answerability in {"supported", "partially_supported"}
         else []
     )
@@ -151,7 +151,7 @@ async def run_scenario(scenario: Scenario) -> dict[str, object]:
         {
             "answerability": scenario.response_answerability,
             "answer": response_answer,
-            "supporting_entry_ids": supporting_entry_ids,
+            "supporting_evidence_refs": supporting_evidence_refs,
             "unsupported_aspects": unsupported_aspects,
         },
         exc=scenario.generation_exception,
@@ -273,6 +273,7 @@ async def run_scenario(scenario: Scenario) -> dict[str, object]:
         "tool_calls": tool_registry.calls,
         "search_queries": search_queries,
         "saved_state": saved_states[-1] if saved_states else None,
+        "final_state": dict(state),
     }
 
 
@@ -677,3 +678,97 @@ async def test_production_business_sequence_replay_does_not_escalate_new_topics(
     )
     assert continuation_outcome["search_queries"] != ["да"]
     assert "kb_search" in continuation_outcome["nodes"]
+
+
+@pytest.mark.asyncio
+async def test_exact_manager_document_sequence_does_not_escalate_or_template():
+    dialog_state = {
+        "last_intent": "other",
+        "last_topic": "product",
+        "repeat_count": 9,
+        "lead_status": "warm",
+        "lifecycle": "warm",
+        "last_repeat_increment_reason": "explicit_repeat_like",
+        "last_repeat_reset_reason": None,
+    }
+    questions = [
+        ("Что такое менеджерский контур?", "support", "product"),
+        ("А когда он подключается?", "support", "product"),
+        ("Что будет, если бот не знает ответа?", "support", "support"),
+        ("Куда попадёт сложный вопрос?", "support", "support"),
+        ("Что происходит с документом после загрузки?", "other", "product"),
+        ("Как документ превращается в базу знаний?", "other", "product"),
+        ("Зачем публиковать знания отдельно?", "other", "product"),
+    ]
+
+    for user_input, intent, topic in questions:
+        outcome = await run_scenario(
+            Scenario(
+                user_input,
+                user_input,
+                "Independent business question should route through KB/generation.",
+                intent_payload=_payload(
+                    intent=intent,
+                    topic=topic,
+                    cta="none",
+                    turn_relation="new_topic",
+                    should_search_kb=True,
+                    should_generate_answer=True,
+                    should_offer_manager=False,
+                ),
+                initial_state={"lifecycle": "warm", "dialog_state": dialog_state},
+            )
+        )
+
+        final_state = outcome["final_state"]
+        dialog_state = outcome["saved_state"]["dialog_state"]
+        assert "escalate" not in outcome["nodes"]
+        assert "template_response" not in outcome["nodes"]
+        assert "kb_search" in outcome["nodes"]
+        assert outcome["requires_human"] is False
+        assert final_state["decision"] == "LLM_GENERATE"
+        assert final_state["generation_mode"] == "KNOWLEDGE_ANSWER"
+        assert final_state.get("cta") != "call_manager"
+        assert final_state.get("resolved_cta") is None
+        assert final_state.get("resolved_cta_reply") is None
+        assert dialog_state["repeat_count"] == 0
+        assert dialog_state["last_repeat_increment_reason"] is None
+        assert dialog_state["last_repeat_reset_reason"] == "new_topic"
+
+
+@pytest.mark.asyncio
+async def test_canonical_yes_continuation_uses_deterministic_kb_query_source():
+    outcome = await run_scenario(
+        Scenario(
+            "canonical_yes_continuation",
+            "да",
+            "Affirmative continuation should use canonical query.",
+            initial_state={
+                "lifecycle": "warm",
+                "dialog_state": {
+                    "last_cta": "continue_explanation",
+                    "last_topic": "product",
+                    "last_intent": "other",
+                    "repeat_count": 0,
+                    "lead_status": "warm",
+                    "lifecycle": "warm",
+                },
+            },
+        )
+    )
+
+    final_state = outcome["final_state"]
+    assert "escalate" not in outcome["nodes"]
+    assert "kb_search" in outcome["nodes"]
+    assert outcome["requires_human"] is False
+    assert final_state["decision"] == "LLM_GENERATE"
+    assert final_state["generation_mode"] == "KNOWLEDGE_ANSWER"
+    assert final_state["knowledge_query_source"] == "canonical_continue_explanation"
+    assert final_state["knowledge_query"] == (
+        "подробнее как работает продукт и его возможности"
+    )
+    assert outcome["search_queries"] == [
+        "подробнее как работает продукт и его возможности"
+    ]
+    assert outcome["search_queries"][0] != "да"
+    assert final_state["dialog_state"]["repeat_count"] == 0

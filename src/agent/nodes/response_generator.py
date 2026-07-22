@@ -13,6 +13,7 @@ import re
 from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import (
+    DEFAULT_KB_LIMIT,
     build_response_prompt,
     format_kb_prompt_entry_traces,
 )
@@ -27,6 +28,10 @@ from src.domain.runtime.language_policy import (
     normalize_project_language,
 )
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
+from src.domain.runtime.evidence_references import (
+    EvidenceReferenceIndex,
+    UnknownEvidenceReference,
+)
 from src.domain.runtime.response_generation import (
     GENERATION_MODE_VALUES,
     GenerationMode,
@@ -128,6 +133,26 @@ class StructuredGenerationValidation:
     failure_reason: str | None = None
 
 
+REPAIRABLE_VALIDATION_FAILURES = frozenset(
+    {
+        "invalid_json",
+        "invalid_schema",
+        "invalid answerability",
+        "legacy supporting_entry_ids field is forbidden",
+        "invalid_supporting_evidence_refs",
+        "missing_supporting_evidence_refs",
+        "duplicate_supporting_evidence_refs",
+        "missing_answer",
+        "missing_unsupported_aspects",
+        "supported_with_unsupported_aspects",
+        "unsupported_answer_must_be_empty",
+        "supporting_refs_invalid_for_answerability",
+        "conflicting_evidence_requires_two_supporting_refs",
+        "conflicting_answer_must_be_empty",
+    }
+)
+
+
 # Test hook and lazy runtime cache.
 # Keep this symbol module-level so existing tests can patch
 # src.agent.nodes.response_generator.ChatGroq without importing langchain_groq
@@ -158,6 +183,33 @@ def _chat_groq_class() -> ChatGroqFactory:
     from langchain_groq import ChatGroq as ImportedChatGroq
 
     return cast(ChatGroqFactory, ImportedChatGroq)
+
+
+async def _invoke_response_model(
+    *,
+    llm: ChatGroqClient | None,
+    selected_model: str,
+    base_model: str,
+    prompt: str,
+) -> str:
+    messages = [("human", prompt)]
+    if llm is not None and selected_model == base_model:
+        response = await llm.ainvoke(messages)
+    else:
+
+        def _make_client(*, api_key: str) -> ChatGroqClient:
+            return _chat_groq_class()(
+                model=selected_model,
+                temperature=0.3,
+                max_tokens=700,
+                api_key=api_key,
+            )
+
+        response = await _ainvoke_chat_once(
+            make_client=_make_client,
+            messages=messages,
+        )
+    return (response.content or "").strip()
 
 
 def _merge_dialog_state_into_user_memory(
@@ -463,14 +515,28 @@ def _unwrap_json_block(content: str) -> str:
     return text.strip()
 
 
-def _valid_knowledge_entry_ids(chunks: Sequence[object]) -> set[str]:
-    ids: set[str] = set()
-    for item in chunks:
-        if isinstance(item, Mapping):
-            entry_id = str(item.get("id") or "").strip()
-            if entry_id:
-                ids.add(entry_id)
-    return ids
+def build_structured_response_repair_prompt(
+    *,
+    original_prompt: str,
+    invalid_output: str,
+    validation: StructuredGenerationValidation,
+    known_evidence_refs: Sequence[str],
+) -> str:
+    refs = ", ".join(known_evidence_refs) if known_evidence_refs else "none"
+    return (
+        f"{original_prompt}\n\n"
+        "The previous response did not satisfy the required JSON contract.\n"
+        f"Failure reason: {validation.failure_reason or 'invalid_generation'}\n"
+        f"Allowed evidence refs: {refs}\n"
+        f"Invalid output chars: {len(invalid_output)}\n\n"
+        "Repair instructions:\n"
+        "- Return only valid JSON and no markdown.\n"
+        "- Use only the field supporting_evidence_refs for evidence references.\n"
+        "- Do not return the legacy field supporting_entry_ids.\n"
+        "- Use only evidence refs listed above, exactly as written and case-sensitive.\n"
+        "- Do not add facts, sources, internal IDs, hashes, source IDs, or document IDs.\n"
+        "- Do not change answerability unless it is necessary to fix the contract error.\n"
+    )
 
 
 def _generation_metadata(
@@ -480,18 +546,25 @@ def _generation_metadata(
     model_answerability: str | None,
     supporting_entry_ids: list[str] | None = None,
     unsupported_aspects: list[str] | None = None,
+    supporting_evidence_refs: list[str] | None = None,
     parse_status: str,
     schema_status: str,
     evidence_reference_status: str,
     semantic_grounding_status: str,
     semantic_grounding_failure_reason: str | None = None,
     fallback_reason: str | None = None,
+    generation_attempt_count: int = 0,
+    initial_validation_failure_reason: str | None = None,
+    repair_attempted: bool = False,
+    repair_validation_failure_reason: str | None = None,
+    repair_succeeded: bool = False,
 ) -> dict[str, object]:
     return {
         "generation_mode": generation_mode,
         "retrieval_status": retrieval_status,
         "model_answerability": model_answerability,
         "supporting_entry_ids": supporting_entry_ids or [],
+        "supporting_evidence_refs": supporting_evidence_refs or [],
         "unsupported_aspects": unsupported_aspects or [],
         "generation_output_parse_status": parse_status,
         "generation_schema_status": schema_status,
@@ -499,6 +572,11 @@ def _generation_metadata(
         "semantic_grounding_status": semantic_grounding_status,
         "semantic_grounding_failure_reason": semantic_grounding_failure_reason,
         "fallback_reason": fallback_reason,
+        "generation_attempt_count": generation_attempt_count,
+        "initial_validation_failure_reason": initial_validation_failure_reason,
+        "repair_attempted": repair_attempted,
+        "repair_validation_failure_reason": repair_validation_failure_reason,
+        "repair_succeeded": repair_succeeded,
     }
 
 
@@ -521,7 +599,9 @@ def _response_patch(
         {
             "generation_mode": metadata.get("generation_mode"),
             "model_answerability": metadata.get("model_answerability"),
+            "model_evidence_refs": metadata.get("supporting_evidence_refs", []),
             "supporting_entry_ids": metadata.get("supporting_entry_ids", []),
+            "resolved_supporting_entry_ids": metadata.get("supporting_entry_ids", []),
             "unsupported_aspects": metadata.get("unsupported_aspects", []),
             "generation_output_parse_status": metadata.get(
                 "generation_output_parse_status"
@@ -714,13 +794,13 @@ def _validate_structured_response(
         )
 
     if context.generation_mode != GenerationMode.KNOWLEDGE_ANSWER:
-        if result.supporting_entry_ids:
+        if result.supporting_evidence_refs:
             return StructuredGenerationValidation(
                 result=None,
                 parse_status="valid",
                 schema_status="invalid_answerability_contract",
                 evidence_reference_status="not_applicable",
-                failure_reason="non_kb_response_with_supporting_ids",
+                failure_reason="non_kb_response_with_supporting_refs",
             )
         if result.answerability != "supported":
             return StructuredGenerationValidation(
@@ -753,19 +833,14 @@ def _validate_structured_response(
             evidence_reference_status="not_applicable",
         )
 
-    valid_ids = _valid_knowledge_entry_ids(context.knowledge_chunks)
-    unknown_ids = [
-        entry_id
-        for entry_id in result.supporting_entry_ids
-        if entry_id not in valid_ids
-    ]
-    if unknown_ids:
+    refs = result.supporting_evidence_refs
+    if len(refs) != len(set(refs)):
         return StructuredGenerationValidation(
             result=None,
             parse_status="valid",
             schema_status="valid",
-            evidence_reference_status="unknown_ids",
-            failure_reason="invalid_supporting_entry_ids",
+            evidence_reference_status="invalid_for_answerability",
+            failure_reason="duplicate_supporting_evidence_refs",
         )
 
     if result.answerability in {"supported", "partially_supported"}:
@@ -777,13 +852,13 @@ def _validate_structured_response(
                 evidence_reference_status="not_called",
                 failure_reason="missing_answer",
             )
-        if not result.supporting_entry_ids:
+        if not refs:
             return StructuredGenerationValidation(
                 result=None,
                 parse_status="valid",
                 schema_status="valid",
-                evidence_reference_status="missing_required_ids",
-                failure_reason="missing_supporting_entry_ids",
+                evidence_reference_status="missing_required_refs",
+                failure_reason="missing_supporting_evidence_refs",
             )
 
     if result.answerability == "partially_supported" and not result.unsupported_aspects:
@@ -813,13 +888,13 @@ def _validate_structured_response(
                 evidence_reference_status="not_called",
                 failure_reason="unsupported_answer_must_be_empty",
             )
-        if result.supporting_entry_ids:
+        if refs:
             return StructuredGenerationValidation(
                 result=None,
                 parse_status="valid",
                 schema_status="valid",
                 evidence_reference_status="invalid_for_answerability",
-                failure_reason="unsupported_with_supporting_ids",
+                failure_reason="supporting_refs_invalid_for_answerability",
             )
         if not result.unsupported_aspects:
             return StructuredGenerationValidation(
@@ -831,14 +906,14 @@ def _validate_structured_response(
             )
 
     if result.answerability == "conflicting_evidence":
-        distinct_ids = set(result.supporting_entry_ids)
-        if len(result.supporting_entry_ids) < 2 or len(distinct_ids) < 2:
+        distinct_refs = set(refs)
+        if len(refs) < 2 or len(distinct_refs) < 2:
             return StructuredGenerationValidation(
                 result=None,
                 parse_status="valid",
                 schema_status="valid",
                 evidence_reference_status="invalid_for_answerability",
-                failure_reason="conflicting_evidence_requires_two_supporting_ids",
+                failure_reason="conflicting_evidence_requires_two_supporting_refs",
             )
         if result.answer:
             return StructuredGenerationValidation(
@@ -849,8 +924,23 @@ def _validate_structured_response(
                 failure_reason="conflicting_answer_must_be_empty",
             )
 
+    evidence_index = EvidenceReferenceIndex.from_knowledge_chunks(
+        context.knowledge_chunks,
+        limit=DEFAULT_KB_LIMIT,
+    )
+    try:
+        resolved_entry_ids = evidence_index.resolve_aliases(refs)
+    except UnknownEvidenceReference:
+        return StructuredGenerationValidation(
+            result=None,
+            parse_status="valid",
+            schema_status="valid",
+            evidence_reference_status="unknown_refs",
+            failure_reason="invalid_supporting_evidence_refs",
+        )
+
     return StructuredGenerationValidation(
-        result=result,
+        result=result.with_resolved_entry_ids(resolved_entry_ids),
         parse_status="valid",
         schema_status="valid",
         evidence_reference_status="valid",
@@ -947,6 +1037,15 @@ def _emit_generation_trace(
                 "semantic_grounding_failure_reason"
             ),
             "fallback_reason": metadata.get("fallback_reason"),
+            "generation_attempt_count": metadata.get("generation_attempt_count", 0),
+            "initial_validation_failure_reason": metadata.get(
+                "initial_validation_failure_reason"
+            ),
+            "repair_attempted": metadata.get("repair_attempted", False),
+            "repair_validation_failure_reason": metadata.get(
+                "repair_validation_failure_reason"
+            ),
+            "repair_succeeded": metadata.get("repair_succeeded", False),
             "canonical_response_cta": response_cta,
             "generated_action_cta_detected": generated_action_cta_detected,
         },
@@ -1311,30 +1410,48 @@ def create_response_generator_node(
 
         try:
             selected_model = _resolve_response_model_name(state, base_model)
-            messages = [("human", prompt)]
-
-            if llm is not None and selected_model == base_model:
-                response = await llm.ainvoke(messages)
-            else:
-
-                def _make_client(*, api_key: str) -> ChatGroqClient:
-                    return _chat_groq_class()(
-                        model=selected_model,
-                        temperature=0.3,
-                        max_tokens=700,
-                        api_key=api_key,
-                    )
-
-                response = await _ainvoke_chat_once(
-                    make_client=_make_client,
-                    messages=messages,
-                )
-            raw_response_text = (response.content or "").strip()
+            raw_response_text = await _invoke_response_model(
+                llm=llm,
+                selected_model=selected_model,
+                base_model=base_model,
+                prompt=prompt,
+            )
             is_fallback_response = False
             validation = _validate_structured_response(
                 raw_response_text,
                 context=context,
             )
+            generation_attempt_count = 1
+            initial_validation_failure_reason = validation.failure_reason
+            repair_attempted = False
+            repair_validation_failure_reason: str | None = None
+            known_evidence_refs = EvidenceReferenceIndex.from_knowledge_chunks(
+                context.knowledge_chunks,
+                limit=DEFAULT_KB_LIMIT,
+            ).known_aliases()
+            if (
+                validation.result is None
+                and validation.failure_reason in REPAIRABLE_VALIDATION_FAILURES
+            ):
+                repair_attempted = True
+                repair_prompt = build_structured_response_repair_prompt(
+                    original_prompt=prompt,
+                    invalid_output=raw_response_text,
+                    validation=validation,
+                    known_evidence_refs=known_evidence_refs,
+                )
+                raw_response_text = await _invoke_response_model(
+                    llm=llm,
+                    selected_model=selected_model,
+                    base_model=base_model,
+                    prompt=repair_prompt,
+                )
+                generation_attempt_count = 2
+                validation = _validate_structured_response(
+                    raw_response_text,
+                    context=context,
+                )
+                repair_validation_failure_reason = validation.failure_reason
             structured_result = validation.result
             if structured_result is None:
                 patch = _safe_generation_fallback(
@@ -1354,6 +1471,15 @@ def create_response_generator_node(
                 metadata["fallback_reason"] = (
                     validation.failure_reason or "invalid_generation"
                 )
+                metadata["generation_attempt_count"] = generation_attempt_count
+                metadata["initial_validation_failure_reason"] = (
+                    initial_validation_failure_reason
+                )
+                metadata["repair_attempted"] = repair_attempted
+                metadata["repair_validation_failure_reason"] = (
+                    repair_validation_failure_reason
+                )
+                metadata["repair_succeeded"] = False
                 patch["metadata"] = metadata
                 patch["fallback_reason"] = metadata["fallback_reason"]
                 _emit_generation_trace(
@@ -1433,6 +1559,7 @@ def create_response_generator_node(
                 retrieval_status=context.knowledge_retrieval_status,
                 model_answerability=structured_result.answerability,
                 supporting_entry_ids=structured_result.supporting_entry_ids,
+                supporting_evidence_refs=structured_result.supporting_evidence_refs,
                 unsupported_aspects=structured_result.unsupported_aspects,
                 parse_status=validation.parse_status,
                 schema_status=validation.schema_status,
@@ -1441,6 +1568,11 @@ def create_response_generator_node(
                     structured_result
                 ),
                 fallback_reason=fallback_reason,
+                generation_attempt_count=generation_attempt_count,
+                initial_validation_failure_reason=initial_validation_failure_reason,
+                repair_attempted=repair_attempted,
+                repair_validation_failure_reason=repair_validation_failure_reason,
+                repair_succeeded=repair_attempted and structured_result is not None,
             )
             metadata["generated_action_cta_detected"] = generated_action_cta_detected
             metadata["canonical_response_cta"] = response_cta

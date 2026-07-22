@@ -118,9 +118,11 @@ async def test_kb_search_uses_resolved_knowledge_query_for_short_continuation_re
                 "thread_id": "thread-1",
                 "user_input": "Да",
                 "knowledge_query": "подробнее как это работает возможности продукта",
+                "knowledge_query_source": "canonical_continue_explanation",
                 "turn_relation": "continuation",
                 "topic": "product",
                 "cta": "continue_explanation",
+                "should_search_kb": True,
             }
         )
 
@@ -150,14 +152,165 @@ async def test_kb_search_ignores_stale_knowledge_query_on_independent_turn():
                 "thread_id": "thread-1",
                 "user_input": "Сколько это стоит?",
                 "knowledge_query": "подробнее как работает продукт и его возможности",
+                "knowledge_query_source": "model_contextual",
                 "turn_relation": "new_topic",
                 "topic": "pricing",
                 "cta": "none",
+                "should_search_kb": True,
             }
         )
 
     called_args = tool_registry.execute.await_args.args[1]
     assert called_args["query"] == "Сколько это стоит?"
+
+
+@pytest.mark.asyncio
+async def test_kb_search_logs_literal_query_trace_payload():
+    tool_registry = MagicMock()
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
+    node = create_kb_search_node(tool_registry=tool_registry)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with (
+        patch(
+            "src.agent.nodes.kb_search.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch("src.agent.nodes.kb_search.logger") as kb_logger,
+    ):
+        await node(
+            {
+                "project_id": "project-1",
+                "thread_id": "thread-1",
+                "user_input": "Что умеет продукт?",
+                "knowledge_query": "старая подсказка",
+                "knowledge_query_source": "model_contextual",
+                "turn_relation": "new_topic",
+                "topic": "product",
+                "cta": "none",
+                "resolved_cta": "none",
+                "resolved_cta_reply": None,
+                "should_search_kb": True,
+            }
+        )
+
+    start = [
+        call
+        for call in kb_logger.info.call_args_list
+        if call.args and call.args[0] == "KB search start"
+    ][-1]
+    extra = start.kwargs["extra"]
+    assert extra["query_source"] == "none"
+    assert extra["resolved_query_used"] is False
+    assert extra["original_user_input_preview"] == "Что умеет продукт?"
+    assert extra["resolved_query_preview"] is None
+    assert extra["resolved_query_hash"] is None
+    assert extra["resolved_query_len"] == 0
+    assert extra["turn_relation"] == "new_topic"
+    assert extra["topic"] == "product"
+    assert extra["cta"] == "none"
+    assert extra["resolved_cta"] == "none"
+    assert extra["resolved_cta_reply"] is None
+
+
+@pytest.mark.asyncio
+async def test_kb_search_logs_model_contextual_query_trace_payload(monkeypatch):
+    monkeypatch.setenv("RAG_DEBUG", "true")
+    tool_registry = MagicMock()
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
+    node = create_kb_search_node(tool_registry=tool_registry)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with (
+        patch(
+            "src.agent.nodes.kb_search.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch("src.agent.nodes.kb_search.logger") as kb_logger,
+    ):
+        await node(
+            {
+                "project_id": "project-1",
+                "thread_id": "thread-1",
+                "user_input": "А роли?",
+                "knowledge_query": "какие роли есть в проекте",
+                "knowledge_query_source": "model_contextual",
+                "turn_relation": "continuation",
+                "topic": "product",
+                "cta": "none",
+                "resolved_cta": "none",
+                "resolved_cta_reply": None,
+                "should_search_kb": True,
+            }
+        )
+
+    trace = [
+        call
+        for call in kb_logger.info.call_args_list
+        if call.args and call.args[0] == "RAG semantic retrieval trace"
+    ][-1]
+    extra = trace.kwargs["extra"]
+    assert extra["query_source"] == "model_contextual"
+    assert extra["resolved_query_used"] is True
+    assert extra["original_user_input_preview"] == "А роли?"
+    assert extra["resolved_query_preview"] == "какие роли есть в проекте"
+    assert extra["resolved_query_hash"]
+    assert extra["resolved_query_len"] == len("какие роли есть в проекте")
+
+
+@pytest.mark.asyncio
+async def test_kb_search_logs_rejected_contextual_query_trace_payload(monkeypatch):
+    monkeypatch.setenv("RAG_DEBUG", "true")
+    tool_registry = MagicMock()
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
+    node = create_kb_search_node(tool_registry=tool_registry)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with (
+        patch(
+            "src.agent.nodes.kb_search.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch("src.agent.nodes.kb_search.logger") as kb_logger,
+    ):
+        await node(
+            {
+                "project_id": "project-1",
+                "thread_id": "thread-1",
+                "user_input": "нет",
+                "knowledge_query": "какие роли есть в проекте",
+                "knowledge_query_source": "model_contextual",
+                "turn_relation": "continuation",
+                "topic": "product",
+                "cta": "continue_explanation",
+                "resolved_cta": "continue_explanation",
+                "resolved_cta_reply": "negative",
+                "should_search_kb": True,
+            }
+        )
+
+    trace = [
+        call
+        for call in kb_logger.info.call_args_list
+        if call.args and call.args[0] == "RAG semantic retrieval trace"
+    ][-1]
+    extra = trace.kwargs["extra"]
+    assert extra["query_source"] == "none"
+    assert extra["resolved_query_used"] is False
+    assert extra["resolved_query_preview"] is None
+    assert extra["resolved_query_len"] == 0
 
 
 def test_knowledge_search_result_keeps_trace_metadata_outside_prompt_payload():

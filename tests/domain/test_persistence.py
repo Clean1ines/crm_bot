@@ -20,6 +20,8 @@ def test_extract_dialog_state_from_memory_reads_stored_snapshot():
         "last_cta": None,
         "last_topic": None,
         "repeat_count": 2,
+        "last_repeat_increment_reason": None,
+        "last_repeat_reset_reason": None,
         "lead_status": "active_client",
         "lifecycle": "active_client",
         "handoff_confirmation_pending": False,
@@ -49,6 +51,8 @@ def test_persistence_context_builds_normalized_dialog_state():
         "last_cta": "call_manager",
         "last_topic": "integration",
         "repeat_count": 0,
+        "last_repeat_increment_reason": None,
+        "last_repeat_reset_reason": None,
         "lifecycle": "warm",
         "handoff_confirmation_pending": False,
     }

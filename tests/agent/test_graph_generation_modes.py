@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from src.agent import graph as graph_module
+from src.agent.nodes.response_generator import create_response_generator_node
 from src.domain.runtime.tool_execution import ToolExecutionOutcome, ToolExecutionStatus
 
 
@@ -393,6 +394,130 @@ async def test_compiled_graph_valid_knowledge_mode_routes_to_kb(monkeypatch):
 
     assert kb_called == [True]
     assert response_seen[-1]["generation_mode"] == "KNOWLEDGE_ANSWER"
+
+
+@pytest.mark.asyncio
+async def test_compiled_graph_invalid_evidence_ref_repairs_to_valid_alias(monkeypatch):
+    response_patches = []
+    llm = MagicMock()
+    llm.ainvoke = AsyncMock(
+        side_effect=[
+            MagicMock(
+                content=(
+                    '{"answerability":"supported","answer":"Непроверенный ответ.",'
+                    '"supporting_evidence_refs":["E999"],"unsupported_aspects":[]}'
+                )
+            ),
+            MagicMock(
+                content=(
+                    '{"answerability":"supported","answer":"Подтверждённый ответ.",'
+                    '"supporting_evidence_refs":["E1"],"unsupported_aspects":[]}'
+                )
+            ),
+        ]
+    )
+
+    def load_state_node_factory(**_kwargs):
+        async def node(_state):
+            return {}
+
+        return node
+
+    def intent_node_factory(*_args, **_kwargs):
+        async def node(_state):
+            return {}
+
+        return node
+
+    def policy_node_factory(*_args, **_kwargs):
+        async def node(_state):
+            return {
+                "decision": "LLM_GENERATE",
+                "generation_mode": "KNOWLEDGE_ANSWER",
+                "requires_human": False,
+            }
+
+        return node
+
+    def kb_node_factory(_registry):
+        async def node(_state):
+            return {
+                "knowledge_chunks": [
+                    {
+                        "id": "draft-claim-curation-runtime-entry:entry-1",
+                        "score": 0.9,
+                        "content": "Подтверждённый ответ.",
+                    }
+                ],
+                "knowledge_retrieval_status": "retrieved",
+            }
+
+        return node
+
+    monkeypatch.setattr(graph_module, "create_load_state_node", load_state_node_factory)
+    monkeypatch.setattr(
+        graph_module, "create_intent_extractor_node", intent_node_factory
+    )
+    monkeypatch.setattr(graph_module, "create_policy_engine_node", policy_node_factory)
+    monkeypatch.setattr(graph_module, "create_kb_search_node", kb_node_factory)
+    monkeypatch.setattr(
+        graph_module,
+        "create_response_generator_node",
+        lambda: _capturing_response_node(llm, response_patches),
+    )
+
+    repos = _repo_bundle()
+    registry = FakeToolRegistry()
+    agent = graph_module.create_agent(tool_registry=registry, **repos)
+
+    await agent.ainvoke(
+        {
+            "project_id": "project-1",
+            "thread_id": "thread-1",
+            "client_id": "client-1",
+            "chat_id": 1,
+            "user_input": "Что известно?",
+            "project_configuration": {"settings": {"target_language": "ru"}},
+            "requires_human": False,
+        }
+    )
+
+    sent_messages = [
+        args["text"]
+        for name, args, _context in registry.calls
+        if name == "telegram.send_message"
+    ]
+    assert sent_messages == ["Подтверждённый ответ."]
+    response_patch = response_patches[-1]
+    assert response_patch["metadata"]["generation_attempt_count"] == 2
+    assert response_patch["metadata"]["initial_validation_failure_reason"] == (
+        "invalid_supporting_evidence_refs"
+    )
+    assert response_patch["metadata"]["repair_attempted"] is True
+    assert response_patch["metadata"]["repair_succeeded"] is True
+    assert response_patch["metadata"]["repair_validation_failure_reason"] is None
+    assert response_patch["model_evidence_refs"] == ["E1"]
+    assert response_patch["supporting_entry_ids"] == [
+        "draft-claim-curation-runtime-entry:entry-1"
+    ]
+    assert llm.ainvoke.await_count == 2
+    first_prompt = llm.ainvoke.await_args_list[0].args[0][0][1]
+    repair_prompt = llm.ainvoke.await_args_list[1].args[0][0][1]
+    assert "draft-claim-curation-runtime-entry:" not in first_prompt
+    assert "Allowed evidence refs: E1" in repair_prompt
+    repair_section = repair_prompt.split("The previous response did not satisfy", 1)[1]
+    assert "draft-claim-curation-runtime-entry:" not in repair_section
+
+
+def _capturing_response_node(llm, response_patches):
+    real_node = create_response_generator_node(llm=llm, model_name="base-model")
+
+    async def node(state):
+        patch = await real_node(state)
+        response_patches.append(dict(patch))
+        return patch
+
+    return node
 
 
 @pytest.mark.asyncio

@@ -45,14 +45,14 @@ Tool result:
 Правила работы с evidence:
 - Evidence из базы знаний состоит из узких grounded fragments.
 - Только Evidence из базы знаний является источником конкретных продуктовых фактов.
-- Каждый конкретный факт в answer должен быть поддержан одним или несколькими supporting_entry_ids.
+- Каждый конкретный факт в answer должен быть поддержан одним или несколькими supporting_evidence_refs из блока Evidence.
 - Не вываливай все fragments подряд.
 - Если клиент задаёт широкий вопрос, собери короткий обзор из самых релевантных fragments.
 - Если клиент задаёт узкий вопрос, отвечай только на этот узкий вопрос.
 - Если релевантны несколько fragments, сгруппируй их в короткий связный ответ.
 - Если fragments покрывают разные аспекты, кратко упомяни главные аспекты и предложи уточнить детали.
 - Если fragments противоречат друг другу, не выбирай случайно; скажи, что это нужно уточнить у менеджера.
-- Не показывай scores, ids, methods, chunk numbers или внутренние детали retrieval.
+- Не показывай scores, ids, methods, evidence refs или внутренние детали retrieval.
 - Не цитируй source text дословно, если клиент не просит точную формулировку.
 - Предпочитай конкретные возможности и ограничения вместо общей рекламной фразы.
 - Если evidence отвечает только на часть вопроса, ответь только на подтверждённую часть и перечисли неподтверждённые аспекты.
@@ -74,16 +74,20 @@ Tool result:
 {{
   "answerability": "supported | partially_supported | unsupported | conflicting_evidence",
   "answer": "текст ответа клиенту или null для unsupported/conflicting_evidence",
-  "supporting_entry_ids": ["id evidence fragment, если он реально использован"],
+  "supporting_evidence_refs": ["E1", "E2"],
   "unsupported_aspects": ["неподтверждённые аспекты вопроса"]
 }}
 
 JSON rules:
 - В KNOWLEDGE_ANSWER конкретные факты должны идти только из Evidence.
-- В TOOL_RESULT_RESPONSE конкретные факты о результате действия должны идти только из Tool result; supporting_entry_ids оставь пустым.
-- В CONVERSATIONAL_RESPONSE не добавляй новые конкретные факты о проекте; supporting_entry_ids оставь пустым.
-- supporting_entry_ids могут содержать только IDs fragments, которые были в Evidence.
-- Для supported в KNOWLEDGE_ANSWER нужен хотя бы один supporting_entry_id.
-- Для partially_supported в KNOWLEDGE_ANSWER нужен хотя бы один supporting_entry_id и хотя бы один unsupported_aspect.
-- Для unsupported answer должен быть null или пустым, supporting_entry_ids должны быть пустыми, unsupported_aspects не должен быть пустым.
-- Для conflicting_evidence answer должен быть null или пустым, нужно указать минимум два разных conflicting supporting_entry_ids.
+- В TOOL_RESULT_RESPONSE конкретные факты о результате действия должны идти только из Tool result; supporting_evidence_refs оставь пустым.
+- В CONVERSATIONAL_RESPONSE не добавляй новые конкретные факты о проекте; supporting_evidence_refs оставь пустым.
+- supporting_evidence_refs могут содержать только refs, буквально присутствующие в Evidence: E1, E2, E3 и так далее.
+- Запрещено возвращать внутренние IDs, hashes, source IDs и document IDs.
+- Запрещено возвращать legacy field supporting_entry_ids.
+- Evidence refs чувствительны к регистру: E1 допустим, e1 недопустим.
+- Нельзя выдумывать E6, если в Evidence есть только E1–E5.
+- Для supported в KNOWLEDGE_ANSWER нужен хотя бы один supporting_evidence_ref.
+- Для partially_supported в KNOWLEDGE_ANSWER нужен хотя бы один supporting_evidence_ref и хотя бы один unsupported_aspect.
+- Для unsupported answer должен быть null или пустым, supporting_evidence_refs должны быть пустыми, unsupported_aspects не должен быть пустым.
+- Для conflicting_evidence answer должен быть null или пустым, нужно указать минимум два разных conflicting supporting_evidence_refs.
