@@ -6,7 +6,11 @@ import pytest
 from src.agent.nodes.intent_extractor import create_intent_extractor_node
 from src.agent.nodes.kb_search import create_kb_search_node
 from src.agent.nodes.policy_engine import create_policy_engine_node
-from src.agent.nodes.response_generator import create_response_generator_node
+from src.agent.nodes.response_generator import (
+    _history_tail_preview,
+    create_response_generator_node,
+)
+from src.domain.project_plane.thread_views import ThreadRuntimeMessageView
 
 
 async def _passthrough(_name, impl, state, **_kwargs):
@@ -92,6 +96,84 @@ async def test_rag_debug_true_emits_retrieval_and_generation_traces(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_rag_debug_true_accepts_thread_runtime_message_view_history(monkeypatch):
+    monkeypatch.setenv("RAG_DEBUG", "true")
+
+    llm = AsyncMock()
+    llm.ainvoke = AsyncMock(return_value=SimpleNamespace(content="Axole помогает."))
+    response_node = create_response_generator_node(
+        llm=llm,
+        model_name="llama-3.3-70b-versatile",
+    )
+
+    state = {
+        "project_id": "project-1",
+        "thread_id": "thread-1",
+        "user_input": "Что умеет сервис?",
+        "decision": "LLM_GENERATE",
+        "history": [
+            ThreadRuntimeMessageView(
+                role="user",
+                content="Что такое Axole?",
+            )
+        ],
+        "project_configuration": {"settings": {"target_language": "ru"}},
+    }
+
+    with (
+        patch(
+            "src.agent.nodes.response_generator.log_node_execution",
+            AsyncMock(side_effect=_passthrough),
+        ),
+        patch("src.agent.nodes.response_generator.logger") as response_logger,
+    ):
+        result = await response_node(state)
+
+    generation_trace = [
+        call
+        for call in response_logger.info.call_args_list
+        if call.args and call.args[0] == "RAG generation context trace"
+    ][-1]
+
+    assert llm.ainvoke.await_count == 1
+    assert result["response_text"] == "Axole помогает."
+    assert generation_trace.kwargs["extra"]["generation_status"] == "success"
+    assert generation_trace.kwargs["extra"]["history_tail_preview"] == [
+        {"role": "user", "content_preview": "Что такое Axole?"}
+    ]
+
+
+def test_history_tail_preview_accepts_mixed_history_items():
+    class BrokenHistoryItem:
+        @property
+        def role(self):
+            raise RuntimeError("role unavailable")
+
+        @property
+        def content(self):
+            raise RuntimeError("content unavailable")
+
+    long_content = "x" * 200
+
+    preview = _history_tail_preview(
+        [
+            {"role": "user", "content": "Первое сообщение"},
+            SimpleNamespace(role="assistant", content="Ответ"),
+            object(),
+            BrokenHistoryItem(),
+            {"role": "user", "content": long_content},
+        ]
+    )
+
+    assert preview[0] == {"role": "user", "content_preview": "Первое сообщение"}
+    assert preview[1] == {"role": "assistant", "content_preview": "Ответ"}
+    assert preview[2] == {"role": "message", "content_preview": ""}
+    assert preview[3] == {"role": "message", "content_preview": ""}
+    assert preview[4]["role"] == "user"
+    assert len(preview[4]["content_preview"]) <= 120
+
+
+@pytest.mark.asyncio
 async def test_rag_debug_false_suppresses_extended_traces(monkeypatch):
     monkeypatch.setenv("RAG_DEBUG", "false")
 
@@ -111,6 +193,7 @@ async def test_rag_debug_false_suppresses_extended_traces(monkeypatch):
         "thread_id": "thread-1",
         "user_input": "Что умеет сервис?",
         "decision": "LLM_GENERATE",
+        "history": [SimpleNamespace(role="user", content="Что такое Axole?")],
         "project_configuration": {"settings": {"target_language": "ru"}},
     }
 
@@ -129,6 +212,7 @@ async def test_rag_debug_false_suppresses_extended_traces(monkeypatch):
         state.update(await kb_node(state))
         await response_node(state)
 
+    assert llm.ainvoke.await_count == 1
     assert all(
         call.args[0] != "RAG semantic retrieval trace"
         for call in kb_logger.info.call_args_list

@@ -5,7 +5,7 @@ Uses the configured LLM to craft the final answer from decision, history,
 knowledge, memory, and project runtime configuration.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import os
 from typing import Protocol, cast
@@ -251,13 +251,24 @@ def _preview_text(value: object, limit: int = 160) -> str | None:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def _history_tail_preview(history: list[RuntimeHistoryMessage]) -> list[dict[str, str]]:
+def _history_item_value(item: object, field: str) -> object:
+    if isinstance(item, Mapping):
+        return item.get(field)
+    try:
+        return getattr(item, field, None)
+    except Exception:
+        return None
+
+
+def _history_tail_preview(history: Sequence[object]) -> list[dict[str, str]]:
     previews: list[dict[str, str]] = []
     for item in history[-5:]:
+        role = _history_item_value(item, "role")
+        content = _history_item_value(item, "content")
         previews.append(
             {
-                "role": str(item.get("role") or "message"),
-                "content_preview": _preview_text(item.get("content"), 120) or "",
+                "role": str(role or "message"),
+                "content_preview": _preview_text(content, 120) or "",
             }
         )
     return previews
