@@ -48,7 +48,7 @@ def test_persistence_context_builds_normalized_dialog_state():
         "last_intent": "ask_integration",
         "last_cta": "call_manager",
         "last_topic": "integration",
-        "repeat_count": 1,
+        "repeat_count": 0,
         "lifecycle": "warm",
         "handoff_confirmation_pending": False,
     }
@@ -428,3 +428,142 @@ def test_persistence_context_skips_already_created_technical_incident():
     )
 
     assert context.should_create_technical_incident() is False
+
+
+def test_persistence_state_payload_does_not_persist_turn_scoped_tool_or_generation_fields():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-",
+            "project_id": "project-",
+            "user_input": "tool result turn",
+            "intent": "other",
+            "topic": "support",
+            "tool_name": "crm.lookup",
+            "tool_args": {"name": "Alice"},
+            "tool_result": {"text": "stale"},
+            "tool_execution_status": "succeeded",
+            "tool_execution_safe_error_code": "legacy",
+            "tool_response_text": "stale done",
+            "generation_mode": "TOOL_RESULT_RESPONSE",
+            "knowledge_chunks": [{"id": "old", "content": "old"}],
+            "knowledge_retrieval_status": "retrieved",
+            "knowledge_retrieval_error_type": "old",
+            "model_answerability": "supported",
+            "supporting_entry_ids": [],
+            "unsupported_aspects": [],
+            "generation_output_parse_status": "valid",
+            "generation_schema_status": "valid",
+            "evidence_reference_status": "not_applicable",
+            "semantic_grounding_status": "unchecked",
+            "semantic_grounding_failure_reason": "old",
+            "fallback_reason": None,
+            "generated_action_cta_detected": False,
+            "canonical_response_cta": None,
+            "dialog_state": {"last_topic": "support"},
+        }
+    )
+
+    assert context.state_payload is not None
+    for key in (
+        "tool_name",
+        "tool_args",
+        "tool_result",
+        "tool_execution_status",
+        "tool_execution_safe_error_code",
+        "tool_response_text",
+        "generation_mode",
+        "knowledge_chunks",
+        "knowledge_retrieval_status",
+        "knowledge_retrieval_error_type",
+        "model_answerability",
+        "supporting_entry_ids",
+        "unsupported_aspects",
+        "generation_output_parse_status",
+        "generation_schema_status",
+        "evidence_reference_status",
+        "semantic_grounding_status",
+        "semantic_grounding_failure_reason",
+        "fallback_reason",
+        "generated_action_cta_detected",
+        "canonical_response_cta",
+    ):
+        assert key not in context.state_payload
+
+
+def test_persistence_round_trips_partial_handoff_ticket_identity():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "handoff failed",
+            "requires_human": False,
+            "ticket_created": True,
+            "handoff_ticket_id": "ticket-123",
+            "escalation_failed": True,
+            "handoff_completed": False,
+            "thread_waiting_manager": False,
+            "notification_degraded": False,
+            "lifecycle": "active_client",
+            "dialog_state": {
+                "lifecycle": "active_client",
+                "lead_status": "active_client",
+            },
+        }
+    )
+
+    assert context.state_payload is not None
+    assert context.state_payload["ticket_created"] is True
+    assert context.state_payload["handoff_ticket_id"] == "ticket-123"
+    assert context.state_payload["escalation_failed"] is True
+    assert context.state_payload["handoff_completed"] is False
+    assert context.state_payload["thread_waiting_manager"] is False
+    assert context.state_payload["notification_degraded"] is False
+    assert context.state_payload["requires_human"] is False
+
+
+def test_persistence_round_trips_successful_handoff_ticket_identity():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "handoff success",
+            "requires_human": True,
+            "ticket_created": True,
+            "handoff_ticket_id": "ticket-123",
+            "escalation_failed": False,
+            "handoff_completed": True,
+            "thread_waiting_manager": True,
+            "notification_degraded": False,
+            "lifecycle": "handoff_to_manager",
+            "dialog_state": {
+                "lifecycle": "handoff_to_manager",
+                "lead_status": "handoff_to_manager",
+            },
+        }
+    )
+
+    assert context.state_payload is not None
+    assert context.state_payload["ticket_created"] is True
+    assert context.state_payload["handoff_ticket_id"] == "ticket-123"
+    assert context.state_payload["escalation_failed"] is False
+    assert context.state_payload["handoff_completed"] is True
+    assert context.state_payload["thread_waiting_manager"] is True
+    assert context.state_payload["requires_human"] is True
+
+
+def test_persistence_keeps_handoff_and_technical_ticket_ids_separate():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "separate tickets",
+            "ticket_created": True,
+            "handoff_ticket_id": "manager-ticket-1",
+            "technical_incident_created": True,
+            "technical_ticket_id": "incident-ticket-1",
+        }
+    )
+
+    assert context.state_payload is not None
+    assert context.state_payload["handoff_ticket_id"] == "manager-ticket-1"
+    assert context.state_payload["technical_ticket_id"] == "incident-ticket-1"

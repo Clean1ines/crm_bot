@@ -9,8 +9,16 @@ import json
 from typing import cast
 
 from src.agent.state import AgentState
-from src.domain.runtime.tool_execution import ToolExecutionContext, ToolExecutionResult
+from src.domain.runtime.response_generation import GenerationMode
 from src.domain.runtime.state_contracts import RuntimeStateInput
+from src.domain.runtime.tool_execution import (
+    ToolSafeErrorCode,
+    ToolExecutionContext,
+    ToolExecutionOutcome,
+    ToolExecutionResult,
+    ToolExecutionStatus,
+    exception_safe_error_code,
+)
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
@@ -18,9 +26,8 @@ logger = get_logger(__name__)
 
 MISSING_TOOL_TEXT = (
     "The requested action could not be executed because no tool was selected. "
-    "The conversation has been handed off to a manager."
+    "Please try again later."
 )
-TOOL_FAILED_TEXT = "An error occurred while executing the requested action. The conversation has been handed off to a manager."
 
 
 def create_tool_executor_node(tool_registry: ToolRegistry):
@@ -33,9 +40,12 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
         if not context.tool_name:
             logger.warning("tool_executor_node called with no tool_name")
             patch = ToolExecutionResult(
-                requires_human=True,
+                requires_human=False,
                 response_text=MISSING_TOOL_TEXT,
+                status=ToolExecutionStatus.FAILED,
+                safe_error_code=ToolSafeErrorCode.MISSING_TOOL_SELECTION.value,
             ).to_state_patch()
+            patch["generation_mode"] = GenerationMode.TOOL_RESULT_RESPONSE.value
             return dict(patch)
 
         logger.info(
@@ -48,29 +58,67 @@ def create_tool_executor_node(tool_registry: ToolRegistry):
         )
 
         try:
-            result = await tool_registry.execute(
+            result: object = await tool_registry.execute(
                 context.tool_name,
                 dict(context.tool_args),
                 dict(context.execution_context()),
             )
+            if isinstance(result, ToolExecutionOutcome):
+                outcome = result
+            else:
+                logger.error(
+                    "Tool registry returned invalid outcome contract",
+                    extra={
+                        "tool_name": context.tool_name,
+                        "result_type": type(result).__name__,
+                    },
+                )
+                outcome = ToolExecutionOutcome.failed(
+                    safe_error_code=ToolSafeErrorCode.INVALID_TOOL_OUTCOME
+                )
             logger.debug(
-                "Tool executed successfully", extra={"tool_name": context.tool_name}
+                "Tool executed",
+                extra={
+                    "tool_name": context.tool_name,
+                    "tool_execution_status": outcome.status.value,
+                },
             )
-            patch = ToolExecutionResult(
-                tool_result=result, requires_human=False
-            ).to_state_patch()
-            return dict(patch)
         except Exception as exc:
             logger.exception(
                 "Tool execution failed",
-                extra={"tool_name": context.tool_name, "error": str(exc)},
+                extra={
+                    "tool_name": context.tool_name,
+                    "error_type": type(exc).__name__,
+                },
             )
-            patch = ToolExecutionResult(
-                tool_result=None,
-                requires_human=True,
-                response_text=TOOL_FAILED_TEXT,
-            ).to_state_patch()
-            return dict(patch)
+            outcome = ToolExecutionOutcome(
+                status=ToolExecutionStatus.FAILED,
+                payload=None,
+                safe_error_code=exception_safe_error_code(exc).value,
+            )
+
+        patch = ToolExecutionResult(
+            tool_result=outcome.payload,
+            requires_human=outcome.status is ToolExecutionStatus.REQUIRES_HUMAN,
+            response_text=(
+                outcome.response_text
+                if outcome.status is ToolExecutionStatus.REQUIRES_HUMAN
+                else None
+            ),
+            status=outcome.status,
+            safe_error_code=outcome.safe_error_code,
+            tool_response_text=(
+                outcome.response_text
+                if outcome.status is ToolExecutionStatus.SUCCEEDED
+                else None
+            ),
+        ).to_state_patch()
+        if outcome.status in {
+            ToolExecutionStatus.SUCCEEDED,
+            ToolExecutionStatus.FAILED,
+        }:
+            patch["generation_mode"] = GenerationMode.TOOL_RESULT_RESPONSE.value
+        return dict(patch)
 
     def _get_tool_executor_input_size(state: AgentState) -> int:
         context = ToolExecutionContext.from_state(cast(RuntimeStateInput, state))

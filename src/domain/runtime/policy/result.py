@@ -74,6 +74,7 @@ class PolicyDecisionResult:
             "dialog_state": self.dialog_state,
         }
         if self.lifecycle != previous_lifecycle:
+            result["previous_lifecycle"] = previous_lifecycle
             result["lifecycle"] = self.lifecycle
         if self.response_text is not None:
             result["response_text"] = self.response_text

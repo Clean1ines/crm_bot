@@ -23,9 +23,14 @@ from src.agent.nodes.template_response import template_response_node
 from src.agent.nodes.rules import rules_node
 from src.agent.nodes.tool_executor import create_tool_executor_node
 from src.agent.state import AgentState
+from src.domain.runtime.response_generation import (
+    GenerationMode,
+    normalize_generation_mode,
+)
 from src.domain.runtime.graph_contract import (
     AgentGraphDecision,
     AgentGraphNode,
+    AgentGraphRoute,
     AGENT_GRAPH_CONTRACT,
 )
 from src.infrastructure.logging.logger import get_logger
@@ -171,6 +176,13 @@ def create_agent(
     def route_from_policy(state: AgentState) -> str:
         decision = state.get("decision") or AgentGraphDecision.LLM_GENERATE.value
         logger.info("Policy engine decision: %s", decision)
+        if str(decision) == AgentGraphDecision.LLM_GENERATE.value:
+            generation_mode = normalize_generation_mode(state.get("generation_mode"))
+            if generation_mode is GenerationMode.KNOWLEDGE_ANSWER:
+                return AgentGraphRoute.LLM_GENERATE_KNOWLEDGE.value
+            if generation_mode is GenerationMode.CONVERSATIONAL_RESPONSE:
+                return AgentGraphRoute.LLM_GENERATE_CONVERSATIONAL.value
+            return AgentGraphRoute.LLM_GENERATE_INVALID_MODE.value
         return str(decision)
 
     graph_builder.add_conditional_edges(
@@ -179,9 +191,9 @@ def create_agent(
         {
             _decision_value(AgentGraphDecision.RESPOND): AgentGraphNode.RESPONDER.value,
             "RESPOND_TEMPLATE": AgentGraphNode.TEMPLATE_RESPONSE.value,
-            _decision_value(
-                AgentGraphDecision.LLM_GENERATE
-            ): AgentGraphNode.KB_SEARCH.value,
+            AgentGraphRoute.LLM_GENERATE_KNOWLEDGE.value: AgentGraphNode.KB_SEARCH.value,
+            AgentGraphRoute.LLM_GENERATE_CONVERSATIONAL.value: AgentGraphNode.RESPONSE_GENERATOR.value,
+            AgentGraphRoute.LLM_GENERATE_INVALID_MODE.value: AgentGraphNode.RESPONSE_GENERATOR.value,
             _decision_value(
                 AgentGraphDecision.ESCALATE_TO_HUMAN
             ): AgentGraphNode.ESCALATE.value,

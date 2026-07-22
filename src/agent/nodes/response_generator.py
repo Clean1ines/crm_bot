@@ -7,7 +7,9 @@ knowledge, memory, and project runtime configuration.
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import json
 import os
+import re
 from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import (
@@ -26,8 +28,15 @@ from src.domain.runtime.language_policy import (
 )
 from src.domain.runtime.project_runtime_profile import ProjectRuntimeProfile
 from src.domain.runtime.response_generation import (
+    GENERATION_MODE_VALUES,
+    GenerationMode,
     ResponseGenerationContext,
     ResponseGenerationResult,
+    StructuredResponseResult,
+)
+from src.domain.runtime.tool_execution import (
+    ToolExecutionStatus,
+    normalize_tool_execution_status,
 )
 from src.domain.runtime.state_contracts import (
     ProjectRuntimeConfigurationState,
@@ -67,6 +76,18 @@ LANGUAGE_MISMATCH_FALLBACK_ES = (
 )
 CONTINUATION_TOPICS = frozenset({"product", "integration"})
 QUESTION_ENDINGS = ("?", "？")
+ACTION_OFFER_MARKERS = (
+    "менеджер",
+    "звонок",
+    "созвон",
+    "консультац",
+    "передать",
+    "manager",
+    "operator",
+    "call",
+    "consult",
+)
+CJK_PATTERN = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 
 
 class ChatMessageResponse(Protocol):
@@ -96,6 +117,15 @@ class ChatGroqClientFactory(Protocol):
 class ContinuationOfferDecision:
     should_offer: bool
     cta: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredGenerationValidation:
+    result: StructuredResponseResult | None
+    parse_status: str
+    schema_status: str
+    evidence_reference_status: str
+    failure_reason: str | None = None
 
 
 # Test hook and lazy runtime cache.
@@ -328,6 +358,186 @@ def _with_continuation_prompt(response_text: str, target_language: str) -> str:
     return f"{stripped}\n\n{prompt}"
 
 
+def _last_question_sentence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.endswith(QUESTION_ENDINGS):
+        return ""
+    parts = [part.strip() for part in stripped.replace("\n", " ").split(".")]
+    return parts[-1] if parts else stripped
+
+
+def _remove_last_question_sentence(text: str) -> str:
+    stripped = text.strip()
+    question_index = max(stripped.rfind("?"), stripped.rfind("？"))
+    if question_index < 0:
+        return stripped
+
+    prefix = stripped[:question_index].rstrip()
+    sentence_starts = (
+        prefix.rfind("\n\n"),
+        prefix.rfind(". "),
+        prefix.rfind("! "),
+        prefix.rfind("? "),
+    )
+    cut_index = max(sentence_starts)
+    if cut_index < 0:
+        return ""
+
+    return prefix[: cut_index + 1].strip()
+
+
+def _sanitize_generated_action_cta(
+    response_text: str,
+) -> tuple[str, bool]:
+    # Defensive compatibility layer: remove orphan action-offer endings from
+    # legacy/free-form model text. Canonical policy state remains the only
+    # source of action CTA, lifecycle changes, or handoff routing.
+    question = _last_question_sentence(response_text).lower()
+    if not question:
+        return response_text, False
+
+    if any(marker in question for marker in ACTION_OFFER_MARKERS):
+        sanitized = _remove_last_question_sentence(response_text)
+        return sanitized, True
+
+    return response_text, False
+
+
+def _no_confirmation_text(target_language: str) -> str:
+    if target_language == "en":
+        return (
+            "The available knowledge base does not contain data that can confirm this."
+        )
+    if target_language == "de":
+        return "Die verfügbare Wissensbasis enthält keine Daten, mit denen sich das bestätigen lässt."
+    if target_language == "es":
+        return "La base de conocimiento disponible no contiene datos que permitan confirmarlo."
+    return "В доступной базе знаний нет данных, позволяющих подтвердить это."
+
+
+def _retrieval_failed_text(target_language: str) -> str:
+    if target_language == "en":
+        return "I cannot check the knowledge base right now due to a technical issue."
+    if target_language == "de":
+        return "Ich kann die Wissensbasis gerade wegen eines technischen Problems nicht prüfen."
+    if target_language == "es":
+        return (
+            "Ahora no puedo consultar la base de conocimiento por un problema técnico."
+        )
+    return "Сейчас не получается проверить базу знаний из-за технической ошибки."
+
+
+def _conflicting_evidence_text(target_language: str) -> str:
+    if target_language == "en":
+        return "The available knowledge base contains conflicting information, so I cannot answer confidently."
+    if target_language == "de":
+        return "Die verfügbare Wissensbasis enthält widersprüchliche Informationen, daher kann ich nicht sicher antworten."
+    if target_language == "es":
+        return "La base de conocimiento disponible contiene información contradictoria, así que no puedo responder con certeza."
+    return "В доступной базе знаний есть противоречивые сведения, поэтому я не могу уверенно ответить."
+
+
+def _invalid_generation_text(target_language: str) -> str:
+    if target_language == "en":
+        return "I could not form a correct answer from the available knowledge base right now."
+    if target_language == "de":
+        return "Ich konnte gerade keine korrekte Antwort aus der verfügbaren Wissensbasis bilden."
+    if target_language == "es":
+        return "Ahora no pude formar una respuesta correcta a partir de la base de conocimiento disponible."
+    return (
+        "Сейчас не получилось сформировать корректный ответ по доступной базе знаний."
+    )
+
+
+def _contains_invalid_language_mix(response_text: str, target_language: str) -> bool:
+    return target_language == "ru" and bool(CJK_PATTERN.search(response_text))
+
+
+def _unwrap_json_block(content: str) -> str:
+    text = content.strip()
+    if text.startswith("```"):
+        parts = text.split("```")
+        text = parts[1] if len(parts) > 1 else text
+        if text.strip().startswith("json"):
+            text = text.strip()[4:]
+    return text.strip()
+
+
+def _valid_knowledge_entry_ids(chunks: Sequence[object]) -> set[str]:
+    ids: set[str] = set()
+    for item in chunks:
+        if isinstance(item, Mapping):
+            entry_id = str(item.get("id") or "").strip()
+            if entry_id:
+                ids.add(entry_id)
+    return ids
+
+
+def _generation_metadata(
+    *,
+    generation_mode: str | None,
+    retrieval_status: str,
+    model_answerability: str | None,
+    supporting_entry_ids: list[str] | None = None,
+    unsupported_aspects: list[str] | None = None,
+    parse_status: str,
+    schema_status: str,
+    evidence_reference_status: str,
+    semantic_grounding_status: str,
+    semantic_grounding_failure_reason: str | None = None,
+    fallback_reason: str | None = None,
+) -> dict[str, object]:
+    return {
+        "generation_mode": generation_mode,
+        "retrieval_status": retrieval_status,
+        "model_answerability": model_answerability,
+        "supporting_entry_ids": supporting_entry_ids or [],
+        "unsupported_aspects": unsupported_aspects or [],
+        "generation_output_parse_status": parse_status,
+        "generation_schema_status": schema_status,
+        "evidence_reference_status": evidence_reference_status,
+        "semantic_grounding_status": semantic_grounding_status,
+        "semantic_grounding_failure_reason": semantic_grounding_failure_reason,
+        "fallback_reason": fallback_reason,
+    }
+
+
+def _response_patch(
+    *,
+    response_text: str,
+    metadata: dict[str, object],
+    cta: str | None = None,
+    topic: str | None = None,
+) -> dict[str, object]:
+    patch = dict(
+        ResponseGenerationResult(
+            response_text=response_text,
+            metadata=metadata,
+            cta=cta,
+            topic=topic,
+        ).to_state_patch()
+    )
+    patch.update(
+        {
+            "generation_mode": metadata.get("generation_mode"),
+            "model_answerability": metadata.get("model_answerability"),
+            "supporting_entry_ids": metadata.get("supporting_entry_ids", []),
+            "unsupported_aspects": metadata.get("unsupported_aspects", []),
+            "generation_output_parse_status": metadata.get(
+                "generation_output_parse_status"
+            ),
+            "generation_schema_status": metadata.get("generation_schema_status"),
+            "evidence_reference_status": metadata.get("evidence_reference_status"),
+            "semantic_grounding_status": metadata.get("semantic_grounding_status"),
+            "semantic_grounding_failure_reason": metadata.get(
+                "semantic_grounding_failure_reason"
+            ),
+            "fallback_reason": metadata.get("fallback_reason"),
+        }
+    )
+    return patch
+
+
 def _continuation_offer_decision(
     context: ResponseGenerationContext,
     *,
@@ -382,6 +592,8 @@ def build_answer_preview_prompt(
         conversation_summary="",
         history=[],
         knowledge_chunks=knowledge_chunks,
+        generation_mode="KNOWLEDGE_ANSWER",
+        tool_result=None,
         user_memory=None,
         features=None,
         project_configuration=cast(
@@ -434,10 +646,18 @@ def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, obj
         else TECHNICAL_FAILURE_FIRST_TEXT
     )
 
-    patch = dict(
-        ResponseGenerationResult(
-            response_text=response_text,
-        ).to_state_patch()
+    patch = _response_patch(
+        response_text=response_text,
+        metadata=_generation_metadata(
+            generation_mode=str(state.get("generation_mode") or "UNKNOWN"),
+            retrieval_status=str(state.get("knowledge_retrieval_status") or "unknown"),
+            model_answerability=None,
+            parse_status="not_called",
+            schema_status="not_called",
+            evidence_reference_status="not_called",
+            semantic_grounding_status="not_applicable",
+            fallback_reason="generation_exception",
+        ),
     )
     patch.update(
         {
@@ -453,6 +673,356 @@ def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, obj
     )
 
     return patch
+
+
+def _validate_structured_response(
+    raw_content: str,
+    *,
+    context: ResponseGenerationContext,
+) -> StructuredGenerationValidation:
+    try:
+        payload = json.loads(_unwrap_json_block(raw_content))
+    except json.JSONDecodeError:
+        return StructuredGenerationValidation(
+            result=None,
+            parse_status="invalid_json",
+            schema_status="invalid_payload",
+            evidence_reference_status="not_called",
+            failure_reason="invalid_json",
+        )
+    if not isinstance(payload, Mapping):
+        return StructuredGenerationValidation(
+            result=None,
+            parse_status="invalid_schema",
+            schema_status="invalid_payload",
+            evidence_reference_status="not_called",
+            failure_reason="invalid_schema",
+        )
+
+    try:
+        result = StructuredResponseResult.from_mapping(payload)
+    except ValueError as exc:
+        reason = str(exc)
+        return StructuredGenerationValidation(
+            result=None,
+            parse_status="valid",
+            schema_status="invalid_enum"
+            if reason == "invalid answerability"
+            else "invalid_payload",
+            evidence_reference_status="not_called",
+            failure_reason=reason,
+        )
+
+    if context.generation_mode != GenerationMode.KNOWLEDGE_ANSWER:
+        if result.supporting_entry_ids:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="invalid_answerability_contract",
+                evidence_reference_status="not_applicable",
+                failure_reason="non_kb_response_with_supporting_ids",
+            )
+        if result.answerability != "supported":
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="invalid_answerability_contract",
+                evidence_reference_status="not_applicable",
+                failure_reason="non_kb_response_must_be_supported",
+            )
+        if result.unsupported_aspects:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="invalid_answerability_contract",
+                evidence_reference_status="not_applicable",
+                failure_reason="non_kb_response_with_unsupported_aspects",
+            )
+        if not result.answer:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="missing_required_answer",
+                evidence_reference_status="not_applicable",
+                failure_reason="missing_answer",
+            )
+        return StructuredGenerationValidation(
+            result=result,
+            parse_status="valid",
+            schema_status="valid",
+            evidence_reference_status="not_applicable",
+        )
+
+    valid_ids = _valid_knowledge_entry_ids(context.knowledge_chunks)
+    unknown_ids = [
+        entry_id
+        for entry_id in result.supporting_entry_ids
+        if entry_id not in valid_ids
+    ]
+    if unknown_ids:
+        return StructuredGenerationValidation(
+            result=None,
+            parse_status="valid",
+            schema_status="valid",
+            evidence_reference_status="unknown_ids",
+            failure_reason="invalid_supporting_entry_ids",
+        )
+
+    if result.answerability in {"supported", "partially_supported"}:
+        if not result.answer:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="missing_required_answer",
+                evidence_reference_status="not_called",
+                failure_reason="missing_answer",
+            )
+        if not result.supporting_entry_ids:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="valid",
+                evidence_reference_status="missing_required_ids",
+                failure_reason="missing_supporting_entry_ids",
+            )
+
+    if result.answerability == "partially_supported" and not result.unsupported_aspects:
+        return StructuredGenerationValidation(
+            result=None,
+            parse_status="valid",
+            schema_status="invalid_answerability_contract",
+            evidence_reference_status="valid",
+            failure_reason="missing_unsupported_aspects",
+        )
+
+    if result.answerability == "supported" and result.unsupported_aspects:
+        return StructuredGenerationValidation(
+            result=None,
+            parse_status="valid",
+            schema_status="invalid_answerability_contract",
+            evidence_reference_status="valid",
+            failure_reason="supported_with_unsupported_aspects",
+        )
+
+    if result.answerability == "unsupported":
+        if result.answer:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="invalid_answerability_contract",
+                evidence_reference_status="not_called",
+                failure_reason="unsupported_answer_must_be_empty",
+            )
+        if result.supporting_entry_ids:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="valid",
+                evidence_reference_status="invalid_for_answerability",
+                failure_reason="unsupported_with_supporting_ids",
+            )
+        if not result.unsupported_aspects:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="invalid_answerability_contract",
+                evidence_reference_status="valid",
+                failure_reason="missing_unsupported_aspects",
+            )
+
+    if result.answerability == "conflicting_evidence":
+        distinct_ids = set(result.supporting_entry_ids)
+        if len(result.supporting_entry_ids) < 2 or len(distinct_ids) < 2:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="valid",
+                evidence_reference_status="invalid_for_answerability",
+                failure_reason="conflicting_evidence_requires_two_supporting_ids",
+            )
+        if result.answer:
+            return StructuredGenerationValidation(
+                result=None,
+                parse_status="valid",
+                schema_status="invalid_answerability_contract",
+                evidence_reference_status="valid",
+                failure_reason="conflicting_answer_must_be_empty",
+            )
+
+    return StructuredGenerationValidation(
+        result=result,
+        parse_status="valid",
+        schema_status="valid",
+        evidence_reference_status="valid",
+    )
+
+
+def _safe_generation_fallback(
+    *,
+    generation_mode: str | None,
+    target_language: str,
+    retrieval_status: str,
+    parse_status: str = "not_called",
+    schema_status: str = "not_called",
+    evidence_reference_status: str = "not_called",
+    semantic_grounding_status: str = "not_applicable",
+    fallback_reason: str,
+) -> dict[str, object]:
+    if fallback_reason == "retrieval_failed":
+        response_text = _retrieval_failed_text(target_language)
+    elif fallback_reason == "conflicting_evidence":
+        response_text = _conflicting_evidence_text(target_language)
+    elif fallback_reason in {
+        "invalid_generation",
+        "generation_mode_contract_violation",
+        "retrieval_contract_violation",
+        "tool_result_contract_violation",
+        "orphan_action_cta_removed",
+    }:
+        response_text = _invalid_generation_text(target_language)
+    else:
+        response_text = _no_confirmation_text(target_language)
+
+    return _response_patch(
+        response_text=response_text,
+        metadata=_generation_metadata(
+            generation_mode=generation_mode,
+            retrieval_status=retrieval_status,
+            model_answerability=None,
+            parse_status=parse_status,
+            schema_status=schema_status,
+            evidence_reference_status=evidence_reference_status,
+            semantic_grounding_status=semantic_grounding_status,
+            fallback_reason=fallback_reason,
+        ),
+    )
+
+
+def _emit_generation_trace(
+    *,
+    trace_extra: dict[str, object] | None,
+    status: str,
+    patch: Mapping[str, object],
+    response_cta: str | None,
+    response_topic: str | None,
+    is_fallback_response: bool,
+    parse_status: str,
+    generated_action_cta_detected: bool,
+    error_type: str | None = None,
+    error_preview: str | None = None,
+) -> None:
+    if not _rag_debug_enabled():
+        return
+    raw_metadata = patch.get("metadata")
+    metadata: Mapping[str, object] = (
+        raw_metadata if isinstance(raw_metadata, Mapping) else {}
+    )
+    logger.info(
+        "RAG generation context trace",
+        extra={
+            **(trace_extra or {}),
+            "generation_status": status,
+            "error_type": error_type,
+            "error_preview": error_preview,
+            "generated_response_preview": _preview_text(patch.get("response_text")),
+            "fallback_response_preview": (
+                _preview_text(patch.get("response_text"))
+                if is_fallback_response
+                else None
+            ),
+            "response_cta": response_cta,
+            "response_topic": response_topic,
+            "is_fallback_response": is_fallback_response,
+            "generation_mode": metadata.get("generation_mode"),
+            "model_answerability": metadata.get("model_answerability"),
+            "supporting_entry_ids": metadata.get("supporting_entry_ids", []),
+            "unsupported_aspects": metadata.get("unsupported_aspects", []),
+            "generation_output_parse_status": metadata.get(
+                "generation_output_parse_status", parse_status
+            ),
+            "generation_schema_status": metadata.get("generation_schema_status"),
+            "evidence_reference_status": metadata.get("evidence_reference_status"),
+            "semantic_grounding_status": metadata.get("semantic_grounding_status"),
+            "semantic_grounding_failure_reason": metadata.get(
+                "semantic_grounding_failure_reason"
+            ),
+            "fallback_reason": metadata.get("fallback_reason"),
+            "canonical_response_cta": response_cta,
+            "generated_action_cta_detected": generated_action_cta_detected,
+        },
+    )
+
+
+def _generation_mode_contract_violation(
+    context: ResponseGenerationContext,
+) -> str | None:
+    if context.generation_mode not in GENERATION_MODE_VALUES:
+        return "missing_or_invalid_generation_mode"
+    return None
+
+
+def _retrieval_contract_violation(context: ResponseGenerationContext) -> str | None:
+    if context.generation_mode != GenerationMode.KNOWLEDGE_ANSWER:
+        return None
+
+    has_chunks = bool(context.knowledge_chunks)
+    status = context.knowledge_retrieval_status
+    if status == "retrieved" and has_chunks:
+        return None
+    if status == "empty" and not has_chunks:
+        return None
+    if status == "failed" and not has_chunks:
+        return None
+    if status == "retrieved":
+        return "retrieved_without_entries"
+    if status in {"empty", "failed"}:
+        return f"{status}_with_entries"
+    return f"invalid_knowledge_retrieval_status:{status}"
+
+
+def _semantic_grounding_status_for(result: StructuredResponseResult) -> str:
+    if result.answerability in {"supported", "partially_supported"}:
+        return "unchecked"
+    return "not_applicable"
+
+
+def _tool_failure_text(target_language: str) -> str:
+    if target_language == "en":
+        return "The requested action could not be completed due to a technical issue."
+    if target_language == "de":
+        return "Die angeforderte Aktion konnte wegen eines technischen Problems nicht abgeschlossen werden."
+    if target_language == "es":
+        return "La acción solicitada no se pudo completar por un problema técnico."
+    return "Не получилось выполнить запрошенное действие из-за технической ошибки."
+
+
+def _tool_result_contract_violation(context: ResponseGenerationContext) -> str | None:
+    if context.generation_mode != GenerationMode.TOOL_RESULT_RESPONSE:
+        return None
+
+    status = normalize_tool_execution_status(context.tool_execution_status)
+    if status is None:
+        return "missing_or_invalid_tool_execution_status"
+    if status is ToolExecutionStatus.REQUIRES_HUMAN:
+        return "requires_human_tool_result_in_response_generator"
+    if status is ToolExecutionStatus.FAILED:
+        return None
+    if context.tool_result is None and not _has_tool_response_text(context):
+        return "missing_or_malformed_tool_result"
+    return None
+
+
+def _has_tool_response_text(context: ResponseGenerationContext) -> bool:
+    return bool((context.tool_response_text or "").strip())
+
+
+def _tool_result_failed(context: ResponseGenerationContext) -> bool:
+    if context.generation_mode != GenerationMode.TOOL_RESULT_RESPONSE:
+        return False
+    return (
+        normalize_tool_execution_status(context.tool_execution_status)
+        is ToolExecutionStatus.FAILED
+    )
 
 
 def create_response_generator_node(
@@ -474,17 +1044,22 @@ def create_response_generator_node(
 
     async def _response_generator_node_impl(state: AgentState) -> dict[str, object]:
         context = ResponseGenerationContext.from_state(cast(RuntimeStateInput, state))
-        if context.decision not in {"LLM_GENERATE", "RESPOND_KB", "RESPOND_TEMPLATE"}:
+        if context.decision not in {
+            "LLM_GENERATE",
+            "RESPOND_KB",
+            "CALL_TOOL",
+        }:
             logger.debug(
                 "Skipping response generation, decision not generative",
                 extra={"decision": context.decision},
             )
             return {}
 
-        merged_memory = _merge_dialog_state_into_user_memory(
-            _prompt_user_memory(context.user_memory),
-            _prompt_dialog_state(context.dialog_state),
-        )
+        input_lang = detect_language_hint(context.user_input)
+        target_lang = _project_target_language(state)
+        if target_lang == "unknown":
+            target_lang = input_lang
+
         logger.debug(
             "Preparing response prompt",
             extra={
@@ -492,20 +1067,11 @@ def create_response_generator_node(
                 "history_count": len(context.history),
                 "knowledge_chunk_count": len(context.knowledge_chunks),
                 "has_dialog_state": bool(context.dialog_state),
+                "knowledge_retrieval_status": context.knowledge_retrieval_status,
+                "generation_mode": context.generation_mode,
             },
         )
 
-        prompt = build_response_prompt(
-            decision=context.decision,
-            user_input=context.user_input,
-            conversation_summary=context.conversation_summary,
-            history=_prompt_history(context.history),
-            knowledge_chunks=context.knowledge_chunks,
-            user_memory=merged_memory,
-            features=_prompt_features(context.features),
-            project_configuration=context.project_configuration,
-            target_language=_project_target_language(state),
-        )
         generation_trace_extra: dict[str, object] | None = None
         if _rag_debug_enabled():
             generation_trace_extra = {
@@ -513,6 +1079,7 @@ def create_response_generator_node(
                 "project_id": state.get("project_id"),
                 "model_name": _resolve_response_model_name(state, base_model),
                 "decision": context.decision,
+                "generation_mode": context.generation_mode,
                 "user_input_preview": _preview_text(context.user_input),
                 "history_count": len(context.history),
                 "history_tail_preview": _history_tail_preview(context.history),
@@ -528,9 +1095,219 @@ def create_response_generator_node(
                 "prompt_entries": format_kb_prompt_entry_traces(
                     context.knowledge_chunks
                 ),
-                "prompt_chars": len(prompt),
+                "retrieval_status": context.knowledge_retrieval_status,
+                "prompt_chars": 0,
                 "user_input_len": len(context.user_input),
             }
+
+        mode_violation = _generation_mode_contract_violation(context)
+        if mode_violation:
+            logger.error(
+                "Response generation mode contract violation",
+                extra={
+                    "generation_mode": context.generation_mode,
+                    "decision": context.decision,
+                    "violation": mode_violation,
+                },
+            )
+            patch = _safe_generation_fallback(
+                generation_mode=str(context.generation_mode or "UNKNOWN"),
+                target_language=target_lang,
+                retrieval_status=context.knowledge_retrieval_status,
+                semantic_grounding_status="not_applicable",
+                fallback_reason="generation_mode_contract_violation",
+            )
+            _emit_generation_trace(
+                trace_extra=generation_trace_extra,
+                status="skipped",
+                patch=patch,
+                response_cta=None,
+                response_topic=None,
+                is_fallback_response=True,
+                parse_status="not_called",
+                generated_action_cta_detected=False,
+            )
+            return patch
+
+        assert context.generation_mode is not None
+        generation_mode = context.generation_mode.value
+        retrieval_violation = _retrieval_contract_violation(context)
+        if retrieval_violation:
+            logger.error(
+                "Response generation retrieval contract violation",
+                extra={
+                    "generation_mode": context.generation_mode,
+                    "retrieval_status": context.knowledge_retrieval_status,
+                    "entries_count": len(context.knowledge_chunks),
+                    "violation": retrieval_violation,
+                },
+            )
+            patch = _safe_generation_fallback(
+                generation_mode=str(context.generation_mode or "UNKNOWN"),
+                target_language=target_lang,
+                retrieval_status=context.knowledge_retrieval_status,
+                semantic_grounding_status="not_applicable",
+                fallback_reason="retrieval_contract_violation",
+            )
+            _emit_generation_trace(
+                trace_extra=generation_trace_extra,
+                status="skipped",
+                patch=patch,
+                response_cta=None,
+                response_topic=None,
+                is_fallback_response=True,
+                parse_status="not_called",
+                generated_action_cta_detected=False,
+            )
+            return patch
+
+        if context.generation_mode == GenerationMode.KNOWLEDGE_ANSWER:
+            if context.knowledge_retrieval_status == "failed":
+                patch = _safe_generation_fallback(
+                    generation_mode=generation_mode,
+                    target_language=target_lang,
+                    retrieval_status=context.knowledge_retrieval_status,
+                    fallback_reason="retrieval_failed",
+                )
+                _emit_generation_trace(
+                    trace_extra=generation_trace_extra,
+                    status="skipped",
+                    patch=patch,
+                    response_cta=None,
+                    response_topic=None,
+                    is_fallback_response=True,
+                    parse_status="not_called",
+                    generated_action_cta_detected=False,
+                )
+                return patch
+            if context.knowledge_retrieval_status == "empty":
+                patch = _safe_generation_fallback(
+                    generation_mode=generation_mode,
+                    target_language=target_lang,
+                    retrieval_status=context.knowledge_retrieval_status,
+                    fallback_reason="no_evidence",
+                )
+                _emit_generation_trace(
+                    trace_extra=generation_trace_extra,
+                    status="skipped",
+                    patch=patch,
+                    response_cta=None,
+                    response_topic=None,
+                    is_fallback_response=True,
+                    parse_status="not_called",
+                    generated_action_cta_detected=False,
+                )
+                return patch
+
+        tool_violation = _tool_result_contract_violation(context)
+        if tool_violation:
+            logger.error(
+                "Response generation tool result contract violation",
+                extra={
+                    "generation_mode": context.generation_mode,
+                    "tool_execution_status": context.tool_execution_status,
+                    "has_tool_result": context.tool_result is not None,
+                    "violation": tool_violation,
+                },
+            )
+            patch = _safe_generation_fallback(
+                generation_mode=str(context.generation_mode or "UNKNOWN"),
+                target_language=target_lang,
+                retrieval_status=context.knowledge_retrieval_status,
+                semantic_grounding_status="not_applicable",
+                fallback_reason="tool_result_contract_violation",
+            )
+            _emit_generation_trace(
+                trace_extra=generation_trace_extra,
+                status="skipped",
+                patch=patch,
+                response_cta=None,
+                response_topic=None,
+                is_fallback_response=True,
+                parse_status="not_called",
+                generated_action_cta_detected=False,
+            )
+            return patch
+
+        if _tool_result_failed(context):
+            patch = _response_patch(
+                response_text=_tool_failure_text(target_lang),
+                metadata=_generation_metadata(
+                    generation_mode=generation_mode,
+                    retrieval_status=context.knowledge_retrieval_status,
+                    model_answerability=None,
+                    parse_status="not_called",
+                    schema_status="not_called",
+                    evidence_reference_status="not_applicable",
+                    semantic_grounding_status="not_applicable",
+                    fallback_reason="tool_failed",
+                ),
+            )
+            _emit_generation_trace(
+                trace_extra=generation_trace_extra,
+                status="skipped",
+                patch=patch,
+                response_cta=None,
+                response_topic=None,
+                is_fallback_response=True,
+                parse_status="not_called",
+                generated_action_cta_detected=False,
+            )
+            return patch
+
+        if (
+            context.generation_mode == GenerationMode.TOOL_RESULT_RESPONSE
+            and context.tool_result is None
+            and _has_tool_response_text(context)
+        ):
+            patch = _response_patch(
+                response_text=str(context.tool_response_text).strip(),
+                metadata=_generation_metadata(
+                    generation_mode=generation_mode,
+                    retrieval_status=context.knowledge_retrieval_status,
+                    model_answerability="supported",
+                    parse_status="not_called",
+                    schema_status="not_applicable",
+                    evidence_reference_status="not_applicable",
+                    semantic_grounding_status="not_applicable",
+                    fallback_reason=None,
+                ),
+            )
+            _emit_generation_trace(
+                trace_extra=generation_trace_extra,
+                status="skipped",
+                patch=patch,
+                response_cta=None,
+                response_topic=None,
+                is_fallback_response=False,
+                parse_status="not_called",
+                generated_action_cta_detected=False,
+            )
+            return patch
+
+        merged_memory = _merge_dialog_state_into_user_memory(
+            _prompt_user_memory(context.user_memory),
+            _prompt_dialog_state(context.dialog_state),
+        )
+        prompt = build_response_prompt(
+            decision=context.decision,
+            user_input=context.user_input,
+            conversation_summary=context.conversation_summary,
+            history=_prompt_history(context.history),
+            knowledge_chunks=context.knowledge_chunks,
+            generation_mode=generation_mode,
+            tool_result=(
+                context.tool_result
+                if context.generation_mode is GenerationMode.TOOL_RESULT_RESPONSE
+                else None
+            ),
+            user_memory=merged_memory,
+            features=_prompt_features(context.features),
+            project_configuration=context.project_configuration,
+            target_language=target_lang,
+        )
+        if generation_trace_extra is not None:
+            generation_trace_extra["prompt_chars"] = len(prompt)
 
         try:
             selected_model = _resolve_response_model_name(state, base_model)
@@ -544,7 +1321,7 @@ def create_response_generator_node(
                     return _chat_groq_class()(
                         model=selected_model,
                         temperature=0.3,
-                        max_tokens=500,
+                        max_tokens=700,
                         api_key=api_key,
                     )
 
@@ -552,19 +1329,54 @@ def create_response_generator_node(
                     make_client=_make_client,
                     messages=messages,
                 )
-            response_text = (response.content or "").strip()
+            raw_response_text = (response.content or "").strip()
             is_fallback_response = False
-            input_lang = detect_language_hint(context.user_input)
-            target_lang = _project_target_language(state)
-            if target_lang == "unknown":
-                target_lang = input_lang
+            validation = _validate_structured_response(
+                raw_response_text,
+                context=context,
+            )
+            structured_result = validation.result
+            if structured_result is None:
+                patch = _safe_generation_fallback(
+                    generation_mode=generation_mode,
+                    target_language=target_lang,
+                    retrieval_status=context.knowledge_retrieval_status,
+                    parse_status=validation.parse_status,
+                    schema_status=validation.schema_status,
+                    evidence_reference_status=validation.evidence_reference_status,
+                    semantic_grounding_status="not_applicable",
+                    fallback_reason="invalid_generation",
+                )
+                raw_metadata = patch.get("metadata")
+                metadata = (
+                    dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}
+                )
+                metadata["fallback_reason"] = (
+                    validation.failure_reason or "invalid_generation"
+                )
+                patch["metadata"] = metadata
+                patch["fallback_reason"] = metadata["fallback_reason"]
+                _emit_generation_trace(
+                    trace_extra=generation_trace_extra,
+                    status="success",
+                    patch=patch,
+                    response_cta=None,
+                    response_topic=None,
+                    is_fallback_response=True,
+                    parse_status="failed",
+                    generated_action_cta_detected=False,
+                )
+                return patch
+
+            response_text = structured_result.answer or ""
+            fallback_reason: str | None = None
             output_lang = detect_language_hint(response_text)
             if (
                 response_text
                 and target_lang != "unknown"
                 and output_lang != "unknown"
                 and target_lang != output_lang
-            ):
+            ) or _contains_invalid_language_mix(response_text, target_lang):
                 logger.warning(
                     "Response language mismatch detected; using safe fallback",
                     extra={
@@ -576,10 +1388,36 @@ def create_response_generator_node(
                 )
                 response_text = _language_mismatch_fallback(target_lang)
                 is_fallback_response = True
+                fallback_reason = "language_validation_failed"
+                structured_result = StructuredResponseResult(
+                    answerability="unsupported",
+                    answer=response_text,
+                    unsupported_aspects=["language_validation_failed"],
+                )
 
-            metadata: dict[str, object] = {}
+            if (
+                structured_result.answerability == "unsupported"
+                and fallback_reason != "language_validation_failed"
+            ):
+                response_text = _no_confirmation_text(target_lang)
+                is_fallback_response = True
+                fallback_reason = "unsupported"
+            elif structured_result.answerability == "conflicting_evidence":
+                response_text = _conflicting_evidence_text(target_lang)
+                is_fallback_response = True
+                fallback_reason = "conflicting_evidence"
+
             response_cta: str | None = None
             response_topic: str | None = None
+            (
+                response_text,
+                generated_action_cta_detected,
+            ) = _sanitize_generated_action_cta(response_text)
+            if generated_action_cta_detected and not response_text.strip():
+                response_text = _invalid_generation_text(target_lang)
+                is_fallback_response = True
+                fallback_reason = "orphan_action_cta_removed"
+
             continuation_decision = _continuation_offer_decision(
                 context,
                 response_text=response_text,
@@ -590,18 +1428,39 @@ def create_response_generator_node(
                 response_cta = continuation_decision.cta
                 response_topic = context.topic
 
-            if _rag_debug_enabled():
-                logger.info(
-                    "RAG generation context trace",
-                    extra={
-                        **generation_trace_extra,
-                        "generation_status": "success",
-                        "generated_response_preview": _preview_text(response_text),
-                        "response_cta": response_cta,
-                        "response_topic": response_topic,
-                        "is_fallback_response": is_fallback_response,
-                    },
-                )
+            metadata = _generation_metadata(
+                generation_mode=generation_mode,
+                retrieval_status=context.knowledge_retrieval_status,
+                model_answerability=structured_result.answerability,
+                supporting_entry_ids=structured_result.supporting_entry_ids,
+                unsupported_aspects=structured_result.unsupported_aspects,
+                parse_status=validation.parse_status,
+                schema_status=validation.schema_status,
+                evidence_reference_status=validation.evidence_reference_status,
+                semantic_grounding_status=_semantic_grounding_status_for(
+                    structured_result
+                ),
+                fallback_reason=fallback_reason,
+            )
+            metadata["generated_action_cta_detected"] = generated_action_cta_detected
+            metadata["canonical_response_cta"] = response_cta
+
+            patch = _response_patch(
+                response_text=response_text,
+                metadata=metadata,
+                cta=response_cta,
+                topic=response_topic,
+            )
+            _emit_generation_trace(
+                trace_extra=generation_trace_extra,
+                status="success",
+                patch=patch,
+                response_cta=response_cta,
+                response_topic=response_topic,
+                is_fallback_response=is_fallback_response,
+                parse_status="valid",
+                generated_action_cta_detected=generated_action_cta_detected,
+            )
 
             logger.debug(
                 "Response generated",
@@ -611,20 +1470,12 @@ def create_response_generator_node(
                     "model": selected_model,
                 },
             )
-            return dict(
-                ResponseGenerationResult(
-                    response_text=response_text,
-                    metadata=metadata,
-                    cta=response_cta,
-                    topic=response_topic,
-                ).to_state_patch()
-            )
+            return patch
         except Exception as exc:
             if _rag_debug_enabled():
                 fallback_patch = _technical_failure_patch(state, exc)
-                logger.info(
-                    "RAG generation context trace",
-                    extra={
+                _emit_generation_trace(
+                    trace_extra={
                         **(generation_trace_extra or {}),
                         "thread_id": state.get("thread_id"),
                         "project_id": state.get("project_id"),
@@ -634,13 +1485,16 @@ def create_response_generator_node(
                             context.knowledge_chunks
                         ),
                         "prompt_chars": len(prompt),
-                        "generation_status": "failed",
-                        "error_type": type(exc).__name__,
-                        "error_preview": _preview_text(str(exc)),
-                        "fallback_response_preview": _preview_text(
-                            fallback_patch.get("response_text")
-                        ),
                     },
+                    status="failed",
+                    patch=fallback_patch,
+                    response_cta=None,
+                    response_topic=None,
+                    is_fallback_response=True,
+                    parse_status="failed",
+                    generated_action_cta_detected=False,
+                    error_type=type(exc).__name__,
+                    error_preview=_preview_text(str(exc)),
                 )
             logger.exception(
                 "Response generation failed",

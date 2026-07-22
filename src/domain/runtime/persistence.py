@@ -165,7 +165,8 @@ class PersistenceContext:
             state_payload=state_copy,
             user_memory=state.get("user_memory"),
         )
-        context.state_payload["dialog_state"] = context.normalized_dialog_state()
+        if context.state_payload is not None:
+            context.state_payload["dialog_state"] = context.normalized_dialog_state()
         return context
 
     def normalized_dialog_state(self) -> DialogState:
@@ -340,9 +341,6 @@ class PersistenceContext:
 
 
 def _ensure_repeat_count(dialog_state: DialogState) -> DialogState:
-    if dialog_state["repeat_count"] <= 0 and dialog_state["last_intent"]:
-        dialog_state["repeat_count"] = 1
-
     return dialog_state
 
 
@@ -393,7 +391,8 @@ def _state_payload_from_runtime_state(state: RuntimeStateInput) -> RuntimeStateP
     state_copy: RuntimeStatePatch = {}
     _copy_core_state_fields(state, state_copy)
     _copy_runtime_signal_fields(state, state_copy)
-    _copy_tool_state_fields(state, state_copy)
+    # Execution-scoped tool/retrieval/generation fields are intentionally omitted
+    # so the next turn cannot reconstruct stale factual or tool state.
     return state_copy
 
 
@@ -419,8 +418,8 @@ def _copy_core_state_fields(
         state_copy["project_id"] = state["project_id"]
     if "client_id" in state:
         state_copy["client_id"] = state["client_id"]
-    if "response_text" in state:
-        state_copy["response_text"] = state["response_text"]
+    # response_text is persisted as an assistant message, not reconstructed as
+    # executable state for the next user turn.
     if "metadata" in state:
         state_copy["metadata"] = state["metadata"]
 
@@ -465,6 +464,18 @@ def _copy_runtime_flags(
         state_copy["confidence"] = state["confidence"]
     if "requires_human" in state:
         state_copy["requires_human"] = state["requires_human"]
+    if "ticket_created" in state:
+        state_copy["ticket_created"] = state["ticket_created"]
+    if "handoff_ticket_id" in state:
+        state_copy["handoff_ticket_id"] = state["handoff_ticket_id"]
+    if "escalation_failed" in state:
+        state_copy["escalation_failed"] = state["escalation_failed"]
+    if "handoff_completed" in state:
+        state_copy["handoff_completed"] = state["handoff_completed"]
+    if "thread_waiting_manager" in state:
+        state_copy["thread_waiting_manager"] = state["thread_waiting_manager"]
+    if "notification_degraded" in state:
+        state_copy["notification_degraded"] = state["notification_degraded"]
     if "close_ticket" in state:
         state_copy["close_ticket"] = state["close_ticket"]
     if "features" in state:
@@ -493,18 +504,6 @@ def _copy_runtime_flags(
         state_copy["should_generate_answer"] = state["should_generate_answer"]
     if "should_offer_manager" in state:
         state_copy["should_offer_manager"] = state["should_offer_manager"]
-
-
-def _copy_tool_state_fields(
-    state: RuntimeStateInput,
-    state_copy: RuntimeStatePatch,
-) -> None:
-    if "tool_name" in state:
-        state_copy["tool_name"] = state["tool_name"]
-    if "tool_args" in state:
-        state_copy["tool_args"] = state["tool_args"]
-    if "tool_result" in state:
-        state_copy["tool_result"] = state["tool_result"]
 
 
 def _access_issue_kind(text: str) -> str | None:

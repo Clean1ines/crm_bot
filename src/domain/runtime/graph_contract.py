@@ -40,6 +40,12 @@ class AgentGraphDecision(StrEnum):
     ESCALATE_TO_HUMAN = "ESCALATE_TO_HUMAN"
 
 
+class AgentGraphRoute(StrEnum):
+    LLM_GENERATE_KNOWLEDGE = "LLM_GENERATE_KNOWLEDGE"
+    LLM_GENERATE_CONVERSATIONAL = "LLM_GENERATE_CONVERSATIONAL"
+    LLM_GENERATE_INVALID_MODE = "LLM_GENERATE_INVALID_MODE"
+
+
 class AgentGraphSideEffect(StrEnum):
     LOAD_THREAD_STATE = "load_thread_state"
     LOAD_USER_MEMORY = "load_user_memory"
@@ -85,6 +91,7 @@ class AgentGraphTransition:
     source: AgentGraphNode
     target: AgentGraphNode | None
     decision: AgentGraphDecision | None = None
+    route: AgentGraphRoute | None = None
     terminal: bool = False
 
 
@@ -153,6 +160,7 @@ AGENT_GRAPH_NODES: tuple[AgentGraphNode, ...] = (
     AgentGraphNode.TOOL_EXECUTOR,
     AgentGraphNode.ESCALATE,
     AgentGraphNode.RESPONSE_GENERATOR,
+    AgentGraphNode.TEMPLATE_RESPONSE,
     AgentGraphNode.RESPONDER,
     AgentGraphNode.PERSIST,
 )
@@ -179,12 +187,27 @@ AGENT_GRAPH_TRANSITIONS: tuple[AgentGraphTransition, ...] = (
     AgentGraphTransition(
         AgentGraphNode.POLICY_ENGINE,
         AgentGraphNode.KB_SEARCH,
-        AgentGraphDecision.LLM_GENERATE,
+        route=AgentGraphRoute.LLM_GENERATE_KNOWLEDGE,
+    ),
+    AgentGraphTransition(
+        AgentGraphNode.POLICY_ENGINE,
+        AgentGraphNode.RESPONSE_GENERATOR,
+        route=AgentGraphRoute.LLM_GENERATE_CONVERSATIONAL,
+    ),
+    AgentGraphTransition(
+        AgentGraphNode.POLICY_ENGINE,
+        AgentGraphNode.RESPONSE_GENERATOR,
+        route=AgentGraphRoute.LLM_GENERATE_INVALID_MODE,
     ),
     AgentGraphTransition(
         AgentGraphNode.POLICY_ENGINE,
         AgentGraphNode.RESPONDER,
         AgentGraphDecision.RESPOND,
+    ),
+    AgentGraphTransition(
+        AgentGraphNode.POLICY_ENGINE,
+        AgentGraphNode.TEMPLATE_RESPONSE,
+        AgentGraphDecision.RESPOND_TEMPLATE,
     ),
     AgentGraphTransition(
         AgentGraphNode.POLICY_ENGINE,
@@ -208,6 +231,7 @@ AGENT_GRAPH_TRANSITIONS: tuple[AgentGraphTransition, ...] = (
     AgentGraphTransition(AgentGraphNode.TOOL_EXECUTOR, AgentGraphNode.ESCALATE),
     AgentGraphTransition(AgentGraphNode.ESCALATE, AgentGraphNode.RESPONDER),
     AgentGraphTransition(AgentGraphNode.RESPONSE_GENERATOR, AgentGraphNode.RESPONDER),
+    AgentGraphTransition(AgentGraphNode.TEMPLATE_RESPONSE, AgentGraphNode.RESPONDER),
     AgentGraphTransition(AgentGraphNode.RESPONDER, AgentGraphNode.PERSIST),
     AgentGraphTransition(AgentGraphNode.PERSIST, None, terminal=True),
 )
@@ -273,6 +297,10 @@ AGENT_GRAPH_NODE_CONTRACTS: Mapping[AgentGraphNode, AgentGraphNodeContract] = {
         node=AgentGraphNode.RESPONSE_GENERATOR,
         optional_dependencies=(AgentGraphDependency.RESPONSE_LLM,),
         side_effects=(AgentGraphSideEffect.CALL_RESPONSE_LLM,),
+        fallbacks=(AgentGraphFallback.USER_VISIBLE_ERROR,),
+    ),
+    AgentGraphNode.TEMPLATE_RESPONSE: AgentGraphNodeContract(
+        node=AgentGraphNode.TEMPLATE_RESPONSE,
         fallbacks=(AgentGraphFallback.USER_VISIBLE_ERROR,),
     ),
     AgentGraphNode.RESPONDER: AgentGraphNodeContract(

@@ -12,6 +12,7 @@ from uuid import UUID
 from src.agent.state import AgentState
 from src.domain.runtime.persistence import PersistenceContext
 from src.domain.runtime.state_contracts import RuntimeStateInput
+from src.domain.runtime.tool_execution import ToolExecutionStatus
 from src.domain.project_plane.json_types import json_object_from_unknown
 from src.infrastructure.db.repositories.event_repository import EventRepository
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
@@ -79,9 +80,20 @@ def create_persist_node(
                             "user_id": context.client_id,
                         },
                     )
-                    ticket_id = str(ticket_result.get("ticket_id") or "")
+                    payload = (
+                        ticket_result.payload
+                        if ticket_result.status is ToolExecutionStatus.SUCCEEDED
+                        else {}
+                    )
+                    ticket_id = (
+                        str(payload.get("ticket_id") or "")
+                        if isinstance(payload, dict)
+                        else ""
+                    )
                     if context.state_payload is not None:
-                        context.state_payload["technical_incident_created"] = True
+                        context.state_payload["technical_incident_created"] = (
+                            ticket_result.status is ToolExecutionStatus.SUCCEEDED
+                        )
                         if ticket_id:
                             context.state_payload["technical_ticket_id"] = ticket_id
                     logger.warning(

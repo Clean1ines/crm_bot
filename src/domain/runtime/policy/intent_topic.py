@@ -123,3 +123,21 @@ def feature_risk_detected(features: FeatureMap | None) -> bool:
             return True
 
     return False
+
+
+def recognized_feature_map(features: FeatureMap | None) -> dict[str, object]:
+    if not isinstance(features, Mapping):
+        return {}
+    return {
+        str(key): value
+        for key, value in features.items()
+        if key in RISK_FEATURE_KEYS or key == "topic"
+    }
+
+
+def unrecognized_feature_keys(features: FeatureMap | None) -> list[str]:
+    if not isinstance(features, Mapping):
+        return []
+    return sorted(
+        str(key) for key in features if key not in RISK_FEATURE_KEYS and key != "topic"
+    )

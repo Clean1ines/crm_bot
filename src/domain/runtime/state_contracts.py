@@ -86,11 +86,14 @@ class RuntimeStateInput(TypedDict, total=False):
     history: list[RuntimeHistoryMessage]
     user_memory: RuntimeMemory
     knowledge_chunks: list[KnowledgeChunkPayload]
+    knowledge_retrieval_status: str | None
+    knowledge_retrieval_error_type: str | None
     client_profile: ClientProfileState
     project_configuration: ProjectRuntimeConfigurationState
     decision: str
     intent: str | None
     lifecycle: str | None
+    previous_lifecycle: str | None
     lead_status: str | None
     cta: str | None
     resolved_cta: str | None
@@ -106,6 +109,12 @@ class RuntimeStateInput(TypedDict, total=False):
     should_offer_manager: bool
     confidence: float | None
     requires_human: bool
+    ticket_created: bool
+    handoff_ticket_id: str | None
+    escalation_failed: bool
+    handoff_completed: bool
+    thread_waiting_manager: bool
+    notification_degraded: bool
     close_ticket: bool
     technical_failure_count: int
     technical_failure_stage: str | None
@@ -117,7 +126,21 @@ class RuntimeStateInput(TypedDict, total=False):
     tool_name: str | None
     tool_args: Mapping[str, object]
     tool_result: object
+    tool_execution_status: str | None
+    tool_execution_safe_error_code: str | None
+    tool_response_text: str | None
     metadata: Mapping[str, object]
+    generation_mode: str | None
+    model_answerability: str | None
+    supporting_entry_ids: list[str]
+    unsupported_aspects: list[str]
+    generation_output_parse_status: str | None
+    generation_schema_status: str | None
+    evidence_reference_status: str | None
+    semantic_grounding_status: str | None
+    semantic_grounding_failure_reason: str | None
+    fallback_reason: str | None
+    normalization_flags: Mapping[str, object]
     messages: object
 
 
@@ -132,11 +155,14 @@ class RuntimeStatePatch(TypedDict, total=False):
     history: list[RuntimeHistoryMessage] | list[Mapping[str, object]]
     user_memory: RuntimeMemory | Mapping[str, object]
     knowledge_chunks: list[KnowledgeChunkPayload] | None
+    knowledge_retrieval_status: str | None
+    knowledge_retrieval_error_type: str | None
     client_profile: ClientProfileState | None
     message_sent: bool
     decision: str
     intent: str | None
     lifecycle: str | None
+    previous_lifecycle: str | None
     lead_status: str | None
     cta: str | None
     resolved_cta: str | None
@@ -152,6 +178,12 @@ class RuntimeStatePatch(TypedDict, total=False):
     should_offer_manager: bool
     confidence: float | None
     requires_human: bool
+    ticket_created: bool
+    handoff_ticket_id: str | None
+    escalation_failed: bool
+    handoff_completed: bool
+    thread_waiting_manager: bool
+    notification_degraded: bool
     close_ticket: bool
     technical_failure_count: int
     technical_failure_stage: str | None
@@ -164,6 +196,20 @@ class RuntimeStatePatch(TypedDict, total=False):
     tool_name: str | None
     tool_args: Mapping[str, object]
     tool_result: object
+    tool_execution_status: str | None
+    tool_execution_safe_error_code: str | None
+    tool_response_text: str | None
+    generation_mode: str | None
+    model_answerability: str | None
+    supporting_entry_ids: list[str]
+    unsupported_aspects: list[str]
+    generation_output_parse_status: str | None
+    generation_schema_status: str | None
+    evidence_reference_status: str | None
+    semantic_grounding_status: str | None
+    semantic_grounding_failure_reason: str | None
+    fallback_reason: str | None
+    normalization_flags: Mapping[str, object]
 
 
 # Backward-compatible aliases for existing agent/runtime imports.

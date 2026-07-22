@@ -4,6 +4,7 @@ import pytest
 
 from src.agent.nodes.kb_search import create_kb_search_node
 from src.domain.runtime.knowledge_search import KnowledgeSearchResult
+from src.domain.runtime.tool_execution import ToolExecutionOutcome
 
 
 @pytest.mark.asyncio
@@ -19,19 +20,25 @@ async def test_kb_search_returns_empty_chunks_when_context_missing():
     ):
         result = await node({})
 
-    assert result == {"knowledge_chunks": []}
+    assert result == {
+        "knowledge_chunks": [],
+        "knowledge_retrieval_status": "skipped",
+        "knowledge_retrieval_error_type": None,
+    }
 
 
 @pytest.mark.asyncio
 async def test_kb_search_normalizes_tool_results():
     tool_registry = MagicMock()
     tool_registry.execute = AsyncMock(
-        return_value={
-            "results": [
-                {"id": "chunk-1", "score": 0.9, "content": "abc"},
-                {"score": None, "content": "xyz"},
-            ]
-        }
+        return_value=ToolExecutionOutcome.succeeded(
+            payload={
+                "results": [
+                    {"id": "chunk-1", "score": 0.9, "content": "abc"},
+                    {"score": None, "content": "xyz"},
+                ]
+            }
+        )
     )
     node = create_kb_search_node(tool_registry=tool_registry)
 
@@ -48,7 +55,9 @@ async def test_kb_search_normalizes_tool_results():
         "knowledge_chunks": [
             {"id": "chunk-1", "score": 0.9, "content": "abc"},
             {"id": "no-id-1", "score": None, "content": "xyz"},
-        ]
+        ],
+        "knowledge_retrieval_status": "retrieved",
+        "knowledge_retrieval_error_type": None,
     }
     tool_registry.execute.assert_awaited_once()
 
@@ -62,9 +71,11 @@ async def test_kb_search_keeps_full_curated_claim_text():
     )
     tool_registry = MagicMock()
     tool_registry.execute = AsyncMock(
-        return_value={
-            "results": [{"id": "runtime-entry-1", "score": 0.93, "content": claim}]
-        }
+        return_value=ToolExecutionOutcome.succeeded(
+            payload={
+                "results": [{"id": "runtime-entry-1", "score": 0.93, "content": claim}]
+            }
+        )
     )
     node = create_kb_search_node(tool_registry=tool_registry)
 
@@ -78,14 +89,20 @@ async def test_kb_search_keeps_full_curated_claim_text():
         result = await node({"project_id": "project-1", "user_input": "hello"})
 
     assert result == {
-        "knowledge_chunks": [{"id": "runtime-entry-1", "score": 0.93, "content": claim}]
+        "knowledge_chunks": [
+            {"id": "runtime-entry-1", "score": 0.93, "content": claim}
+        ],
+        "knowledge_retrieval_status": "retrieved",
+        "knowledge_retrieval_error_type": None,
     }
 
 
 @pytest.mark.asyncio
 async def test_kb_search_uses_resolved_knowledge_query_for_short_continuation_reply():
     tool_registry = MagicMock()
-    tool_registry.execute = AsyncMock(return_value={"results": []})
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
     node = create_kb_search_node(tool_registry=tool_registry)
 
     async def passthrough(_name, impl, state, **_kwargs):
@@ -115,7 +132,9 @@ async def test_kb_search_uses_resolved_knowledge_query_for_short_continuation_re
 @pytest.mark.asyncio
 async def test_kb_search_ignores_stale_knowledge_query_on_independent_turn():
     tool_registry = MagicMock()
-    tool_registry.execute = AsyncMock(return_value={"results": []})
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
     node = create_kb_search_node(tool_registry=tool_registry)
 
     async def passthrough(_name, impl, state, **_kwargs):
@@ -181,5 +200,40 @@ def test_knowledge_search_result_keeps_trace_metadata_outside_prompt_payload():
                 "score": 0.91,
                 "content": "Axole helps businesses automate client replies.",
             }
-        ]
+        ],
+        "knowledge_retrieval_status": "retrieved",
+        "knowledge_retrieval_error_type": None,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("exception", "expected_code"),
+    [
+        (TimeoutError("slow search"), "tool_timeout"),
+        (ConnectionError("provider unavailable"), "tool_unavailable"),
+        (RuntimeError("search unavailable"), "knowledge_search_failed"),
+    ],
+)
+async def test_kb_search_marks_retrieval_exception_with_stable_code(
+    exception, expected_code
+):
+    tool_registry = MagicMock()
+    tool_registry.execute = AsyncMock(side_effect=exception)
+    node = create_kb_search_node(tool_registry=tool_registry)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.kb_search.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node({"project_id": "project-1", "user_input": "hello"})
+
+    assert result == {
+        "knowledge_chunks": [],
+        "knowledge_retrieval_status": "failed",
+        "knowledge_retrieval_error_type": expected_code,
+    }
+    assert type(exception).__name__ not in result.values()

@@ -19,13 +19,19 @@ from src.domain.runtime.policy.handoff_confirmation import (
 )
 from src.domain.runtime.policy.handoff_request import is_explicit_handoff_request
 from src.domain.runtime.policy.intent_topic import (
+    RISK_FEATURE_KEYS,
     feature_risk_detected,
     normalize_intent,
     resolve_current_topic,
+    unrecognized_feature_keys,
 )
 from src.domain.runtime.dialog_state import merge_dialog_state
-from src.domain.runtime.policy.repeat_detection import build_dialog_state_update
+from src.domain.runtime.policy.repeat_detection import (
+    build_dialog_state_update,
+    evaluate_repeat_count,
+)
 from src.domain.runtime.policy.result import PolicyDecisionContext, PolicyDecisionResult
+from src.domain.runtime.response_generation import GenerationMode
 from src.domain.runtime.state_contracts import RuntimeStateInput
 from src.domain.project_plane.json_types import JsonObject, json_object_from_unknown
 from src.infrastructure.db.repositories.event_repository import EventRepository
@@ -46,19 +52,25 @@ def _handoff_confirmation_result(
     normalized_intent: str,
     topic: str,
     cta: str,
+    dialog_state: Mapping[str, object] | None = None,
 ) -> PolicyDecisionResult:
-    next_dialog_state = merge_dialog_state(
-        build_dialog_state_update(
-            context.dialog_state,
-            intent=normalized_intent,
-            topic=topic,
-            cta=cta,
+    if dialog_state is None:
+        next_dialog_state = merge_dialog_state(
+            build_dialog_state_update(
+                context.dialog_state,
+                intent=normalized_intent,
+                topic=topic,
+                cta=cta,
+                lifecycle=context.lifecycle,
+                decision="RESPOND",
+                features=context.features,
+            ),
             lifecycle=context.lifecycle,
-            decision="RESPOND",
-            features=context.features,
-        ),
-        lifecycle=context.lifecycle,
-    )
+        )
+    else:
+        next_dialog_state = merge_dialog_state(
+            dialog_state, lifecycle=context.lifecycle
+        )
 
     next_dialog_state = with_handoff_confirmation_pending(next_dialog_state)
     return PolicyDecisionResult(
@@ -130,6 +142,34 @@ def _resolved_cta(state: AgentState) -> str | None:
     return normalize_cta(state.get("resolved_cta"))
 
 
+def _clear_turn_scoped_execution_fields(patch: dict[str, object]) -> None:
+    patch.update(
+        {
+            "generation_mode": None,
+            "tool_name": None,
+            "tool_args": None,
+            "tool_result": None,
+            "tool_execution_status": None,
+            "tool_execution_safe_error_code": None,
+            "tool_response_text": None,
+            "knowledge_chunks": [],
+            "knowledge_retrieval_status": None,
+            "knowledge_retrieval_error_type": None,
+            "model_answerability": None,
+            "supporting_entry_ids": [],
+            "unsupported_aspects": [],
+            "generation_output_parse_status": None,
+            "generation_schema_status": None,
+            "evidence_reference_status": None,
+            "semantic_grounding_status": None,
+            "semantic_grounding_failure_reason": None,
+            "fallback_reason": None,
+            "generated_action_cta_detected": None,
+            "canonical_response_cta": None,
+        }
+    )
+
+
 def _merge_intent_and_policy_state(
     state: AgentState,
     policy_patch: dict[str, object],
@@ -141,6 +181,7 @@ def _merge_intent_and_policy_state(
     if resolved_cta == "call_manager":
         if resolved_reply == "affirmative":
             patch = dict(policy_patch)
+            _clear_turn_scoped_execution_fields(patch)
             patch.update(
                 {
                     "decision": "ESCALATE",
@@ -157,6 +198,7 @@ def _merge_intent_and_policy_state(
 
         if resolved_reply == "negative":
             patch = dict(policy_patch)
+            _clear_turn_scoped_execution_fields(patch)
             patch.update(
                 {
                     "decision": "RESPOND",
@@ -175,6 +217,7 @@ def _merge_intent_and_policy_state(
     if resolved_cta == "book_consultation":
         if resolved_reply == "affirmative":
             patch = dict(policy_patch)
+            _clear_turn_scoped_execution_fields(patch)
             patch.update(
                 {
                     "decision": "ESCALATE",
@@ -191,6 +234,7 @@ def _merge_intent_and_policy_state(
 
         if resolved_reply == "negative":
             patch = dict(policy_patch)
+            _clear_turn_scoped_execution_fields(patch)
             patch.update(
                 {
                     "decision": "RESPOND",
@@ -209,6 +253,7 @@ def _merge_intent_and_policy_state(
     if resolved_cta == CONTINUE_EXPLANATION_CTA:
         if resolved_reply == "affirmative":
             patch = dict(policy_patch)
+            _clear_turn_scoped_execution_fields(patch)
             patch.update(
                 {
                     "decision": "LLM_GENERATE",
@@ -220,12 +265,14 @@ def _merge_intent_and_policy_state(
                     "should_generate_answer": True,
                     "should_offer_manager": False,
                     "requires_human": False,
+                    "generation_mode": GenerationMode.KNOWLEDGE_ANSWER.value,
                 }
             )
             return patch
 
         if resolved_reply == "negative":
             patch = dict(policy_patch)
+            _clear_turn_scoped_execution_fields(patch)
             patch.update(
                 {
                     "decision": "RESPOND",
@@ -243,9 +290,23 @@ def _merge_intent_and_policy_state(
 
     patch = dict(policy_patch)
     patch["knowledge_query"] = None
+    if patch.get("decision") == "LLM_GENERATE":
+        _clear_turn_scoped_execution_fields(patch)
+        patch["generation_mode"] = GenerationMode.KNOWLEDGE_ANSWER.value
+        if patch.get("cta") in {"call_manager", "book_consultation"}:
+            patch["cta"] = "none"
+            dialog_state = patch.get("dialog_state")
+            if isinstance(dialog_state, dict):
+                dialog_state = dict(dialog_state)
+                dialog_state["last_cta"] = None
+                patch["dialog_state"] = dialog_state
+        patch["should_search_kb"] = True
+        patch["should_generate_answer"] = True
+        patch["should_offer_manager"] = bool(state.get("should_offer_manager") or False)
     if "turn_relation" in state:
         patch["turn_relation"] = state.get("turn_relation")
     if patch.get("decision") != "LLM_GENERATE":
+        _clear_turn_scoped_execution_fields(patch)
         patch["should_search_kb"] = False
         patch["should_generate_answer"] = False
         patch["should_offer_manager"] = False
@@ -258,7 +319,9 @@ def _risk_features(features: object) -> list[str]:
     return [
         str(key)
         for key, value in features.items()
-        if isinstance(value, (int, float)) and float(value) >= 0.8
+        if key in RISK_FEATURE_KEYS
+        and isinstance(value, (int, float))
+        and float(value) >= 0.8
     ]
 
 
@@ -269,7 +332,8 @@ def _handoff_signal_source(
     resolved_topic: str,
     previous_repeat_count: int,
     final_repeat_count: object,
-    features: object,
+    repeat_increment_reason: str | None,
+    features: Mapping[str, object] | None,
     decision: str,
     resolved_cta: str | None,
     resolved_reply: str | None,
@@ -288,11 +352,15 @@ def _handoff_signal_source(
     if feature_risk_detected(features):
         return "complaint_or_refund_risk"
     try:
-        repeat_count = int(final_repeat_count or 0)
-    except (TypeError, ValueError):
+        repeat_count = (
+            int(final_repeat_count)
+            if isinstance(final_repeat_count, int | float | str)
+            else 0
+        )
+    except ValueError:
         repeat_count = 0
     if decision in {"ESCALATE", "ESCALATE_TO_HUMAN", "RESPOND"}:
-        if previous_repeat_count >= 2 and repeat_count >= 3:
+        if repeat_increment_reason and previous_repeat_count >= 2 and repeat_count >= 3:
             return "repeat_escalation"
     return "none"
 
@@ -319,6 +387,13 @@ def create_policy_engine_node(
 ):
     async def _policy_engine_node_impl(state: AgentState) -> dict[str, object]:
         context = PolicyDecisionContext.from_state(cast(RuntimeStateInput, state))
+        features = context.features if isinstance(context.features, Mapping) else None
+        raw_normalization_flags = state.get("normalization_flags")
+        normalization_flags: Mapping[str, object] = (
+            raw_normalization_flags
+            if isinstance(raw_normalization_flags, Mapping)
+            else {}
+        )
 
         # Preserve deterministic response patches produced before policy_engine,
         # especially technical failures from intent_extractor.
@@ -341,18 +416,51 @@ def create_policy_engine_node(
 
         domain = str(state.get("domain") or "business").strip().lower()
         turn_relation = str(state.get("turn_relation") or "unknown").strip().lower()
-        should_generate_answer = bool(state.get("should_generate_answer", True))
+        if domain == "smalltalk":
+            result = PolicyDecisionResult(
+                lifecycle=context.lifecycle,
+                decision="LLM_GENERATE",
+                cta="none",
+                topic="other",
+                lead_status=str(context.dialog_state.get("lead_status") or ""),
+                dialog_state=merge_dialog_state(
+                    build_dialog_state_update(
+                        context.dialog_state,
+                        intent="other",
+                        topic="other",
+                        cta="none",
+                        lifecycle=context.lifecycle,
+                        decision="LLM_GENERATE",
+                        features=features,
+                        turn_relation=turn_relation,
+                        is_repeat_like=False,
+                    )
+                ),
+            )
+            patch = dict(result.to_state_patch(previous_lifecycle=context.lifecycle))
+            _clear_turn_scoped_execution_fields(patch)
+            patch.update(
+                {
+                    "domain": domain,
+                    "turn_relation": turn_relation,
+                    "should_search_kb": False,
+                    "should_generate_answer": True,
+                    "should_offer_manager": False,
+                    "requires_human": False,
+                    "generation_mode": GenerationMode.CONVERSATIONAL_RESPONSE.value,
+                    "knowledge_retrieval_status": "skipped",
+                }
+            )
+            return patch
 
-        if (
-            domain in {"greeting", "out_of_domain", "ambiguous"}
-            or not should_generate_answer
-        ):
+        if domain in {"greeting", "out_of_domain", "ambiguous"}:
             result = _template_policy_result(
                 context,
                 domain=domain,
                 turn_relation=turn_relation,
             )
             patch = dict(result.to_state_patch(previous_lifecycle=context.lifecycle))
+            _clear_turn_scoped_execution_fields(patch)
             patch.update(
                 {
                     "domain": domain,
@@ -360,6 +468,7 @@ def create_policy_engine_node(
                     "should_search_kb": False,
                     "should_generate_answer": False,
                     "requires_human": False,
+                    "generation_mode": None,
                 }
             )
             return patch
@@ -368,10 +477,17 @@ def create_policy_engine_node(
         input_topic = state.get("topic")
         topic = resolve_current_topic(
             normalized_intent,
-            context.features,
+            features,
             current_topic=str(input_topic) if input_topic is not None else None,
         )
         previous_repeat_count = int(context.dialog_state.get("repeat_count") or 0)
+        repeat_evaluation = evaluate_repeat_count(
+            context.dialog_state,
+            normalized_intent,
+            topic,
+            turn_relation=turn_relation,
+            is_repeat_like=bool(state.get("is_repeat_like") or False),
+        )
 
         new_lifecycle, decision, cta = get_decision(
             context.lifecycle,
@@ -379,6 +495,8 @@ def create_policy_engine_node(
             features=context.features,
             dialog_state=context.dialog_state,
             current_topic=topic,
+            turn_relation=turn_relation,
+            is_repeat_like=bool(state.get("is_repeat_like") or False),
         )
 
         next_dialog_state = merge_dialog_state(
@@ -390,6 +508,8 @@ def create_policy_engine_node(
                 lifecycle=new_lifecycle,
                 decision=decision,
                 features=context.features,
+                turn_relation=turn_relation,
+                is_repeat_like=bool(state.get("is_repeat_like") or False),
             )
         )
         result = PolicyDecisionResult(
@@ -408,6 +528,7 @@ def create_policy_engine_node(
                 normalized_intent=normalized_intent,
                 topic=topic,
                 cta=cta,
+                dialog_state=next_dialog_state,
             )
 
         policy_patch = dict(result.to_state_patch(previous_lifecycle=context.lifecycle))
@@ -458,20 +579,37 @@ def create_policy_engine_node(
                 "new_lifecycle": final_patch.get("lifecycle", result.lifecycle),
                 "previous_repeat_count": previous_repeat_count,
                 "final_repeat_count": final_dialog_state.get("repeat_count"),
-                "risk_features": _risk_features(context.features),
+                "risk_features": _risk_features(features),
                 "handoff_signal_source": _handoff_signal_source(
                     lifecycle=context.lifecycle,
                     normalized_intent=normalized_intent,
                     resolved_topic=topic,
                     previous_repeat_count=previous_repeat_count,
                     final_repeat_count=final_dialog_state.get("repeat_count"),
-                    features=context.features,
+                    repeat_increment_reason=repeat_evaluation.increment_reason,
+                    features=features,
                     decision=str(final_patch.get("decision") or ""),
                     resolved_cta=_resolved_cta(state),
                     resolved_reply=_resolved_cta_reply(state),
                     user_input=context.user_input,
                 ),
                 "raw_policy_decision": decision,
+                "repeat_increment_reason": repeat_evaluation.increment_reason,
+                "repeat_reset_reason": repeat_evaluation.reset_reason,
+                "current_turn_relation": turn_relation,
+                "current_is_repeat_like": bool(state.get("is_repeat_like") or False),
+                "previous_topic": context.dialog_state.get("last_topic"),
+                "current_topic": topic,
+                "previous_intent": context.dialog_state.get("last_intent"),
+                "current_intent": normalized_intent,
+                "routing_flag_override_reason": normalization_flags.get(
+                    "routing_flag_override_reason"
+                ),
+                "unrecognized_feature_keys": (
+                    unrecognized_feature_keys(features)
+                    or normalization_flags.get("unrecognized_feature_keys")
+                    or []
+                ),
                 "final_decision": final_patch.get("decision"),
                 "cta": final_patch.get("cta"),
                 "requires_human": final_patch.get("requires_human", False),

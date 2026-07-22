@@ -10,6 +10,7 @@ from typing import cast
 from src.agent.state import AgentState
 from src.domain.runtime.delivery import ResponseDeliveryContext, ResponseDeliveryResult
 from src.domain.runtime.state_contracts import RuntimeStateInput
+from src.domain.runtime.tool_execution import ToolExecutionStatus
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
@@ -59,7 +60,7 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
                     "thread_id": context.thread_id,
                 },
             )
-            if result.get("ok"):
+            if result.status is ToolExecutionStatus.SUCCEEDED:
                 logger.info(
                     "Message sent successfully", extra={"chat_id": context.chat_id}
                 )
@@ -94,7 +95,11 @@ def create_responder_node(tool_registry: ToolRegistry, thread_message_repo=None)
 
             logger.error(
                 "Telegram send failed",
-                extra={"chat_id": context.chat_id, "result": result},
+                extra={
+                    "chat_id": context.chat_id,
+                    "tool_execution_status": result.status.value,
+                    "safe_error_code": result.safe_error_code,
+                },
             )
             patch = ResponseDeliveryResult(
                 message_sent=False,

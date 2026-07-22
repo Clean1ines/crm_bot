@@ -55,6 +55,7 @@ def test_policy_decision_result_serializes_state_patch_and_event_payload():
             "lead_status": "handoff_to_manager",
             "handoff_confirmation_pending": False,
         },
+        "previous_lifecycle": "warm",
         "lifecycle": "handoff_to_manager",
     }
     assert result.to_event_payload(confidence=0.8) == {

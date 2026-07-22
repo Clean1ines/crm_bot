@@ -111,9 +111,6 @@ def _llm_topic_decision(topic: str, decision: PolicyDecision) -> PolicyDecision:
     if topic not in LLM_TOPICS:
         return decision
 
-    if current_decision == "ESCALATE_TO_HUMAN":
-        return decision
-
     if cta in MANAGER_CTAS:
         return new_lifecycle, "LLM_GENERATE", cta
 
@@ -130,6 +127,8 @@ def get_decision(
     features: FeatureMap | None = None,
     dialog_state: DialogStateMap | None = None,
     current_topic: str | None = None,
+    turn_relation: str | None = None,
+    is_repeat_like: bool = False,
 ) -> PolicyDecision:
     normalized_lifecycle = normalize_lifecycle(lifecycle)
     normalized_intent = normalize_intent(intent)
@@ -141,7 +140,11 @@ def get_decision(
 
     previous_dialog_state = _previous_dialog_state(dialog_state)
     repeat_count = calculate_repeat_count(
-        previous_dialog_state, normalized_intent, topic
+        previous_dialog_state,
+        normalized_intent,
+        topic,
+        turn_relation=turn_relation,
+        is_repeat_like=is_repeat_like,
     )
 
     handoff_decision = _requires_human_handoff(

@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
 
 from src.domain.runtime.cta import is_pending_cta, normalize_cta
 from src.domain.runtime.dialog_state import default_dialog_state
@@ -16,6 +17,13 @@ DialogStateMap = Mapping[str, object]
 MutableDialogState = dict[str, object]
 
 
+@dataclass(frozen=True, slots=True)
+class RepeatEvaluation:
+    count: int
+    increment_reason: str | None = None
+    reset_reason: str | None = None
+
+
 def _normalized_previous_value(
     previous_dialog_state: DialogStateMap,
     key: str,
@@ -23,20 +31,64 @@ def _normalized_previous_value(
     return str(previous_dialog_state.get(key) or "").strip().lower()
 
 
-def calculate_repeat_count(
-    previous_dialog_state: DialogStateMap, intent: str, topic: str
-) -> int:
+def evaluate_repeat_count(
+    previous_dialog_state: DialogStateMap,
+    intent: str,
+    topic: str,
+    *,
+    turn_relation: str | None = None,
+    is_repeat_like: bool = False,
+) -> RepeatEvaluation:
     prev_intent = _normalized_previous_value(previous_dialog_state, "last_intent")
     prev_topic = _normalized_previous_value(previous_dialog_state, "last_topic")
     previous_count = coerce_int(previous_dialog_state.get("repeat_count"), 0)
+    normalized_turn_relation = str(turn_relation or "unknown").strip().lower()
 
     if not intent:
-        return previous_count
+        return RepeatEvaluation(
+            0,
+            reset_reason="missing_current_intent",
+        )
 
-    if intent == prev_intent or topic == prev_topic:
-        return previous_count + 1
+    same_intent = bool(intent and intent == prev_intent)
+    same_topic = bool(topic and topic == prev_topic and topic != "other")
+    continuation_repeat = (
+        normalized_turn_relation == "continuation" and same_intent and same_topic
+    )
 
-    return 1
+    if is_repeat_like:
+        return RepeatEvaluation(
+            max(previous_count, 1) + 1,
+            increment_reason="is_repeat_like",
+        )
+
+    if continuation_repeat:
+        return RepeatEvaluation(
+            max(previous_count, 1) + 1,
+            increment_reason="continuation_same_intent_topic",
+        )
+
+    if normalized_turn_relation == "new_topic":
+        return RepeatEvaluation(0, reset_reason="new_topic")
+
+    return RepeatEvaluation(0, reset_reason="no_repeat_evidence")
+
+
+def calculate_repeat_count(
+    previous_dialog_state: DialogStateMap,
+    intent: str,
+    topic: str,
+    *,
+    turn_relation: str | None = None,
+    is_repeat_like: bool = False,
+) -> int:
+    return evaluate_repeat_count(
+        previous_dialog_state,
+        intent,
+        topic,
+        turn_relation=turn_relation,
+        is_repeat_like=is_repeat_like,
+    ).count
 
 
 def _base_dialog_state(
@@ -142,11 +194,19 @@ def build_dialog_state_update(
     lifecycle: str,
     decision: str,
     features: FeatureMap | None = None,
+    turn_relation: str | None = None,
+    is_repeat_like: bool = False,
 ) -> MutableDialogState:
     del features
 
     dialog_state = _base_dialog_state(previous_dialog_state, lifecycle)
-    repeat_count = calculate_repeat_count(previous_dialog_state, intent, topic)
+    repeat_count = calculate_repeat_count(
+        previous_dialog_state,
+        intent,
+        topic,
+        turn_relation=turn_relation,
+        is_repeat_like=is_repeat_like,
+    )
 
     dialog_state["repeat_count"] = repeat_count
     _remember_latest_signals(dialog_state, intent=intent, topic=topic, cta=cta)

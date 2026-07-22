@@ -83,9 +83,19 @@ class AgentState(TypedDict):
     tool_name: str | None
     tool_args: ToolArguments | None
     tool_result: object | None
+    tool_execution_status: str | None
+    tool_execution_safe_error_code: str | None
+    tool_response_text: str | None
+    generation_mode: str | None
     user_memory: dict[str, object] | None  # Added hidden field discovered during audit
     response_text: str | None
     requires_human: bool
+    ticket_created: bool | None
+    handoff_ticket_id: str | None
+    escalation_failed: bool | None
+    handoff_completed: bool | None
+    thread_waiting_manager: bool | None
+    notification_degraded: bool | None
     confidence: float | None
     chat_id: int | None  # Telegram chat ID of the user, needed for responder
     message_sent: (
@@ -109,6 +119,7 @@ class AgentState(TypedDict):
     resolved_cta: str | None
     resolved_cta_reply: str | None
     lifecycle: str | None  # Customer lifecycle stage (e.g., "cold", "warm", "hot")
+    previous_lifecycle: str | None
     features: (
         dict[str, object] | None
     )  # Tracked feature interest (e.g., {"auto_reply": True})
@@ -123,3 +134,12 @@ class AgentState(TypedDict):
     should_search_kb: bool | None
     should_generate_answer: bool | None
     should_offer_manager: bool | None
+    model_answerability: str | None
+    supporting_entry_ids: list[str] | None
+    unsupported_aspects: list[str] | None
+    generation_output_parse_status: str | None
+    generation_schema_status: str | None
+    evidence_reference_status: str | None
+    semantic_grounding_status: str | None
+    semantic_grounding_failure_reason: str | None
+    fallback_reason: str | None

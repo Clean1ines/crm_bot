@@ -70,6 +70,8 @@ class KnowledgeChunk:
 @dataclass(slots=True)
 class KnowledgeSearchResult:
     chunks: list[KnowledgeChunk] = field(default_factory=list)
+    retrieval_status: str = "empty"
+    error_type: str | None = None
 
     @classmethod
     def from_tool_payload(
@@ -98,7 +100,7 @@ class KnowledgeSearchResult:
                     questions=row.get("questions"),
                 )
             )
-        return cls(chunks=chunks)
+        return cls(chunks=chunks, retrieval_status="retrieved" if chunks else "empty")
 
     def ids(self) -> list[str]:
         return [chunk.chunk_id for chunk in self.chunks]
@@ -108,7 +110,9 @@ class KnowledgeSearchResult:
 
     def to_state_patch(self) -> RuntimeStatePatch:
         return {
-            "knowledge_chunks": [chunk.to_prompt_payload() for chunk in self.chunks]
+            "knowledge_chunks": [chunk.to_prompt_payload() for chunk in self.chunks],
+            "knowledge_retrieval_status": self.retrieval_status,
+            "knowledge_retrieval_error_type": self.error_type,
         }
 
 

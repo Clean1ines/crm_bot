@@ -25,7 +25,7 @@ def test_intent_extraction_result_serializes_validated_payload():
         {
             "intent": "support",
             "cta": "none",
-            "features": {"crm": 0.8},
+            "features": {"complaint": 0.8},
             "topic": "support",
             "cta_hint": None,
             "emotion": "negative",
@@ -36,7 +36,7 @@ def test_intent_extraction_result_serializes_validated_payload():
     assert result.to_state_patch() == {
         "intent": "support",
         "cta": "none",
-        "features": {"crm": 0.8},
+        "features": {"complaint": 0.8},
         "topic": "support",
         "cta_hint": None,
         "emotion": "negative",
@@ -49,7 +49,44 @@ def test_intent_extraction_result_serializes_validated_payload():
         "knowledge_query": None,
         "resolved_cta": None,
         "resolved_cta_reply": None,
+        "normalization_flags": {},
     }
+
+
+def test_intent_extraction_filters_unrecognized_features():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "support",
+            "cta": "none",
+            "features": {"Axole": 1.0, "complaint": 0.9},
+            "topic": "support",
+        }
+    )
+
+    assert result.features == {"complaint": 0.9}
+
+
+def test_intent_extraction_overrides_false_routing_flags_for_business_question():
+    context = IntentExtractionContext.from_state(
+        {"user_input": "Это обычный конструктор Telegram-ботов с кнопками?"}
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "other",
+            "topic": "product",
+            "cta": "none",
+            "features": {},
+            "should_search_kb": False,
+            "should_generate_answer": False,
+        }
+    ).normalized_for_context(context)
+
+    assert result.should_search_kb is True
+    assert result.should_generate_answer is True
+    assert result.normalization_flags["routing_flag_override_reason"] == (
+        "ordinary_business_question"
+    )
 
 
 def test_intent_extraction_result_explicitly_clears_turn_scoped_knowledge_query():
@@ -386,6 +423,7 @@ def test_intent_extraction_downgrades_non_explicit_handoff_classification():
     assert result.should_generate_answer is True
     assert result.should_offer_manager is False
     assert result.normalization_flags == {
+        "unrecognized_feature_keys": ["handoff"],
         "handoff_intent_downgraded": True,
         "handoff_intent_downgrade_reason": "mention_without_explicit_request",
     }
@@ -441,7 +479,7 @@ def test_intent_extraction_keeps_explicit_handoff_classification():
     assert result.intent == "handoff_request"
     assert result.topic == "handoff"
     assert result.cta == "call_manager"
-    assert result.normalization_flags == {}
+    assert result.normalization_flags == {"unrecognized_feature_keys": ["handoff"]}
 
 
 def test_intent_extraction_later_yes_cannot_confirm_expired_cta():

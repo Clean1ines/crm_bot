@@ -74,11 +74,15 @@ def format_kb_results(
             text = extract_kb_text(item)
             question = truncate_text(str(item.get("question", "")), 120)
             method = compact_whitespace(str(item.get("method", "")))
+            entry_id = compact_whitespace(str(item.get("id", "")))
         else:
             text = extract_kb_text(item)
+            entry_id = ""
 
         top_score = max(top_score, score)
         parts: list[str] = [f"{index}. score={score:.3f}"]
+        if entry_id:
+            parts.append(f"id={entry_id}")
         if question:
             parts.append(f"question={question}")
         if method:
@@ -287,6 +291,8 @@ def build_response_prompt(
     history: list[HistoryMessage] | None = None,
     user_memory: dict[str, list[dict[str, object]]] | None = None,
     knowledge_chunks: Sequence[object] | None = None,
+    generation_mode: str = "KNOWLEDGE_ANSWER",
+    tool_result: object | None = None,
     project_configuration: ProjectRuntimeConfigurationState | None = None,
     target_language: str | None = None,
 ) -> str:
@@ -320,9 +326,18 @@ def build_response_prompt(
         else NO_KNOWLEDGE_TEXT
     )
     knowledge_block = kb_block
+    tool_result_block = (
+        truncate_text(
+            json.dumps(tool_result, ensure_ascii=False, separators=(",", ":")),
+            1200,
+        )
+        if tool_result is not None
+        else NO_DATA_TEXT
+    )
 
     return response_prompt_template.format(
         decision=decision,
+        generation_mode=generation_mode,
         features=feat_str,
         user_input=user_input,
         conversation_summary=conversation_summary or NO_DATA_TEXT,
@@ -330,5 +345,6 @@ def build_response_prompt(
         user_memory=mem_str or NO_DATA_TEXT,
         project_context=project_context,
         knowledge_block=knowledge_block,
+        tool_result=tool_result_block,
         interpretation_block=_interpretation_block,
     )

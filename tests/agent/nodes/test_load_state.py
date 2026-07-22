@@ -5,6 +5,7 @@ import pytest
 
 from src.agent.nodes.load_state import create_load_state_node
 from src.domain.project_plane.memory_views import MemoryEntryView
+from src.domain.runtime.persistence import PersistenceContext
 
 
 @pytest.mark.asyncio
@@ -162,3 +163,162 @@ async def test_load_state_indexes_memory_and_hydrates_dialog_state():
     }
     assert result["dialog_state"]["repeat_count"] == 2
     assert result["dialog_state"]["last_topic"] == "pricing"
+
+
+@pytest.mark.asyncio
+async def test_load_state_reconstruction_does_not_restore_persisted_transient_execution_state():
+    turn_one_context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "response_text": "done",
+            "decision": "CALL_TOOL",
+            "generation_mode": "TOOL_RESULT_RESPONSE",
+            "tool_name": "crm.get_user",
+            "tool_args": {"telegram_id": 1},
+            "tool_result": {"found": True},
+            "tool_execution_status": "succeeded",
+            "tool_execution_safe_error_code": None,
+            "tool_response_text": "Done.",
+            "knowledge_chunks": [{"id": "old", "content": "old"}],
+            "knowledge_retrieval_status": "retrieved",
+            "knowledge_retrieval_error_type": None,
+            "model_answerability": "supported",
+            "supporting_entry_ids": ["old"],
+            "unsupported_aspects": [],
+            "generation_output_parse_status": "valid",
+            "generation_schema_status": "valid",
+            "evidence_reference_status": "valid",
+            "semantic_grounding_status": "unchecked",
+            "semantic_grounding_failure_reason": None,
+            "fallback_reason": None,
+            "generated_action_cta_detected": False,
+            "canonical_response_cta": None,
+        }
+    )
+    assert turn_one_context.state_payload is not None
+
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "summary",
+        }
+    )
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_runtime_state_repo.get_state_json = AsyncMock(
+        return_value=turn_one_context.state_payload
+    )
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    result = await node({"thread_id": "thread-1"})
+
+    for field in (
+        "generation_mode",
+        "tool_name",
+        "tool_args",
+        "tool_result",
+        "tool_execution_status",
+        "tool_execution_safe_error_code",
+        "tool_response_text",
+        "knowledge_chunks",
+        "knowledge_retrieval_status",
+        "knowledge_retrieval_error_type",
+        "model_answerability",
+        "supporting_entry_ids",
+        "unsupported_aspects",
+        "generation_output_parse_status",
+        "generation_schema_status",
+        "evidence_reference_status",
+        "semantic_grounding_status",
+        "semantic_grounding_failure_reason",
+        "fallback_reason",
+        "generated_action_cta_detected",
+        "canonical_response_cta",
+    ):
+        assert field not in result
+
+
+@pytest.mark.asyncio
+async def test_load_state_reconstructs_handoff_ticket_identity_after_persistence_round_trip():
+    turn_one_context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "user_input": "handoff partial failure",
+            "requires_human": False,
+            "ticket_created": True,
+            "handoff_ticket_id": "ticket-123",
+            "escalation_failed": True,
+            "handoff_completed": False,
+            "thread_waiting_manager": False,
+            "notification_degraded": False,
+            "lifecycle": "active_client",
+            "dialog_state": {
+                "lifecycle": "active_client",
+                "lead_status": "active_client",
+            },
+            "response_text": "technical failure text",
+            "tool_result": {"ticket_id": "ticket-123"},
+            "generation_mode": "TOOL_RESULT_RESPONSE",
+            "tool_execution_status": "failed",
+            "tool_execution_safe_error_code": "handoff_state_transition_failed",
+        }
+    )
+    assert turn_one_context.state_payload is not None
+
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "summary",
+        }
+    )
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_runtime_state_repo.get_state_json = AsyncMock(
+        return_value=turn_one_context.state_payload
+    )
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    result = await node({"thread_id": "thread-1"})
+
+    assert result["ticket_created"] is True
+    assert result["handoff_ticket_id"] == "ticket-123"
+    assert result["escalation_failed"] is True
+    assert result["handoff_completed"] is False
+    assert result["thread_waiting_manager"] is False
+    assert result["notification_degraded"] is False
+    assert result["requires_human"] is False
+    assert "response_text" not in result
+    assert "tool_result" not in result
+    assert "generation_mode" not in result
+    assert "tool_execution_status" not in result
+    assert "tool_execution_safe_error_code" not in result

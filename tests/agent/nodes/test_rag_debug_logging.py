@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,10 +12,31 @@ from src.agent.nodes.response_generator import (
     create_response_generator_node,
 )
 from src.domain.project_plane.thread_views import ThreadRuntimeMessageView
+from src.domain.runtime.tool_execution import ToolExecutionOutcome
 
 
 async def _passthrough(_name, impl, state, **_kwargs):
     return await impl(state)
+
+
+def _structured_content(answer: str, *, entry_id: str = "entry-1") -> str:
+    return json.dumps(
+        {
+            "answerability": "supported",
+            "answer": answer,
+            "supporting_entry_ids": [entry_id],
+            "unsupported_aspects": [],
+        },
+        ensure_ascii=False,
+    )
+
+
+def _retrieved_state(content: str = "Axole helps clients.") -> dict[str, object]:
+    return {
+        "knowledge_chunks": [{"id": "entry-1", "score": 0.9, "content": content}],
+        "knowledge_retrieval_status": "retrieved",
+        "generation_mode": "KNOWLEDGE_ANSWER",
+    }
 
 
 @pytest.mark.asyncio
@@ -23,24 +45,28 @@ async def test_rag_debug_true_emits_retrieval_and_generation_traces(monkeypatch)
 
     tool_registry = MagicMock()
     tool_registry.execute = AsyncMock(
-        return_value={
-            "results": [
-                {
-                    "id": "entry-1",
-                    "score": 0.9,
-                    "content": "Axole automates client replies.",
-                    "method": "hybrid",
-                    "entry_kind": "runtime_entry",
-                    "source": "about.md",
-                    "title": "About Axole",
-                }
-            ]
-        }
+        return_value=ToolExecutionOutcome.succeeded(
+            payload={
+                "results": [
+                    {
+                        "id": "entry-1",
+                        "score": 0.9,
+                        "content": "Axole automates client replies.",
+                        "method": "hybrid",
+                        "entry_kind": "runtime_entry",
+                        "source": "about.md",
+                        "title": "About Axole",
+                    }
+                ]
+            }
+        )
     )
     kb_node = create_kb_search_node(tool_registry)
 
     llm = AsyncMock()
-    llm.ainvoke = AsyncMock(return_value=SimpleNamespace(content="Axole помогает."))
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content=_structured_content("Axole helps."))
+    )
     response_node = create_response_generator_node(
         llm=llm,
         model_name="llama-3.3-70b-versatile",
@@ -51,7 +77,8 @@ async def test_rag_debug_true_emits_retrieval_and_generation_traces(monkeypatch)
         "thread_id": "thread-1",
         "user_input": "Что умеет сервис?",
         "decision": "LLM_GENERATE",
-        "project_configuration": {"settings": {"target_language": "ru"}},
+        "generation_mode": "KNOWLEDGE_ANSWER",
+        "project_configuration": {"settings": {"target_language": "en"}},
     }
 
     with (
@@ -86,6 +113,9 @@ async def test_rag_debug_true_emits_retrieval_and_generation_traces(monkeypatch)
     assert generation_trace[-1].kwargs["extra"]["retrieved_entry_ids"] == ["entry-1"]
     assert generation_trace[-1].kwargs["extra"]["prompt_entries"][0]["id"] == "entry-1"
     assert generation_trace[-1].kwargs["extra"]["generation_status"] == "success"
+    assert generation_trace[-1].kwargs["extra"]["model_answerability"] == "supported"
+    assert "answerability" not in generation_trace[-1].kwargs["extra"]
+    assert generation_trace[-1].kwargs["extra"]["supporting_entry_ids"] == ["entry-1"]
     assert "generated_response_preview" in generation_trace[-1].kwargs["extra"]
 
     ordinary_logs = [
@@ -100,7 +130,9 @@ async def test_rag_debug_true_accepts_thread_runtime_message_view_history(monkey
     monkeypatch.setenv("RAG_DEBUG", "true")
 
     llm = AsyncMock()
-    llm.ainvoke = AsyncMock(return_value=SimpleNamespace(content="Axole помогает."))
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content=_structured_content("Axole helps."))
+    )
     response_node = create_response_generator_node(
         llm=llm,
         model_name="llama-3.3-70b-versatile",
@@ -117,7 +149,8 @@ async def test_rag_debug_true_accepts_thread_runtime_message_view_history(monkey
                 content="Что такое Axole?",
             )
         ],
-        "project_configuration": {"settings": {"target_language": "ru"}},
+        "project_configuration": {"settings": {"target_language": "en"}},
+        **_retrieved_state(),
     }
 
     with (
@@ -136,7 +169,7 @@ async def test_rag_debug_true_accepts_thread_runtime_message_view_history(monkey
     ][-1]
 
     assert llm.ainvoke.await_count == 1
-    assert result["response_text"] == "Axole помогает."
+    assert result["response_text"] == "Axole helps."
     assert generation_trace.kwargs["extra"]["generation_status"] == "success"
     assert generation_trace.kwargs["extra"]["history_tail_preview"] == [
         {"role": "user", "content_preview": "Что такое Axole?"}
@@ -178,11 +211,15 @@ async def test_rag_debug_false_suppresses_extended_traces(monkeypatch):
     monkeypatch.setenv("RAG_DEBUG", "false")
 
     tool_registry = MagicMock()
-    tool_registry.execute = AsyncMock(return_value={"results": []})
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
     kb_node = create_kb_search_node(tool_registry)
 
     llm = AsyncMock()
-    llm.ainvoke = AsyncMock(return_value=SimpleNamespace(content="Axole помогает."))
+    llm.ainvoke = AsyncMock(
+        return_value=SimpleNamespace(content=_structured_content("Axole helps."))
+    )
     response_node = create_response_generator_node(
         llm=llm,
         model_name="llama-3.3-70b-versatile",
@@ -194,7 +231,7 @@ async def test_rag_debug_false_suppresses_extended_traces(monkeypatch):
         "user_input": "Что умеет сервис?",
         "decision": "LLM_GENERATE",
         "history": [SimpleNamespace(role="user", content="Что такое Axole?")],
-        "project_configuration": {"settings": {"target_language": "ru"}},
+        "project_configuration": {"settings": {"target_language": "en"}},
     }
 
     with (
@@ -212,7 +249,7 @@ async def test_rag_debug_false_suppresses_extended_traces(monkeypatch):
         state.update(await kb_node(state))
         await response_node(state)
 
-    assert llm.ainvoke.await_count == 1
+    assert llm.ainvoke.await_count == 0
     assert all(
         call.args[0] != "RAG semantic retrieval trace"
         for call in kb_logger.info.call_args_list
@@ -281,7 +318,8 @@ async def test_rag_debug_true_emits_intent_and_policy_structured_traces(monkeypa
     ][-1]
 
     assert intent_trace.kwargs["extra"]["user_input_preview"].startswith("Как менеджер")
-    assert intent_trace.kwargs["extra"]["features"] == {"handoff": 0.9}
+    assert intent_trace.kwargs["extra"]["features"] == {}
+    assert intent_trace.kwargs["extra"]["unrecognized_feature_keys"] == ["handoff"]
     assert intent_trace.kwargs["extra"]["handoff_intent_downgraded"] is True
     assert policy_trace.kwargs["extra"]["input_topic"] == "support"
     assert policy_trace.kwargs["extra"]["resolved_topic"] == "support"
@@ -363,7 +401,9 @@ async def test_rag_debug_true_emits_generation_failure_trace(monkeypatch):
                 "content": "A" * 600,
             }
         ],
-        "project_configuration": {"settings": {"target_language": "ru"}},
+        "knowledge_retrieval_status": "retrieved",
+        "generation_mode": "KNOWLEDGE_ANSWER",
+        "project_configuration": {"settings": {"target_language": "en"}},
     }
 
     with (
@@ -387,5 +427,10 @@ async def test_rag_debug_true_emits_generation_failure_trace(monkeypatch):
     assert (
         generation_trace.kwargs["extra"]["prompt_entries"][0]["was_truncated"] is True
     )
-    assert "fallback_response_preview" in generation_trace.kwargs["extra"]
+    assert "generated_response_preview" in generation_trace.kwargs["extra"]
+    assert generation_trace.kwargs["extra"]["fallback_reason"] == "generation_exception"
+    assert (
+        generation_trace.kwargs["extra"]["semantic_grounding_status"]
+        == "not_applicable"
+    )
     assert result["technical_failure_stage"] == "response_generator"

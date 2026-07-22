@@ -15,6 +15,10 @@ from src.domain.runtime.language_policy import (
     normalize_project_language,
 )
 from src.domain.runtime.policy.handoff_request import is_explicit_handoff_request
+from src.domain.runtime.policy.intent_topic import (
+    recognized_feature_map,
+    unrecognized_feature_keys,
+)
 from src.domain.runtime.state_contracts import (
     RuntimeHistoryMessage,
     RuntimeMemory,
@@ -78,6 +82,11 @@ class IntentExtractionPayload:
                     features[str(key)] = float(value)
                 except (TypeError, ValueError):
                     continue
+        features = {
+            key: float(value)
+            for key, value in recognized_feature_map(features).items()
+            if isinstance(value, (int, float))
+        }
 
         cta_hint = payload.get("cta_hint")
         domain = _normalized_enum_value(
@@ -173,6 +182,10 @@ class IntentExtractionResult:
         cls, payload: Mapping[str, object]
     ) -> "IntentExtractionResult":
         validated = IntentExtractionPayload.from_mapping(payload)
+        raw_features = payload.get("features")
+        unknown_feature_keys = unrecognized_feature_keys(
+            raw_features if isinstance(raw_features, Mapping) else None
+        )
         return cls(
             intent=validated.intent,
             cta=validated.cta,
@@ -189,7 +202,11 @@ class IntentExtractionResult:
             knowledge_query=validated.knowledge_query,
             resolved_cta=None,
             resolved_cta_reply=None,
-            normalization_flags={},
+            normalization_flags=(
+                {"unrecognized_feature_keys": unknown_feature_keys}
+                if unknown_feature_keys
+                else {}
+            ),
         )
 
     def normalized_for_context(
@@ -198,7 +215,10 @@ class IntentExtractionResult:
     ) -> "IntentExtractionResult":
         reply_kind = _short_reply_kind(context.user_input)
         if reply_kind is None:
-            return _normalize_handoff_classification(self, context)
+            return _normalize_business_question_route(
+                _normalize_handoff_classification(self, context),
+                context,
+            )
 
         previous_topic = _previous_topic(context)
         previous_cta = _previous_cta(context)
@@ -260,6 +280,7 @@ class IntentExtractionResult:
         patch["knowledge_query"] = self.knowledge_query
         patch["resolved_cta"] = self.resolved_cta
         patch["resolved_cta_reply"] = self.resolved_cta_reply
+        patch["normalization_flags"] = dict(self.normalization_flags)
         return patch
 
 
@@ -413,6 +434,36 @@ def _normalize_handoff_classification(
             **dict(result.normalization_flags),
             "handoff_intent_downgraded": True,
             "handoff_intent_downgrade_reason": "mention_without_explicit_request",
+        },
+    )
+
+
+def _normalize_business_question_route(
+    result: IntentExtractionResult,
+    context: IntentExtractionContext,
+) -> IntentExtractionResult:
+    if result.domain != "business":
+        return result
+    if is_explicit_handoff_request(context.user_input):
+        return result
+    if result.intent in {"handoff_request", "angry"} or result.topic in {
+        "handoff",
+        "angry",
+    }:
+        return result
+    if result.resolved_cta in ACTION_CTAS:
+        return result
+    if result.should_search_kb and result.should_generate_answer:
+        return result
+
+    return replace(
+        result,
+        should_search_kb=True,
+        should_generate_answer=True,
+        normalization_flags={
+            **dict(result.normalization_flags),
+            "routing_flags_overridden": True,
+            "routing_flag_override_reason": "ordinary_business_question",
         },
     )
 

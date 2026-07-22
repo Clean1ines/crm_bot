@@ -6,6 +6,7 @@ stores normalized chunks in graph state.
 """
 
 import os
+from collections.abc import Mapping
 from typing import cast
 
 from src.agent.state import AgentState
@@ -15,6 +16,7 @@ from src.domain.runtime.knowledge_search import (
     KnowledgeSearchResult,
 )
 from src.domain.runtime.state_contracts import RuntimeStateInput
+from src.domain.runtime.tool_execution import ToolSafeErrorCode, ToolExecutionStatus
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 from src.tools.registry import ToolRegistry
 
@@ -53,6 +55,14 @@ def _chunk_trace_payload(chunk: KnowledgeChunk, rank: int) -> dict[str, object]:
     return {key: value for key, value in payload.items() if value is not None}
 
 
+def _knowledge_search_exception_code(exc: BaseException) -> str:
+    if isinstance(exc, TimeoutError):
+        return ToolSafeErrorCode.TOOL_TIMEOUT.value
+    if isinstance(exc, (ConnectionError, OSError)):
+        return ToolSafeErrorCode.TOOL_UNAVAILABLE.value
+    return ToolSafeErrorCode.KNOWLEDGE_SEARCH_FAILED.value
+
+
 def create_kb_search_node(tool_registry: ToolRegistry):
     """
     Create the knowledge-search node with an injected tool registry.
@@ -66,6 +76,7 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                 extra={"project_id": context.project_id, "query": context.query},
             )
             patch = KnowledgeSearchResult().to_state_patch()
+            patch["knowledge_retrieval_status"] = "skipped"
             return dict(patch)
 
         logger.info(
@@ -88,7 +99,36 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                     "thread_id": context.thread_id,
                 },
             )
-            result = KnowledgeSearchResult.from_tool_payload(payload)
+            if payload.status is not ToolExecutionStatus.SUCCEEDED:
+                logger.error(
+                    "KB search tool returned non-success outcome",
+                    extra={
+                        "project_id": context.project_id,
+                        "tool_execution_status": payload.status.value,
+                        "safe_error_code": payload.safe_error_code,
+                    },
+                )
+                patch = KnowledgeSearchResult().to_state_patch()
+                patch["knowledge_retrieval_status"] = "failed"
+                patch["knowledge_retrieval_error_type"] = (
+                    payload.safe_error_code or "knowledge_search_failed"
+                )
+                return dict(patch)
+
+            if not isinstance(payload.payload, Mapping):
+                logger.error(
+                    "KB search tool returned malformed success payload",
+                    extra={
+                        "project_id": context.project_id,
+                        "payload_type": type(payload.payload).__name__,
+                    },
+                )
+                patch = KnowledgeSearchResult().to_state_patch()
+                patch["knowledge_retrieval_status"] = "failed"
+                patch["knowledge_retrieval_error_type"] = "invalid_tool_outcome"
+                return dict(patch)
+
+            result = KnowledgeSearchResult.from_tool_payload(payload.payload)
 
             logger.info(
                 "KB search result",
@@ -162,9 +202,13 @@ def create_kb_search_node(tool_registry: ToolRegistry):
                     "query_len": len(context.query),
                     "query_preview": _preview_text(context.query),
                     "error": str(exc),
+                    "error_type": type(exc).__name__,
                 },
             )
-            patch = KnowledgeSearchResult().to_state_patch()
+            patch = KnowledgeSearchResult(
+                retrieval_status="failed",
+                error_type=_knowledge_search_exception_code(exc),
+            ).to_state_patch()
             return dict(patch)
 
     def _get_kb_search_input_size(state: AgentState) -> int:

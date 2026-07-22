@@ -30,7 +30,8 @@ async def test_policy_engine_returns_typed_state_patch_and_emits_event():
         )
 
     assert result["decision"] == "LLM_GENERATE"
-    assert result["cta"] in {"book_consultation"}
+    assert result["cta"] == "none"
+    assert result["dialog_state"]["last_cta"] is None
     assert result["topic"] == "pricing"
     assert "dialog_state" in result
     event_repo.append.assert_awaited_once()
@@ -53,12 +54,16 @@ async def test_policy_engine_loads_dialog_state_from_user_memory_when_missing_di
                 "project_id": "project-1",
                 "lifecycle": "interested",
                 "intent": "ask_integration",
+                "topic": "integration",
+                "turn_relation": "continuation",
+                "is_repeat_like": True,
                 "user_memory": {
                     "dialog_state": [
                         {
                             "key": "dialog_state",
                             "value": {
                                 "last_intent": "ask_integration",
+                                "last_topic": "integration",
                                 "repeat_count": 2,
                             },
                         }
@@ -72,7 +77,7 @@ async def test_policy_engine_loads_dialog_state_from_user_memory_when_missing_di
 
 
 @pytest.mark.asyncio
-async def test_policy_engine_keeps_sales_cta_without_marking_handoff():
+async def test_policy_engine_keeps_sales_advisory_cta_out_of_pending_state():
     node = create_policy_engine_node(event_repo=None)
 
     async def passthrough(_name, impl, state, **_kwargs):
@@ -100,7 +105,8 @@ async def test_policy_engine_keeps_sales_cta_without_marking_handoff():
         )
 
     assert result["decision"] == "LLM_GENERATE"
-    assert result["cta"] == "call_manager"
+    assert result["cta"] == "none"
+    assert result["dialog_state"]["last_cta"] is None
     assert result["topic"] == "product"
     assert result["lead_status"] == "warm"
 
@@ -233,6 +239,140 @@ async def test_policy_engine_routes_informational_manager_mention_to_generation(
 
 
 @pytest.mark.asyncio
+async def test_policy_engine_does_not_escalate_long_new_topic_business_sequence():
+    node = create_policy_engine_node(event_repo=None)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    questions = [
+        ("Что такое Axole?", "product"),
+        ("Опиши Axole одним предложением.", "product"),
+        ("Зачем использовать Axole вместо обычного AI-бота?", "product"),
+        ("Чем отличается клиентский бот от менеджерского?", "product"),
+        ("Можно ли встроить чат-виджет?", "integration"),
+        ("Как выглядит запуск?", "product"),
+        ("Каким компаниям подходит Axole?", "product"),
+    ]
+    dialog_state = {
+        "last_intent": None,
+        "last_topic": None,
+        "repeat_count": 0,
+        "lead_status": "warm",
+        "lifecycle": "warm",
+    }
+
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        repeat_counts = []
+        for user_input, topic in questions:
+            result = await node(
+                {
+                    "thread_id": "thread-1",
+                    "project_id": "project-1",
+                    "lifecycle": "warm",
+                    "intent": "other",
+                    "topic": topic,
+                    "cta": "call_manager",
+                    "user_input": user_input,
+                    "turn_relation": "new_topic",
+                    "is_repeat_like": False,
+                    "should_search_kb": True,
+                    "should_generate_answer": True,
+                    "should_offer_manager": True,
+                    "dialog_state": dialog_state,
+                }
+            )
+            assert result["decision"] == "LLM_GENERATE"
+            assert result["should_search_kb"] is True
+            assert result["should_generate_answer"] is True
+            assert "response_text" not in result
+            dialog_state = result["dialog_state"]
+            repeat_counts.append(dialog_state["repeat_count"])
+
+    assert repeat_counts == [0, 0, 0, 0, 0, 0, 0]
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_escalates_only_real_repeat_streak():
+    node = create_policy_engine_node(event_repo=None)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    dialog_state = {
+        "last_intent": "pricing",
+        "last_topic": "pricing",
+        "repeat_count": 2,
+        "lead_status": "warm",
+        "lifecycle": "warm",
+        "handoff_confirmation_pending": False,
+    }
+
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "lifecycle": "warm",
+                "intent": "pricing",
+                "topic": "pricing",
+                "user_input": "Так сколько стоит подключение?",
+                "turn_relation": "continuation",
+                "is_repeat_like": True,
+                "dialog_state": dialog_state,
+            }
+        )
+
+    assert result["decision"] == "RESPOND"
+    assert result["dialog_state"]["repeat_count"] == 3
+    assert result["dialog_state"]["handoff_confirmation_pending"] is True
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_filters_risk_features_by_allowlist():
+    node = create_policy_engine_node(event_repo=None)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with (
+        patch(
+            "src.agent.nodes.policy_engine.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch("src.agent.nodes.policy_engine.logger") as logger,
+    ):
+        result = await node(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "lifecycle": "warm",
+                "intent": "support",
+                "topic": "support",
+                "features": {"Axole": 1.0},
+                "user_input": "Что такое Axole?",
+                "turn_relation": "new_topic",
+                "dialog_state": {"repeat_count": 0, "lifecycle": "warm"},
+            }
+        )
+
+    trace = [
+        call
+        for call in logger.info.call_args_list
+        if call.args and call.args[0] == "Policy routing trace"
+    ][-1]
+    assert result["decision"] == "LLM_GENERATE"
+    assert trace.kwargs["extra"]["risk_features"] == []
+    assert trace.kwargs["extra"]["unrecognized_feature_keys"] == ["Axole"]
+
+
+@pytest.mark.asyncio
 async def test_policy_engine_marks_llm_handoff_classification_without_claiming_explicit_rule():
     node = create_policy_engine_node(event_repo=None)
 
@@ -354,3 +494,87 @@ async def test_policy_engine_keeps_complaint_risk_handoff_path():
     assert result["decision"] == "RESPOND"
     assert result["dialog_state"]["handoff_confirmation_pending"] is True
     assert "менеджер" in str(result["response_text"]).lower()
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_sets_conversational_generation_mode_for_smalltalk():
+    node = create_policy_engine_node()
+
+    result = await node(
+        {
+            "domain": "smalltalk",
+            "intent": "other",
+            "topic": "other",
+            "turn_relation": "new_topic",
+            "user_input": "???????",
+            "dialog_state": {"repeat_count": 0},
+        }
+    )
+
+    assert result["decision"] == "LLM_GENERATE"
+    assert result["generation_mode"] == "CONVERSATIONAL_RESPONSE"
+    assert result["knowledge_retrieval_status"] == "skipped"
+    assert result["should_search_kb"] is False
+    assert result["should_generate_answer"] is True
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_overwrites_stale_generation_mode_for_factual_turn():
+    node = create_policy_engine_node()
+
+    result = await node(
+        {
+            "domain": "business",
+            "intent": "other",
+            "topic": "product",
+            "turn_relation": "new_topic",
+            "user_input": "??? ????? Axole?",
+            "generation_mode": "CONVERSATIONAL_RESPONSE",
+            "tool_result": {"text": "stale"},
+            "tool_execution_status": "succeeded",
+            "dialog_state": {"repeat_count": 0},
+        }
+    )
+
+    assert result["decision"] == "LLM_GENERATE"
+    assert result["generation_mode"] == "KNOWLEDGE_ANSWER"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("domain", ["greeting", "out_of_domain", "ambiguous"])
+async def test_policy_engine_template_domains_clear_generation_mode(domain):
+    node = create_policy_engine_node(event_repo=None)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "domain": domain,
+                "intent": "other",
+                "generation_mode": "TOOL_RESULT_RESPONSE",
+                "tool_name": "stale.tool",
+                "tool_result": {"stale": True},
+                "tool_execution_status": "succeeded",
+                "knowledge_chunks": [{"id": "stale", "content": "old"}],
+                "knowledge_retrieval_status": "retrieved",
+            }
+        )
+
+    assert result["decision"] == "RESPOND_TEMPLATE"
+    assert result["generation_mode"] is None
+    assert result["should_search_kb"] is False
+    assert result["should_generate_answer"] is False
+    assert result["tool_name"] is None
+    assert result["tool_args"] is None
+    assert result["tool_result"] is None
+    assert result["tool_execution_status"] is None
+    assert result["knowledge_chunks"] == []
+    assert result["tool_result"] is None
+    assert result["tool_execution_status"] is None

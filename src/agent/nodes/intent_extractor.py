@@ -232,6 +232,14 @@ def create_intent_extractor_node(
                 ),
             }
             if _rag_debug_enabled():
+                raw_unrecognized_feature_keys = result.normalization_flags.get(
+                    "unrecognized_feature_keys", []
+                )
+                unrecognized_feature_keys = (
+                    raw_unrecognized_feature_keys
+                    if isinstance(raw_unrecognized_feature_keys, list)
+                    else []
+                )
                 trace_extra.update(
                     {
                         "user_input_preview": _preview_text(context.user_input),
@@ -239,6 +247,7 @@ def create_intent_extractor_node(
                             result.knowledge_query
                         ),
                         "features": dict(result.features),
+                        "unrecognized_feature_keys": list(unrecognized_feature_keys),
                         "normalization_flags": dict(result.normalization_flags),
                         "handoff_intent_downgrade_reason": (
                             result.normalization_flags.get(

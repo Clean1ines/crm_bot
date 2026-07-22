@@ -10,6 +10,10 @@ from typing import Protocol
 import jsonschema
 from jsonschema import ValidationError as SchemaValidationError
 
+from src.domain.runtime.tool_execution import (
+    ToolExecutionOutcome,
+    ToolSafeErrorCode,
+)
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -50,7 +54,7 @@ class Tool(ABC):
     timeout_seconds: int | None = None
 
     @abstractmethod
-    async def run(self, args: JsonMap, context: JsonMap) -> JsonMap:
+    async def run(self, args: JsonMap, context: JsonMap) -> ToolExecutionOutcome:
         """
         Execute the tool with given arguments and context.
         """
@@ -141,7 +145,7 @@ class ToolRegistry:
         name: str,
         args: JsonMap,
         context: JsonMap,
-    ) -> JsonMap:
+    ) -> ToolExecutionOutcome:
         start_time = time.time()
         tool = self._registered_tool(name)
 
@@ -161,7 +165,12 @@ class ToolRegistry:
 
         try:
             result = await self._run_tool(tool, args, context)
-            self._handle_success(name, result, start_time)
+            if not isinstance(result, ToolExecutionOutcome):
+                self._handle_invalid_outcome(name, result, start_time)
+                return ToolExecutionOutcome.failed(
+                    safe_error_code=ToolSafeErrorCode.INVALID_TOOL_OUTCOME
+                )
+            self._handle_terminal_outcome(name, result, start_time)
             return result
         except asyncio.TimeoutError:
             self._handle_timeout(name, tool, context)
@@ -237,7 +246,7 @@ class ToolRegistry:
             },
         )
 
-    async def _run_tool(self, tool: Tool, args: JsonMap, context: JsonMap) -> JsonMap:
+    async def _run_tool(self, tool: Tool, args: JsonMap, context: JsonMap) -> object:
         if tool.timeout_seconds:
             return await asyncio.wait_for(
                 tool.run(args, context),
@@ -245,15 +254,21 @@ class ToolRegistry:
             )
         return await tool.run(args, context)
 
-    def _handle_success(self, name: str, result: JsonMap, start_time: float) -> None:
+    def _handle_terminal_outcome(
+        self, name: str, outcome: ToolExecutionOutcome, start_time: float
+    ) -> None:
         elapsed = time.time() - start_time
-        result_keys = list(result.keys())
+        result_keys = (
+            list(outcome.payload.keys()) if isinstance(outcome.payload, dict) else []
+        )
 
         logger.info(
-            "Tool executed successfully",
+            "Tool executed",
             extra={
                 "tool_name": name,
                 "elapsed_seconds": round(elapsed, 3),
+                "tool_execution_status": outcome.status.value,
+                "safe_error_code": outcome.safe_error_code,
                 "result_keys": result_keys,
             },
         )
@@ -263,7 +278,30 @@ class ToolRegistry:
             {
                 "tool_name": name,
                 "elapsed_seconds": elapsed,
+                "tool_execution_status": outcome.status.value,
                 "result_keys": result_keys,
+            },
+        )
+
+    def _handle_invalid_outcome(
+        self, name: str, result: object, start_time: float
+    ) -> None:
+        elapsed = time.time() - start_time
+        logger.error(
+            "Tool returned invalid outcome contract",
+            extra={
+                "tool_name": name,
+                "elapsed_seconds": round(elapsed, 3),
+                "result_type": type(result).__name__,
+            },
+        )
+        self._emit_event(
+            "tool_failed",
+            {
+                "tool_name": name,
+                "elapsed_seconds": elapsed,
+                "safe_error_code": ToolSafeErrorCode.INVALID_TOOL_OUTCOME.value,
+                "result_type": type(result).__name__,
             },
         )
 

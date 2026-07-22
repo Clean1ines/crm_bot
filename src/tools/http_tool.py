@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from src.domain.runtime.tool_execution import ToolExecutionOutcome
 from src.infrastructure.config.settings import settings
 from src.infrastructure.logging.logger import get_logger
 from src.tools.registry import JsonMap, Tool, ToolExecutionError
@@ -105,7 +106,7 @@ class HTTPTool(Tool):
             {"url": url, "allowed_domains": allowed_domains},
         )
 
-    async def run(self, args: JsonMap, context: JsonMap) -> JsonMap:
+    async def run(self, args: JsonMap, context: JsonMap) -> ToolExecutionOutcome:
         project_id = str(self._require_context_field(context, "project_id"))
         request = _request_from_args(args)
         self._validate_url(request.url)
@@ -122,7 +123,9 @@ class HTTPTool(Tool):
 
         return await self._execute_request(project_id, request)
 
-    async def _execute_request(self, project_id: str, request: HTTPRequest) -> JsonMap:
+    async def _execute_request(
+        self, project_id: str, request: HTTPRequest
+    ) -> ToolExecutionOutcome:
         start_time = time.monotonic()
 
         try:
@@ -157,13 +160,15 @@ class HTTPTool(Tool):
                 },
             )
 
-            return {
-                "status_code": response.status_code,
-                "headers": dict(response.headers),
-                "body": response_body,
-                "elapsed_ms": elapsed_ms,
-                "url": request.url,
-            }
+            return ToolExecutionOutcome.succeeded(
+                payload={
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers),
+                    "body": response_body,
+                    "elapsed_ms": elapsed_ms,
+                    "url": request.url,
+                }
+            )
 
         except httpx.TimeoutException as exc:
             raise self._timeout_error(project_id, request) from exc

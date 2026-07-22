@@ -14,6 +14,7 @@ import httpx
 
 from src.domain.project_plane.knowledge_views import KnowledgeSearchResultView
 from src.domain.project_plane.thread_status import ThreadStatus
+from src.domain.runtime.tool_execution import ToolExecutionOutcome, ToolSafeErrorCode
 from src.infrastructure.logging.logger import get_logger
 from src.tools.registry import Tool, ToolExecutionError
 from src.infrastructure.llm.rag_service import RAGService
@@ -127,7 +128,7 @@ class SearchKnowledgeTool(Tool):
 
     async def run(
         self, args: dict[str, object], context: dict[str, object]
-    ) -> dict[str, object]:
+    ) -> ToolExecutionOutcome:
         """
         Execute semantic search over the project's knowledge base.
 
@@ -148,8 +149,8 @@ class SearchKnowledgeTool(Tool):
         # category = args.get("category")
 
         if not query:
-            raise ToolExecutionError(
-                self.name, "Search query cannot be empty", {"args": args}
+            return ToolExecutionOutcome.failed(
+                safe_error_code=ToolSafeErrorCode.TOOL_BUSINESS_REJECTED
             )
 
         logger.debug(
@@ -181,11 +182,13 @@ class SearchKnowledgeTool(Tool):
                 },
             )
 
-            return {
-                "results": formatted_results,
-                "query": query,
-                "total_found": len(formatted_results),
-            }
+            return ToolExecutionOutcome.succeeded(
+                payload={
+                    "results": formatted_results,
+                    "query": query,
+                    "total_found": len(formatted_results),
+                }
+            )
 
         except Exception as e:
             logger.error(
@@ -271,7 +274,7 @@ class EscalateTool(Tool):
 
     async def run(
         self, args: dict[str, object], context: dict[str, object]
-    ) -> dict[str, object]:
+    ) -> ToolExecutionOutcome:
         """
         Create a ticket and notify managers for the escalated conversation.
 
@@ -292,8 +295,8 @@ class EscalateTool(Tool):
         priority = args.get("priority", "normal")
 
         if not reason:
-            raise ToolExecutionError(
-                self.name, "Escalation reason cannot be empty", {"args": args}
+            return ToolExecutionOutcome.failed(
+                safe_error_code=ToolSafeErrorCode.TOOL_BUSINESS_REJECTED
             )
 
         logger.info(
@@ -323,12 +326,14 @@ class EscalateTool(Tool):
                     extra={"project_id": project_id, "thread_id": thread_id},
                 )
                 # Still mark as escalated, but note no notification sent
-                return {
-                    "ticket_created": True,
-                    "thread_id": str(thread_id),
-                    "managers_notified": 0,
-                    "warning": "No managers configured for this project",
-                }
+                return ToolExecutionOutcome.succeeded(
+                    payload={
+                        "ticket_created": True,
+                        "thread_id": str(thread_id),
+                        "managers_notified": 0,
+                        "warning": "No managers configured for this project",
+                    }
+                )
 
             # Queue notification task for each manager
             notification_payload = {
@@ -352,13 +357,15 @@ class EscalateTool(Tool):
                 },
             )
 
-            return {
-                "ticket_created": True,
-                "thread_id": str(thread_id),
-                "managers_notified": len(managers),
-                "queue_job_id": job_id,
-                "priority": priority,
-            }
+            return ToolExecutionOutcome.succeeded(
+                payload={
+                    "ticket_created": True,
+                    "thread_id": str(thread_id),
+                    "managers_notified": len(managers),
+                    "queue_job_id": job_id,
+                    "priority": priority,
+                }
+            )
 
         except Exception as e:
             logger.error(
@@ -437,7 +444,7 @@ class CRMGetUserTool(Tool):
 
     async def run(
         self, args: dict[str, object], context: dict[str, object]
-    ) -> dict[str, object]:
+    ) -> ToolExecutionOutcome:
         project_id = self._require_context_field(context, "project_id")
 
         telegram_id = args.get("telegram_id")
@@ -484,12 +491,14 @@ class CRMGetUserTool(Tool):
                 )
 
         if not row:
-            return {"found": False, "user": None}
+            return ToolExecutionOutcome.succeeded(
+                payload={"found": False, "user": None}
+            )
 
         user = dict(row)
         user["id"] = str(user["id"])  # UUID to string
         user["user_id"] = str(user["user_id"]) if user.get("user_id") else None
-        return {"found": True, "user": user}
+        return ToolExecutionOutcome.succeeded(payload={"found": True, "user": user})
 
 
 class CRMCreateUserTool(Tool):
@@ -549,7 +558,7 @@ class CRMCreateUserTool(Tool):
 
     async def run(
         self, args: dict[str, object], context: dict[str, object]
-    ) -> dict[str, object]:
+    ) -> ToolExecutionOutcome:
         project_id = self._require_context_field(context, "project_id")
 
         telegram_id = args["telegram_id"]
@@ -572,12 +581,14 @@ class CRMCreateUserTool(Tool):
                 str(telegram_id),
             )
             if existing:
-                return {
-                    "success": False,
-                    "error": "Contact already exists",
-                    "client_id": str(existing),
-                    "user_id": str(existing),
-                }
+                return ToolExecutionOutcome.failed(
+                    safe_error_code=ToolSafeErrorCode.TOOL_BUSINESS_REJECTED,
+                    payload={
+                        "reason": "contact_already_exists",
+                        "client_id": str(existing),
+                        "user_id": str(existing),
+                    },
+                )
 
             client_id = await conn.fetchval(
                 """
@@ -605,11 +616,13 @@ class CRMCreateUserTool(Tool):
                 metadata,
             )
 
-            return {
-                "success": True,
-                "client_id": str(client_id),
-                "user_id": str(client_id),
-            }
+            return ToolExecutionOutcome.succeeded(
+                payload={
+                    "success": True,
+                    "client_id": str(client_id),
+                    "user_id": str(client_id),
+                }
+            )
 
 
 class CRMCollectProfileTool(Tool):
@@ -642,17 +655,19 @@ class CRMCollectProfileTool(Tool):
 
     async def run(
         self, args: dict[str, object], context: dict[str, object]
-    ) -> dict[str, object]:
+    ) -> ToolExecutionOutcome:
         # For now, return static list
-        return {
-            "asking_fields": [
-                "company_name",
-                "industry",
-                "monthly_orders",
-                "crm_used",
-                "api_keys_needed",
-            ]
-        }
+        return ToolExecutionOutcome.succeeded(
+            payload={
+                "asking_fields": [
+                    "company_name",
+                    "industry",
+                    "monthly_orders",
+                    "crm_used",
+                    "api_keys_needed",
+                ]
+            }
+        )
 
 
 class TicketCreateTool(Tool):
@@ -704,7 +719,7 @@ class TicketCreateTool(Tool):
 
     async def run(
         self, args: dict[str, object], context: dict[str, object]
-    ) -> dict[str, object]:
+    ) -> ToolExecutionOutcome:
         project_id = self._require_context_field(context, "project_id")
         thread_id = context.get("thread_id")
         user_id = context.get("user_id")  # client UUID
@@ -728,7 +743,9 @@ class TicketCreateTool(Tool):
                 priority,
             )
 
-            return {"ticket_id": str(ticket_id), "status": "open"}
+            return ToolExecutionOutcome.succeeded(
+                payload={"ticket_id": str(ticket_id), "status": "open"}
+            )
 
 
 class TelegramSendMessageTool(Tool):
@@ -778,7 +795,7 @@ class TelegramSendMessageTool(Tool):
 
     async def run(
         self, args: dict[str, object], context: dict[str, object]
-    ) -> dict[str, object]:
+    ) -> ToolExecutionOutcome:
         project_id = self._require_context_field(context, "project_id")
 
         chat_id = args["chat_id"]
@@ -788,7 +805,9 @@ class TelegramSendMessageTool(Tool):
         # Fetch bot token
         bot_token = await self._project_tokens.get_bot_token(project_id)
         if not bot_token:
-            raise ToolExecutionError(self.name, "No bot token configured for project")
+            return ToolExecutionOutcome.failed(
+                safe_error_code=ToolSafeErrorCode.TOOL_UNAVAILABLE
+            )
 
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         payload = {
@@ -801,13 +820,17 @@ class TelegramSendMessageTool(Tool):
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, json=payload, timeout=10)
             if resp.status_code != 200:
-                error_data = resp.json()
-                raise ToolExecutionError(
-                    self.name,
-                    f"Telegram API error: {error_data.get('description', 'Unknown error')}",
+                return ToolExecutionOutcome.failed(
+                    safe_error_code=ToolSafeErrorCode.TELEGRAM_REQUEST_REJECTED
                 )
             result = resp.json()
-            return {
-                "ok": result.get("ok", False),
-                "message_id": result.get("result", {}).get("message_id"),
-            }
+            if result.get("ok") is not True:
+                return ToolExecutionOutcome.failed(
+                    safe_error_code=ToolSafeErrorCode.TELEGRAM_REQUEST_REJECTED
+                )
+            return ToolExecutionOutcome.succeeded(
+                payload={
+                    "ok": True,
+                    "message_id": result.get("result", {}).get("message_id"),
+                }
+            )

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.agent.nodes.intent_extractor import create_intent_extractor_node
+from src.domain.runtime.tool_execution import ToolExecutionOutcome
 from src.agent.nodes.kb_search import create_kb_search_node
 
 
@@ -45,7 +46,7 @@ async def test_intent_extractor_parses_json_block_into_state_patch():
         result = await node({"user_input": "help"})
 
     assert result["intent"] == "support"
-    assert result["features"] == {"crm": 0.8}
+    assert result["features"] == {}
     assert result["is_repeat_like"] is True
 
 
@@ -230,7 +231,9 @@ async def test_production_continuation_yes_uses_resolved_query_not_literal_yes()
     intent_node = create_intent_extractor_node(llm=llm)
 
     tool_registry = MagicMock()
-    tool_registry.execute = AsyncMock(return_value={"results": []})
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
     kb_node = create_kb_search_node(tool_registry=tool_registry)
 
     async def passthrough(_name, impl, state, **_kwargs):
@@ -286,7 +289,9 @@ async def test_stale_continuation_query_cannot_leak_into_next_independent_turn()
     intent_node = create_intent_extractor_node(llm=llm)
 
     tool_registry = MagicMock()
-    tool_registry.execute = AsyncMock(return_value={"results": []})
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
     kb_node = create_kb_search_node(tool_registry=tool_registry)
 
     async def passthrough(_name, impl, state, **_kwargs):
@@ -355,7 +360,9 @@ async def test_continuation_search_query_is_localized_for_short_reply(
     intent_node = create_intent_extractor_node(llm=llm)
 
     tool_registry = MagicMock()
-    tool_registry.execute = AsyncMock(return_value={"results": []})
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"results": []})
+    )
     kb_node = create_kb_search_node(tool_registry=tool_registry)
 
     async def passthrough(_name, impl, state, **_kwargs):

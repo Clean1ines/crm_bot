@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.agent.nodes.responder import create_responder_node
+from src.domain.runtime.tool_execution import ToolExecutionOutcome
 
 
 @pytest.mark.asyncio
@@ -25,7 +26,9 @@ async def test_responder_returns_human_fallback_when_chat_id_missing():
 @pytest.mark.asyncio
 async def test_responder_sends_message_and_saves_assistant_copy():
     tool_registry = MagicMock()
-    tool_registry.execute = AsyncMock(return_value={"ok": True})
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"ok": True})
+    )
     thread_message_repo = MagicMock()
     thread_message_repo.add_message = AsyncMock()
     node = create_responder_node(
@@ -56,7 +59,9 @@ async def test_responder_sends_message_and_saves_assistant_copy():
 @pytest.mark.asyncio
 async def test_responder_delivery_success_degrades_when_assistant_copy_fails():
     tool_registry = MagicMock()
-    tool_registry.execute = AsyncMock(return_value={"ok": True})
+    tool_registry.execute = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"ok": True})
+    )
     thread_message_repo = MagicMock()
     thread_message_repo.add_message = AsyncMock(
         side_effect=RuntimeError("db write failed")

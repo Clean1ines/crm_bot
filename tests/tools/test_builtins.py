@@ -4,11 +4,15 @@ from uuid import uuid4
 import pytest
 
 from src.tools.builtins import (
+    CRMCollectProfileTool,
     CRMCreateUserTool,
     CRMGetUserTool,
+    TelegramSendMessageTool,
     EscalateTool,
     SearchKnowledgeTool,
+    TicketCreateTool,
 )
+from src.domain.runtime.tool_execution import ToolExecutionStatus
 
 
 @pytest.fixture
@@ -44,8 +48,10 @@ async def test_escalate_tool_uses_membership_aware_manager_targets():
         },
     )
 
-    assert result["ticket_created"] is True
-    assert result["managers_notified"] == 2
+    assert result.status is ToolExecutionStatus.SUCCEEDED
+    assert isinstance(result.payload, dict)
+    assert result.payload["ticket_created"] is True
+    assert result.payload["managers_notified"] == 2
     project_repo.get_manager_notification_targets.assert_awaited_once_with("project-1")
     queue_repo.enqueue.assert_awaited_once()
 
@@ -71,9 +77,13 @@ async def test_crm_get_user_reads_project_scoped_client(mock_pool):
 
     result = await tool.run({"telegram_id": 123}, {"project_id": "project-1"})
 
-    assert result["found"] is True
-    assert result["user"]["id"] == str(client_id)
-    assert result["user"]["user_id"] == str(platform_user_id)
+    assert result.status is ToolExecutionStatus.SUCCEEDED
+    assert isinstance(result.payload, dict)
+    assert result.payload["found"] is True
+    user = result.payload["user"]
+    assert isinstance(user, dict)
+    assert user["id"] == str(client_id)
+    assert user["user_id"] == str(platform_user_id)
     sql, project_id, telegram_id = mock_pool.conn.fetchrow.await_args.args
     assert "FROM clients" in sql
     assert "FROM users" not in sql
@@ -101,7 +111,8 @@ async def test_crm_create_user_writes_project_scoped_client(mock_pool):
         {"project_id": "project-1"},
     )
 
-    assert result == {
+    assert result.status is ToolExecutionStatus.SUCCEEDED
+    assert result.payload == {
         "success": True,
         "client_id": str(client_id),
         "user_id": str(client_id),
@@ -166,7 +177,8 @@ async def test_search_knowledge_tool_uses_injected_rag_service_without_groq():
             "final_limit": 5,
         }
     ]
-    assert result == {
+    assert result.status is ToolExecutionStatus.SUCCEEDED
+    assert result.payload == {
         "results": [
             {
                 "id": "chunk-1",
@@ -181,3 +193,165 @@ async def test_search_knowledge_tool_uses_injected_rag_service_without_groq():
         "query": "pricing",
         "total_found": 1,
     }
+
+
+@pytest.mark.asyncio
+async def test_search_knowledge_tool_empty_query_returns_business_failure():
+    rag = FakeRAGService()
+    tool = SearchKnowledgeTool(rag)
+
+    result = await tool.run({"query": "   "}, {"project_id": "project-1"})
+
+    assert result.status is ToolExecutionStatus.FAILED
+    assert result.safe_error_code == "tool_business_rejected"
+    assert rag.calls == []
+
+
+@pytest.mark.asyncio
+async def test_search_knowledge_tool_technical_exception_propagates_for_executor_policy():
+    class FailingRAGService:
+        async def search_with_expansion(self, **_kwargs):
+            raise RuntimeError("rag down")
+
+    tool = SearchKnowledgeTool(FailingRAGService())
+
+    with pytest.raises(Exception):
+        await tool.run({"query": "pricing"}, {"project_id": "project-1"})
+
+
+@pytest.mark.asyncio
+async def test_crm_collect_profile_tool_returns_explicit_success():
+    tool = CRMCollectProfileTool()
+
+    result = await tool.run({}, {"project_id": "project-1"})
+
+    assert result.status is ToolExecutionStatus.SUCCEEDED
+    assert isinstance(result.payload, dict)
+    assert result.payload["asking_fields"]
+
+
+@pytest.mark.asyncio
+async def test_ticket_create_tool_returns_explicit_success(mock_pool):
+    ticket_id = uuid4()
+    mock_pool.conn.fetchval = AsyncMock(return_value=ticket_id)
+    tool = TicketCreateTool(mock_pool)
+
+    result = await tool.run(
+        {"title": "Help", "description": "Details"},
+        {"project_id": "project-1", "thread_id": "thread-1", "user_id": "user-1"},
+    )
+
+    assert result.status is ToolExecutionStatus.SUCCEEDED
+    assert result.payload == {"ticket_id": str(ticket_id), "status": "open"}
+
+
+@pytest.mark.asyncio
+async def test_ticket_create_tool_technical_exception_propagates_for_executor_policy(
+    mock_pool,
+):
+    mock_pool.conn.fetchval = AsyncMock(side_effect=RuntimeError("db down"))
+    tool = TicketCreateTool(mock_pool)
+
+    with pytest.raises(RuntimeError):
+        await tool.run({"title": "Help"}, {"project_id": "project-1"})
+
+
+@pytest.mark.asyncio
+async def test_crm_create_user_existing_contact_is_business_failure(mock_pool):
+    client_id = uuid4()
+    mock_pool.conn.fetchval = AsyncMock(return_value=client_id)
+    tool = CRMCreateUserTool(mock_pool)
+
+    result = await tool.run({"telegram_id": 123}, {"project_id": "project-1"})
+
+    assert result.status is ToolExecutionStatus.FAILED
+    assert result.safe_error_code == "tool_business_rejected"
+    assert isinstance(result.payload, dict)
+    assert result.payload["reason"] == "contact_already_exists"
+
+
+class FakeTokenRepo:
+    def __init__(self, token="token"):
+        self.token = token
+
+    async def get_bot_token(self, _project_id):
+        return self.token
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_message_ok_true_returns_success(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"ok": True, "result": {"message_id": 42}}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("src.tools.builtins.httpx.AsyncClient", lambda: FakeClient())
+    tool = TelegramSendMessageTool(FakeTokenRepo())
+
+    result = await tool.run(
+        {"chat_id": 1, "text": "hello"}, {"project_id": "project-1"}
+    )
+
+    assert result.status is ToolExecutionStatus.SUCCEEDED
+    assert result.payload == {"ok": True, "message_id": 42}
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_message_ok_false_returns_failed(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"ok": False, "description": "rejected"}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr("src.tools.builtins.httpx.AsyncClient", lambda: FakeClient())
+    tool = TelegramSendMessageTool(FakeTokenRepo())
+
+    result = await tool.run(
+        {"chat_id": 1, "text": "hello"}, {"project_id": "project-1"}
+    )
+
+    assert result.status is ToolExecutionStatus.FAILED
+    assert result.safe_error_code == "telegram_request_rejected"
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_message_exception_propagates_for_executor_policy(
+    monkeypatch,
+):
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, *_args, **_kwargs):
+            raise RuntimeError("network down")
+
+    monkeypatch.setattr("src.tools.builtins.httpx.AsyncClient", lambda: FakeClient())
+    tool = TelegramSendMessageTool(FakeTokenRepo())
+
+    with pytest.raises(RuntimeError):
+        await tool.run({"chat_id": 1, "text": "hello"}, {"project_id": "project-1"})

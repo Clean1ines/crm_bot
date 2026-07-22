@@ -59,7 +59,9 @@ def test_knowledge_search_result_normalizes_tool_payload():
         "knowledge_chunks": [
             {"id": "chunk-1", "score": 0.9, "content": "abc"},
             {"id": "no-id-1", "score": 0.5, "content": "xyz"},
-        ]
+        ],
+        "knowledge_retrieval_status": "retrieved",
+        "knowledge_retrieval_error_type": None,
     }
 
 
@@ -75,5 +77,9 @@ def test_knowledge_search_result_preserves_full_curated_claim_text():
     )
 
     assert result.to_state_patch() == {
-        "knowledge_chunks": [{"id": "runtime-entry-1", "score": 0.91, "content": claim}]
+        "knowledge_chunks": [
+            {"id": "runtime-entry-1", "score": 0.91, "content": claim}
+        ],
+        "knowledge_retrieval_status": "retrieved",
+        "knowledge_retrieval_error_type": None,
     }

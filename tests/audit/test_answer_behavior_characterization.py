@@ -15,6 +15,7 @@ from src.agent.nodes.responder import create_responder_node
 from src.agent.nodes.response_generator import create_response_generator_node
 from src.agent.nodes.rules import rules_node
 from src.agent.nodes.template_response import template_response_node
+from src.domain.runtime.tool_execution import ToolExecutionOutcome
 
 
 PROJECT_ID = "11111111-1111-1111-1111-111111111111"
@@ -31,6 +32,7 @@ def _payload(
     turn_relation: str = "new_topic",
     should_search_kb: bool = True,
     should_generate_answer: bool = True,
+    should_offer_manager: bool = False,
     emotion: str = "neutral",
     features: dict[str, float] | None = None,
 ) -> dict[str, object]:
@@ -46,7 +48,7 @@ def _payload(
         "is_repeat_like": False,
         "should_search_kb": should_search_kb,
         "should_generate_answer": should_generate_answer,
-        "should_offer_manager": False,
+        "should_offer_manager": should_offer_manager,
     }
 
 
@@ -57,6 +59,8 @@ class Scenario:
     expected_business_outcome: str
     intent_payload: dict[str, object] | None = None
     response_text: str = "Ответ по базе знаний."
+    response_answerability: str = "supported"
+    response_unsupported_aspects: list[str] = field(default_factory=list)
     initial_state: dict[str, object] = field(default_factory=dict)
     history: list[dict[str, str]] = field(default_factory=list)
     user_memory: dict[str, list[dict[str, object]]] = field(default_factory=dict)
@@ -107,10 +111,12 @@ class FakeToolRegistry:
         if name == "search_knowledge":
             if self.kb_exception is not None:
                 raise self.kb_exception
-            return {"results": self.kb_results}
+            return ToolExecutionOutcome.succeeded(payload={"results": self.kb_results})
         if name == "telegram.send_message":
-            return {"ok": True, "message_id": len(self.calls)}
-        return {"ok": True, "text": "tool ok"}
+            return ToolExecutionOutcome.succeeded(
+                payload={"ok": True, "message_id": len(self.calls)}
+            )
+        return ToolExecutionOutcome.succeeded(payload={"ok": True, "text": "tool ok"})
 
 
 async def _passthrough(_name, impl, state, **_kwargs):
@@ -126,8 +132,29 @@ async def run_scenario(scenario: Scenario) -> dict[str, object]:
         scenario.intent_payload or _payload(),
         exc=scenario.intent_exception,
     )
+    supporting_entry_ids = (
+        ["entry-1"]
+        if scenario.response_answerability in {"supported", "partially_supported"}
+        else []
+    )
+    response_answer = (
+        scenario.response_text
+        if scenario.response_answerability
+        not in {"unsupported", "conflicting_evidence"}
+        else None
+    )
+    unsupported_aspects = list(scenario.response_unsupported_aspects)
+    if scenario.response_answerability == "unsupported" and not unsupported_aspects:
+        unsupported_aspects = ["requested fact is not confirmed by evidence"]
+
     response_llm = FakeLLM(
-        text=scenario.response_text, exc=scenario.generation_exception
+        {
+            "answerability": scenario.response_answerability,
+            "answer": response_answer,
+            "supporting_entry_ids": supporting_entry_ids,
+            "unsupported_aspects": unsupported_aspects,
+        },
+        exc=scenario.generation_exception,
     )
 
     thread_lifecycle_repo = MagicMock()
@@ -135,7 +162,9 @@ async def run_scenario(scenario: Scenario) -> dict[str, object]:
     queue_repo = MagicMock()
     queue_repo.enqueue = AsyncMock()
     ticket_create_tool = MagicMock()
-    ticket_create_tool.run = AsyncMock(return_value={"ticket_id": "ticket-1"})
+    ticket_create_tool.run = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"ticket_id": "ticket-1"})
+    )
 
     thread_message_repo = MagicMock()
     thread_message_repo.add_message = AsyncMock()
@@ -479,7 +508,6 @@ async def test_business_answer_flow_characterization_scenarios_execute():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="AUDIT BUG-003: topic streak is not true repeat")
 @pytest.mark.asyncio
 async def test_audit_same_topic_different_question_should_not_increment_failed_repeat():
     outcome = await run_scenario(
@@ -498,7 +526,8 @@ async def test_audit_same_topic_different_question_should_not_increment_failed_r
         )
     )
 
-    assert outcome["dialog_state"]["repeat_count"] == 1
+    assert "kb_search" in outcome["nodes"]
+    assert outcome["dialog_state"]["repeat_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -515,10 +544,6 @@ async def test_audit_human_in_the_loop_should_not_auto_escalate():
     assert "kb_search" in outcome["nodes"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="AUDIT BUG-003: integration deepening escalates as repeat",
-)
 @pytest.mark.asyncio
 async def test_audit_integration_deepening_should_continue_rag_not_handoff():
     outcome = await run_scenario(
@@ -540,3 +565,115 @@ async def test_audit_integration_deepening_should_continue_rag_not_handoff():
     )
 
     assert "kb_search" in outcome["nodes"]
+    assert outcome["dialog_state"]["repeat_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_production_business_sequence_replay_does_not_escalate_new_topics():
+    dialog_state = {
+        "last_intent": "other",
+        "last_topic": "product",
+        "repeat_count": 4,
+        "lead_status": "warm",
+        "lifecycle": "warm",
+    }
+    cases = [
+        ("Что такое Axole?", "sales", "product", "Ответ по базе знаний."),
+        (
+            "Опиши Axole одним предложением.",
+            "sales",
+            "product",
+            "Ответ по базе знаний.",
+        ),
+        (
+            "Зачем использовать Axole вместо обычного AI-бота?",
+            "sales",
+            "product",
+            "Ответ по базе знаний.",
+        ),
+        (
+            "Чем отличается клиентский бот от менеджерского?",
+            "support",
+            "support",
+            "Ответ по базе знаний.",
+        ),
+        (
+            "Можно ли встроить Axole как чат-виджет на сайт?",
+            "other",
+            "integration",
+            "В базе знаний нет подтверждения.",
+            "unsupported",
+        ),
+        (
+            "Это обычный конструктор Telegram-ботов?",
+            "other",
+            "product",
+            "Ответ по базе знаний.",
+        ),
+        ("Как выглядит запуск Axole?", "sales", "product", "Ответ по базе знаний."),
+        (
+            "Каким компаниям подходит Axole?",
+            "sales",
+            "product",
+            "Ответ по базе знаний.",
+        ),
+        (
+            "Какие роли есть в проекте?",
+            "support",
+            "product",
+            "Есть клиентская и менеджерская роль.",
+            "supported",
+        ),
+    ]
+
+    outcomes: list[dict[str, object]] = []
+    for case in cases:
+        if len(case) == 4:
+            user_input, intent, topic, response_text = case
+            response_answerability = "supported"
+        else:
+            user_input, intent, topic, response_text, response_answerability = case
+        outcome = await run_scenario(
+            Scenario(
+                user_input,
+                user_input,
+                "Informational business question should answer via KB/generation.",
+                intent_payload=_payload(
+                    intent=intent,
+                    topic=topic,
+                    cta="call_manager",
+                    should_offer_manager=True,
+                ),
+                response_text=response_text,
+                response_answerability=response_answerability,
+                initial_state={"lifecycle": "warm", "dialog_state": dialog_state},
+            )
+        )
+        outcomes.append(outcome)
+        dialog_state = outcome["saved_state"]["dialog_state"]
+
+    continuation_outcome = await run_scenario(
+        Scenario(
+            "yes_after_roles_continuation",
+            "да",
+            "Continue roles explanation without technical failure or handoff.",
+            response_text="Продолжаю объяснение ролей.",
+            initial_state={"lifecycle": "warm", "dialog_state": dialog_state},
+        )
+    )
+    outcomes.append(continuation_outcome)
+
+    for outcome in outcomes:
+        assert "escalate" not in outcome["nodes"]
+        assert "template_response" not in outcome["nodes"]
+        assert outcome["requires_human"] is False
+
+    for outcome in outcomes[:-1]:
+        assert "kb_search" in outcome["nodes"]
+        assert outcome["saved_state"]["dialog_state"]["repeat_count"] == 0
+
+    assert outcomes[4]["final_response"] == (
+        "В доступной базе знаний нет данных, позволяющих подтвердить это."
+    )
+    assert continuation_outcome["search_queries"] != ["да"]
+    assert "kb_search" in continuation_outcome["nodes"]

@@ -8,6 +8,7 @@ from src.agent.nodes.escalate import create_escalate_node
 from src.agent.nodes.intent_extractor import create_intent_extractor_node
 from src.agent.nodes.kb_search import create_kb_search_node
 from src.agent.nodes.policy_engine import create_policy_engine_node
+from src.domain.runtime.tool_execution import ToolExecutionOutcome
 from src.agent.nodes.response_generator import create_response_generator_node
 from src.domain.runtime.persistence import PersistenceContext
 
@@ -170,7 +171,9 @@ async def test_full_flow_action_cta_yes_routes_to_escalation_and_consumes_cta():
     queue_repo = MagicMock()
     queue_repo.enqueue = AsyncMock()
     ticket_create_tool = MagicMock()
-    ticket_create_tool.run = AsyncMock(return_value={"ticket_id": "ticket-1"})
+    ticket_create_tool.run = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"ticket_id": "ticket-1"})
+    )
     escalate_node = create_escalate_node(
         thread_lifecycle_repo,
         queue_repo,
@@ -240,7 +243,9 @@ async def test_full_flow_book_consultation_yes_uses_current_manager_handoff_rout
     queue_repo = MagicMock()
     queue_repo.enqueue = AsyncMock()
     ticket_create_tool = MagicMock()
-    ticket_create_tool.run = AsyncMock(return_value={"ticket_id": "ticket-2"})
+    ticket_create_tool.run = AsyncMock(
+        return_value=ToolExecutionOutcome.succeeded(payload={"ticket_id": "ticket-2"})
+    )
     escalate_node = create_escalate_node(
         thread_lifecycle_repo,
         queue_repo,
