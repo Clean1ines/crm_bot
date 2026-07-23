@@ -10,7 +10,7 @@ from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_
 
 
 MEASURED_PROMPT_TOKEN_COUNTS: dict[str, int] = {
-    "faq_claim_observations": 1_953,
+    "faq_claim_observations": 3_008,
 }
 
 

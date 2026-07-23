@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_CEILING
 import os
 
 from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
     WorkItemSchedulePlan,
-)
-from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
-    estimate_tokens_roughly,
 )
 
 
@@ -26,7 +24,7 @@ from src.contexts.llm_runtime.application.capacity.llm_capacity_estimate_payload
     build_llm_capacity_estimate_payload,
 )
 
-CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 1_953
+CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 3_008
 CLAIM_BUILDER_PROMPT_TOKENS_ENV = "CLAIM_BUILDER_PROMPT_TOKENS"
 CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS = 100
 CLAIM_BUILDER_MODEL_REF = "qwen/qwen3.6-27b"
@@ -133,12 +131,17 @@ def _claim_builder_token_estimate(
     plan: ClaimBuilderSectionWorkPlan,
     prompt_contract: ClaimBuilderSectionExtractionPromptContract,
 ) -> dict[str, object]:
-    del prompt_contract
     prompt_token_count = _claim_builder_prompt_tokens_from_env()
-    source_unit_token_count = max(1, estimate_tokens_roughly(plan.source_unit_text))
+    model_profile = model_budget_profile_for_ref(CLAIM_BUILDER_MODEL_REF)
+    user_message_content = _require_single_user_message_content(
+        prompt_contract.provider_messages,
+    )
+    source_unit_token_count = _estimate_artifact_tokens_from_chars(
+        char_count=len(user_message_content),
+        model_char_to_token_multiplier=model_profile.model_char_to_token_multiplier,
+    )
     input_tokens = prompt_token_count + source_unit_token_count
     planned_output_tokens = source_unit_token_count
-    model_profile = model_budget_profile_for_ref(CLAIM_BUILDER_MODEL_REF)
 
     return build_llm_capacity_estimate_payload(
         model_profile=model_profile,
@@ -146,7 +149,8 @@ def _claim_builder_token_estimate(
         operation="section_extraction",
         estimator=(
             f"measured_prompt_{prompt_token_count}_"
-            "source_char_div_3_3_conservative_section_output"
+            f"source_char_div_{model_profile.model_char_to_token_multiplier}"
+            "_conservative_section_output"
         ),
         prompt_tokens=prompt_token_count,
         artifact_tokens=source_unit_token_count,
@@ -158,6 +162,47 @@ def _claim_builder_token_estimate(
                 model_profile.model_char_to_token_multiplier
             ),
         },
+    )
+
+
+def _require_single_user_message_content(
+    provider_messages: tuple[dict[str, str], ...],
+) -> str:
+    user_contents = tuple(
+        message["content"]
+        for message in provider_messages
+        if message.get("role") == "user"
+    )
+    if len(user_contents) != 1:
+        raise ValueError(
+            "claim-builder prompt contract must contain exactly one user message"
+        )
+    content = user_contents[0]
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("claim-builder user message content must be non-empty")
+    return content
+
+
+def _estimate_artifact_tokens_from_chars(
+    *,
+    char_count: int,
+    model_char_to_token_multiplier: Decimal,
+) -> int:
+    if isinstance(char_count, bool) or not isinstance(char_count, int):
+        raise TypeError("char_count must be int")
+    if char_count < 0:
+        raise ValueError("char_count must be >= 0")
+    if model_char_to_token_multiplier <= 0:
+        raise ValueError("model_char_to_token_multiplier must be > 0")
+    if char_count == 0:
+        return 1
+    return max(
+        1,
+        int(
+            (Decimal(char_count) / model_char_to_token_multiplier).to_integral_value(
+                rounding=ROUND_CEILING,
+            )
+        ),
     )
 
 

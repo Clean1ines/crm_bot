@@ -215,11 +215,11 @@ def default_source_ingestion_segmentation_budget() -> DocumentSegmentationBudget
     return DocumentSegmentationBudget(
         prompt=SegmentationPromptProfile(
             prompt_name="claim_builder_section_extraction",
-            prompt_token_count=1_953,
+            prompt_token_count=3_008,
         ),
         model=SegmentationModelBudgetProfile(
             profile_name="primary_model",
-            max_request_input_tokens=6_000,
+            max_request_input_tokens=8_000,
             planned_output_tokens=100,
         ),
     )

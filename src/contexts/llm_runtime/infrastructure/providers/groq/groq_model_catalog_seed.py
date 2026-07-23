@@ -76,7 +76,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
                 ),
                 default_effort=ReasoningEffort.NONE,
             ),
-            model_char_to_token_multiplier=Decimal("3.3"),
+            model_char_to_token_multiplier=Decimal("2.8"),
             supports_json_object=True,
             supports_json_schema=False,
         ),

@@ -82,7 +82,7 @@ def _dispatch_payload(
                 "provider": "groq",
                 "model_ref": "qwen/qwen3.6-27b",
                 "model_tpm_limit": 8000,
-                "model_char_to_token_multiplier": "3.3",
+                "model_char_to_token_multiplier": "2.8",
                 "phase": "test",
                 "operation": "dispatch",
                 "prompt_tokens": 500,
@@ -156,6 +156,46 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
     ]
     assert "reasoning_effort" not in request_payload
     assert request_payload["max_completion_tokens"] == 6700
+
+
+@pytest.mark.asyncio
+async def test_claim_builder_budget_caps_completion_tokens_by_remaining_tpm() -> None:
+    transport = FakeGroqTransport(response=_success_response(raw_text='{"done": true}'))
+    schedule_payload = {
+        "provider_messages": [
+            {
+                "role": "user",
+                "content": "Extract claims",
+            },
+        ],
+        "llm_capacity_estimate": {
+            "budget_contract_version": "v3",
+            "estimator": "measured_prompt_3008_source_char_div_2.8",
+            "provider": "groq",
+            "model_ref": "qwen/qwen3.6-27b",
+            "model_tpm_limit": 8000,
+            "model_char_to_token_multiplier": "2.8",
+            "phase": "claim_builder_section_extraction",
+            "operation": "section_extraction",
+            "prompt_tokens": 3008,
+            "artifact_tokens": 369,
+            "input_tokens": 3377,
+            "planned_output_tokens": 369,
+            "safety_gap_tokens": 100,
+            "required_window_tokens": 3846,
+        },
+    }
+
+    result = await _executor(transport).execute_dispatch(
+        _execution_input(
+            dispatch_payload=_dispatch_payload(schedule_payload=schedule_payload)
+        ),
+    )
+
+    assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
+    request_payload = transport.payloads[0]
+    assert request_payload["max_completion_tokens"] == 4323
+    assert 3357 + request_payload["max_completion_tokens"] <= 8000
 
 
 @pytest.mark.asyncio

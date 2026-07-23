@@ -136,7 +136,6 @@ def _system_message(prompt_text: str) -> str:
 
 def _user_message(command: ClaimBuilderSectionExtractionPromptInput) -> str:
     return (
-        f"source_unit_ref: {command.source_unit_ref}\n"
         f"heading_path: {_format_heading_path(command.heading_path)}\n\n"
         f"{command.source_unit_text}"
     )

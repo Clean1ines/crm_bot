@@ -81,11 +81,11 @@ def default_source_ingestion_segmentation_profile() -> (
             prompt_name="claim_builder_section_extraction",
             node_id="faq_claim_observations",
             prompt_path="src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
-            prompt_token_count=1_953,
+            prompt_token_count=3_008,
         ),
         primary_model=WorkbenchModelRequestBudgetProfile(
             profile_name="primary_model",
-            max_request_input_tokens=6_000,
+            max_request_input_tokens=8_000,
             planned_output_tokens=100,
         ),
     )

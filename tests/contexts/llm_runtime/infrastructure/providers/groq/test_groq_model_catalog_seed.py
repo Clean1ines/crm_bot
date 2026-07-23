@@ -32,7 +32,15 @@ def test_groq_free_plan_seed_contains_target_text_models_in_fallback_order() -> 
 
 
 def test_qwen_seed_can_disable_reasoning_for_output_budget_control() -> None:
-    qwen = build_groq_free_plan_model_profiles()[0]
+    profiles = build_groq_free_plan_model_profiles()
+    qwen = next(
+        profile for profile in profiles if profile.model_id.value == "qwen/qwen3.6-27b"
+    )
+    llama_instant = next(
+        profile
+        for profile in profiles
+        if profile.model_id.value == "llama-3.1-8b-instant"
+    )
 
     assert qwen.model_id.value == "qwen/qwen3.6-27b"
     assert qwen.lifecycle is ModelLifecycle.PREVIEW
@@ -45,7 +53,8 @@ def test_qwen_seed_can_disable_reasoning_for_output_budget_control() -> None:
     assert qwen.rate_limits.tokens_per_day == 200_000
     assert qwen.token_price.input_per_million == Decimal("0.60")
     assert qwen.token_price.output_per_million == Decimal("3.00")
-    assert qwen.model_char_to_token_multiplier == Decimal("3.3")
+    assert qwen.model_char_to_token_multiplier == Decimal("2.8")
+    assert llama_instant.model_char_to_token_multiplier == Decimal("4.0")
 
 
 def test_llama_instant_seed_uses_free_plan_capacity_and_large_output_window() -> None:
@@ -69,7 +78,7 @@ def test_model_budget_profile_for_ref_returns_seeded_model_budget_fields() -> No
     gpt_oss = model_budget_profile_for_ref("openai/gpt-oss-120b")
 
     assert qwen.rate_limits.tokens_per_minute == 8_000
-    assert qwen.model_char_to_token_multiplier == Decimal("3.3")
+    assert qwen.model_char_to_token_multiplier == Decimal("2.8")
     assert gpt_oss.rate_limits.tokens_per_minute == 8_000
     assert gpt_oss.model_char_to_token_multiplier == Decimal("3.7")
 

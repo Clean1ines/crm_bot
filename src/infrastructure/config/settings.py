@@ -79,7 +79,7 @@ class Settings(BaseSettings):
         description="Groq model used by knowledge document preprocessing/compiler jobs",
     )
     CLAIM_BUILDER_PROMPT_TOKENS: int = Field(
-        1_953,
+        3_008,
         ge=1,
         description="Measured prompt token estimate for claim-builder section extraction admission",
     )

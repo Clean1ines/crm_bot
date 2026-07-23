@@ -1,5 +1,6 @@
 from pathlib import Path
 import ast
+from decimal import Decimal, ROUND_CEILING
 
 import pytest
 
@@ -9,9 +10,12 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
 )
 from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.map_claim_builder_section_plans_to_execution_schedule import (
+    CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS,
+    CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS,
     MapClaimBuilderSectionPlansToExecutionSchedule,
     MapClaimBuilderSectionPlansToExecutionScheduleCommand,
     MapClaimBuilderSectionPlansToExecutionScheduleResult,
+    _estimate_artifact_tokens_from_chars,
 )
 from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
     ClaimBuilderSectionWorkPlan,
@@ -90,6 +94,11 @@ def test_maps_one_workbench_plan_to_execution_schedule_plan(
 
     provider_messages = schedule.payload["provider_messages"]
     assert provider_messages == prompt_contract.provider_messages
+    user_content = _single_user_content(provider_messages)
+    assert "source_unit_ref:" not in user_content
+    assert plan.source_unit_ref.value not in user_content
+    assert "heading_path:" in user_content
+    assert plan.source_unit_text in user_content
 
     claim_builder_provenance = schedule.payload["claim_builder_provenance"]
     assert claim_builder_provenance == {
@@ -185,10 +194,10 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
     assert capacity_estimate["phase"] == "claim_builder_section_extraction"
     assert capacity_estimate["model_ref"] == "qwen/qwen3.6-27b"
     assert capacity_estimate["model_tpm_limit"] == 8_000
-    assert capacity_estimate["model_char_to_token_multiplier"] == "3.3"
-    assert capacity_estimate["prompt_tokens"] == 1953
+    assert capacity_estimate["model_char_to_token_multiplier"] == "2.8"
+    assert capacity_estimate["prompt_tokens"] == CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS
     assert capacity_estimate["input_tokens"] == (
-        1953 + capacity_estimate["artifact_tokens"]
+        CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS + capacity_estimate["artifact_tokens"]
     )
     assert (
         capacity_estimate["planned_output_tokens"]
@@ -232,6 +241,80 @@ def test_prompt_token_count_can_be_overridden_from_env(
         + capacity_estimate["safety_gap_tokens"]
     )
     assert capacity_estimate["estimator"].startswith("measured_prompt_4200_")
+
+
+def test_qwen36_artifact_tokens_use_ceiling_char_multiplier() -> None:
+    assert (
+        _estimate_artifact_tokens_from_chars(
+            char_count=1031,
+            model_char_to_token_multiplier=Decimal("2.8"),
+        )
+        == 369
+    )
+
+
+def test_default_claim_builder_schedule_budget_matches_calibrated_qwen36(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CLAIM_BUILDER_PROMPT_TOKENS", raising=False)
+    plan = _plan(
+        source_unit_ref="source-unit:project-1:calibration:0",
+        heading_path=("Возвраты", "Сроки"),
+        source_unit_text="Возврат выполняется в течение 14 дней.",
+    )
+
+    schedule = (
+        MapClaimBuilderSectionPlansToExecutionSchedule()
+        .execute(_command((plan,)))
+        .schedule_plans[0]
+    )
+
+    user_content = _single_user_content(schedule.payload["provider_messages"])
+    expected_artifact_tokens = _ceil_div_decimal(
+        len(user_content),
+        Decimal("2.8"),
+    )
+    capacity = schedule.payload["llm_capacity_estimate"]
+    assert isinstance(capacity, dict)
+    assert schedule.payload["source_unit_ref"] == plan.source_unit_ref.value
+    assert schedule.payload["claim_builder_provenance"]["source_unit_ref"] == (
+        plan.source_unit_ref.value
+    )
+    assert "source_unit_ref:" not in user_content
+    assert plan.source_unit_ref.value not in user_content
+    assert "heading_path:" in user_content
+    assert plan.source_unit_text in user_content
+    assert capacity["budget_contract_version"] == "v3"
+    assert capacity["model_ref"] == "qwen/qwen3.6-27b"
+    assert capacity["prompt_tokens"] == 3_008
+    assert capacity["artifact_tokens"] == expected_artifact_tokens
+    assert capacity["input_tokens"] == 3_008 + expected_artifact_tokens
+    assert capacity["planned_output_tokens"] == capacity["artifact_tokens"]
+    assert capacity["safety_gap_tokens"] == CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS
+    assert capacity["required_window_tokens"] == (
+        capacity["input_tokens"]
+        + capacity["planned_output_tokens"]
+        + CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS
+    )
+
+
+def _single_user_content(provider_messages: object) -> str:
+    assert isinstance(provider_messages, tuple)
+    user_contents = tuple(
+        message["content"]
+        for message in provider_messages
+        if isinstance(message, dict) and message.get("role") == "user"
+    )
+    assert len(user_contents) == 1
+    content = user_contents[0]
+    assert isinstance(content, str)
+    return content
+
+
+def _ceil_div_decimal(value: int, divisor: Decimal) -> int:
+    return int(
+        (Decimal(value) / divisor).to_integral_value(rounding=ROUND_CEILING),
+    )
 
 
 def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() -> None:

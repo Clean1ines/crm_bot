@@ -1,0 +1,535 @@
+diff --git a/src/contexts/knowledge_workbench/application/sagas/create_source_units_for_ingestion.py b/src/contexts/knowledge_workbench/application/sagas/create_source_units_for_ingestion.py
+index 099afb62..ca999482 100644
+--- a/src/contexts/knowledge_workbench/application/sagas/create_source_units_for_ingestion.py
++++ b/src/contexts/knowledge_workbench/application/sagas/create_source_units_for_ingestion.py
+@@ -215,11 +215,11 @@ def default_source_ingestion_segmentation_budget() -> DocumentSegmentationBudget
+     return DocumentSegmentationBudget(
+         prompt=SegmentationPromptProfile(
+             prompt_name="claim_builder_section_extraction",
+-            prompt_token_count=1_953,
++            prompt_token_count=3_008,
+         ),
+         model=SegmentationModelBudgetProfile(
+             profile_name="primary_model",
+-            max_request_input_tokens=6_000,
++            max_request_input_tokens=8_000,
+             planned_output_tokens=100,
+         ),
+     )
+diff --git a/src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py b/src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py
+index 14fa6503..dfcd074d 100644
+--- a/src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py
++++ b/src/contexts/knowledge_workbench/application/sagas/map_claim_builder_section_plans_to_execution_schedule.py
+@@ -1,14 +1,12 @@
+ from __future__ import annotations
+ 
+ from dataclasses import dataclass
++from decimal import Decimal, ROUND_CEILING
+ import os
+ 
+ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_scheduled import (
+     WorkItemSchedulePlan,
+ )
+-from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_budget import (
+-    estimate_tokens_roughly,
+-)
+ 
+ 
+ from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+@@ -26,7 +24,7 @@ from src.contexts.llm_runtime.application.capacity.llm_capacity_estimate_payload
+     build_llm_capacity_estimate_payload,
+ )
+ 
+-CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 1_953
++CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 3_008
+ CLAIM_BUILDER_PROMPT_TOKENS_ENV = "CLAIM_BUILDER_PROMPT_TOKENS"
+ CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS = 100
+ CLAIM_BUILDER_MODEL_REF = "qwen/qwen3.6-27b"
+@@ -133,12 +131,17 @@ def _claim_builder_token_estimate(
+     plan: ClaimBuilderSectionWorkPlan,
+     prompt_contract: ClaimBuilderSectionExtractionPromptContract,
+ ) -> dict[str, object]:
+-    del prompt_contract
+     prompt_token_count = _claim_builder_prompt_tokens_from_env()
+-    source_unit_token_count = max(1, estimate_tokens_roughly(plan.source_unit_text))
++    model_profile = model_budget_profile_for_ref(CLAIM_BUILDER_MODEL_REF)
++    user_message_content = _require_single_user_message_content(
++        prompt_contract.provider_messages,
++    )
++    source_unit_token_count = _estimate_artifact_tokens_from_chars(
++        char_count=len(user_message_content),
++        model_char_to_token_multiplier=model_profile.model_char_to_token_multiplier,
++    )
+     input_tokens = prompt_token_count + source_unit_token_count
+     planned_output_tokens = source_unit_token_count
+-    model_profile = model_budget_profile_for_ref(CLAIM_BUILDER_MODEL_REF)
+ 
+     return build_llm_capacity_estimate_payload(
+         model_profile=model_profile,
+@@ -146,7 +149,8 @@ def _claim_builder_token_estimate(
+         operation="section_extraction",
+         estimator=(
+             f"measured_prompt_{prompt_token_count}_"
+-            "source_char_div_3_3_conservative_section_output"
++            f"source_char_div_{model_profile.model_char_to_token_multiplier}"
++            "_conservative_section_output"
+         ),
+         prompt_tokens=prompt_token_count,
+         artifact_tokens=source_unit_token_count,
+@@ -161,6 +165,47 @@ def _claim_builder_token_estimate(
+     )
+ 
+ 
++def _require_single_user_message_content(
++    provider_messages: tuple[dict[str, str], ...],
++) -> str:
++    user_contents = tuple(
++        message["content"]
++        for message in provider_messages
++        if message.get("role") == "user"
++    )
++    if len(user_contents) != 1:
++        raise ValueError(
++            "claim-builder prompt contract must contain exactly one user message"
++        )
++    content = user_contents[0]
++    if not isinstance(content, str) or not content.strip():
++        raise ValueError("claim-builder user message content must be non-empty")
++    return content
++
++
++def _estimate_artifact_tokens_from_chars(
++    *,
++    char_count: int,
++    model_char_to_token_multiplier: Decimal,
++) -> int:
++    if isinstance(char_count, bool) or not isinstance(char_count, int):
++        raise TypeError("char_count must be int")
++    if char_count < 0:
++        raise ValueError("char_count must be >= 0")
++    if model_char_to_token_multiplier <= 0:
++        raise ValueError("model_char_to_token_multiplier must be > 0")
++    if char_count == 0:
++        return 1
++    return max(
++        1,
++        int(
++            (Decimal(char_count) / model_char_to_token_multiplier).to_integral_value(
++                rounding=ROUND_CEILING,
++            )
++        ),
++    )
++
++
+ def _claim_builder_prompt_tokens_from_env() -> int:
+     raw_value = os.environ.get(CLAIM_BUILDER_PROMPT_TOKENS_ENV)
+     if raw_value is None or not raw_value.strip():
+diff --git a/src/contexts/knowledge_workbench/application/sagas/source_ingestion_segmentation_profiles.py b/src/contexts/knowledge_workbench/application/sagas/source_ingestion_segmentation_profiles.py
+index 2c501c65..140ecf6d 100644
+--- a/src/contexts/knowledge_workbench/application/sagas/source_ingestion_segmentation_profiles.py
++++ b/src/contexts/knowledge_workbench/application/sagas/source_ingestion_segmentation_profiles.py
+@@ -81,11 +81,11 @@ def default_source_ingestion_segmentation_profile() -> (
+             prompt_name="claim_builder_section_extraction",
+             node_id="faq_claim_observations",
+             prompt_path="src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt",
+-            prompt_token_count=1_953,
++            prompt_token_count=3_008,
+         ),
+         primary_model=WorkbenchModelRequestBudgetProfile(
+             profile_name="primary_model",
+-            max_request_input_tokens=6_000,
++            max_request_input_tokens=8_000,
+             planned_output_tokens=100,
+         ),
+     )
+diff --git a/src/contexts/knowledge_workbench/application/sagas/source_ingestion_token_estimation.py b/src/contexts/knowledge_workbench/application/sagas/source_ingestion_token_estimation.py
+index 1b99c1e5..ef7a324d 100644
+--- a/src/contexts/knowledge_workbench/application/sagas/source_ingestion_token_estimation.py
++++ b/src/contexts/knowledge_workbench/application/sagas/source_ingestion_token_estimation.py
+@@ -10,7 +10,7 @@ from src.contexts.knowledge_workbench.document_segmentation.domain.segmentation_
+ 
+ 
+ MEASURED_PROMPT_TOKEN_COUNTS: dict[str, int] = {
+-    "faq_claim_observations": 1_953,
++    "faq_claim_observations": 3_008,
+ }
+ 
+ 
+diff --git a/src/contexts/knowledge_workbench/extraction/application/policies/claim_builder_section_extraction_prompt_contract.py b/src/contexts/knowledge_workbench/extraction/application/policies/claim_builder_section_extraction_prompt_contract.py
+index ad4675ce..3b4adab4 100644
+--- a/src/contexts/knowledge_workbench/extraction/application/policies/claim_builder_section_extraction_prompt_contract.py
++++ b/src/contexts/knowledge_workbench/extraction/application/policies/claim_builder_section_extraction_prompt_contract.py
+@@ -136,7 +136,6 @@ def _system_message(prompt_text: str) -> str:
+ 
+ def _user_message(command: ClaimBuilderSectionExtractionPromptInput) -> str:
+     return (
+-        f"source_unit_ref: {command.source_unit_ref}\n"
+         f"heading_path: {_format_heading_path(command.heading_path)}\n\n"
+         f"{command.source_unit_text}"
+     )
+diff --git a/src/contexts/llm_runtime/infrastructure/providers/groq/groq_model_catalog_seed.py b/src/contexts/llm_runtime/infrastructure/providers/groq/groq_model_catalog_seed.py
+index f41571b1..94bc0fb7 100644
+--- a/src/contexts/llm_runtime/infrastructure/providers/groq/groq_model_catalog_seed.py
++++ b/src/contexts/llm_runtime/infrastructure/providers/groq/groq_model_catalog_seed.py
+@@ -76,7 +76,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
+                 ),
+                 default_effort=ReasoningEffort.NONE,
+             ),
+-            model_char_to_token_multiplier=Decimal("3.3"),
++            model_char_to_token_multiplier=Decimal("2.8"),
+             supports_json_object=True,
+             supports_json_schema=False,
+         ),
+diff --git a/src/infrastructure/config/settings.py b/src/infrastructure/config/settings.py
+index 353c4d1f..0d43b007 100644
+--- a/src/infrastructure/config/settings.py
++++ b/src/infrastructure/config/settings.py
+@@ -79,7 +79,7 @@ class Settings(BaseSettings):
+         description="Groq model used by knowledge document preprocessing/compiler jobs",
+     )
+     CLAIM_BUILDER_PROMPT_TOKENS: int = Field(
+-        1_953,
++        3_008,
+         ge=1,
+         description="Measured prompt token estimate for claim-builder section extraction admission",
+     )
+diff --git a/tests/contexts/knowledge_workbench/application/sagas/test_map_claim_builder_section_plans_to_execution_schedule.py b/tests/contexts/knowledge_workbench/application/sagas/test_map_claim_builder_section_plans_to_execution_schedule.py
+index 7fb53414..91633a49 100644
+--- a/tests/contexts/knowledge_workbench/application/sagas/test_map_claim_builder_section_plans_to_execution_schedule.py
++++ b/tests/contexts/knowledge_workbench/application/sagas/test_map_claim_builder_section_plans_to_execution_schedule.py
+@@ -1,5 +1,6 @@
+ from pathlib import Path
+ import ast
++from decimal import Decimal, ROUND_CEILING
+ 
+ import pytest
+ 
+@@ -9,9 +10,12 @@ from src.contexts.execution_runtime.application.use_cases.ensure_work_items_sche
+ )
+ from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
+ from src.contexts.knowledge_workbench.application.sagas.map_claim_builder_section_plans_to_execution_schedule import (
++    CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS,
++    CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS,
+     MapClaimBuilderSectionPlansToExecutionSchedule,
+     MapClaimBuilderSectionPlansToExecutionScheduleCommand,
+     MapClaimBuilderSectionPlansToExecutionScheduleResult,
++    _estimate_artifact_tokens_from_chars,
+ )
+ from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+     ClaimBuilderSectionWorkPlan,
+@@ -90,6 +94,11 @@ def test_maps_one_workbench_plan_to_execution_schedule_plan(
+ 
+     provider_messages = schedule.payload["provider_messages"]
+     assert provider_messages == prompt_contract.provider_messages
++    user_content = _single_user_content(provider_messages)
++    assert "source_unit_ref:" not in user_content
++    assert plan.source_unit_ref.value not in user_content
++    assert "heading_path:" in user_content
++    assert plan.source_unit_text in user_content
+ 
+     claim_builder_provenance = schedule.payload["claim_builder_provenance"]
+     assert claim_builder_provenance == {
+@@ -185,10 +194,10 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
+     assert capacity_estimate["phase"] == "claim_builder_section_extraction"
+     assert capacity_estimate["model_ref"] == "qwen/qwen3.6-27b"
+     assert capacity_estimate["model_tpm_limit"] == 8_000
+-    assert capacity_estimate["model_char_to_token_multiplier"] == "3.3"
+-    assert capacity_estimate["prompt_tokens"] == 1953
++    assert capacity_estimate["model_char_to_token_multiplier"] == "2.8"
++    assert capacity_estimate["prompt_tokens"] == CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS
+     assert capacity_estimate["input_tokens"] == (
+-        1953 + capacity_estimate["artifact_tokens"]
++        CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS + capacity_estimate["artifact_tokens"]
+     )
+     assert (
+         capacity_estimate["planned_output_tokens"]
+@@ -234,6 +243,80 @@ def test_prompt_token_count_can_be_overridden_from_env(
+     assert capacity_estimate["estimator"].startswith("measured_prompt_4200_")
+ 
+ 
++def test_qwen36_artifact_tokens_use_ceiling_char_multiplier() -> None:
++    assert (
++        _estimate_artifact_tokens_from_chars(
++            char_count=1031,
++            model_char_to_token_multiplier=Decimal("2.8"),
++        )
++        == 369
++    )
++
++
++def test_default_claim_builder_schedule_budget_matches_calibrated_qwen36(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    monkeypatch.delenv("CLAIM_BUILDER_PROMPT_TOKENS", raising=False)
++    plan = _plan(
++        source_unit_ref="source-unit:project-1:calibration:0",
++        heading_path=("Возвраты", "Сроки"),
++        source_unit_text="Возврат выполняется в течение 14 дней.",
++    )
++
++    schedule = (
++        MapClaimBuilderSectionPlansToExecutionSchedule()
++        .execute(_command((plan,)))
++        .schedule_plans[0]
++    )
++
++    user_content = _single_user_content(schedule.payload["provider_messages"])
++    expected_artifact_tokens = _ceil_div_decimal(
++        len(user_content),
++        Decimal("2.8"),
++    )
++    capacity = schedule.payload["llm_capacity_estimate"]
++    assert isinstance(capacity, dict)
++    assert schedule.payload["source_unit_ref"] == plan.source_unit_ref.value
++    assert schedule.payload["claim_builder_provenance"]["source_unit_ref"] == (
++        plan.source_unit_ref.value
++    )
++    assert "source_unit_ref:" not in user_content
++    assert plan.source_unit_ref.value not in user_content
++    assert "heading_path:" in user_content
++    assert plan.source_unit_text in user_content
++    assert capacity["budget_contract_version"] == "v3"
++    assert capacity["model_ref"] == "qwen/qwen3.6-27b"
++    assert capacity["prompt_tokens"] == 3_008
++    assert capacity["artifact_tokens"] == expected_artifact_tokens
++    assert capacity["input_tokens"] == 3_008 + expected_artifact_tokens
++    assert capacity["planned_output_tokens"] == capacity["artifact_tokens"]
++    assert capacity["safety_gap_tokens"] == CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS
++    assert capacity["required_window_tokens"] == (
++        capacity["input_tokens"]
++        + capacity["planned_output_tokens"]
++        + CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS
++    )
++
++
++def _single_user_content(provider_messages: object) -> str:
++    assert isinstance(provider_messages, tuple)
++    user_contents = tuple(
++        message["content"]
++        for message in provider_messages
++        if isinstance(message, dict) and message.get("role") == "user"
++    )
++    assert len(user_contents) == 1
++    content = user_contents[0]
++    assert isinstance(content, str)
++    return content
++
++
++def _ceil_div_decimal(value: int, divisor: Decimal) -> int:
++    return int(
++        (Decimal(value) / divisor).to_integral_value(rounding=ROUND_CEILING),
++    )
++
++
+ def test_map_claim_builder_section_plans_to_execution_schedule_source_guard() -> None:
+     source = Path(
+         "src/contexts/knowledge_workbench/application/sagas/"
+diff --git a/tests/contexts/knowledge_workbench/extraction/application/policies/test_claim_builder_section_extraction_prompt_contract.py b/tests/contexts/knowledge_workbench/extraction/application/policies/test_claim_builder_section_extraction_prompt_contract.py
+index cbc21056..c37b8033 100644
+--- a/tests/contexts/knowledge_workbench/extraction/application/policies/test_claim_builder_section_extraction_prompt_contract.py
++++ b/tests/contexts/knowledge_workbench/extraction/application/policies/test_claim_builder_section_extraction_prompt_contract.py
+@@ -66,13 +66,25 @@ def test_system_message_contains_prompt_identity_and_strict_json_contract() -> N
+     )
+ 
+ 
+-def test_user_message_contains_source_unit_context() -> None:
+-    contract = BuildClaimBuilderSectionExtractionPrompt().execute(_contract_input())
++def test_user_message_contains_heading_and_section_text_without_source_unit_ref() -> (
++    None
++):
++    command = ClaimBuilderSectionExtractionPromptInput(
++        source_unit_ref="source-unit:123",
++        heading_path=("Возвраты", "Сроки"),
++        source_unit_text="Возврат выполняется в течение 14 дней.",
++    )
++    contract = BuildClaimBuilderSectionExtractionPrompt().execute(command)
+     user_message = contract.provider_messages[1]["content"]
+ 
+-    assert "source_unit_ref: source-unit:project-1:abc:0" in user_message
+-    assert "heading_path: Root / Child" in user_message
+-    assert "# Child\n\nSource body" in user_message
++    assert (
++        user_message == "heading_path: Возвраты / Сроки\n\n"
++        "Возврат выполняется в течение 14 дней."
++    )
++    assert "heading_path: Возвраты / Сроки" in user_message
++    assert "Возврат выполняется в течение 14 дней." in user_message
++    assert "source_unit_ref:" not in user_message
++    assert "source-unit:123" not in user_message
+ 
+ 
+ def test_user_message_formats_empty_heading_path_as_root() -> None:
+diff --git a/tests/contexts/llm_runtime/infrastructure/providers/groq/test_groq_dispatch_executor.py b/tests/contexts/llm_runtime/infrastructure/providers/groq/test_groq_dispatch_executor.py
+index 7998ef28..4286c460 100644
+--- a/tests/contexts/llm_runtime/infrastructure/providers/groq/test_groq_dispatch_executor.py
++++ b/tests/contexts/llm_runtime/infrastructure/providers/groq/test_groq_dispatch_executor.py
+@@ -82,7 +82,7 @@ def _dispatch_payload(
+                 "provider": "groq",
+                 "model_ref": "qwen/qwen3.6-27b",
+                 "model_tpm_limit": 8000,
+-                "model_char_to_token_multiplier": "3.3",
++                "model_char_to_token_multiplier": "2.8",
+                 "phase": "test",
+                 "operation": "dispatch",
+                 "prompt_tokens": 500,
+@@ -158,6 +158,46 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
+     assert request_payload["max_completion_tokens"] == 6700
+ 
+ 
++@pytest.mark.asyncio
++async def test_claim_builder_budget_caps_completion_tokens_by_remaining_tpm() -> None:
++    transport = FakeGroqTransport(response=_success_response(raw_text='{"done": true}'))
++    schedule_payload = {
++        "provider_messages": [
++            {
++                "role": "user",
++                "content": "Extract claims",
++            },
++        ],
++        "llm_capacity_estimate": {
++            "budget_contract_version": "v3",
++            "estimator": "measured_prompt_3008_source_char_div_2.8",
++            "provider": "groq",
++            "model_ref": "qwen/qwen3.6-27b",
++            "model_tpm_limit": 8000,
++            "model_char_to_token_multiplier": "2.8",
++            "phase": "claim_builder_section_extraction",
++            "operation": "section_extraction",
++            "prompt_tokens": 3008,
++            "artifact_tokens": 369,
++            "input_tokens": 3377,
++            "planned_output_tokens": 369,
++            "safety_gap_tokens": 100,
++            "required_window_tokens": 3846,
++        },
++    }
++
++    result = await _executor(transport).execute_dispatch(
++        _execution_input(
++            dispatch_payload=_dispatch_payload(schedule_payload=schedule_payload)
++        ),
++    )
++
++    assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
++    request_payload = transport.payloads[0]
++    assert request_payload["max_completion_tokens"] == 4323
++    assert 3357 + request_payload["max_completion_tokens"] <= 8000
++
++
+ @pytest.mark.asyncio
+ async def test_invalid_dispatch_missing_provider_messages_returns_terminal_failed() -> (
+     None
+diff --git a/tests/contexts/llm_runtime/infrastructure/providers/groq/test_groq_model_catalog_seed.py b/tests/contexts/llm_runtime/infrastructure/providers/groq/test_groq_model_catalog_seed.py
+index 3654bdf4..7db89696 100644
+--- a/tests/contexts/llm_runtime/infrastructure/providers/groq/test_groq_model_catalog_seed.py
++++ b/tests/contexts/llm_runtime/infrastructure/providers/groq/test_groq_model_catalog_seed.py
+@@ -32,7 +32,15 @@ def test_groq_free_plan_seed_contains_target_text_models_in_fallback_order() ->
+ 
+ 
+ def test_qwen_seed_can_disable_reasoning_for_output_budget_control() -> None:
+-    qwen = build_groq_free_plan_model_profiles()[0]
++    profiles = build_groq_free_plan_model_profiles()
++    qwen = next(
++        profile for profile in profiles if profile.model_id.value == "qwen/qwen3.6-27b"
++    )
++    llama_instant = next(
++        profile
++        for profile in profiles
++        if profile.model_id.value == "llama-3.1-8b-instant"
++    )
+ 
+     assert qwen.model_id.value == "qwen/qwen3.6-27b"
+     assert qwen.lifecycle is ModelLifecycle.PREVIEW
+@@ -45,7 +53,8 @@ def test_qwen_seed_can_disable_reasoning_for_output_budget_control() -> None:
+     assert qwen.rate_limits.tokens_per_day == 200_000
+     assert qwen.token_price.input_per_million == Decimal("0.60")
+     assert qwen.token_price.output_per_million == Decimal("3.00")
+-    assert qwen.model_char_to_token_multiplier == Decimal("3.3")
++    assert qwen.model_char_to_token_multiplier == Decimal("2.8")
++    assert llama_instant.model_char_to_token_multiplier == Decimal("4.0")
+ 
+ 
+ def test_llama_instant_seed_uses_free_plan_capacity_and_large_output_window() -> None:
+@@ -69,7 +78,7 @@ def test_model_budget_profile_for_ref_returns_seeded_model_budget_fields() -> No
+     gpt_oss = model_budget_profile_for_ref("openai/gpt-oss-120b")
+ 
+     assert qwen.rate_limits.tokens_per_minute == 8_000
+-    assert qwen.model_char_to_token_multiplier == Decimal("3.3")
++    assert qwen.model_char_to_token_multiplier == Decimal("2.8")
+     assert gpt_oss.rate_limits.tokens_per_minute == 8_000
+     assert gpt_oss.model_char_to_token_multiplier == Decimal("3.7")
+ 
+diff --git a/tests/interfaces/composition/test_prepare_llm_dispatch_batch.py b/tests/interfaces/composition/test_prepare_llm_dispatch_batch.py
+index 230f81cc..d2b2fe44 100644
+--- a/tests/interfaces/composition/test_prepare_llm_dispatch_batch.py
++++ b/tests/interfaces/composition/test_prepare_llm_dispatch_batch.py
+@@ -445,7 +445,7 @@ def _schedule_payload(
+             "provider": "groq",
+             "model_ref": "qwen/qwen3.6-27b",
+             "model_tpm_limit": 8_000,
+-            "model_char_to_token_multiplier": "3.3",
++            "model_char_to_token_multiplier": "2.8",
+             "phase": "test",
+             "operation": "prepare",
+             "prompt_tokens": capacity_profile.estimated_prompt_tokens,
+@@ -1614,7 +1614,7 @@ async def test_source_split_required_raises_when_due_payload_has_no_source_unit_
+             "provider": "groq",
+             "model_ref": "qwen/qwen3.6-27b",
+             "model_tpm_limit": 8_000,
+-            "model_char_to_token_multiplier": "3.3",
++            "model_char_to_token_multiplier": "2.8",
+             "phase": "test",
+             "operation": "prepare",
+             "prompt_tokens": large_profile.estimated_prompt_tokens,
+diff --git a/tests/interfaces/composition/test_source_ingestion_first_phase_composition.py b/tests/interfaces/composition/test_source_ingestion_first_phase_composition.py
+index 67eb6b2e..6154049f 100644
+--- a/tests/interfaces/composition/test_source_ingestion_first_phase_composition.py
++++ b/tests/interfaces/composition/test_source_ingestion_first_phase_composition.py
+@@ -753,7 +753,7 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
+ ) -> None:
+     prompt_text = "alpha beta gamma delta"
+     _write_prompt_text(tmp_path, prompt_text)
+-    expected_prompt_tokens = 1_953
++    expected_prompt_tokens = 3_008
+ 
+     config = default_source_ingestion_first_phase_segmentation_config(
+         repo_root=tmp_path,
+@@ -763,9 +763,9 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
+     assert budget.prompt.prompt_name == "claim_builder_section_extraction"
+     assert budget.prompt.prompt_token_count == expected_prompt_tokens
+     assert budget.model.profile_name == "primary_model"
+-    assert budget.model.max_request_input_tokens == 6_000
++    assert budget.model.max_request_input_tokens == 8_000
+     assert budget.model.planned_output_tokens == 100
+-    assert budget.max_source_segment_tokens == (6_000 - expected_prompt_tokens - 100)
++    assert budget.max_source_segment_tokens == (8_000 - expected_prompt_tokens - 100)
+ 
+ 
+ @pytest.mark.asyncio
+@@ -775,7 +775,7 @@ async def test_factory_runner_injects_default_segmentation_budget(
+ ) -> None:
+     prompt_text = "alpha beta gamma delta"
+     _write_prompt_text(tmp_path, prompt_text)
+-    expected_prompt_tokens = 1_953
++    expected_prompt_tokens = 3_008
+     _patch_transactional_dependencies(monkeypatch)
+     transaction = FakeTransaction()
+     connection = FakeConnection(transaction)
+@@ -962,7 +962,7 @@ def test_loads_prompt_text_and_estimates_prompt_tokens(tmp_path: Path) -> None:
+         repo_root=tmp_path,
+     )
+ 
+-    assert profile.prompt.prompt_token_count == 1_953
++    assert profile.prompt.prompt_token_count == 3_008
+     assert (
+         profile.prompt.prompt_path
+         == "src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt"
+@@ -980,7 +980,7 @@ def test_default_composition_config_uses_estimated_prompt_tokens(
+         repo_root=tmp_path,
+     )
+ 
+-    assert config.prompt_token_count == 1_953
++    assert config.prompt_token_count == 3_008
+ 
+ 
+ @pytest.mark.asyncio

@@ -753,7 +753,7 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
 ) -> None:
     prompt_text = "alpha beta gamma delta"
     _write_prompt_text(tmp_path, prompt_text)
-    expected_prompt_tokens = 1_953
+    expected_prompt_tokens = 3_008
 
     config = default_source_ingestion_first_phase_segmentation_config(
         repo_root=tmp_path,
@@ -763,9 +763,9 @@ def test_default_segmentation_config_is_request_budget_without_provider_names(
     assert budget.prompt.prompt_name == "claim_builder_section_extraction"
     assert budget.prompt.prompt_token_count == expected_prompt_tokens
     assert budget.model.profile_name == "primary_model"
-    assert budget.model.max_request_input_tokens == 6_000
+    assert budget.model.max_request_input_tokens == 8_000
     assert budget.model.planned_output_tokens == 100
-    assert budget.max_source_segment_tokens == (6_000 - expected_prompt_tokens - 100)
+    assert budget.max_source_segment_tokens == (8_000 - expected_prompt_tokens - 100)
 
 
 @pytest.mark.asyncio
@@ -775,7 +775,7 @@ async def test_factory_runner_injects_default_segmentation_budget(
 ) -> None:
     prompt_text = "alpha beta gamma delta"
     _write_prompt_text(tmp_path, prompt_text)
-    expected_prompt_tokens = 1_953
+    expected_prompt_tokens = 3_008
     _patch_transactional_dependencies(monkeypatch)
     transaction = FakeTransaction()
     connection = FakeConnection(transaction)
@@ -962,7 +962,7 @@ def test_loads_prompt_text_and_estimates_prompt_tokens(tmp_path: Path) -> None:
         repo_root=tmp_path,
     )
 
-    assert profile.prompt.prompt_token_count == 1_953
+    assert profile.prompt.prompt_token_count == 3_008
     assert (
         profile.prompt.prompt_path
         == "src/contexts/knowledge_workbench/extraction/application/prompts/faq_surface_claim_observations.ru.txt"
@@ -980,7 +980,7 @@ def test_default_composition_config_uses_estimated_prompt_tokens(
         repo_root=tmp_path,
     )
 
-    assert config.prompt_token_count == 1_953
+    assert config.prompt_token_count == 3_008
 
 
 @pytest.mark.asyncio

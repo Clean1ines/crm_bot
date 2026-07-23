@@ -66,13 +66,25 @@ def test_system_message_contains_prompt_identity_and_strict_json_contract() -> N
     )
 
 
-def test_user_message_contains_source_unit_context() -> None:
-    contract = BuildClaimBuilderSectionExtractionPrompt().execute(_contract_input())
+def test_user_message_contains_heading_and_section_text_without_source_unit_ref() -> (
+    None
+):
+    command = ClaimBuilderSectionExtractionPromptInput(
+        source_unit_ref="source-unit:123",
+        heading_path=("Возвраты", "Сроки"),
+        source_unit_text="Возврат выполняется в течение 14 дней.",
+    )
+    contract = BuildClaimBuilderSectionExtractionPrompt().execute(command)
     user_message = contract.provider_messages[1]["content"]
 
-    assert "source_unit_ref: source-unit:project-1:abc:0" in user_message
-    assert "heading_path: Root / Child" in user_message
-    assert "# Child\n\nSource body" in user_message
+    assert (
+        user_message == "heading_path: Возвраты / Сроки\n\n"
+        "Возврат выполняется в течение 14 дней."
+    )
+    assert "heading_path: Возвраты / Сроки" in user_message
+    assert "Возврат выполняется в течение 14 дней." in user_message
+    assert "source_unit_ref:" not in user_message
+    assert "source-unit:123" not in user_message
 
 
 def test_user_message_formats_empty_heading_path_as_root() -> None:
