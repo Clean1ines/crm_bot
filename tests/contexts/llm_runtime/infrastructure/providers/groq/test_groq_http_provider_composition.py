@@ -95,7 +95,7 @@ def test_http_provider_factory_builds_primary_provider_and_all_account_slots() -
 
     result = components.provider.transport.post_chat_completions(
         payload={
-            "model": "qwen/qwen3-32b",
+            "model": "qwen/qwen3.6-27b",
         },
     )
 
@@ -104,5 +104,5 @@ def test_http_provider_factory_builds_primary_provider_and_all_account_slots() -
     url, headers, json_payload, timeout_seconds = http_client.captured_posts[0]
     assert url == "https://example.test/chat/completions"
     assert headers["Authorization"] == "Bearer primary-secret"
-    assert json_payload["model"] == "qwen/qwen3-32b"
+    assert json_payload["model"] == "qwen/qwen3.6-27b"
     assert timeout_seconds == 12.5

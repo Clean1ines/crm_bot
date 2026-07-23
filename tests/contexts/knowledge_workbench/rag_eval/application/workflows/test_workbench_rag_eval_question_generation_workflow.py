@@ -59,7 +59,7 @@ def test_qgen_planner_creates_one_work_item_per_runtime_entry() -> None:
 
     plans = WorkbenchRagEvalQuestionGenerationWorkPlanner(
         prompt_version="prompt-v1",
-        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
     ).plan(
         workflow_run_id="run-1",
         project_id="project-1",
@@ -83,7 +83,7 @@ def test_qgen_planner_creates_one_work_item_per_runtime_entry() -> None:
 def test_qgen_dispatch_preparation_builder_uses_due_item_estimates() -> None:
     plans = WorkbenchRagEvalQuestionGenerationWorkPlanner(
         prompt_version="prompt-v1",
-        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
     ).plan(
         workflow_run_id="run-1",
         project_id="project-1",
@@ -126,8 +126,8 @@ def test_qgen_dispatch_preparation_builder_uses_due_item_estimates() -> None:
     }
     assert estimate["budget_contract_version"] == "v3"
     assert estimate["provider"] == "groq"
-    assert estimate["model_ref"] == "qwen/qwen3-32b"
-    assert estimate["model_tpm_limit"] == 6_000
+    assert estimate["model_ref"] == "qwen/qwen3.6-27b"
+    assert estimate["model_tpm_limit"] == 8_000
     assert profile.profile_id == "workbench_rag_eval.question_generation.real_due_batch"
     assert profile.estimated_requests == 1
     assert profile.estimated_prompt_tokens == estimate["input_tokens"]

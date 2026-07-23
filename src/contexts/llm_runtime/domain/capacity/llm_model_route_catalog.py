@@ -217,12 +217,12 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
     return LlmModelRouteCatalog(
         routes=(
             LlmModelRoute(
-                model_ref="qwen/qwen3-32b",
+                model_ref="qwen/qwen3.6-27b",
                 role=LlmModelRouteRole.PRIMARY,
                 order=0,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=6_000,
+                    input_token_limit=8_000,
                     output_token_limit=8192,
                 ),
             ),

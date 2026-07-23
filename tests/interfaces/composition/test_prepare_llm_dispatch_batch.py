@@ -400,7 +400,7 @@ def _account(
     account_ref: str = "org-1",
     minute_requests: int = 2,
     minute_tokens: int = 7000,
-    model_ref: str = "qwen/qwen3-32b",
+    model_ref: str = "qwen/qwen3.6-27b",
     daily_requests: int = 100,
     daily_tokens: int = 50000,
 ) -> LlmProviderAccountCapacity:
@@ -443,8 +443,8 @@ def _schedule_payload(
             "budget_contract_version": "v3",
             "estimator": "test_budget",
             "provider": "groq",
-            "model_ref": "qwen/qwen3-32b",
-            "model_tpm_limit": 6_000,
+            "model_ref": "qwen/qwen3.6-27b",
+            "model_tpm_limit": 8_000,
             "model_char_to_token_multiplier": "3.3",
             "phase": "test",
             "operation": "prepare",
@@ -482,7 +482,7 @@ def _command(
     work_kind: WorkKind | None = None,
     profile: LlmTaskCapacityProfile | None = None,
     account_capacities: tuple[LlmProviderAccountCapacity, ...] = (_account(),),
-    active_model_ref: str = "qwen/qwen3-32b",
+    active_model_ref: str = "qwen/qwen3.6-27b",
     requested_items: int = 2,
     now: datetime | None = None,
     started_at: datetime | None = None,
@@ -762,7 +762,7 @@ async def test_prepare_uses_work_kind_specific_dispatch_preparation_builder() ->
 
     assert len(result.attempt_result.started_attempts) == 1
     assert rag_eval_builder.profile_due_work_item_counts == [1]
-    assert rag_eval_builder.account_model_refs == ["qwen/qwen3-32b"]
+    assert rag_eval_builder.account_model_refs == ["qwen/qwen3.6-27b"]
     dispatch = next(iter(connection.dispatches.values()))
     assert dispatch["llm_allocation_payload"]["account_ref"] == "rag-eval-org-1"
     assert (
@@ -779,7 +779,7 @@ async def test_rag_eval_question_generation_preparation_persists_groq_parseable_
 ):
     plan = WorkbenchRagEvalQuestionGenerationWorkPlanner(
         prompt_version="prompt-v1",
-        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+        generation_model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
     ).plan(
         workflow_run_id="run-1",
         project_id="project-1",
@@ -811,7 +811,7 @@ async def test_rag_eval_question_generation_preparation_persists_groq_parseable_
     assert isinstance(dispatch_payload, dict)
     estimate = dispatch_payload["schedule_payload"]["llm_capacity_estimate"]
     assert estimate["budget_contract_version"] == "v3"
-    assert estimate["model_tpm_limit"] == 6_000
+    assert estimate["model_tpm_limit"] == 8_000
     await _assert_groq_executor_accepts_dispatch_payload(dispatch_payload)
 
 
@@ -820,7 +820,7 @@ async def test_rag_eval_adjudication_preparation_persists_groq_parseable_contrac
     None
 ):
     plan = WorkbenchRagEvalAdjudicationWorkPlanner(
-        adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+        adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
     ).plan(
         inputs=(_adjudication_input(),),
         provider_messages_by_question_id={
@@ -850,7 +850,7 @@ async def test_rag_eval_adjudication_preparation_persists_groq_parseable_contrac
     assert isinstance(dispatch_payload, dict)
     estimate = dispatch_payload["schedule_payload"]["llm_capacity_estimate"]
     assert estimate["budget_contract_version"] == "v3"
-    assert estimate["model_tpm_limit"] == 6_000
+    assert estimate["model_tpm_limit"] == 8_000
     await _assert_groq_executor_accepts_dispatch_payload(dispatch_payload)
 
 
@@ -1193,13 +1193,13 @@ async def test_prepare_uses_only_active_qwen_model_capacity() -> None:
                     account_ref="qwen_1",
                     minute_requests=10,
                     minute_tokens=7000,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
                 _account(
                     account_ref="qwen_2",
                     minute_requests=10,
                     minute_tokens=3500,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
                 _account(
                     account_ref="fallback_openai",
@@ -1208,7 +1208,7 @@ async def test_prepare_uses_only_active_qwen_model_capacity() -> None:
                     model_ref="openai/gpt-oss-120b",
                 ),
             ),
-            active_model_ref="qwen/qwen3-32b",
+            active_model_ref="qwen/qwen3.6-27b",
             requested_items=10,
         ),
     )
@@ -1220,7 +1220,7 @@ async def test_prepare_uses_only_active_qwen_model_capacity() -> None:
     assert {
         dispatch["llm_allocation_payload"]["model_ref"]
         for dispatch in connection.dispatches.values()
-    } == {"qwen/qwen3-32b"}
+    } == {"qwen/qwen3.6-27b"}
 
 
 @pytest.mark.asyncio
@@ -1235,7 +1235,7 @@ async def test_prepare_ignores_fallback_capacities_when_qwen_is_active() -> None
                     account_ref="qwen_1",
                     minute_requests=10,
                     minute_tokens=3500,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
                 _account(
                     account_ref="fallback_openai",
@@ -1250,7 +1250,7 @@ async def test_prepare_ignores_fallback_capacities_when_qwen_is_active() -> None
                     model_ref="llama-3.3-70b-versatile",
                 ),
             ),
-            active_model_ref="qwen/qwen3-32b",
+            active_model_ref="qwen/qwen3.6-27b",
             requested_items=10,
         ),
     )
@@ -1271,7 +1271,7 @@ async def test_prepare_absent_active_model_starts_no_attempts() -> None:
                     account_ref="qwen_1",
                     minute_requests=10,
                     minute_tokens=35000,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
             ),
             active_model_ref="openai/gpt-oss-120b",
@@ -1519,7 +1519,7 @@ async def test_prepare_uses_input_preflight_model_ref_before_leasing() -> None:
     fallback_model_ref = catalog.automatic_fallback_model_refs_with_larger_input_limit(
         catalog.primary_model_ref(),
     )[0]
-    large_profile = _large_input_profile(7000)
+    large_profile = _large_input_profile(9000)
     connection = _connection_with_due_items(2, profile=large_profile)
     pool = FakePool(connection=connection)
 
@@ -1612,8 +1612,8 @@ async def test_source_split_required_raises_when_due_payload_has_no_source_unit_
             "budget_contract_version": "v3",
             "estimator": "test_budget",
             "provider": "groq",
-            "model_ref": "qwen/qwen3-32b",
-            "model_tpm_limit": 6_000,
+            "model_ref": "qwen/qwen3.6-27b",
+            "model_tpm_limit": 8_000,
             "model_char_to_token_multiplier": "3.3",
             "phase": "test",
             "operation": "prepare",
@@ -1674,7 +1674,7 @@ def test_groq_missing_minute_reset_uses_local_sixty_second_timer() -> None:
     observation = LlmAttemptCapacityObservation(
         provider="groq",
         account_ref="org-1",
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         remaining_minute_requests=60,
         remaining_minute_tokens=0,
         remaining_daily_requests=999,
@@ -1760,12 +1760,12 @@ async def test_prepare_skips_expensive_due_item_and_leases_later_item_that_fits_
                     account_ref="qwen_1",
                     minute_requests=1,
                     minute_tokens=1000,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     daily_requests=10,
                     daily_tokens=1000,
                 ),
             ),
-            active_model_ref="qwen/qwen3-32b",
+            active_model_ref="qwen/qwen3.6-27b",
             requested_items=3,
         ),
     )
@@ -1951,7 +1951,7 @@ async def test_prepare_subtracts_active_route_reservations_before_admission() ->
             "attempt_id": "other-work:attempt:1",
             "provider": "groq",
             "account_ref": "qwen_1",
-            "model_ref": "qwen/qwen3-32b",
+            "model_ref": "qwen/qwen3.6-27b",
             "reserved_requests": 1,
             "reserved_tokens": 3500,
             "status": "active",

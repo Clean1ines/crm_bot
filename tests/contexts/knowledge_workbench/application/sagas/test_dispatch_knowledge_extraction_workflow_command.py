@@ -163,14 +163,14 @@ def _dispatch_preparation() -> dict[str, object]:
             {
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
                 "remaining_minute_requests": 1,
                 "remaining_minute_tokens": 7000,
                 "remaining_daily_requests": 100,
                 "remaining_daily_tokens": 50000,
             },
         ),
-        "active_model_ref": "qwen/qwen3-32b",
+        "active_model_ref": "qwen/qwen3.6-27b",
         "requested_items": 1,
         "worker_ref": "worker-1",
         "lease_token_prefix": "lease-prefix",
@@ -456,7 +456,7 @@ class FakePrepareResult:
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
     )
-    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3.6-27b"
     source_split_required: bool = False
     affected_work_item_refs: tuple[str, ...] = ()
     source_unit_refs: tuple[str, ...] = ()
@@ -482,7 +482,7 @@ class FakePrepareLlmDispatchBatch:
                             "llm_allocation": {
                                 "provider": "groq",
                                 "account_ref": "groq_org_primary",
-                                "model_ref": "qwen/qwen3-32b",
+                                "model_ref": "qwen/qwen3.6-27b",
                             },
                             "schedule_payload": {
                                 "workflow_run_id": _workflow_run_id(),
@@ -1112,7 +1112,7 @@ async def test_dispatch_repairs_claim_builder_prepare_command_without_dispatch_p
     assert result.dispatched is True
     assert result.blocked_reason is None
     assert len(prepare.calls) == 1
-    assert prepare.calls[0].active_model_ref == "qwen/qwen3-32b"
+    assert prepare.calls[0].active_model_ref == "qwen/qwen3.6-27b"
     assert prepare.calls[0].requested_items == 2
     assert prepare.calls[0].worker.value == (
         "knowledge-workbench-claim-builder-dispatch"

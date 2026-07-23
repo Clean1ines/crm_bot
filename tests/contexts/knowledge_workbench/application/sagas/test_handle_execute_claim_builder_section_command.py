@@ -174,7 +174,7 @@ def _capacity_payload() -> dict[str, object]:
     return {
         "provider": "groq",
         "account_ref": "groq_org_primary",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "remaining_minute_requests": 2,
         "remaining_minute_tokens": 7000,
         "remaining_daily_requests": 100,
@@ -235,7 +235,7 @@ def _dispatch(
             "llm_allocation": {
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
                 "slot_index": 0,
             },
             "llm_execution_settings": {"reasoning_enabled": False},
@@ -646,7 +646,7 @@ async def test_records_capacity_observation_feedback_contract() -> None:
     observation = capacity_repository.observations[0]
     assert observation.provider == "groq"
     assert observation.account_ref == "groq_org_primary"
-    assert observation.model_ref == "qwen/qwen3-32b"
+    assert observation.model_ref == "qwen/qwen3.6-27b"
     assert observation.actual_total_tokens == 15
 
 
@@ -711,7 +711,7 @@ async def test_projects_llm_provider_capacity_observed_event_once() -> None:
     assert len(repository.events) == 1
     projected = next(iter(repository.events.values()))
     assert projected.projection_type == "workflow_capacity_window_observed"
-    assert projected.payload["window_key"] == "groq:groq_org_primary:qwen/qwen3-32b"
+    assert projected.payload["window_key"] == "groq:groq_org_primary:qwen/qwen3.6-27b"
     assert projected.payload["account_ref"] == "groq_org_primary"
 
 
@@ -1267,7 +1267,7 @@ def test_source_unit_text_missing_fails_explicitly() -> None:
                 "llm_allocation": {
                     "provider": "groq",
                     "account_ref": "groq_org_primary",
-                    "model_ref": "qwen/qwen3-32b",
+                    "model_ref": "qwen/qwen3.6-27b",
                     "slot_index": 0,
                 },
                 "llm_execution_settings": {"reasoning_enabled": False},
@@ -1302,7 +1302,7 @@ async def test_valid_claims_are_persisted_as_draft_claim_observations() -> None:
     assert candidate.work_item_id == _work_item_id()
     assert candidate.dispatch_attempt_id == _attempt_id()
     assert candidate.provider == "groq"
-    assert candidate.model_ref == "qwen/qwen3-32b"
+    assert candidate.model_ref == "qwen/qwen3.6-27b"
     assert candidate.claim_index == 0
     assert candidate.claim == "Product System turns documents into knowledge."
     assert candidate.validation_decision == (

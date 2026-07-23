@@ -53,12 +53,12 @@ def test_active_qwen_selection_ignores_fallback_capacities() -> None:
             account_capacities=(
                 _account(
                     account_ref="qwen-1",
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     minute_tokens=7000,
                 ),
                 _account(
                     account_ref="qwen-2",
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     minute_tokens=10500,
                 ),
                 _account(
@@ -72,7 +72,7 @@ def test_active_qwen_selection_ignores_fallback_capacities() -> None:
                     minute_tokens=35000,
                 ),
             ),
-            active_model_ref="qwen/qwen3-32b",
+            active_model_ref="qwen/qwen3.6-27b",
             requested_items=10,
         ),
     )
@@ -83,7 +83,7 @@ def test_active_qwen_selection_ignores_fallback_capacities() -> None:
     )
     assert result.projection.max_projected_items == 5
     assert {slot.model_ref for slot in result.projection.allocations} == {
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
     }
 
 
@@ -94,7 +94,7 @@ def test_active_fallback_selection_ignores_qwen_capacity() -> None:
             account_capacities=(
                 _account(
                     account_ref="qwen-1",
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     minute_tokens=35000,
                 ),
                 _account(
@@ -125,7 +125,7 @@ def test_no_accounts_for_active_model_returns_zero_capacity_projection() -> None
             account_capacities=(
                 _account(
                     account_ref="qwen-1",
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     minute_tokens=35000,
                 ),
             ),

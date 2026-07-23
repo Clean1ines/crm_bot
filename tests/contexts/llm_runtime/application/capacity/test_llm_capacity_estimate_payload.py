@@ -12,7 +12,7 @@ from src.contexts.llm_runtime.infrastructure.providers.groq.groq_model_catalog_s
 
 def test_build_llm_capacity_estimate_payload_uses_model_profile_tpm_limit() -> None:
     payload = build_llm_capacity_estimate_payload(
-        model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+        model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
         phase="question_generation",
         operation="prepare_workbench_rag_eval_question_generation",
         estimator="provider_message_char_div_4",
@@ -26,8 +26,8 @@ def test_build_llm_capacity_estimate_payload_uses_model_profile_tpm_limit() -> N
     assert payload == {
         "budget_contract_version": "v3",
         "provider": "groq",
-        "model_ref": "qwen/qwen3-32b",
-        "model_tpm_limit": 6_000,
+        "model_ref": "qwen/qwen3.6-27b",
+        "model_tpm_limit": 8_000,
         "phase": "question_generation",
         "operation": "prepare_workbench_rag_eval_question_generation",
         "estimator": "provider_message_char_div_4",
@@ -44,7 +44,7 @@ def test_build_llm_capacity_estimate_payload_keeps_estimator_metadata_optional()
     None
 ):
     payload = build_llm_capacity_estimate_payload(
-        model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+        model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
         phase="claim_builder_section_extraction",
         operation="section_extraction",
         estimator="measured_prompt_source_char_div_3_3",
@@ -65,7 +65,7 @@ def test_build_llm_capacity_estimate_payload_rejects_reserved_metadata_keys() ->
         match="metadata must not override reserved LLM capacity estimate keys",
     ):
         build_llm_capacity_estimate_payload(
-            model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+            model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
             phase="question_generation",
             operation="prepare_workbench_rag_eval_question_generation",
             estimator="provider_message_char_div_4",

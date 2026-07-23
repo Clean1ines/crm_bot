@@ -71,7 +71,7 @@ def _extracted_payload() -> dict[str, object]:
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "provider": "groq",
         "account_ref": "groq_org_primary",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "actual_total_tokens": 15,
         "persisted_draft_claim_count": 1,
         "validated_claim_count": 1,
@@ -88,7 +88,7 @@ def _item_owned_retryable_failed_payload() -> dict[str, object]:
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "provider": "groq",
         "account_ref": "groq_org_primary",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "actual_prompt_tokens": 10,
         "actual_completion_tokens": 5,
         "actual_total_tokens": 15,
@@ -127,7 +127,7 @@ def _terminal_failed_payload() -> dict[str, object]:
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
         "provider": "groq",
         "account_ref": "groq_org_primary",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "actual_prompt_tokens": 10,
         "actual_completion_tokens": 5,
         "actual_total_tokens": 15,
@@ -188,7 +188,7 @@ def test_projects_item_owned_retryable_failed_to_versioned_envelope() -> None:
     assert projected.payload["work_item_state"] == "retryable_failed"
     assert projected.payload["retry_driver"] == "capacity_window_admission"
     assert projected.payload["provider"] == "groq"
-    assert projected.payload["model_ref"] == "qwen/qwen3-32b"
+    assert projected.payload["model_ref"] == "qwen/qwen3.6-27b"
     assert projected.payload["actual_total_tokens"] == 15
 
 
@@ -259,7 +259,7 @@ def test_projects_terminal_failed_to_versioned_envelope() -> None:
     assert projected.payload["work_item_state"] == "terminal_failed"
     assert projected.payload["retry_eligibility"] == "not_eligible"
     assert projected.payload["provider"] == "groq"
-    assert projected.payload["model_ref"] == "qwen/qwen3-32b"
+    assert projected.payload["model_ref"] == "qwen/qwen3.6-27b"
     assert projected.payload["actual_total_tokens"] == 15
 
 

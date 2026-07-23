@@ -82,7 +82,7 @@ def test_rag_eval_route_catalog_has_only_required_routes() -> None:
         WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,
     )
     assert tuple(route.model_ref for route in catalog.routes) == (
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
         "openai/gpt-oss-120b",
     )
     with pytest.raises(ValueError, match="no DEGRADED_USER_CHOICE"):

@@ -180,7 +180,7 @@ async def test_transition_run_progress_updates_state_and_progress_atomically() -
         progress=progress,
         updated_at=_now(),
         capacity_next_due_at=_now(),
-        capacity_model_ref="qwen/qwen3-32b",
+        capacity_model_ref="qwen/qwen3.6-27b",
         capacity_account_ref="groq_org_primary",
     )
 

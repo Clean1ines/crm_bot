@@ -33,7 +33,7 @@ def _account(
     minute_tokens: int,
     daily_requests: int,
     daily_tokens: int,
-    model_ref: str = "qwen/qwen3-32b",
+    model_ref: str = "qwen/qwen3.6-27b",
     provider: str = "groq",
 ) -> LlmProviderAccountCapacity:
     return LlmProviderAccountCapacity(
@@ -229,9 +229,9 @@ def test_projection_returns_allocation_per_projected_item() -> None:
         "org-1",
     )
     assert tuple(slot.model_ref for slot in result.allocations) == (
-        "qwen/qwen3-32b",
-        "qwen/qwen3-32b",
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
+        "qwen/qwen3.6-27b",
+        "qwen/qwen3.6-27b",
     )
 
 
@@ -347,7 +347,7 @@ def test_allocation_payload_is_json_compatible() -> None:
     assert result.allocations[0].to_payload() == {
         "provider": "groq",
         "account_ref": "org-1",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "slot_index": 0,
     }
 
@@ -367,7 +367,7 @@ def test_projection_rejects_mixed_model_ref_accounts() -> None:
                         minute_tokens=7000,
                         daily_requests=100,
                         daily_tokens=50000,
-                        model_ref="qwen/qwen3-32b",
+                        model_ref="qwen/qwen3.6-27b",
                     ),
                     _account(
                         account_ref="org-2",
@@ -394,7 +394,7 @@ def test_projection_allows_same_model_ref_across_multiple_accounts() -> None:
                     minute_tokens=7000,
                     daily_requests=100,
                     daily_tokens=50000,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
                 _account(
                     account_ref="org-2",
@@ -402,7 +402,7 @@ def test_projection_allows_same_model_ref_across_multiple_accounts() -> None:
                     minute_tokens=7000,
                     daily_requests=100,
                     daily_tokens=50000,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
             ),
             requested_items=8,
@@ -411,10 +411,10 @@ def test_projection_allows_same_model_ref_across_multiple_accounts() -> None:
 
     assert result.max_projected_items == 4
     assert tuple(slot.model_ref for slot in result.allocations) == (
-        "qwen/qwen3-32b",
-        "qwen/qwen3-32b",
-        "qwen/qwen3-32b",
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
+        "qwen/qwen3.6-27b",
+        "qwen/qwen3.6-27b",
+        "qwen/qwen3.6-27b",
     )
 
 

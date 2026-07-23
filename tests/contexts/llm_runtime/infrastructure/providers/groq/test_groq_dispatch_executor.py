@@ -80,8 +80,8 @@ def _dispatch_payload(
                 "budget_contract_version": "v3",
                 "estimator": "test_budget",
                 "provider": "groq",
-                "model_ref": "qwen/qwen3-32b",
-                "model_tpm_limit": 6000,
+                "model_ref": "qwen/qwen3.6-27b",
+                "model_tpm_limit": 8000,
                 "model_char_to_token_multiplier": "3.3",
                 "phase": "test",
                 "operation": "dispatch",
@@ -96,7 +96,7 @@ def _dispatch_payload(
         "llm_allocation": {
             "provider": "groq",
             "account_ref": "groq_org_primary",
-            "model_ref": "qwen/qwen3-32b",
+            "model_ref": "qwen/qwen3.6-27b",
             "slot_index": 0,
         },
         "llm_execution_settings": execution_settings
@@ -137,7 +137,7 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
     assert result.output_payload == {
         "raw_text": '{"done": true}',
         "provider": "groq",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "account_ref": "groq_org_primary",
         "usage": {
             "input_tokens": 7,
@@ -147,7 +147,7 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
     }
     assert len(transport.payloads) == 1
     request_payload = transport.payloads[0]
-    assert request_payload["model"] == "qwen/qwen3-32b"
+    assert request_payload["model"] == "qwen/qwen3.6-27b"
     assert request_payload["messages"] == [
         {
             "role": "user",
@@ -155,7 +155,7 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
         },
     ]
     assert "reasoning_effort" not in request_payload
-    assert request_payload["max_completion_tokens"] == 4700
+    assert request_payload["max_completion_tokens"] == 6700
 
 
 @pytest.mark.asyncio

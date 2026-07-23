@@ -42,7 +42,7 @@ def _provider_id() -> ProviderId:
     return ProviderId("groq")
 
 
-def _route(model: str = "qwen/qwen3-32b") -> LlmRoute:
+def _route(model: str = "qwen/qwen3.6-27b") -> LlmRoute:
     return LlmRoute(
         provider_id=_provider_id(),
         model_id=ModelId(model),
@@ -100,7 +100,7 @@ def test_builder_creates_chat_completion_payload_with_json_mode() -> None:
         ),
     )
 
-    assert request.payload["model"] == "qwen/qwen3-32b"
+    assert request.payload["model"] == "qwen/qwen3.6-27b"
     assert request.payload["messages"] == [
         {"role": "system", "content": "You return JSON."},
         {"role": "user", "content": "Return JSON."},
@@ -140,7 +140,7 @@ def test_disabled_execution_settings_suppress_model_default_reasoning() -> None:
 def test_qwen_default_catalog_settings_suppress_reasoning() -> None:
     qwen_profile = build_groq_free_plan_model_profiles()[0]
     settings = default_groq_llm_model_route_catalog().execution_settings_for_model_ref(
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
     )
 
     request = GroqChatRequestBuilder().build(

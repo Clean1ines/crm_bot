@@ -142,7 +142,7 @@ async def test_start_v2_creates_running_run_and_schedules_one_qgen_item_per_entr
         workflow_command_log=command_log,
         question_generator=WorkbenchRagEvalQuestionGenerator.from_prompt_file(),
         question_generation_model_profile=model_budget_profile_for_ref(
-            "qwen/qwen3-32b"
+            "qwen/qwen3.6-27b"
         ),
     ).execute(
         project_id="project-1",
@@ -182,4 +182,4 @@ async def test_start_v2_creates_running_run_and_schedules_one_qgen_item_per_entr
     assert initial_command.payload["work_kind"] == (
         WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND.value
     )
-    assert initial_command.payload["active_model_ref"] == "qwen/qwen3-32b"
+    assert initial_command.payload["active_model_ref"] == "qwen/qwen3.6-27b"

@@ -105,7 +105,7 @@ def test_workbench_rag_eval_capacity_routing_is_outside_generator() -> None:
     assert "llama-3.1-8b-instant" not in generator_source
     assert "GroqDispatchExecutor" not in generator_source
 
-    assert "qwen/qwen3-32b" in policy_source
+    assert "qwen/qwen3.6-27b" in policy_source
     assert "openai/gpt-oss-120b" in policy_source
     assert "WORKBENCH_RAG_EVAL_FORBIDDEN_AUTOMATIC_MODEL_REFS" in policy_source
     assert "llama-3.1-8b-instant" in policy_source

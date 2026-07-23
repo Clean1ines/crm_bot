@@ -101,7 +101,7 @@ class FakeExecutePreparedDispatch:
                 "llm_allocation": {
                     "provider": "groq",
                     "account_ref": "groq_org_secondary",
-                    "model_ref": "qwen/qwen3-32b",
+                    "model_ref": "qwen/qwen3.6-27b",
                     "slot_index": 1,
                 },
             },
@@ -166,7 +166,7 @@ async def test_execute_qgen_uses_prepared_dispatch_and_persists_ten_questions() 
     assert executor.received[0].attempt_id == "attempt-1"
     assert executor.received[0].output_validator is not None
     assert {question.generation_model for question in repository.saved_questions} == {
-        "qwen/qwen3-32b"
+        "qwen/qwen3.6-27b"
     }
     assert {
         question.generation_account_ref for question in repository.saved_questions

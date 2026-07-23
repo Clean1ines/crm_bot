@@ -16,7 +16,7 @@ describe('ClaimClusterCompactionAttemptRow', () => {
           status: 'retryable_failed',
           statusLabel: 'ответ не принят, будет повторная попытка',
           toneClassName: '',
-          modelName: 'qwen/qwen3-32b',
+          modelName: 'qwen/qwen3.6-27b',
           provider: 'groq',
           tokenCount: 3723,
           durationMs: null,
@@ -29,7 +29,7 @@ describe('ClaimClusterCompactionAttemptRow', () => {
     );
 
     expect(markup).toContain('ответ не принят, будет повторная попытка');
-    expect(markup).toContain('groq · qwen/qwen3-32b · 3\u00a0723 токенов');
+    expect(markup).toContain('groq · qwen/qwen3.6-27b · 3\u00a0723 токенов');
     expect(markup).not.toContain('· —');
     expect(markup).not.toContain('LATIN_TEXT_NOT_SUPPORTED_BY_EVIDENCE');
     expect(markup).toContain('В ответе появилась латиница');
@@ -48,7 +48,7 @@ describe('ClaimClusterCompactionAttemptRow', () => {
           status: 'completed',
           statusLabel: 'ответ принят',
           toneClassName: '',
-          modelName: 'qwen/qwen3-32b',
+          modelName: 'qwen/qwen3.6-27b',
           provider: 'groq',
           tokenCount: 3877,
           durationMs: null,

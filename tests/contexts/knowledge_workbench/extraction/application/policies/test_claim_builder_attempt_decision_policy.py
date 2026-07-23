@@ -59,7 +59,7 @@ def _command(
         dispatch_attempt_id="work-1:attempt:1",
         attempt_number=1,
         provider="groq",
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         output_payload=output_payload,
         raw_output_text=raw_output_text,
         source_unit_text=SOURCE_UNIT_TEXT,

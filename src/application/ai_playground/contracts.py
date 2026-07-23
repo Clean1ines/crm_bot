@@ -47,7 +47,7 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
         "tpm": 8000,
         "tpd": 200000,
     },
-    "qwen/qwen3-32b": {"rpm": 60, "rpd": 1000, "tpm": 6000, "tpd": 500000},
+    "qwen/qwen3.6-27b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
 }
 
 

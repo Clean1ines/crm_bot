@@ -63,7 +63,7 @@ def test_http_transport_posts_chat_completion_payload_with_auth_header() -> None
 
     response = transport.post_chat_completions(
         payload={
-            "model": "qwen/qwen3-32b",
+            "model": "qwen/qwen3.6-27b",
             "messages": [{"role": "user", "content": "Return JSON."}],
         },
     )
@@ -79,7 +79,7 @@ def test_http_transport_posts_chat_completion_payload_with_auth_header() -> None
         "Authorization": "Bearer secret-key",
         "Content-Type": "application/json",
     }
-    assert json_payload["model"] == "qwen/qwen3-32b"
+    assert json_payload["model"] == "qwen/qwen3.6-27b"
     assert timeout_seconds == 12.5
 
 

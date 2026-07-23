@@ -31,7 +31,7 @@ def test_groq_request_builder_execution_settings_required_markers_exist() -> Non
         "reasoning_enabled",
         "reasoning_effort",
         "default_groq_llm_model_route_catalog",
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
     )
     for marker in required:
         assert marker in source

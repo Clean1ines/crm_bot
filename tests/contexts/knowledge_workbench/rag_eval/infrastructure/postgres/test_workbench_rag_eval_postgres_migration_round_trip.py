@@ -332,7 +332,7 @@ async def test_migrated_postgres_supports_rag_eval_create_and_latest_round_trip(
                     publication_id=None,
                     source_document_ref=None,
                     status=WorkbenchRagEvalRunStatus.WAITING_CAPACITY,
-                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_model="qwen/qwen3.6-27b",
                     question_generation_prompt_version="rag-eval-v2",
                     total_entries=4,
                     total_questions=0,
@@ -365,7 +365,7 @@ async def test_migrated_postgres_supports_rag_eval_create_and_latest_round_trip(
                         promotion_candidate_count=2,
                     ),
                     capacity_next_due_at=capacity_next_due_at,
-                    capacity_model_ref="qwen/qwen3-32b",
+                    capacity_model_ref="qwen/qwen3.6-27b",
                     capacity_account_ref="groq_org_primary",
                 )
             )
@@ -389,7 +389,7 @@ async def test_migrated_postgres_supports_rag_eval_create_and_latest_round_trip(
             assert latest.progress.failed == 0
             assert latest.progress.generated_question_sets == 1
             assert latest.capacity_next_due_at == capacity_next_due_at
-            assert latest.capacity_model_ref == "qwen/qwen3-32b"
+            assert latest.capacity_model_ref == "qwen/qwen3.6-27b"
             assert latest.capacity_account_ref == "groq_org_primary"
             assert latest.progress.adjudication_total == 3
             assert latest.progress.adjudication_waiting == 1
@@ -448,7 +448,7 @@ async def test_has_complete_question_sets_uses_integer_sql_boundary(
                     publication_id=None,
                     source_document_ref=None,
                     status=WorkbenchRagEvalRunStatus.RUNNING,
-                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_model="qwen/qwen3.6-27b",
                     question_generation_prompt_version="rag-eval-v2",
                     total_entries=len(question_counts_by_entry),
                     total_questions=0,
@@ -484,7 +484,7 @@ async def test_has_complete_question_sets_uses_integer_sql_boundary(
                             question=f"Question {entry_index}-{question_index}?",
                             question_kind=WorkbenchRagEvalQuestionKind.PARAPHRASE,
                             source=WorkbenchRagEvalQuestionSource.GENERATED,
-                            generation_model="qwen/qwen3-32b",
+                            generation_model="qwen/qwen3.6-27b",
                             prompt_version="rag-eval-v2",
                             contract_version="workbench_rag_eval_questions.v2",
                             promotion_eligible=True,
@@ -587,7 +587,7 @@ async def test_migrated_postgres_accepts_all_v2_generated_question_kinds() -> No
                     publication_id=None,
                     source_document_ref=None,
                     status=WorkbenchRagEvalRunStatus.RUNNING,
-                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_model="qwen/qwen3.6-27b",
                     question_generation_prompt_version="rag-eval-v2",
                     total_entries=len(RAG_EVAL_V2_GENERATED_QUESTION_KINDS),
                     total_questions=0,
@@ -616,7 +616,7 @@ async def test_migrated_postgres_accepts_all_v2_generated_question_kinds() -> No
                         question=f"Question for {kind.value}?",
                         question_kind=kind,
                         source=WorkbenchRagEvalQuestionSource.GENERATED,
-                        generation_model="qwen/qwen3-32b",
+                        generation_model="qwen/qwen3.6-27b",
                         prompt_version="rag-eval-v2",
                         contract_version="workbench_rag_eval_questions.v2",
                         promotion_eligible=True,
@@ -717,7 +717,7 @@ async def test_workflow_command_failure_is_marked_after_aborted_transaction_roll
                     publication_id=None,
                     source_document_ref=None,
                     status=WorkbenchRagEvalRunStatus.RUNNING,
-                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_model="qwen/qwen3.6-27b",
                     question_generation_prompt_version="rag-eval-v2",
                     total_entries=1,
                     total_questions=0,
@@ -806,7 +806,7 @@ async def test_rag_eval_question_generation_dispatch_payload_round_trips_through
             project_id = str(uuid.uuid4())
             plan = WorkbenchRagEvalQuestionGenerationWorkPlanner(
                 prompt_version="prompt-v1",
-                generation_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+                generation_model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
             ).plan(
                 workflow_run_id="run-dispatch-jsonb",
                 project_id=project_id,
@@ -850,7 +850,7 @@ async def test_rag_eval_question_generation_dispatch_payload_round_trips_through
                     lease_expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
                     now=datetime.now(timezone.utc),
                     started_at=datetime.now(timezone.utc),
-                    active_model_ref="qwen/qwen3-32b",
+                    active_model_ref="qwen/qwen3.6-27b",
                     provider_account_refs=("groq_org_primary",),
                 )
             )
@@ -875,7 +875,7 @@ async def test_rag_eval_question_generation_dispatch_payload_round_trips_through
             assert isinstance(dispatch_payload, dict)
             estimate = dispatch_payload["schedule_payload"]["llm_capacity_estimate"]
             assert estimate["budget_contract_version"] == "v3"
-            assert estimate["model_tpm_limit"] == 6_000
+            assert estimate["model_tpm_limit"] == 8_000
 
             transport = FakeGroqTransport()
             result = await GroqDispatchExecutor(
@@ -1024,7 +1024,7 @@ async def test_qgen_reconcile_projects_frontend_event_and_updates_read_sides() -
                     publication_id="publication-1",
                     source_document_ref=None,
                     status=WorkbenchRagEvalRunStatus.RUNNING,
-                    question_generation_model="qwen/qwen3-32b",
+                    question_generation_model="qwen/qwen3.6-27b",
                     question_generation_prompt_version="rag-eval-v2",
                     total_entries=1,
                     total_questions=0,
@@ -1052,7 +1052,7 @@ async def test_qgen_reconcile_projects_frontend_event_and_updates_read_sides() -
                         question=f"Generated question {index}?",
                         question_kind=WorkbenchRagEvalQuestionKind.DIRECT_PARAPHRASE,
                         source=WorkbenchRagEvalQuestionSource.GENERATED,
-                        generation_model="qwen/qwen3-32b",
+                        generation_model="qwen/qwen3.6-27b",
                         prompt_version="rag-eval-v2",
                         contract_version="workbench_rag_eval_questions.v2",
                         promotion_eligible=True,

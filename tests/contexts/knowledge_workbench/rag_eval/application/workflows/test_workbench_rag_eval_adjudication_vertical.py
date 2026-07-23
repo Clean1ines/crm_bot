@@ -185,7 +185,7 @@ def test_planner_creates_stable_adjudication_work_items_with_immutable_snapshot(
         for item in inputs
     }
 
-    model_profile = model_budget_profile_for_ref("qwen/qwen3-32b")
+    model_profile = model_budget_profile_for_ref("qwen/qwen3.6-27b")
     first = WorkbenchRagEvalAdjudicationWorkPlanner(
         adjudication_model_profile=model_profile,
     ).plan(
@@ -430,7 +430,7 @@ async def test_reconcile_drained_creates_candidates_and_enters_promotion_review(
                     promotion_recommended=True,
                     reason="reason",
                     contract_version=WORKBENCH_RAG_EVAL_ADJUDICATION_CONTRACT_VERSION,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     account_ref="groq_org_primary",
                     slot_index=0,
                     attempt_id="attempt-1",

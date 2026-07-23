@@ -88,7 +88,7 @@ def _account(
     account_ref: str,
     minute_requests: int,
     minute_tokens: int,
-    model_ref: str = "qwen/qwen3-32b",
+    model_ref: str = "qwen/qwen3.6-27b",
     daily_requests: int = 100,
     daily_tokens: int = 50000,
 ) -> LlmProviderAccountCapacity:
@@ -122,7 +122,7 @@ def _command(
     *,
     account_capacities: tuple[LlmProviderAccountCapacity, ...],
     requested_items: int,
-    active_model_ref: str = "qwen/qwen3-32b",
+    active_model_ref: str = "qwen/qwen3.6-27b",
     now: datetime | None = None,
 ) -> LeaseLlmAdmittedWorkItemsCommand:
     return LeaseLlmAdmittedWorkItemsCommand(
@@ -189,7 +189,7 @@ async def test_assigns_allocation_slots_to_leased_work_items() -> None:
         "llm_allocation": {
             "provider": "groq",
             "account_ref": "account_1",
-            "model_ref": "qwen/qwen3-32b",
+            "model_ref": "qwen/qwen3.6-27b",
             "slot_index": 0,
         },
         "llm_execution_settings": {"reasoning_enabled": False},
@@ -359,13 +359,13 @@ async def test_uses_only_active_model_accounts() -> None:
                     account_ref="qwen_1",
                     minute_requests=10,
                     minute_tokens=7000,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
                 _account(
                     account_ref="qwen_2",
                     minute_requests=10,
                     minute_tokens=3500,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
                 _account(
                     account_ref="fallback_openai",
@@ -380,7 +380,7 @@ async def test_uses_only_active_model_accounts() -> None:
                     model_ref="llama-3.3-70b-versatile",
                 ),
             ),
-            active_model_ref="qwen/qwen3-32b",
+            active_model_ref="qwen/qwen3.6-27b",
             requested_items=10,
         ),
     )
@@ -389,7 +389,7 @@ async def test_uses_only_active_model_accounts() -> None:
     assert len(repository.lease_tokens) == 3
     assert len(result.leased) == 3
     assert {item.allocation.model_ref for item in result.leased} == {
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
     }
     assert [item.allocation.account_ref for item in result.leased] == [
         "qwen_1",
@@ -415,7 +415,7 @@ async def test_active_fallback_model_can_be_selected_explicitly() -> None:
                     account_ref="qwen_1",
                     minute_requests=10,
                     minute_tokens=35000,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
                 _account(
                     account_ref="openai_1",
@@ -450,7 +450,7 @@ async def test_absent_active_model_yields_zero_lease() -> None:
                     account_ref="qwen_1",
                     minute_requests=10,
                     minute_tokens=35000,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
             ),
             active_model_ref="openai/gpt-oss-120b",
@@ -474,7 +474,7 @@ async def test_mixed_model_capacities_do_not_raise_in_composition() -> None:
                     account_ref="qwen_1",
                     minute_requests=10,
                     minute_tokens=3500,
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                 ),
                 _account(
                     account_ref="openai_1",
@@ -483,7 +483,7 @@ async def test_mixed_model_capacities_do_not_raise_in_composition() -> None:
                     model_ref="openai/gpt-oss-120b",
                 ),
             ),
-            active_model_ref="qwen/qwen3-32b",
+            active_model_ref="qwen/qwen3.6-27b",
             requested_items=2,
         ),
     )
@@ -528,7 +528,7 @@ def test_direct_projector_still_rejects_mixed_model_capacities() -> None:
                         account_ref="qwen_1",
                         minute_requests=10,
                         minute_tokens=3500,
-                        model_ref="qwen/qwen3-32b",
+                        model_ref="qwen/qwen3.6-27b",
                     ),
                     _account(
                         account_ref="openai_1",

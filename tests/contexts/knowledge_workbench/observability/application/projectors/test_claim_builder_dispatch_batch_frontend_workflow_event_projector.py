@@ -49,7 +49,7 @@ def _event(*, source_unit_refs: tuple[str, ...] = ()) -> WorkflowEvent:
             "input_size_preflight_reason": (
                 "estimated prompt tokens fit active model input limit"
             ),
-            "input_size_preflight_active_model_ref": "qwen/qwen3-32b",
+            "input_size_preflight_active_model_ref": "qwen/qwen3.6-27b",
             "source_split_required": False,
             "affected_work_item_refs": (),
             "source_unit_refs": source_unit_refs,
@@ -123,7 +123,7 @@ def test_projects_claim_builder_dispatch_attempt_prepared_overlay() -> None:
             "attempt_state": "leased",
             "provider": "groq",
             "account_ref": "groq_org_primary",
-            "model_ref": "qwen/qwen3-32b",
+            "model_ref": "qwen/qwen3.6-27b",
             "lease_expires_at": "2026-06-21T12:01:30+00:00",
         },
         occurred_at=parent.occurred_at,

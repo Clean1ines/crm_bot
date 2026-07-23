@@ -19,7 +19,7 @@ def _seed_capacity(account_ref: str) -> LlmProviderAccountCapacity:
     return LlmProviderAccountCapacity(
         provider="groq",
         account_ref=account_ref,
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         remaining_minute_requests=60,
         remaining_minute_tokens=6_000,
         remaining_daily_requests=1_000,
@@ -35,7 +35,7 @@ def _observation(
     return LlmAttemptCapacityObservation(
         provider="groq",
         account_ref=account_ref,
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         remaining_minute_requests=None,
         remaining_minute_tokens=None,
         remaining_daily_requests=999,
@@ -81,7 +81,7 @@ def test_local_active_model_tpm_budget_never_waits_for_provider_reset_headers() 
             LlmAttemptCapacityObservation(
                 provider="groq",
                 account_ref="groq_org_primary",
-                model_ref="qwen/qwen3-32b",
+                model_ref="qwen/qwen3.6-27b",
                 remaining_minute_requests=None,
                 remaining_minute_tokens=None,
                 remaining_daily_requests=999,
@@ -114,7 +114,7 @@ def test_local_active_model_tpm_budget_exhausts_account_after_deferred_without_t
             LlmAttemptCapacityObservation(
                 provider="groq",
                 account_ref="groq_org_secondary",
-                model_ref="qwen/qwen3-32b",
+                model_ref="qwen/qwen3.6-27b",
                 remaining_minute_requests=None,
                 remaining_minute_tokens=None,
                 remaining_daily_requests=999,

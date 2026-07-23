@@ -183,8 +183,8 @@ def test_payload_contains_claim_builder_dispatch_seed_without_attempt_ids(
     assert isinstance(capacity_estimate, dict)
     assert capacity_estimate["budget_contract_version"] == "v3"
     assert capacity_estimate["phase"] == "claim_builder_section_extraction"
-    assert capacity_estimate["model_ref"] == "qwen/qwen3-32b"
-    assert capacity_estimate["model_tpm_limit"] == 6_000
+    assert capacity_estimate["model_ref"] == "qwen/qwen3.6-27b"
+    assert capacity_estimate["model_tpm_limit"] == 8_000
     assert capacity_estimate["model_char_to_token_multiplier"] == "3.3"
     assert capacity_estimate["prompt_tokens"] == 1953
     assert capacity_estimate["input_tokens"] == (

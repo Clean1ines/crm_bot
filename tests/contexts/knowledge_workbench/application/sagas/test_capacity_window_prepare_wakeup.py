@@ -73,7 +73,7 @@ def _observation(
     return LlmAttemptCapacityObservation(
         provider="groq",
         account_ref=account_ref,
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         remaining_minute_requests=1,
         remaining_minute_tokens=6000,
         remaining_daily_requests=100,
@@ -97,9 +97,9 @@ async def test_capacity_observation_appends_single_account_prepare_wakeup() -> N
             "workflow_run_id": "workflow-1",
             "source_document_ref": "doc-1",
             "scheduled_work_item_count": 12,
-            "active_model_ref": "qwen/qwen3-32b",
+            "active_model_ref": "qwen/qwen3.6-27b",
             "llm_dispatch_preparation": {
-                "active_model_ref": "qwen/qwen3-32b",
+                "active_model_ref": "qwen/qwen3.6-27b",
                 "profile": {
                     "profile_id": "claim-builder",
                     "estimated_prompt_tokens": 1000,
@@ -110,7 +110,7 @@ async def test_capacity_observation_appends_single_account_prepare_wakeup() -> N
                     {
                         "provider": "groq",
                         "account_ref": "groq_org_1",
-                        "model_ref": "qwen/qwen3-32b",
+                        "model_ref": "qwen/qwen3.6-27b",
                         "remaining_minute_requests": 1,
                         "remaining_minute_tokens": 6000,
                         "remaining_daily_requests": 100,
@@ -119,7 +119,7 @@ async def test_capacity_observation_appends_single_account_prepare_wakeup() -> N
                     {
                         "provider": "groq",
                         "account_ref": "groq_org_2",
-                        "model_ref": "qwen/qwen3-32b",
+                        "model_ref": "qwen/qwen3.6-27b",
                         "remaining_minute_requests": 1,
                         "remaining_minute_tokens": 6000,
                         "remaining_daily_requests": 100,
@@ -149,7 +149,7 @@ async def test_capacity_observation_appends_single_account_prepare_wakeup() -> N
     )
     assert command.run_after == _now() + timedelta(seconds=60)
     assert command.payload["capacity_window_provider_account_refs"] == ["groq_org_2"]
-    assert command.payload["capacity_window_model_ref"] == "qwen/qwen3-32b"
+    assert command.payload["capacity_window_model_ref"] == "qwen/qwen3.6-27b"
     dispatch_preparation = command.payload["llm_dispatch_preparation"]
     assert isinstance(dispatch_preparation, dict)
     assert "account_capacities" not in dispatch_preparation
@@ -163,9 +163,9 @@ def test_claim_builder_prepare_command_uses_single_capacity_window_account() -> 
             "source_document_ref": "doc-1",
             "scheduled_work_item_count": 12,
             "capacity_window_provider_account_refs": ["groq_org_2"],
-            "active_model_ref": "qwen/qwen3-32b",
+            "active_model_ref": "qwen/qwen3.6-27b",
             "llm_dispatch_preparation": {
-                "active_model_ref": "qwen/qwen3-32b",
+                "active_model_ref": "qwen/qwen3.6-27b",
                 "profile": {
                     "profile_id": "claim-builder",
                     "estimated_prompt_tokens": 1000,
@@ -184,4 +184,4 @@ def test_claim_builder_prepare_command_uses_single_capacity_window_account() -> 
 
     assert command.provider_account_refs == ("groq_org_2",)
     assert command.requested_items == 12
-    assert command.active_model_ref == "qwen/qwen3-32b"
+    assert command.active_model_ref == "qwen/qwen3.6-27b"

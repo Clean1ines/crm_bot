@@ -154,7 +154,7 @@ def _command(
             "work_kind": "knowledge_workbench.claim_builder.section_extraction",
             "scheduled_work_item_count": 1,
             "estimated_prompt_tokens": 200000,
-            "active_model_ref": "qwen/qwen3-32b",
+            "active_model_ref": "qwen/qwen3.6-27b",
             "input_size_preflight_decision": "SOURCE_SPLIT_REQUIRED",
             "input_size_preflight_reason": (
                 "estimated prompt tokens exceed all automatic fallback input limits"
@@ -168,7 +168,7 @@ def _command(
                     "estimated_completion_tokens": 500,
                 },
                 "account_capacities": (),
-                "active_model_ref": "qwen/qwen3-32b",
+                "active_model_ref": "qwen/qwen3.6-27b",
                 "requested_items": 1,
                 "worker_ref": "worker-1",
                 "lease_token_prefix": "lease-prefix",

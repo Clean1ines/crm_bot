@@ -48,7 +48,7 @@ def _route(
 def test_default_catalog_primary_is_qwen() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert catalog.primary_model_ref() == "qwen/qwen3-32b"
+    assert catalog.primary_model_ref() == "qwen/qwen3.6-27b"
 
 
 def test_default_catalog_automatic_fallback_refs_are_ordered() -> None:
@@ -80,7 +80,7 @@ def test_route_for_model_ref_returns_role_and_order() -> None:
 def test_model_route_requires_capacity_limits() -> None:
     with pytest.raises(TypeError, match="capacity_limits"):
         LlmModelRoute(
-            model_ref="qwen/qwen3-32b",
+            model_ref="qwen/qwen3.6-27b",
             role=LlmModelRouteRole.PRIMARY,
             order=0,
             execution_settings=_settings(),
@@ -124,7 +124,7 @@ def test_larger_output_fallback_returns_only_larger_output_models_by_order() -> 
     catalog = default_groq_llm_model_route_catalog()
 
     assert catalog.automatic_fallback_model_refs_with_larger_output_limit(
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
     ) == (
         "llama-3.3-70b-versatile",
         "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -136,7 +136,7 @@ def test_larger_input_fallback_returns_only_larger_input_models_by_order() -> No
     catalog = default_groq_llm_model_route_catalog()
 
     assert catalog.automatic_fallback_model_refs_with_larger_input_limit(
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
     ) == (
         "llama-3.3-70b-versatile",
         "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -149,12 +149,12 @@ def test_rejects_duplicate_model_ref() -> None:
         LlmModelRouteCatalog(
             routes=(
                 _route(
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     role=LlmModelRouteRole.PRIMARY,
                     order=0,
                 ),
                 _route(
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     role=LlmModelRouteRole.DEGRADED_USER_CHOICE,
                     order=1,
                 ),
@@ -167,7 +167,7 @@ def test_rejects_duplicate_primary_role() -> None:
         LlmModelRouteCatalog(
             routes=(
                 _route(
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     role=LlmModelRouteRole.PRIMARY,
                     order=0,
                 ),
@@ -190,7 +190,7 @@ def test_rejects_duplicate_degraded_user_choice_role() -> None:
         LlmModelRouteCatalog(
             routes=(
                 _route(
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     role=LlmModelRouteRole.PRIMARY,
                     order=0,
                 ),
@@ -213,7 +213,7 @@ def test_rejects_duplicate_order() -> None:
         LlmModelRouteCatalog(
             routes=(
                 _route(
-                    model_ref="qwen/qwen3-32b",
+                    model_ref="qwen/qwen3.6-27b",
                     role=LlmModelRouteRole.PRIMARY,
                     order=0,
                 ),
@@ -229,7 +229,7 @@ def test_rejects_duplicate_order() -> None:
 def test_qwen_primary_route_disables_reasoning() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    settings = catalog.execution_settings_for_model_ref("qwen/qwen3-32b")
+    settings = catalog.execution_settings_for_model_ref("qwen/qwen3.6-27b")
 
     assert settings.reasoning_enabled is False
     assert settings.reasoning_effort is None
@@ -238,7 +238,7 @@ def test_qwen_primary_route_disables_reasoning() -> None:
 def test_qwen_execution_settings_provider_options_disable_reasoning() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    settings = catalog.execution_settings_for_model_ref("qwen/qwen3-32b")
+    settings = catalog.execution_settings_for_model_ref("qwen/qwen3.6-27b")
 
     assert settings.to_provider_options() == {"reasoning_enabled": False}
 

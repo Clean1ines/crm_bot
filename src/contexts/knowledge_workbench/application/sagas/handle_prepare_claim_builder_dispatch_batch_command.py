@@ -55,7 +55,7 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
 )
 
 
-CLAIM_BUILDER_ACTIVE_MODEL_REF = "qwen/qwen3-32b"
+CLAIM_BUILDER_ACTIVE_MODEL_REF = "qwen/qwen3.6-27b"
 
 
 class PrepareLlmDispatchBatchPort(Protocol):

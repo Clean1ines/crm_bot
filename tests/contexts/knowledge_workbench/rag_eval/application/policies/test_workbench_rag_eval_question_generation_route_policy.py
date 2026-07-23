@@ -23,10 +23,10 @@ from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
 def test_default_policy_uses_only_v2_automatic_route_chain() -> None:
     policy = WorkbenchRagEvalQuestionGenerationRoutePolicy.default()
 
-    assert policy.primary_model_ref == "qwen/qwen3-32b"
+    assert policy.primary_model_ref == "qwen/qwen3.6-27b"
     assert policy.automatic_fallback_model_ref == "openai/gpt-oss-120b"
     assert policy.automatic_model_refs() == (
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
         "openai/gpt-oss-120b",
     )
     assert all(

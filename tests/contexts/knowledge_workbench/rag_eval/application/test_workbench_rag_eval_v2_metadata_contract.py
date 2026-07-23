@@ -28,7 +28,7 @@ def test_question_generator_exposes_explicit_generation_model() -> None:
     assert (
         generator.generation_model
         == WORKBENCH_RAG_EVAL_QUESTION_GENERATION_MODEL_REF
-        == "qwen/qwen3-32b"
+        == "qwen/qwen3.6-27b"
     )
 
 
@@ -42,7 +42,7 @@ def test_persisted_question_accepts_complete_v2_metadata() -> None:
         question="Как оформить заказ?",
         question_kind=WorkbenchRagEvalQuestionKind.ACTION_FIRST,
         source=WorkbenchRagEvalQuestionSource.GENERATED,
-        generation_model="qwen/qwen3-32b",
+        generation_model="qwen/qwen3.6-27b",
         prompt_version="workbench_rag_eval_question_variants.ru.v2",
         contract_version="workbench_rag_eval_questions.v2",
         promotion_eligible=True,
@@ -84,7 +84,7 @@ def test_persisted_question_rejects_non_low_risk_promotion(
             question="Как оформить заказ?",
             question_kind=WorkbenchRagEvalQuestionKind.ACTION_FIRST,
             source=WorkbenchRagEvalQuestionSource.GENERATED,
-            generation_model="qwen/qwen3-32b",
+            generation_model="qwen/qwen3.6-27b",
             prompt_version="workbench_rag_eval_question_variants.ru.v2",
             contract_version="workbench_rag_eval_questions.v2",
             promotion_eligible=True,
@@ -160,7 +160,7 @@ def test_generated_question_rejects_baseline_role() -> None:
             question="Как оформить заказ?",
             question_kind=WorkbenchRagEvalQuestionKind.ACTION_FIRST,
             source=WorkbenchRagEvalQuestionSource.GENERATED,
-            generation_model="qwen/qwen3-32b",
+            generation_model="qwen/qwen3.6-27b",
             prompt_version="workbench_rag_eval_question_variants.ru.v2",
             contract_version="workbench_rag_eval_questions.v2",
             promotion_eligible=False,

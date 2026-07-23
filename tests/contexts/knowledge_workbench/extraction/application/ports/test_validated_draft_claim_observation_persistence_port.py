@@ -23,7 +23,7 @@ def test_validated_draft_claim_observation_candidate_allows_empty_exclusion_scop
         dispatch_attempt_id="attempt-1",
         claim_index=0,
         provider="groq",
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         claim="Product System turns documents into knowledge.",
         granularity=DraftClaimGranularity.ATOMIC,
         possible_questions=("Что делает Product System?",),

@@ -105,7 +105,7 @@ def test_invalid_qgen_contract_is_persisted_as_retryable_without_retry_plan_meta
     ).validate(
         dispatch_payload={
             "schedule_payload": {"possible_questions": []},
-            "llm_allocation": {"model_ref": "qwen/qwen3-32b"},
+            "llm_allocation": {"model_ref": "qwen/qwen3.6-27b"},
         },
         output_payload={"raw_text": "not-json"},
         llm_status=LlmDispatchExecutionStatus.SUCCEEDED,

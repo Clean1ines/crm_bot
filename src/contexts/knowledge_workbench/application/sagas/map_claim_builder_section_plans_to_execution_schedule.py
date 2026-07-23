@@ -29,7 +29,7 @@ from src.contexts.llm_runtime.application.capacity.llm_capacity_estimate_payload
 CLAIM_BUILDER_DEFAULT_PROMPT_TOKENS = 1_953
 CLAIM_BUILDER_PROMPT_TOKENS_ENV = "CLAIM_BUILDER_PROMPT_TOKENS"
 CLAIM_BUILDER_INPUT_SAFETY_GAP_TOKENS = 100
-CLAIM_BUILDER_MODEL_REF = "qwen/qwen3-32b"
+CLAIM_BUILDER_MODEL_REF = "qwen/qwen3.6-27b"
 CLAIM_BUILDER_PHASE = "claim_builder_section_extraction"
 
 

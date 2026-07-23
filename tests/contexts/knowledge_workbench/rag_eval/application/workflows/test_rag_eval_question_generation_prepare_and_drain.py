@@ -55,7 +55,7 @@ def _prepare_command() -> WorkflowCommand:
             "publication_id": None,
             "source_document_ref": None,
             "scheduled_work_item_count": 2,
-            "active_model_ref": "qwen/qwen3-32b",
+            "active_model_ref": "qwen/qwen3.6-27b",
             "work_kind": (WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND.value),
         },
         status=WorkflowCommandStatus.PENDING,
@@ -162,7 +162,7 @@ def _started_attempt(
             "llm_allocation": {
                 "provider": "groq",
                 "account_ref": account_ref,
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
             },
             "schedule_payload": {
                 "workflow_run_id": "run-1",
@@ -212,7 +212,7 @@ async def test_prepare_handler_uses_canonical_prepare_and_appends_execute_comman
         WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND
     )
     assert prepare.commands[0].requested_items == 2
-    assert prepare.commands[0].active_model_ref == "qwen/qwen3-32b"
+    assert prepare.commands[0].active_model_ref == "qwen/qwen3.6-27b"
     assert prepare.commands[0].allow_automatic_fallbacks is True
 
     assert len(unit_of_work.command_log.appended) == 2

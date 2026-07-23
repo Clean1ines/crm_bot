@@ -50,7 +50,7 @@ def _raw(payload: dict[str, object]) -> str:
 def _parse(payload: dict[str, object], *, existing: tuple[str, ...] = ()):
     return WorkbenchRagEvalQuestionGenerator.from_prompt_file().parse_questions_from_raw_text(
         raw_text=_raw(payload),
-        generation_model="qwen/qwen3-32b",
+        generation_model="qwen/qwen3.6-27b",
         generation_account_ref="groq_org_secondary",
         generation_slot_index=1,
         existing_possible_questions=existing,
@@ -93,7 +93,7 @@ def test_question_generator_parses_strict_v2_distribution() -> None:
     result = _parse(_valid_payload())
 
     assert len(result) == 10
-    assert result[0].generation_model == "qwen/qwen3-32b"
+    assert result[0].generation_model == "qwen/qwen3.6-27b"
     assert result[0].generation_account_ref == "groq_org_secondary"
     assert result[0].generation_slot_index == 1
     assert result[0].contract_version == WORKBENCH_RAG_EVAL_QUESTION_CONTRACT_VERSION

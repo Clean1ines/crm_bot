@@ -58,7 +58,7 @@ def _observation(
     return LlmAttemptCapacityObservation(
         provider="groq",
         account_ref="groq_org_primary",
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         remaining_minute_requests=remaining_minute_requests,
         remaining_minute_tokens=remaining_minute_tokens,
         remaining_daily_requests=remaining_daily_requests,

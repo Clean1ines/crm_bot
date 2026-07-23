@@ -69,7 +69,7 @@ def test_httpx_client_posts_payload_through_mock_transport() -> None:
             "Content-Type": "application/json",
         },
         json_payload={
-            "model": "qwen/qwen3-32b",
+            "model": "qwen/qwen3.6-27b",
             "messages": [{"role": "user", "content": "Return JSON."}],
         },
         timeout_seconds=12.5,
@@ -84,4 +84,4 @@ def test_httpx_client_posts_payload_through_mock_transport() -> None:
     assert str(request.url) == "https://api.groq.test/openai/v1/chat/completions"
     assert request.headers["authorization"] == "Bearer test-key"
     assert request.headers["content-type"] == "application/json"
-    assert b"qwen/qwen3-32b" in request.content
+    assert b"qwen/qwen3.6-27b" in request.content

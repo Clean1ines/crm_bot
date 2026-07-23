@@ -238,7 +238,7 @@ async def test_workflow_runtime_four_account_prepare_integration_proof() -> None
             {
                 "provider": "groq",
                 "account_ref": account_ref,
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
                 "remaining_minute_requests": 1,
                 "remaining_minute_tokens": 3500,
                 "remaining_daily_requests": 10,
@@ -292,11 +292,11 @@ async def test_workflow_runtime_four_account_prepare_integration_proof() -> None
             str(observation["model_ref"]),
         )
         for observation in connection.capacity_observations
-    } == {(account_ref, "qwen/qwen3-32b") for account_ref in expected_refs}
+    } == {(account_ref, "qwen/qwen3.6-27b") for account_ref in expected_refs}
     assert {
         (str(item["account_ref"]), str(item["model_ref"]))
         for item in connection.capacity_reservations
-    } == {(account_ref, "qwen/qwen3-32b") for account_ref in expected_refs}
+    } == {(account_ref, "qwen/qwen3.6-27b") for account_ref in expected_refs}
 
     second = await composition.prepare_llm_dispatch_batch.execute(
         prepare_fakes._command(

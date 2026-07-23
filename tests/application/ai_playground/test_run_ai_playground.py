@@ -144,11 +144,11 @@ async def test_llm_called_once_with_expected_prompt_input_model() -> None:
         AiPlaygroundRunRequest(
             system_prompt=" system ",
             user_input=" input ",
-            model="qwen/qwen3-32b",
+            model="qwen/qwen3.6-27b",
         )
     )
 
     assert len(llm.calls) == 1
     assert llm.calls[0].system_prompt == "system"
     assert llm.calls[0].user_input == "input"
-    assert llm.calls[0].model == "qwen/qwen3-32b"
+    assert llm.calls[0].model == "qwen/qwen3.6-27b"

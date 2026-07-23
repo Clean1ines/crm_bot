@@ -40,7 +40,7 @@ def _base_payload(
         "canonical_phase": canonical_phase,
         "provider": "groq",
         "account_ref": "groq_org_primary",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "remaining_minute_requests": 2,
         "remaining_minute_tokens": 7000,
         "remaining_daily_requests": 100,
@@ -88,7 +88,7 @@ def test_projects_capacity_observed_to_versioned_envelope() -> None:
     assert projected.operation_key == "execute_claim_builder_section"
     assert projected.project_id == "project-1"
     assert projected.document_id == "source-document:project-1:abc"
-    assert projected.payload["window_key"] == "groq:groq_org_primary:qwen/qwen3-32b"
+    assert projected.payload["window_key"] == "groq:groq_org_primary:qwen/qwen3.6-27b"
     assert projected.payload["remaining_minute_requests"] == 2
     assert projected.payload["actual_total_tokens"] == 15
 
@@ -126,7 +126,7 @@ def test_projection_payload_uses_only_canonical_event_fields() -> None:
                 ),
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
                 "outcome_class": "succeeded",
                 "observed_at": _now().isoformat(),
             }

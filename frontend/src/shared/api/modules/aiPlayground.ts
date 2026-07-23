@@ -20,15 +20,15 @@ export const AI_PLAYGROUND_DEFAULT_MODEL = 'llama-3.1-8b-instant';
 
 export const AI_PLAYGROUND_MODELS: AiPlaygroundModelOption[] = [
   { id: 'llama-3.1-8b-instant', label: 'llama-3.1-8b-instant', rpm: 30, rpd: 14400, tpm: 6000, tpd: 500000 },
-  { id: 'qwen/qwen3-32b', label: 'qwen/qwen3-32b', rpm: 60, rpd: 1000, tpm: 6000, tpd: 500000 },
+  { id: 'qwen/qwen3.6-27b', label: 'qwen/qwen3.6-27b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
   {
-    id: 'qwen/qwen3-32b:reasoning-none',
-    label: 'qwen/qwen3-32b · reasoning off',
-    model: 'qwen/qwen3-32b',
-    rpm: 60,
+    id: 'qwen/qwen3.6-27b:reasoning-none',
+    label: 'qwen/qwen3.6-27b · reasoning off',
+    model: 'qwen/qwen3.6-27b',
+    rpm: 30,
     rpd: 1000,
-    tpm: 6000,
-    tpd: 500000,
+    tpm: 8000,
+    tpd: 200000,
     reasoning_effort: 'none',
   },
   { id: 'llama-3.3-70b-versatile', label: 'llama-3.3-70b-versatile', rpm: 30, rpd: 1000, tpm: 12000, tpd: 100000 },

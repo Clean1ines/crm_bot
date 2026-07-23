@@ -153,7 +153,7 @@ def _capacity_payload() -> dict[str, object]:
     return {
         "provider": "groq",
         "account_ref": "groq_org_primary",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "remaining_minute_requests": 29,
         "remaining_minute_tokens": 5000,
         "remaining_daily_requests": 999,

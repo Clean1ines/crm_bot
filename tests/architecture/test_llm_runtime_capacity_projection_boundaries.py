@@ -216,7 +216,7 @@ def test_llm_model_route_catalog_exposes_execution_settings() -> None:
         "reasoning_effort",
         "execution_settings",
         "execution_settings_for_model_ref",
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
     )
     for marker in required_catalog_markers:
         assert marker in catalog_source

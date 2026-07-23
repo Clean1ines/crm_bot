@@ -271,7 +271,7 @@ async def test_schedule_adjudication_creates_one_work_item_per_eligible_question
                     {"role": "user", "content": item.question},
                 )
             ),
-            adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+            adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
         )
     )
 
@@ -298,8 +298,8 @@ async def test_schedule_adjudication_creates_one_work_item_per_eligible_question
     }
     assert estimate["budget_contract_version"] == "v3"
     assert estimate["provider"] == "groq"
-    assert estimate["model_ref"] == "qwen/qwen3-32b"
-    assert estimate["model_tpm_limit"] == 6_000
+    assert estimate["model_ref"] == "qwen/qwen3.6-27b"
+    assert estimate["model_tpm_limit"] == 8_000
     assert uow.command_log.appended[0].command_type == (
         WorkbenchRagEvalWorkflowCommandType.PREPARE_ADJUDICATION_DISPATCH_BATCH.value
     )
@@ -431,7 +431,7 @@ async def test_schedule_adjudication_zero_eligible_goes_to_promotion_review() ->
             provider_messages_builder=SimpleNamespace(
                 provider_messages=lambda item: ()
             ),
-            adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+            adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
         )
     )
 
@@ -467,7 +467,7 @@ async def test_execute_adjudication_handler_records_capacity_and_reconcile() -> 
             capacity_observation={
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
                 "remaining_minute_requests": 1,
                 "remaining_minute_tokens": 1,
                 "remaining_daily_requests": 1,
@@ -618,7 +618,7 @@ async def test_dispatcher_runs_schedule_adjudication_when_dependencies_exist() -
         adjudication_provider_messages_builder=SimpleNamespace(
             provider_messages=lambda item: ()
         ),
-        adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3-32b"),
+        adjudication_model_profile=model_budget_profile_for_ref("qwen/qwen3.6-27b"),
     )
 
     assert result.dispatched is True

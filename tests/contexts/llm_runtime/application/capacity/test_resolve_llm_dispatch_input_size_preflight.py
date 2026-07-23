@@ -23,7 +23,7 @@ def _profile(prompt_tokens: int) -> LlmTaskCapacityProfile:
 
 def _execute(
     *,
-    active_model_ref: str = "qwen/qwen3-32b",
+    active_model_ref: str = "qwen/qwen3.6-27b",
     estimated_prompt_tokens: int,
 ):
     return ResolveLlmDispatchInputSizePreflight().execute(
@@ -39,14 +39,14 @@ def test_estimated_prompt_fits_active_model_uses_active_model() -> None:
     result = _execute(estimated_prompt_tokens=3000)
 
     assert result.decision is LlmDispatchInputSizePreflightDecision.USE_ACTIVE_MODEL
-    assert result.active_model_ref == "qwen/qwen3-32b"
+    assert result.active_model_ref == "qwen/qwen3.6-27b"
     assert result.reason == "estimated prompt tokens fit active model input limit"
 
 
 def test_estimated_prompt_exceeds_active_but_fits_fallback_uses_larger_input_model() -> (
     None
 ):
-    result = _execute(estimated_prompt_tokens=7000)
+    result = _execute(estimated_prompt_tokens=9000)
 
     assert (
         result.decision is LlmDispatchInputSizePreflightDecision.USE_LARGER_INPUT_MODEL
@@ -69,7 +69,7 @@ def test_estimated_prompt_exceeds_all_routes_requires_source_split() -> None:
     assert (
         result.decision is LlmDispatchInputSizePreflightDecision.SOURCE_SPLIT_REQUIRED
     )
-    assert result.active_model_ref == "qwen/qwen3-32b"
+    assert result.active_model_ref == "qwen/qwen3.6-27b"
     assert result.reason == (
         "estimated prompt tokens exceed all automatic fallback input limits"
     )
@@ -78,8 +78,8 @@ def test_estimated_prompt_exceeds_all_routes_requires_source_split() -> None:
 def test_automatic_fallback_can_be_disabled_for_phase_specific_routing() -> None:
     result = ResolveLlmDispatchInputSizePreflight().execute(
         ResolveLlmDispatchInputSizePreflightCommand(
-            active_model_ref="qwen/qwen3-32b",
-            profile=_profile(7000),
+            active_model_ref="qwen/qwen3.6-27b",
+            profile=_profile(9000),
             route_catalog=default_groq_llm_model_route_catalog(),
             allow_automatic_fallbacks=False,
         )
@@ -88,4 +88,4 @@ def test_automatic_fallback_can_be_disabled_for_phase_specific_routing() -> None
     assert (
         result.decision is LlmDispatchInputSizePreflightDecision.SOURCE_SPLIT_REQUIRED
     )
-    assert result.active_model_ref == "qwen/qwen3-32b"
+    assert result.active_model_ref == "qwen/qwen3.6-27b"

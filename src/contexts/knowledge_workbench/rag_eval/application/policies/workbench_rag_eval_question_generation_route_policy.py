@@ -78,7 +78,7 @@ class WorkbenchRagEvalQuestionGenerationRoutePolicy:
             self.route_catalog.primary_model_ref()
             != WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF
         ):
-            raise ValueError("Workbench RAG Eval primary model must be qwen/qwen3-32b")
+            raise ValueError("Workbench RAG Eval primary model must be qwen/qwen3.6-27b")
 
         automatic_fallbacks = self.route_catalog.automatic_fallback_model_refs()
         if automatic_fallbacks != (WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,):

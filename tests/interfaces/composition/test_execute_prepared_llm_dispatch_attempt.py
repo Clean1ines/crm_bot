@@ -340,7 +340,7 @@ async def test_execution_result_exposes_capacity_observation_contract() -> None:
     capacity_observation = {
         "provider": "groq",
         "account_ref": "groq_org_primary",
-        "model_ref": "qwen/qwen3-32b",
+        "model_ref": "qwen/qwen3.6-27b",
         "remaining_minute_requests": 1,
         "remaining_minute_tokens": 1000,
         "remaining_daily_requests": 10,

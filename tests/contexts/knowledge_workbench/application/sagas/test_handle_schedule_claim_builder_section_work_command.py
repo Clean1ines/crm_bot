@@ -530,7 +530,7 @@ class FakePrepareResult:
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
     )
-    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3.6-27b"
     source_split_required: bool = False
 
 
@@ -556,7 +556,7 @@ class FakePrepareLlmDispatchBatch:
                             "llm_allocation": {
                                 "provider": "groq",
                                 "account_ref": "groq_org_primary",
-                                "model_ref": "qwen/qwen3-32b",
+                                "model_ref": "qwen/qwen3.6-27b",
                             },
                         },
                     ),
@@ -585,7 +585,7 @@ async def test_appends_prepare_command_with_default_llm_dispatch_preparation() -
         "lease_token_prefix",
         "lease_ttl_seconds",
     }
-    assert dispatch_preparation["active_model_ref"] == "qwen/qwen3-32b"
+    assert dispatch_preparation["active_model_ref"] == "qwen/qwen3.6-27b"
     assert dispatch_preparation["requested_items"] == 2
     assert dispatch_preparation["worker_ref"] == (
         "knowledge-workbench-claim-builder-dispatch"
@@ -609,7 +609,7 @@ async def test_appends_prepare_command_with_default_llm_dispatch_preparation() -
     assert isinstance(account_capacity, dict)
     assert account_capacity["provider"] == "groq"
     assert account_capacity["account_ref"] == "groq_org_primary"
-    assert account_capacity["model_ref"] == "qwen/qwen3-32b"
+    assert account_capacity["model_ref"] == "qwen/qwen3.6-27b"
 
 
 @pytest.mark.asyncio
@@ -630,7 +630,7 @@ async def test_schedule_output_can_be_passed_to_prepare_without_missing_mapping(
     )
 
     assert len(prepare.calls) == 1
-    assert prepare.calls[0].active_model_ref == "qwen/qwen3-32b"
+    assert prepare.calls[0].active_model_ref == "qwen/qwen3.6-27b"
     assert prepare.calls[0].requested_items == 2
     assert prepare.calls[0].worker.value == (
         "knowledge-workbench-claim-builder-dispatch"

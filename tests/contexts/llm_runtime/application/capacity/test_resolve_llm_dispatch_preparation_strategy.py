@@ -305,7 +305,7 @@ def test_larger_output_strategy_without_larger_output_fallback_raises() -> None:
 def test_daily_limit_fallback_skips_openai_gpt_oss() -> None:
     result = ResolveLlmDispatchPreparationStrategy().execute(
         ResolveLlmDispatchPreparationStrategyCommand(
-            current_active_model_ref="qwen/qwen3-32b",
+            current_active_model_ref="qwen/qwen3.6-27b",
             strategy="DAILY_LIMIT_FALLBACK_MODEL_REQUIRED",
             route_catalog=default_groq_llm_model_route_catalog(),
         )
@@ -318,7 +318,7 @@ def test_daily_limit_fallback_skips_openai_gpt_oss() -> None:
 def test_retry_plan_daily_limit_fallback_skips_openai_gpt_oss() -> None:
     result = ResolveLlmDispatchPreparationStrategy().execute(
         ResolveLlmDispatchPreparationStrategyCommand(
-            current_active_model_ref="qwen/qwen3-32b",
+            current_active_model_ref="qwen/qwen3.6-27b",
             route_catalog=default_groq_llm_model_route_catalog(),
             retry_plan=WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE,
         )

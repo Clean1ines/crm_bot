@@ -54,20 +54,20 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
     return (
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,
-            model_id=ModelId("qwen/qwen3-32b"),
+            model_id=ModelId("qwen/qwen3.6-27b"),
             lifecycle=ModelLifecycle.PREVIEW,
             context_window_tokens=131_072,
-            max_output_tokens=40_960,
+            max_output_tokens=32_768,
             model_rank=0,
             rate_limits=RateLimitProfile(
-                requests_per_minute=60,
+                requests_per_minute=30,
                 requests_per_day=1_000,
-                tokens_per_minute=6_000,
-                tokens_per_day=500_000,
+                tokens_per_minute=8_000,
+                tokens_per_day=200_000,
             ),
             token_price=TokenPrice(
-                input_per_million=Decimal("0.29"),
-                output_per_million=Decimal("0.59"),
+                input_per_million=Decimal("0.60"),
+                output_per_million=Decimal("3.00"),
             ),
             reasoning_profile=ReasoningProfile(
                 supported_efforts=(

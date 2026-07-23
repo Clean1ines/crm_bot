@@ -21,7 +21,7 @@ def test_groq_free_plan_seed_contains_target_text_models_in_fallback_order() -> 
     profiles = build_groq_free_plan_model_profiles()
 
     assert [profile.model_id.value for profile in profiles] == [
-        "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
         "llama-3.1-8b-instant",
         "llama-3.3-70b-versatile",
         "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -34,15 +34,17 @@ def test_groq_free_plan_seed_contains_target_text_models_in_fallback_order() -> 
 def test_qwen_seed_can_disable_reasoning_for_output_budget_control() -> None:
     qwen = build_groq_free_plan_model_profiles()[0]
 
-    assert qwen.model_id.value == "qwen/qwen3-32b"
+    assert qwen.model_id.value == "qwen/qwen3.6-27b"
     assert qwen.lifecycle is ModelLifecycle.PREVIEW
     assert qwen.reasoning_profile.can_disable_reasoning
     assert qwen.reasoning_profile.default_effort is ReasoningEffort.NONE
     assert qwen.context_window_tokens == 131_072
-    assert qwen.max_output_tokens == 40_960
-    assert qwen.rate_limits.requests_per_minute == 60
-    assert qwen.rate_limits.tokens_per_minute == 6_000
-    assert qwen.rate_limits.tokens_per_day == 500_000
+    assert qwen.max_output_tokens == 32_768
+    assert qwen.rate_limits.requests_per_minute == 30
+    assert qwen.rate_limits.tokens_per_minute == 8_000
+    assert qwen.rate_limits.tokens_per_day == 200_000
+    assert qwen.token_price.input_per_million == Decimal("0.60")
+    assert qwen.token_price.output_per_million == Decimal("3.00")
     assert qwen.model_char_to_token_multiplier == Decimal("3.3")
 
 
@@ -63,10 +65,10 @@ def test_llama_instant_seed_uses_free_plan_capacity_and_large_output_window() ->
 
 
 def test_model_budget_profile_for_ref_returns_seeded_model_budget_fields() -> None:
-    qwen = model_budget_profile_for_ref("qwen/qwen3-32b")
+    qwen = model_budget_profile_for_ref("qwen/qwen3.6-27b")
     gpt_oss = model_budget_profile_for_ref("openai/gpt-oss-120b")
 
-    assert qwen.rate_limits.tokens_per_minute == 6_000
+    assert qwen.rate_limits.tokens_per_minute == 8_000
     assert qwen.model_char_to_token_multiplier == Decimal("3.3")
     assert gpt_oss.rate_limits.tokens_per_minute == 8_000
     assert gpt_oss.model_char_to_token_multiplier == Decimal("3.7")

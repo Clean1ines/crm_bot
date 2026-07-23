@@ -81,14 +81,14 @@ def _dispatch_preparation() -> dict[str, object]:
             {
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
                 "remaining_minute_requests": 2,
                 "remaining_minute_tokens": 7000,
                 "remaining_daily_requests": 100,
                 "remaining_daily_tokens": 50000,
             },
         ),
-        "active_model_ref": "qwen/qwen3-32b",
+        "active_model_ref": "qwen/qwen3.6-27b",
         "requested_items": 2,
         "worker_ref": "worker-1",
         "lease_token_prefix": "lease-prefix",
@@ -156,7 +156,7 @@ def _attempt(index: int) -> StartedLlmAdmittedAttempt:
             "llm_allocation": {
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
             },
         },
     )
@@ -176,7 +176,7 @@ class FakePrepareResult:
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
     )
-    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3.6-27b"
     source_split_required: bool = False
     capacity_retry_at: datetime | None = None
 
@@ -192,7 +192,7 @@ class FakePrepareLlmDispatchBatch:
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
     )
-    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3.6-27b"
     source_split_required: bool = False
     capacity_retry_at: datetime | None = None
     calls: list[PrepareLlmDispatchBatchCommand] = field(default_factory=list)
@@ -416,7 +416,7 @@ async def _execute(
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
     ),
-    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b",
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3.6-27b",
     source_split_required: bool = False,
     capacity_retry_at: datetime | None = None,
     frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
@@ -490,7 +490,7 @@ async def test_calls_existing_prepare_llm_dispatch_batch_for_claim_builder_work_
     assert result.prepared_dispatch_count == 2
     assert len(prepare.calls) == 1
     assert prepare.calls[0].work_kind == CLAIM_BUILDER_SECTION_WORK_KIND
-    assert prepare.calls[0].active_model_ref == "qwen/qwen3-32b"
+    assert prepare.calls[0].active_model_ref == "qwen/qwen3.6-27b"
     assert prepare.calls[0].requested_items == 2
     assert prepare.calls[0].profile is not None
     assert prepare.calls[0].profile.profile_id == "faq_claim_observations"
@@ -731,7 +731,7 @@ async def test_source_split_required_prepare_result_emits_split_command() -> Non
         input_size_preflight_reason=(
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
-        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        input_size_preflight_active_model_ref="qwen/qwen3.6-27b",
         affected_work_item_refs=("work-1",),
         source_unit_refs=("unit-1",),
         source_split_required=True,
@@ -765,7 +765,7 @@ async def test_source_split_required_emits_split_required_event_and_command() ->
         input_size_preflight_reason=(
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
-        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        input_size_preflight_active_model_ref="qwen/qwen3.6-27b",
         affected_work_item_refs=("work-1",),
         source_unit_refs=("unit-1",),
         source_split_required=True,
@@ -795,7 +795,7 @@ async def test_source_split_required_emits_split_required_event_and_command() ->
     assert command.payload["source_unit_refs"] == ("unit-1",)
     assert command.payload["affected_work_item_refs"] == ("work-1",)
     assert command.payload["estimated_prompt_tokens"] == 3000
-    assert command.payload["active_model_ref"] == "qwen/qwen3-32b"
+    assert command.payload["active_model_ref"] == "qwen/qwen3.6-27b"
     assert command.payload["input_size_preflight_decision"] == ("SOURCE_SPLIT_REQUIRED")
     assert command.payload["input_size_preflight_reason"] == (
         "estimated prompt tokens exceed all automatic fallback input limits"
@@ -823,7 +823,7 @@ async def test_source_split_required_records_progress_and_timeline() -> None:
         input_size_preflight_reason=(
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
-        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        input_size_preflight_active_model_ref="qwen/qwen3.6-27b",
         affected_work_item_refs=("work-1",),
         source_unit_refs=("unit-1",),
         source_split_required=True,
@@ -852,7 +852,7 @@ async def test_source_split_required_does_not_emit_dispatch_prepared_or_execute_
         input_size_preflight_reason=(
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
-        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        input_size_preflight_active_model_ref="qwen/qwen3.6-27b",
         affected_work_item_refs=("work-1",),
         source_unit_refs=("unit-1",),
         source_split_required=True,
@@ -882,7 +882,7 @@ async def test_source_split_required_raises_when_prepare_result_has_no_source_un
             input_size_preflight_reason=(
                 "estimated prompt tokens exceed all automatic fallback input limits"
             ),
-            input_size_preflight_active_model_ref="qwen/qwen3-32b",
+            input_size_preflight_active_model_ref="qwen/qwen3.6-27b",
             affected_work_item_refs=("work-1",),
             source_unit_refs=(),
             source_split_required=True,
@@ -977,7 +977,7 @@ async def test_source_split_required_path_does_not_create_dispatch_prepared_proj
         input_size_preflight_reason=(
             "estimated prompt tokens exceed all automatic fallback input limits"
         ),
-        input_size_preflight_active_model_ref="qwen/qwen3-32b",
+        input_size_preflight_active_model_ref="qwen/qwen3.6-27b",
         affected_work_item_refs=("work-1",),
         source_unit_refs=("unit-1",),
         source_split_required=True,

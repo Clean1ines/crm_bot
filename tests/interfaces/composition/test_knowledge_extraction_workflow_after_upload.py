@@ -191,14 +191,14 @@ def _dispatch_preparation() -> dict[str, object]:
             {
                 "provider": "groq",
                 "account_ref": "groq_org_primary",
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
                 "remaining_minute_requests": 1,
                 "remaining_minute_tokens": 7000,
                 "remaining_daily_requests": 100,
                 "remaining_daily_tokens": 50000,
             },
         ),
-        "active_model_ref": "qwen/qwen3-32b",
+        "active_model_ref": "qwen/qwen3.6-27b",
         "requested_items": 1,
         "worker_ref": "worker-1",
         "lease_token_prefix": "lease-prefix",
@@ -290,7 +290,7 @@ def _claim_builder_dispatch_payload(attempt_id: str) -> dict[str, object]:
         "llm_allocation": {
             "provider": "groq",
             "account_ref": "groq_org_primary",
-            "model_ref": "qwen/qwen3-32b",
+            "model_ref": "qwen/qwen3.6-27b",
             "slot_index": 0,
         },
         "llm_execution_settings": {"reasoning_enabled": False},
@@ -357,7 +357,7 @@ class FakePrepareResult:
     input_size_preflight_reason: str = (
         "estimated prompt tokens fit active model input limit"
     )
-    input_size_preflight_active_model_ref: str | None = "qwen/qwen3-32b"
+    input_size_preflight_active_model_ref: str | None = "qwen/qwen3.6-27b"
     source_split_required: bool = False
     affected_work_item_refs: tuple[str, ...] = ()
     source_unit_refs: tuple[str, ...] = ()
@@ -1612,7 +1612,7 @@ async def test_after_upload_drain_builds_dispatch_preparation_when_schedule_payl
         "workflow command payload must include mapping llm_dispatch_preparation"
     )
     assert len(prepare_port.calls) == 1
-    assert prepare_port.calls[0].active_model_ref == "qwen/qwen3-32b"
+    assert prepare_port.calls[0].active_model_ref == "qwen/qwen3.6-27b"
     assert prepare_port.calls[0].requested_items == 1
     assert prepare_port.calls[0].lease_token_prefix == (
         f"claim-builder-dispatch:{_workflow_run_id()}"

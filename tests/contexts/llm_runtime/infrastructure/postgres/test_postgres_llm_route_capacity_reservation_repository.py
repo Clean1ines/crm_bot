@@ -37,12 +37,12 @@ async def test_lock_route_uses_transaction_advisory_lock() -> None:
     await repository.lock_route(
         provider="groq",
         account_ref="org-1",
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
     )
 
     query, args = connection.executed[0]
     assert "pg_advisory_xact_lock" in query
-    assert args == ("groq|org-1|qwen/qwen3-32b",)
+    assert args == ("groq|org-1|qwen/qwen3.6-27b",)
 
 
 @pytest.mark.asyncio
@@ -52,7 +52,7 @@ async def test_active_reservations_are_aggregated_by_route() -> None:
             {
                 "provider": "groq",
                 "account_ref": "org-1",
-                "model_ref": "qwen/qwen3-32b",
+                "model_ref": "qwen/qwen3.6-27b",
                 "reserved_requests": 2,
                 "reserved_tokens": 4200,
             }
@@ -63,7 +63,7 @@ async def test_active_reservations_are_aggregated_by_route() -> None:
     totals = await repository.active_totals(
         provider="groq",
         account_refs=("org-1",),
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         now=_now(),
     )
 
@@ -79,7 +79,7 @@ async def test_reservation_is_persisted_and_can_be_finalized() -> None:
         attempt_id="work-1:attempt:1",
         provider="groq",
         account_ref="org-1",
-        model_ref="qwen/qwen3-32b",
+        model_ref="qwen/qwen3.6-27b",
         reserved_requests=1,
         reserved_tokens=3000,
         expires_at=_now() + timedelta(seconds=90),

@@ -63,7 +63,7 @@ def _task() -> LlmTask:
     )
 
 
-def _route(model: str = "qwen/qwen3-32b") -> LlmRoute:
+def _route(model: str = "qwen/qwen3.6-27b") -> LlmRoute:
     return LlmRoute(
         provider_id=GROQ_PROVIDER_ID,
         model_id=ModelId(model),
@@ -128,7 +128,7 @@ def test_groq_provider_adapter_builds_payload_and_maps_success() -> None:
 
     assert len(transport.captured_payloads) == 1
     payload = transport.captured_payloads[0]
-    assert payload["model"] == "qwen/qwen3-32b"
+    assert payload["model"] == "qwen/qwen3.6-27b"
     assert payload["response_format"] == {"type": "json_object"}
     assert payload["reasoning_effort"] == "none"
     assert payload["messages"] == [

@@ -77,7 +77,7 @@ def _question(
         else WorkbenchRagEvalQuestionSource.PUBLISHED_POSSIBLE_QUESTION,
         generation_model=None
         if role is WorkbenchRagEvalQuestionRole.BASELINE
-        else "qwen/qwen3-32b",
+        else "qwen/qwen3.6-27b",
         prompt_version=None
         if role is WorkbenchRagEvalQuestionRole.BASELINE
         else "workbench_rag_eval_question_variants.ru.v2",

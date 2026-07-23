@@ -24,7 +24,7 @@ from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 QUESTION_GENERATION_PROFILE_ID = "workbench_rag_eval.question_generation.real_due_batch"
 ADJUDICATION_PROFILE_ID = "workbench_rag_eval.adjudication.real_due_batch"
 
-WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF = "qwen/qwen3-32b"
+WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF = "qwen/qwen3.6-27b"
 WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF = "openai/gpt-oss-120b"
 
 
@@ -38,7 +38,7 @@ def workbench_rag_eval_route_catalog() -> LlmModelRouteCatalog:
                 order=0,
                 execution_settings=reasoning_disabled,
                 capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=6_000,
+                    input_token_limit=8_000,
                     output_token_limit=8_192,
                 ),
             ),
