@@ -8,6 +8,7 @@ from types import TracebackType
 from typing import Self
 
 import pytest
+from structlog.testing import capture_logs
 
 from src.contexts.capacity_runtime.application.ports.llm_attempt_capacity_observation_repository_port import (
     LlmAttemptCapacityObservation,
@@ -79,6 +80,16 @@ from src.contexts.knowledge_workbench.retrieval.application.models.published_wor
     PublishedWorkbenchRetrievalResult,
     PublishedWorkbenchRetrievalSourceRef,
 )
+from src.contexts.knowledge_workbench.application.sagas.map_claim_builder_section_plans_to_execution_schedule import (
+    MapClaimBuilderSectionPlansToExecutionSchedule,
+    MapClaimBuilderSectionPlansToExecutionScheduleCommand,
+)
+from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_section_work import (
+    CLAIM_BUILDER_SECTION_WORK_KIND,
+    ClaimBuilderSectionWorkPlan,
+    SourceDocumentRef,
+    SourceUnitRef,
+)
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     DispatchPreparationBuilderRegistry,
     PrepareLlmDispatchBatch,
@@ -147,11 +158,13 @@ class FakeConnection:
     fail_dispatch_insert: bool = False
     capacity_observations: list[dict[str, object]] = field(default_factory=list)
     capacity_reservations: list[dict[str, object]] = field(default_factory=list)
+    fetch_queries: list[str] = field(default_factory=list)
 
     def transaction(self) -> FakeTransaction:
         return FakeTransaction(connection=self)
 
     async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
+        self.fetch_queries.append(query)
         if "FROM llm_route_capacity_reservations" in query:
             provider = str(args[0])
             account_refs = tuple(str(item) for item in args[1])
@@ -458,6 +471,26 @@ def _schedule_payload(
     }
 
 
+def _claim_builder_schedule_payload(*, workflow_run_id: str) -> dict[str, object]:
+    plan = ClaimBuilderSectionWorkPlan(
+        workflow_run_id=workflow_run_id,
+        source_document_ref=SourceDocumentRef("source-document:project-1:doc-1"),
+        source_unit_ref=SourceUnitRef("source-unit:project-1:doc-1:0"),
+        source_unit_ordinal=0,
+        source_unit_text="Claim builder section text.",
+        heading_path=("Root",),
+        work_item_id="work-claim-1",
+        work_kind=CLAIM_BUILDER_SECTION_WORK_KIND,
+        idempotency_key="work-claim-1",
+    )
+    schedule_plan = (
+        MapClaimBuilderSectionPlansToExecutionSchedule()
+        .execute(MapClaimBuilderSectionPlansToExecutionScheduleCommand(plans=(plan,)))
+        .schedule_plans[0]
+    )
+    return dict(schedule_plan.payload)
+
+
 def _connection_with_due_items(
     count: int,
     *,
@@ -489,6 +522,7 @@ def _command(
     dispatch_preparation_strategy: str | None = None,
     retry_plan: WorkItemRetryPlan | None = None,
     use_local_active_model_tpm_budget: bool = False,
+    correlation_context: dict[str, str] | None = None,
 ) -> PrepareLlmDispatchBatchCommand:
     return PrepareLlmDispatchBatchCommand(
         work_kind=work_kind or _work_kind(),
@@ -504,6 +538,7 @@ def _command(
         dispatch_preparation_strategy=dispatch_preparation_strategy,
         retry_plan=retry_plan,
         use_local_active_model_tpm_budget=use_local_active_model_tpm_budget,
+        correlation_context=correlation_context or {},
     )
 
 
@@ -516,6 +551,13 @@ def _runner(pool: FakePool) -> PrepareLlmDispatchBatch:
         ),
         route_catalog=default_groq_llm_model_route_catalog(),
     )
+
+
+def _event(logs: list[dict[str, object]], name: str) -> dict[str, object]:
+    for event in logs:
+        if event.get("event") == name:
+            return event
+    raise AssertionError(f"log event not found: {name}")
 
 
 class FakeGroqTransport:
@@ -715,6 +757,189 @@ async def test_commits_lease_and_attempt_start_in_one_transaction() -> None:
     assert len(connection.dispatches) == 1
     assert len(result.lease_result.leased) == 1
     assert len(result.attempt_result.started_attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_logs_capacity_snapshot_and_insufficient_tpm_rejection() -> None:
+    connection = _connection_with_due_items(1)
+    connection.capacity_observations.append(
+        {
+            "provider": "groq",
+            "account_ref": "org-1",
+            "model_ref": "qwen/qwen3.6-27b",
+            "remaining_minute_requests": 2,
+            "remaining_minute_tokens": None,
+            "remaining_daily_requests": 10,
+            "remaining_daily_tokens": 50_000,
+            "minute_reset_at": None,
+            "daily_reset_at": None,
+            "actual_prompt_tokens": 3008,
+            "actual_completion_tokens": 4323,
+            "actual_total_tokens": 7331,
+            "outcome_class": "succeeded",
+            "observed_at": _now() - timedelta(seconds=5),
+        }
+    )
+    connection.capacity_reservations.append(
+        {
+            "attempt_id": "attempt-active",
+            "provider": "groq",
+            "account_ref": "org-1",
+            "model_ref": "qwen/qwen3.6-27b",
+            "reserved_requests": 1,
+            "reserved_tokens": 6_000,
+            "status": "active",
+            "expires_at": _lease_expires_at(),
+            "created_at": _started_at(),
+        }
+    )
+
+    with capture_logs() as logs:
+        result = await _runner(FakePool(connection=connection)).execute(
+            _command(
+                account_capacities=(
+                    _account(
+                        minute_requests=3,
+                        minute_tokens=7_000,
+                    ),
+                ),
+                requested_items=1,
+            )
+        )
+
+    assert len(result.attempt_result.started_attempts) == 0
+    snapshot = _event(logs, "llm_capacity_account_snapshot")
+    assert snapshot["observed_remaining_minute_tokens"] is None
+    assert snapshot["minute_tokens_source"] == "provider_observation_null_fallback"
+    assert snapshot["active_reserved_tokens"] == 6_000
+    assert snapshot["effective_remaining_minute_tokens"] == 1_000
+    assert "latest_observation_attempt_id" not in snapshot
+    assert "active_reservation_attempt_ids" not in snapshot
+    assert "active_reservation_count" not in snapshot
+    assert "prepare_command_id" not in snapshot
+    assert "workflow_run_id" not in snapshot
+
+    candidate = _event(logs, "llm_capacity_candidate_evaluated")
+    assert candidate["admitted"] is False
+    assert candidate["rejection_reason"] == "insufficient_minute_tokens"
+    assert candidate["remaining_tokens_before"] == 1_000
+    latest_observation_reads = [
+        query
+        for query in connection.fetch_queries
+        if "llm_attempt_capacity_observations" in query and "DISTINCT ON" in query
+    ]
+    assert len(latest_observation_reads) == 1
+
+
+@pytest.mark.asyncio
+async def test_prepare_logs_claim_builder_correlation_when_context_is_provided() -> (
+    None
+):
+    connection = _connection_with_due_items(1)
+
+    with capture_logs() as logs:
+        result = await _runner(FakePool(connection=connection)).execute(
+            _command(
+                requested_items=1,
+                correlation_context={
+                    "prepare_command_id": "cmd-prepare-1",
+                    "workflow_run_id": "workflow-1",
+                    "causation_dispatch_attempt_id": "attempt-source-1",
+                },
+            )
+        )
+
+    assert len(result.attempt_result.started_attempts) == 1
+    snapshot = _event(logs, "llm_capacity_account_snapshot")
+    assert snapshot["prepare_command_id"] == "cmd-prepare-1"
+    assert snapshot["workflow_run_id"] == "workflow-1"
+
+    candidate = _event(logs, "llm_capacity_candidate_evaluated")
+    assert candidate["prepare_command_id"] == "cmd-prepare-1"
+    assert candidate["workflow_run_id"] == "workflow-1"
+
+    reservation = _event(logs, "llm_capacity_reservation_created")
+    assert reservation["prepare_command_id"] == "cmd-prepare-1"
+    assert reservation["workflow_run_id"] == "workflow-1"
+
+
+@pytest.mark.asyncio
+async def test_claim_builder_workflow_run_id_reaches_groq_executor_logs() -> None:
+    schedule_payload = _claim_builder_schedule_payload(workflow_run_id="workflow-123")
+    connection = FakeConnection()
+    connection.work_items["work-claim-1"] = _work_item_row("work-claim-1", ordinal=1)
+    connection.schedules["work-claim-1"] = schedule_payload
+
+    prepare_result = await _runner(FakePool(connection=connection)).execute(
+        _command(requested_items=1)
+    )
+
+    assert len(prepare_result.attempt_result.started_attempts) == 1
+    dispatch = next(iter(connection.dispatches.values()))
+    dispatch_payload = dispatch["dispatch_payload"]
+    assert dispatch_payload["schedule_payload"]["workflow_run_id"] == "workflow-123"
+
+    transport = FakeGroqTransport()
+    executor = GroqDispatchExecutor(
+        transport=transport,
+        model_profiles=build_groq_free_plan_model_profiles(),
+    )
+
+    with capture_logs() as logs:
+        await executor.execute_dispatch(
+            LlmDispatchExecutionInput(
+                attempt_id=str(dispatch["attempt_id"]),
+                work_item_id=str(dispatch["work_item_id"]),
+                attempt_number=int(dispatch["attempt_number"]),
+                dispatch_payload=dispatch_payload,
+                started_at=_started_at(),
+            )
+        )
+
+    request_started = _event(logs, "llm_groq_request_started")
+    response_received = _event(logs, "llm_groq_response_received")
+    assert request_started["workflow_run_id"] == "workflow-123"
+    assert response_received["workflow_run_id"] == "workflow-123"
+    assert transport.payloads
+    assert "workflow_run_id" not in transport.payloads[0]
+
+
+@pytest.mark.asyncio
+async def test_prepare_does_not_account_for_finalized_reservation_when_observation_is_absent() -> (
+    None
+):
+    """Unit characterization of admission state, not concurrent PostgreSQL timing."""
+
+    connection = _connection_with_due_items(1)
+    connection.capacity_reservations.append(
+        {
+            "attempt_id": "attempt-finalized-before-observation",
+            "provider": "groq",
+            "account_ref": "org-1",
+            "model_ref": "qwen/qwen3.6-27b",
+            "reserved_requests": 1,
+            "reserved_tokens": 6_500,
+            "status": "committed",
+            "expires_at": _lease_expires_at(),
+            "created_at": _started_at(),
+        }
+    )
+
+    result = await _runner(FakePool(connection=connection)).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    minute_requests=1,
+                    minute_tokens=7_000,
+                ),
+            ),
+            requested_items=1,
+        )
+    )
+
+    assert len(result.attempt_result.started_attempts) == 1
+    assert len(connection.dispatches) == 1
+    assert len(connection.capacity_observations) == 0
 
 
 @pytest.mark.asyncio

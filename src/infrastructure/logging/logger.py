@@ -34,11 +34,47 @@ _SENSITIVE_LOG_KEY_PARTS = (
     "dsn",
     "password",
     "secret",
+    "access_token",
+    "refresh_token",
+    "auth_token",
+    "id_token",
+    "csrf_token",
+    "session_token",
+    "cookie",
     "token",
 )
 
+_OPERATIONAL_TOKEN_COUNTER_KEYS = frozenset(
+    {
+        "remaining_minute_tokens",
+        "remaining_daily_tokens",
+        "remaining_tokens",
+        "reset_tokens",
+        "reserved_tokens",
+        "required_window_tokens",
+        "actual_tokens",
+        "actual_prompt_tokens",
+        "actual_completion_tokens",
+        "actual_total_tokens",
+        "quota_remaining_minute_tokens",
+        "quota_remaining_daily_tokens",
+        "max_completion_tokens",
+        "estimated_input_tokens",
+        "planned_output_tokens",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "prompt_tokens",
+        "completion_tokens",
+        "artifact_tokens",
+        "safety_gap_tokens",
+        "model_tpm_limit",
+        "limit_tokens",
+    }
+)
+
 _SECRET_VALUE_PATTERNS = (
-    re.compile(r"gsk_[A-Za-z0-9_\-]{20,}"),
+    re.compile(r"gsk_[A-Za-z0-9_\-]+"),
     re.compile(r"Bearer\s+[A-Za-z0-9._\-]+", re.IGNORECASE),
     re.compile(r"postgres(?:ql)?://[^\s'\"]+", re.IGNORECASE),
     re.compile(r"https://api\.telegram\.org/bot[^/\s'\"]+", re.IGNORECASE),
@@ -47,6 +83,8 @@ _SECRET_VALUE_PATTERNS = (
 
 def _is_sensitive_log_key(key: object) -> bool:
     normalized = str(key).lower()
+    if normalized in _OPERATIONAL_TOKEN_COUNTER_KEYS:
+        return False
     return any(part in normalized for part in _SENSITIVE_LOG_KEY_PARTS)
 
 

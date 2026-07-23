@@ -198,6 +198,7 @@ class PrepareLlmDispatchBatchCommand:
     use_local_active_model_tpm_budget: bool = False
     allow_automatic_fallbacks: bool = True
     provider_account_refs: tuple[str, ...] = ()
+    correlation_context: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.work_kind, WorkKind):
@@ -249,6 +250,11 @@ class PrepareLlmDispatchBatchCommand:
             raise TypeError("provider_account_refs must be tuple")
         for account_ref in self.provider_account_refs:
             _require_non_empty_text(account_ref, field_name="provider_account_refs")
+        if not isinstance(self.correlation_context, Mapping):
+            raise TypeError("correlation_context must be Mapping")
+        for key, value in self.correlation_context.items():
+            _require_non_empty_text(key, field_name="correlation_context keys")
+            _require_non_empty_text(value, field_name="correlation_context values")
         if self.started_at < self.now:
             raise ValueError("started_at must be >= now")
 
@@ -483,7 +489,7 @@ class PrepareLlmDispatchBatch:
                         account_ref=account_ref,
                         model_ref=resolved_active_model_ref,
                     )
-                account_capacities = await _preparation_account_capacities(
+                account_capacity_snapshots = await _preparation_account_capacity_snapshots(
                     command=command,
                     due_records=admission_due_records,
                     builder=dispatch_preparation_builder,
@@ -503,8 +509,17 @@ class PrepareLlmDispatchBatch:
                         now=command.now,
                     )
                 )
-                account_capacities = _subtract_active_reservations(
-                    account_capacities=account_capacities,
+                account_capacity_snapshots = _subtract_active_reservations(
+                    account_capacity_snapshots=account_capacity_snapshots,
+                    reservation_totals=reservation_totals,
+                )
+                account_capacities = tuple(
+                    snapshot.capacity for snapshot in account_capacity_snapshots
+                )
+                _log_account_capacity_snapshots(
+                    command=command,
+                    active_model_ref=resolved_active_model_ref,
+                    account_capacity_snapshots=account_capacity_snapshots,
                     reservation_totals=reservation_totals,
                 )
                 LOGGER.info(
@@ -549,6 +564,7 @@ class PrepareLlmDispatchBatch:
                     lease_expires_at=command.lease_expires_at,
                     now=command.now,
                     route_catalog=self.route_catalog,
+                    correlation_context=command.correlation_context,
                 )
 
                 LOGGER.info(
@@ -592,12 +608,22 @@ class PrepareLlmDispatchBatch:
                     ),
                 )
                 for started_attempt in attempt_result.started_attempts:
-                    await capacity_reservation_repository.reserve(
-                        _capacity_reservation_from_started_attempt(
-                            attempt=started_attempt,
-                            expires_at=command.lease_expires_at,
-                            created_at=command.started_at,
-                        )
+                    reservation = _capacity_reservation_from_started_attempt(
+                        attempt=started_attempt,
+                        expires_at=command.lease_expires_at,
+                        created_at=command.started_at,
+                    )
+                    await capacity_reservation_repository.reserve(reservation)
+                    LOGGER.info(
+                        "llm_capacity_reservation_created",
+                        **_correlation_log_fields(command),
+                        reservation_id=reservation.attempt_id,
+                        dispatch_attempt_id=reservation.attempt_id,
+                        account_ref=reservation.account_ref,
+                        model_ref=reservation.model_ref,
+                        reserved_requests=reservation.reserved_requests,
+                        reserved_tokens=reservation.reserved_tokens,
+                        expires_at=reservation.expires_at.isoformat(),
                     )
 
                 LOGGER.info(
@@ -647,6 +673,15 @@ class _InputAdmittedCandidate:
     required_window_tokens: int
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparationAccountCapacitySnapshot:
+    seed_capacity: LlmProviderAccountCapacity
+    capacity: LlmProviderAccountCapacity
+    latest_observation: LlmAttemptCapacityObservation | None
+    minute_requests_source: str
+    minute_tokens_source: str
+
+
 @dataclass(slots=True)
 class _LocalAccountUsage:
     request_count: int = 0
@@ -692,12 +727,21 @@ class _MutableInputCapacity:
         )
 
     def can_admit(self, *, required_window_tokens: int) -> bool:
-        return (
-            self.remaining_minute_requests > 0
-            and self.remaining_daily_requests > 0
-            and self.remaining_minute_tokens >= required_window_tokens
-            and self.remaining_daily_tokens >= required_window_tokens
+        admitted, _ = self.admission_decision(
+            required_window_tokens=required_window_tokens,
         )
+        return admitted
+
+    def admission_decision(self, *, required_window_tokens: int) -> tuple[bool, str]:
+        if self.remaining_minute_requests <= 0:
+            return False, "insufficient_minute_requests"
+        if self.remaining_minute_tokens < required_window_tokens:
+            return False, "insufficient_minute_tokens"
+        if self.remaining_daily_requests <= 0:
+            return False, "daily_limit"
+        if self.remaining_daily_tokens < required_window_tokens:
+            return False, "daily_limit"
+        return True, "admitted"
 
     def consume(self, *, required_window_tokens: int) -> None:
         if not self.can_admit(required_window_tokens=required_window_tokens):
@@ -784,6 +828,7 @@ async def _lease_input_admitted_work_items(
     lease_expires_at: datetime,
     now: datetime,
     route_catalog: LlmModelRouteCatalog,
+    correlation_context: Mapping[str, str],
 ) -> LeaseLlmAdmittedWorkItemsResult:
     active_accounts = tuple(
         account
@@ -797,6 +842,7 @@ async def _lease_input_admitted_work_items(
         due_records=due_records,
         mutable_accounts=mutable_accounts,
         requested_items=requested_items,
+        correlation_context=correlation_context,
     )
 
     execution_settings = route_catalog.execution_settings_for_model_ref(
@@ -857,6 +903,7 @@ def _input_admitted_candidates(
     due_records: tuple[DueWorkItemRecord, ...],
     mutable_accounts: list[_MutableInputCapacity],
     requested_items: int,
+    correlation_context: Mapping[str, str],
 ) -> tuple[_InputAdmittedCandidate, ...]:
     candidates: list[_InputAdmittedCandidate] = []
     pending_retry_records = [
@@ -877,11 +924,13 @@ def _input_admitted_candidates(
         selected_record = _pop_first_record_that_fits(
             records=pending_retry_records,
             account=account,
+            correlation_context=correlation_context,
         )
         if selected_record is None:
             selected_record = _pop_first_record_that_fits(
                 records=pending_fresh_records,
                 account=account,
+                correlation_context=correlation_context,
             )
         if selected_record is None:
             continue
@@ -895,14 +944,50 @@ def _pop_first_record_that_fits(
     *,
     records: list[DueWorkItemRecord],
     account: _MutableInputCapacity,
+    correlation_context: Mapping[str, str],
 ) -> _InputAdmittedCandidate | None:
     for index, record in enumerate(records):
         input_tokens = _input_tokens_from_due_record(record)
         required_window_tokens = _required_window_tokens_from_due_record(record)
-        if not account.can_admit(required_window_tokens=required_window_tokens):
+        remaining_requests_before = account.remaining_minute_requests
+        remaining_tokens_before = account.remaining_minute_tokens
+        admitted, rejection_reason = account.admission_decision(
+            required_window_tokens=required_window_tokens,
+        )
+        if not admitted:
+            LOGGER.info(
+                "llm_capacity_candidate_evaluated",
+                **_correlation_log_fields_from_mapping(correlation_context),
+                work_item_id=record.work_item.work_item_id,
+                attempt_number=record.work_item.attempt_count + 1,
+                account_ref=account.account_ref,
+                model_ref=account.model_ref,
+                estimated_input_tokens=input_tokens,
+                planned_output_tokens=_planned_output_tokens_from_due_record(record),
+                required_window_tokens=required_window_tokens,
+                remaining_requests_before=remaining_requests_before,
+                remaining_tokens_before=remaining_tokens_before,
+                admitted=False,
+                rejection_reason=rejection_reason,
+            )
             continue
 
         account.consume(required_window_tokens=required_window_tokens)
+        LOGGER.info(
+            "llm_capacity_candidate_evaluated",
+            **_correlation_log_fields_from_mapping(correlation_context),
+            work_item_id=record.work_item.work_item_id,
+            attempt_number=record.work_item.attempt_count + 1,
+            account_ref=account.account_ref,
+            model_ref=account.model_ref,
+            estimated_input_tokens=input_tokens,
+            planned_output_tokens=_planned_output_tokens_from_due_record(record),
+            required_window_tokens=required_window_tokens,
+            remaining_requests_before=remaining_requests_before,
+            remaining_tokens_before=remaining_tokens_before,
+            admitted=True,
+            rejection_reason=rejection_reason,
+        )
         records.pop(index)
         return _InputAdmittedCandidate(
             record=record,
@@ -913,6 +998,16 @@ def _pop_first_record_that_fits(
             required_window_tokens=required_window_tokens,
         )
     return None
+
+
+def _planned_output_tokens_from_due_record(record: DueWorkItemRecord) -> int | None:
+    estimate_payload = record.schedule_payload.get("llm_capacity_estimate")
+    if not isinstance(estimate_payload, Mapping):
+        return None
+    value = estimate_payload.get("planned_output_tokens")
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
 
 
 def _input_tokens_from_due_record(record: DueWorkItemRecord) -> int:
@@ -965,45 +1060,161 @@ def _reservation_account_refs(
 
 def _subtract_active_reservations(
     *,
-    account_capacities: tuple[LlmProviderAccountCapacity, ...],
+    account_capacity_snapshots: tuple[_PreparationAccountCapacitySnapshot, ...],
     reservation_totals: tuple[LlmRouteCapacityReservationTotal, ...],
-) -> tuple[LlmProviderAccountCapacity, ...]:
+) -> tuple[_PreparationAccountCapacitySnapshot, ...]:
     totals_by_route = {
         (total.provider, total.account_ref, total.model_ref): total
         for total in reservation_totals
     }
-    adjusted: list[LlmProviderAccountCapacity] = []
-    for capacity in account_capacities:
+    adjusted: list[_PreparationAccountCapacitySnapshot] = []
+    for snapshot in account_capacity_snapshots:
+        capacity = snapshot.capacity
         total = totals_by_route.get(
             (capacity.provider, capacity.account_ref, capacity.model_ref)
         )
         if total is None:
-            adjusted.append(capacity)
+            adjusted.append(snapshot)
             continue
+        adjusted_capacity = LlmProviderAccountCapacity(
+            provider=capacity.provider,
+            account_ref=capacity.account_ref,
+            model_ref=capacity.model_ref,
+            remaining_minute_requests=max(
+                capacity.remaining_minute_requests - total.reserved_requests,
+                0,
+            ),
+            remaining_minute_tokens=max(
+                capacity.remaining_minute_tokens - total.reserved_tokens,
+                0,
+            ),
+            remaining_daily_requests=max(
+                capacity.remaining_daily_requests - total.reserved_requests,
+                0,
+            ),
+            remaining_daily_tokens=max(
+                capacity.remaining_daily_tokens - total.reserved_tokens,
+                0,
+            ),
+        )
         adjusted.append(
-            LlmProviderAccountCapacity(
-                provider=capacity.provider,
-                account_ref=capacity.account_ref,
-                model_ref=capacity.model_ref,
-                remaining_minute_requests=max(
-                    capacity.remaining_minute_requests - total.reserved_requests,
-                    0,
-                ),
-                remaining_minute_tokens=max(
-                    capacity.remaining_minute_tokens - total.reserved_tokens,
-                    0,
-                ),
-                remaining_daily_requests=max(
-                    capacity.remaining_daily_requests - total.reserved_requests,
-                    0,
-                ),
-                remaining_daily_tokens=max(
-                    capacity.remaining_daily_tokens - total.reserved_tokens,
-                    0,
-                ),
+            _PreparationAccountCapacitySnapshot(
+                seed_capacity=snapshot.seed_capacity,
+                capacity=adjusted_capacity,
+                latest_observation=snapshot.latest_observation,
+                minute_requests_source=snapshot.minute_requests_source,
+                minute_tokens_source=snapshot.minute_tokens_source,
             )
         )
     return tuple(adjusted)
+
+
+def _log_account_capacity_snapshots(
+    *,
+    command: PrepareLlmDispatchBatchCommand,
+    active_model_ref: str,
+    account_capacity_snapshots: tuple[_PreparationAccountCapacitySnapshot, ...],
+    reservation_totals: tuple[LlmRouteCapacityReservationTotal, ...],
+) -> None:
+    totals_by_account = {total.account_ref: total for total in reservation_totals}
+    for snapshot in account_capacity_snapshots:
+        capacity = snapshot.capacity
+        seed_capacity = snapshot.seed_capacity
+        observation = snapshot.latest_observation
+        total = totals_by_account.get(capacity.account_ref)
+        active_reserved_requests = total.reserved_requests if total is not None else 0
+        active_reserved_tokens = total.reserved_tokens if total is not None else 0
+        LOGGER.info(
+            "llm_capacity_account_snapshot",
+            **_correlation_log_fields(command),
+            provider=capacity.provider,
+            account_ref=capacity.account_ref,
+            model_ref=active_model_ref,
+            observed_at=command.now.isoformat(),
+            seed_minute_requests=seed_capacity.remaining_minute_requests,
+            seed_minute_tokens=seed_capacity.remaining_minute_tokens,
+            latest_observation_recorded_at=observation.observed_at.isoformat()
+            if observation is not None
+            else None,
+            latest_observation_outcome_class=observation.outcome_class
+            if observation is not None
+            else None,
+            observed_remaining_minute_requests=(
+                observation.remaining_minute_requests
+                if observation is not None
+                else None
+            ),
+            observed_remaining_minute_tokens=(
+                observation.remaining_minute_tokens if observation is not None else None
+            ),
+            observed_minute_reset_at=observation.minute_reset_at.isoformat()
+            if observation is not None and observation.minute_reset_at is not None
+            else None,
+            observation_age_ms=_observation_age_ms(
+                now=command.now,
+                observation=observation,
+            ),
+            active_reserved_requests=active_reserved_requests,
+            active_reserved_tokens=active_reserved_tokens,
+            effective_remaining_minute_requests=capacity.remaining_minute_requests,
+            effective_remaining_minute_tokens=capacity.remaining_minute_tokens,
+            quota_unavailable_until=observation.minute_reset_at.isoformat()
+            if observation is not None
+            and _minute_window_exhausted(observation)
+            and observation.minute_reset_at is not None
+            and observation.minute_reset_at > command.now
+            else None,
+            minute_requests_source=snapshot.minute_requests_source,
+            minute_tokens_source=snapshot.minute_tokens_source,
+        )
+
+
+def _capacity_value_source(
+    *,
+    observation: LlmAttemptCapacityObservation | None,
+    field_value: int | None,
+    reset_at: datetime | None,
+    now: datetime,
+) -> str:
+    if observation is None:
+        return "seed"
+    if reset_at is not None and reset_at <= now:
+        return "window_reset"
+    if field_value is None:
+        return "provider_observation_null_fallback"
+    return "provider_observation"
+
+
+def _correlation_log_fields(
+    command: PrepareLlmDispatchBatchCommand,
+) -> dict[str, str]:
+    return _correlation_log_fields_from_mapping(command.correlation_context)
+
+
+def _correlation_log_fields_from_mapping(
+    correlation_context: Mapping[str, str],
+) -> dict[str, str]:
+    allowed_keys = {
+        "prepare_command_id",
+        "workflow_run_id",
+        "causation_command_id",
+        "causation_dispatch_attempt_id",
+    }
+    return {
+        key: value
+        for key, value in correlation_context.items()
+        if key in allowed_keys and value.strip()
+    }
+
+
+def _observation_age_ms(
+    *,
+    now: datetime,
+    observation: LlmAttemptCapacityObservation | None,
+) -> int | None:
+    if observation is None:
+        return None
+    return int((now - observation.observed_at).total_seconds() * 1000)
 
 
 def _capacity_reservation_from_started_attempt(
@@ -1210,7 +1421,7 @@ def _preparation_profile(
     return command.profile
 
 
-async def _preparation_account_capacities(
+async def _preparation_account_capacity_snapshots(
     *,
     command: PrepareLlmDispatchBatchCommand,
     due_records: tuple[DueWorkItemRecord, ...],
@@ -1222,11 +1433,19 @@ async def _preparation_account_capacities(
     profile: LlmTaskCapacityProfile,
     now: datetime,
     use_local_active_model_tpm_budget: bool,
-) -> tuple[LlmProviderAccountCapacity, ...]:
+) -> tuple[_PreparationAccountCapacitySnapshot, ...]:
     if not due_records:
         if not command.account_capacities:
             raise ValueError("PrepareLlmDispatchBatch requires account capacities")
-        return command.account_capacities
+        return tuple(
+            _capacity_snapshot_from_seed(
+                seed_capacity=capacity,
+                capacity=capacity,
+                observation=None,
+                now=now,
+            )
+            for capacity in command.account_capacities
+        )
 
     seed_capacities = (
         command.account_capacities
@@ -1269,32 +1488,94 @@ async def _preparation_account_capacities(
                 now=now,
             )
         }
-        return tuple(
-            _capacity_from_latest_observation(
-                seed_capacity=seed_capacity,
-                observation=latest_observations_by_account_ref.get(
-                    seed_capacity.account_ref
-                ),
-                profile=profile,
-                now=now,
+        recent_observation_accounts = {
+            observation.account_ref for observation in recent_observations
+        }
+        snapshots: list[_PreparationAccountCapacitySnapshot] = []
+        for seed_capacity in seed_capacities:
+            observation = latest_observations_by_account_ref.get(
+                seed_capacity.account_ref,
             )
-            if _observation_has_header_capacity_state(
-                latest_observations_by_account_ref.get(seed_capacity.account_ref),
-            )
-            else local_fallback_capacities[seed_capacity.account_ref]
-            for seed_capacity in seed_capacities
-        )
+            if _observation_has_header_capacity_state(observation):
+                capacity = _capacity_from_latest_observation(
+                    seed_capacity=seed_capacity,
+                    observation=observation,
+                    profile=profile,
+                    now=now,
+                )
+                snapshots.append(
+                    _capacity_snapshot_from_seed(
+                        seed_capacity=seed_capacity,
+                        capacity=capacity,
+                        observation=observation,
+                        now=now,
+                    )
+                )
+                continue
 
-    return tuple(
-        _capacity_from_latest_observation(
+            source = (
+                "local_recent_observation_fallback"
+                if seed_capacity.account_ref in recent_observation_accounts
+                else "seed"
+            )
+            snapshots.append(
+                _PreparationAccountCapacitySnapshot(
+                    seed_capacity=seed_capacity,
+                    capacity=local_fallback_capacities[seed_capacity.account_ref],
+                    latest_observation=observation,
+                    minute_requests_source=source,
+                    minute_tokens_source=source,
+                )
+            )
+        return tuple(snapshots)
+
+    snapshots = []
+    for seed_capacity in seed_capacities:
+        observation = latest_observations_by_account_ref.get(seed_capacity.account_ref)
+        capacity = _capacity_from_latest_observation(
             seed_capacity=seed_capacity,
-            observation=latest_observations_by_account_ref.get(
-                seed_capacity.account_ref
-            ),
+            observation=observation,
             profile=profile,
             now=now,
         )
-        for seed_capacity in seed_capacities
+        snapshots.append(
+            _capacity_snapshot_from_seed(
+                seed_capacity=seed_capacity,
+                capacity=capacity,
+                observation=observation,
+                now=now,
+            )
+        )
+    return tuple(snapshots)
+
+
+def _capacity_snapshot_from_seed(
+    *,
+    seed_capacity: LlmProviderAccountCapacity,
+    capacity: LlmProviderAccountCapacity,
+    observation: LlmAttemptCapacityObservation | None,
+    now: datetime,
+) -> _PreparationAccountCapacitySnapshot:
+    return _PreparationAccountCapacitySnapshot(
+        seed_capacity=seed_capacity,
+        capacity=capacity,
+        latest_observation=observation,
+        minute_requests_source=_capacity_value_source(
+            observation=observation,
+            field_value=observation.remaining_minute_requests
+            if observation is not None
+            else None,
+            reset_at=observation.minute_reset_at if observation is not None else None,
+            now=now,
+        ),
+        minute_tokens_source=_capacity_value_source(
+            observation=observation,
+            field_value=observation.remaining_minute_tokens
+            if observation is not None
+            else None,
+            reset_at=observation.minute_reset_at if observation is not None else None,
+            now=now,
+        ),
     )
 
 

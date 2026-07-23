@@ -50,6 +50,7 @@ def test_success_response_extracts_chat_content_usage_and_quota_snapshot() -> No
     )
     assert mapped.quota_snapshot.remaining_requests_day == 14370
     assert mapped.quota_snapshot.remaining_tokens_minute == 17997
+    assert mapped.matched_rule == "http_success"
 
 
 def test_success_response_tolerates_missing_content_and_usage() -> None:
@@ -111,6 +112,7 @@ def test_429_defaults_to_minute_limit_and_uses_retry_after() -> None:
     assert isinstance(mapped.provider_result, LlmProviderFailure)
     assert mapped.provider_result.error_kind is LlmErrorKind.MINUTE_LIMIT
     assert mapped.provider_result.wait_until == _now() + timedelta(seconds=2)
+    assert mapped.matched_rule == "minute_limit_429"
 
 
 def test_429_daily_message_maps_to_daily_limit() -> None:
@@ -125,6 +127,7 @@ def test_429_daily_message_maps_to_daily_limit() -> None:
 
     assert isinstance(mapped.provider_result, LlmProviderFailure)
     assert mapped.provider_result.error_kind is LlmErrorKind.DAILY_LIMIT
+    assert mapped.matched_rule == "daily_limit_429"
 
 
 def test_auth_status_codes_map_to_auth_error() -> None:
@@ -140,6 +143,7 @@ def test_auth_status_codes_map_to_auth_error() -> None:
 
         assert isinstance(mapped.provider_result, LlmProviderFailure)
         assert mapped.provider_result.error_kind is LlmErrorKind.AUTH_ERROR
+        assert mapped.matched_rule == "auth_status"
 
 
 def test_request_too_large_status_and_context_message_are_classified() -> None:
@@ -154,6 +158,7 @@ def test_request_too_large_status_and_context_message_are_classified() -> None:
 
     assert isinstance(status_mapped.provider_result, LlmProviderFailure)
     assert status_mapped.provider_result.error_kind is LlmErrorKind.REQUEST_TOO_LARGE
+    assert status_mapped.matched_rule == "request_too_large_413"
 
     context_mapped = GroqProviderResponseMapper().map_response(
         response=GroqProviderHttpResponse(
@@ -166,6 +171,7 @@ def test_request_too_large_status_and_context_message_are_classified() -> None:
 
     assert isinstance(context_mapped.provider_result, LlmProviderFailure)
     assert context_mapped.provider_result.error_kind is LlmErrorKind.REQUEST_TOO_LARGE
+    assert context_mapped.matched_rule == "request_too_large_400_context"
 
 
 def test_output_too_large_message_is_classified() -> None:
@@ -180,6 +186,28 @@ def test_output_too_large_message_is_classified() -> None:
 
     assert isinstance(mapped.provider_result, LlmProviderFailure)
     assert mapped.provider_result.error_kind is LlmErrorKind.OUTPUT_TOO_LARGE
+    assert mapped.matched_rule == "output_too_large_400"
+
+
+def test_unknown_400_fallback_exposes_mapper_rule_without_reclassifying() -> None:
+    mapped = GroqProviderResponseMapper().map_response(
+        response=GroqProviderHttpResponse(
+            status_code=400,
+            headers={},
+            body={
+                "error": {
+                    "message": "model is not available for this organization",
+                    "type": "invalid_request_error",
+                    "code": "model_not_available",
+                }
+            },
+        ),
+        observed_at=_now(),
+    )
+
+    assert isinstance(mapped.provider_result, LlmProviderFailure)
+    assert mapped.provider_result.error_kind is LlmErrorKind.INVALID_OUTPUT
+    assert mapped.matched_rule == "unknown_http_400_fallback"
 
 
 def test_server_errors_map_to_network_error() -> None:
@@ -194,6 +222,7 @@ def test_server_errors_map_to_network_error() -> None:
 
     assert isinstance(mapped.provider_result, LlmProviderFailure)
     assert mapped.provider_result.error_kind is LlmErrorKind.NETWORK_ERROR
+    assert mapped.matched_rule == "server_error"
 
 
 def test_unknown_errors_map_to_unknown() -> None:
@@ -208,3 +237,4 @@ def test_unknown_errors_map_to_unknown() -> None:
 
     assert isinstance(mapped.provider_result, LlmProviderFailure)
     assert mapped.provider_result.error_kind is LlmErrorKind.UNKNOWN
+    assert mapped.matched_rule == "unknown_status_fallback"

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from structlog.testing import capture_logs
 
 from src.contexts.llm_runtime.application.ports.llm_dispatch_executor_port import (
     LlmDispatchExecutionInput,
@@ -123,6 +124,13 @@ def _executor(transport: FakeGroqTransport) -> GroqDispatchExecutor:
         transport=transport,
         model_profiles=build_groq_free_plan_model_profiles(),
     )
+
+
+def _event(logs: list[dict[str, object]], name: str) -> dict[str, object]:
+    for event in logs:
+        if event.get("event") == name:
+            return event
+    raise AssertionError(f"log event not found: {name}")
 
 
 @pytest.mark.asyncio
@@ -320,6 +328,104 @@ async def test_auth_error_maps_to_terminal_failed() -> None:
 
     assert result.status is LlmDispatchExecutionStatus.TERMINAL_FAILED
     assert result.error_kind == "auth_error"
+
+
+@pytest.mark.asyncio
+async def test_provider_error_logging_serializes_body_and_extracts_error_fields() -> (
+    None
+):
+    transport = FakeGroqTransport(
+        response=GroqTransportResponse(
+            status_code=400,
+            headers={
+                "x-request-id": "req-123",
+                "x-ratelimit-remaining-tokens": "1234",
+            },
+            body={
+                "error": {
+                    "message": "model is not available for this organization",
+                    "type": "invalid_request_error",
+                    "code": "model_not_available",
+                    "api_key": "gsk_this_must_not_be_logged_1234567890",
+                    "messages": ["prompt text must not be logged"],
+                }
+            },
+        ),
+    )
+
+    with capture_logs() as logs:
+        result = await _executor(transport).execute_dispatch(_execution_input())
+
+    assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
+    response_event = _event(logs, "llm_groq_response_received")
+    assert response_event["response_body_top_level_keys"] == 1
+    assert response_event["response_body_serialized_char_count"] > 1
+    assert response_event["response_body_type"] == "dict"
+    assert response_event["provider_request_id"] == "req-123"
+    assert response_event["remaining_tokens"] == "1234"
+
+    error_event = _event(logs, "llm_groq_provider_error")
+    assert (
+        error_event["error_message"] == "model is not available for this organization"
+    )
+    assert error_event["error_type"] == "invalid_request_error"
+    assert error_event["error_code"] == "model_not_available"
+    assert error_event["provider_error_shape"] == "nested_error_object"
+    assert error_event["provider_error_extra_keys"] == ("api_key", "messages")
+    assert "provider_error_body_hash" not in error_event
+    assert "bounded_raw_body" not in error_event
+    serialized_logs = str(logs)
+    assert "gsk_" not in serialized_logs
+    assert "prompt text must not be logged" not in serialized_logs
+
+    classified_event = _event(logs, "llm_groq_response_classified")
+    assert classified_event["matched_rule"] == "unknown_http_400_fallback"
+    assert classified_event["mapped_error_kind"] == "invalid_output"
+    assert classified_event["has_provider_error"] is True
+    assert classified_event["has_structured_provider_error_message"] is True
+    assert classified_event["provider_error_shape"] == "nested_error_object"
+
+
+@pytest.mark.asyncio
+async def test_unknown_mapping_provider_error_logging_omits_body_content() -> None:
+    transport = FakeGroqTransport(
+        response=GroqTransportResponse(
+            status_code=500,
+            headers={},
+            body={"raw_body": "upstream html error"},
+        ),
+    )
+
+    with capture_logs() as logs:
+        result = await _executor(transport).execute_dispatch(_execution_input())
+
+    assert result.status is LlmDispatchExecutionStatus.RETRYABLE_FAILED
+    response_event = _event(logs, "llm_groq_response_received")
+    assert response_event["response_body_serialized_char_count"] > 1
+    error_event = _event(logs, "llm_groq_provider_error")
+    assert error_event["error_message"] is None
+    assert error_event["provider_error_shape"] == "unknown_mapping"
+    assert error_event["provider_error_extra_keys"] == ("raw_body",)
+    assert "bounded_raw_body" not in error_event
+    classified_event = _event(logs, "llm_groq_response_classified")
+    assert classified_event["has_provider_error"] is True
+    assert classified_event["has_structured_provider_error_message"] is False
+    assert classified_event["provider_error_shape"] == "unknown_mapping"
+
+
+@pytest.mark.asyncio
+async def test_success_logging_does_not_include_generated_text() -> None:
+    generated_text = '{"claims": ["very sensitive generated claim"]}'
+    transport = FakeGroqTransport(response=_success_response(raw_text=generated_text))
+
+    with capture_logs() as logs:
+        result = await _executor(transport).execute_dispatch(_execution_input())
+
+    assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
+    serialized_logs = str(logs)
+    assert generated_text not in serialized_logs
+    success_event = _event(logs, "knowledge_llm_groq_execution_succeeded")
+    assert success_event["raw_text_char_count"] == len(generated_text)
 
 
 def test_executor_does_not_import_legacy_provider_port_or_task_use_cases() -> None:

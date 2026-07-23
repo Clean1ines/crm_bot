@@ -320,11 +320,45 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
         capacity_window_wakeup_count = 0
 
         if capacity_observation is not None:
+            observation_recording_at = datetime.now(tz=finished_at.tzinfo)
+            LOGGER.info(
+                "llm_capacity_observation_recording",
+                workflow_run_id=workflow_run_id,
+                dispatch_attempt_id=dispatch_attempt_id,
+                work_item_id=work_item_id,
+                account_ref=capacity_observation.account_ref,
+                model_ref=capacity_observation.model_ref,
+                provider=capacity_observation.provider,
+                outcome_class=capacity_observation.outcome_class,
+                remaining_minute_requests=(
+                    capacity_observation.remaining_minute_requests
+                ),
+                remaining_minute_tokens=capacity_observation.remaining_minute_tokens,
+                remaining_daily_requests=capacity_observation.remaining_daily_requests,
+                remaining_daily_tokens=capacity_observation.remaining_daily_tokens,
+                minute_reset_at=capacity_observation.minute_reset_at.isoformat()
+                if capacity_observation.minute_reset_at is not None
+                else None,
+                daily_reset_at=capacity_observation.daily_reset_at.isoformat()
+                if capacity_observation.daily_reset_at is not None
+                else None,
+                actual_prompt_tokens=capacity_observation.actual_prompt_tokens,
+                actual_completion_tokens=(
+                    capacity_observation.actual_completion_tokens
+                ),
+                actual_total_tokens=capacity_observation.actual_total_tokens,
+                llm_result_finished_at=finished_at.isoformat(),
+                observation_recorded_at=observation_recording_at.isoformat(),
+                llm_result_finish_to_observation_ms=int(
+                    (observation_recording_at - finished_at).total_seconds() * 1000
+                ),
+            )
             await capacity_observation_repository.record_observation(
                 capacity_observation,
             )
+            observation_recorded_at = datetime.now(tz=finished_at.tzinfo)
             LOGGER.info(
-                "knowledge_claim_builder_capacity_observation_record",
+                "llm_capacity_observation_recorded",
                 workflow_run_id=workflow_run_id,
                 dispatch_attempt_id=dispatch_attempt_id,
                 work_item_id=work_item_id,
@@ -338,6 +372,19 @@ class HandleExecuteClaimBuilderSectionCommandHandler:
                 minute_reset_at=capacity_observation.minute_reset_at.isoformat()
                 if capacity_observation.minute_reset_at is not None
                 else None,
+                daily_reset_at=capacity_observation.daily_reset_at.isoformat()
+                if capacity_observation.daily_reset_at is not None
+                else None,
+                actual_prompt_tokens=capacity_observation.actual_prompt_tokens,
+                actual_completion_tokens=(
+                    capacity_observation.actual_completion_tokens
+                ),
+                actual_total_tokens=capacity_observation.actual_total_tokens,
+                llm_result_finished_at=finished_at.isoformat(),
+                observation_recorded_at=observation_recorded_at.isoformat(),
+                llm_result_finish_to_observation_ms=int(
+                    (observation_recorded_at - finished_at).total_seconds() * 1000
+                ),
                 outcome_class=capacity_observation.outcome_class,
             )
             persisted_capacity_event = await workflow_unit_of_work.outbox.append_event(
@@ -1536,6 +1583,8 @@ def _reconcile_command_payload(
         "dispatch_attempt_id": dispatch_attempt_id,
         "work_item_id": work_item_id,
         "work_kind": CLAIM_BUILDER_SECTION_WORK_KIND.value,
+        "causation_command_id": workflow_command.command_id.value,
+        "causation_dispatch_attempt_id": dispatch_attempt_id,
     }
     dispatch_preparation = workflow_command.payload.get("llm_dispatch_preparation")
     if dispatch_preparation is not None:

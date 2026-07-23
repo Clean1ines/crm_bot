@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from structlog.testing import capture_logs
 
 from src.contexts.llm_runtime.infrastructure.postgres.postgres_llm_route_capacity_reservation_repository import (
     LlmRouteCapacityReservation,
@@ -19,6 +20,7 @@ def _now() -> datetime:
 class FakeConnection:
     executed: list[tuple[str, tuple[object, ...]]] = field(default_factory=list)
     rows: list[dict[str, object]] = field(default_factory=list)
+    row: dict[str, object] | None = None
 
     async def execute(self, query: str, *args: object) -> str:
         self.executed.append((query, args))
@@ -28,10 +30,26 @@ class FakeConnection:
         self.executed.append((query, args))
         return self.rows
 
+    async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
+        self.executed.append((query, args))
+        return self.row
+
 
 @pytest.mark.asyncio
 async def test_lock_route_uses_transaction_advisory_lock() -> None:
-    connection = FakeConnection()
+    connection = FakeConnection(
+        row={
+            "attempt_id": "work-1:attempt:1",
+            "provider": "groq",
+            "account_ref": "org-1",
+            "model_ref": "qwen/qwen3.6-27b",
+            "reserved_requests": 1,
+            "reserved_tokens": 3000,
+            "created_at": _now(),
+            "finalized_at": _now() + timedelta(seconds=5),
+            "status": "committed",
+        }
+    )
     repository = PostgresLlmRouteCapacityReservationRepository(connection)
 
     await repository.lock_route(
@@ -73,7 +91,19 @@ async def test_active_reservations_are_aggregated_by_route() -> None:
 
 @pytest.mark.asyncio
 async def test_reservation_is_persisted_and_can_be_finalized() -> None:
-    connection = FakeConnection()
+    connection = FakeConnection(
+        row={
+            "attempt_id": "work-1:attempt:1",
+            "provider": "groq",
+            "account_ref": "org-1",
+            "model_ref": "qwen/qwen3.6-27b",
+            "reserved_requests": 1,
+            "reserved_tokens": 3000,
+            "created_at": _now(),
+            "finalized_at": _now() + timedelta(seconds=5),
+            "status": "committed",
+        }
+    )
     repository = PostgresLlmRouteCapacityReservationRepository(connection)
     reservation = LlmRouteCapacityReservation(
         attempt_id="work-1:attempt:1",
@@ -87,12 +117,61 @@ async def test_reservation_is_persisted_and_can_be_finalized() -> None:
     )
 
     await repository.reserve(reservation)
-    await repository.finalize(
-        attempt_id=reservation.attempt_id,
-        final_status="committed",
-        actual_tokens=2400,
-        finalized_at=_now() + timedelta(seconds=5),
-    )
+    with capture_logs() as logs:
+        await repository.finalize(
+            attempt_id=reservation.attempt_id,
+            final_status="committed",
+            actual_tokens=2400,
+            finalized_at=_now() + timedelta(seconds=5),
+        )
 
     assert "INSERT INTO llm_route_capacity_reservations" in connection.executed[0][0]
     assert "UPDATE llm_route_capacity_reservations" in connection.executed[1][0]
+    completed = next(
+        event
+        for event in logs
+        if event["event"] == "llm_capacity_reservation_transition_completed"
+    )
+    assert completed["provider"] == "groq"
+    assert completed["account_ref"] == "org-1"
+    assert completed["model_ref"] == "qwen/qwen3.6-27b"
+    assert completed["reserved_requests"] == 1
+    assert completed["reserved_tokens"] == 3000
+    assert completed["transitioned_at"] == (_now() + timedelta(seconds=5)).isoformat()
+    assert "observation_available_at_transition" not in completed
+    assert not any(
+        event["event"] == "llm_capacity_reservation_transition_skipped"
+        for event in logs
+    )
+
+
+@pytest.mark.asyncio
+async def test_finalize_without_active_row_logs_skipped_transition() -> None:
+    connection = FakeConnection(row=None)
+    repository = PostgresLlmRouteCapacityReservationRepository(connection)
+
+    with capture_logs() as logs:
+        await repository.finalize(
+            attempt_id="missing-attempt",
+            final_status="released",
+            actual_tokens=None,
+            finalized_at=_now(),
+        )
+
+    assert any(
+        event["event"] == "llm_capacity_reservation_transition_started"
+        for event in logs
+    )
+    assert not any(
+        event["event"] == "llm_capacity_reservation_transition_completed"
+        for event in logs
+    )
+    skipped = next(
+        event
+        for event in logs
+        if event["event"] == "llm_capacity_reservation_transition_skipped"
+    )
+    assert skipped["reservation_id"] == "missing-attempt"
+    assert skipped["dispatch_attempt_id"] == "missing-attempt"
+    assert skipped["requested_status_after"] == "released"
+    assert skipped["skip_reason"] == "no_active_reservation_matched"

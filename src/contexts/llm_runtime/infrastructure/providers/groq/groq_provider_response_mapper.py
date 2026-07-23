@@ -37,6 +37,7 @@ class GroqProviderHttpResponse:
 class GroqProviderMappedResponse:
     provider_result: LlmProviderResult
     quota_snapshot: LlmQuotaSnapshot
+    matched_rule: str
 
 
 class GroqProviderResponseMapper:
@@ -71,17 +72,20 @@ class GroqProviderResponseMapper:
                     usage=self._extract_usage(response.body),
                 ),
                 quota_snapshot=quota_snapshot,
+                matched_rule="http_success",
             )
 
+        error_kind, matched_rule = self._classify_error(
+            status_code=response.status_code,
+            body=response.body,
+        )
         return GroqProviderMappedResponse(
             provider_result=LlmProviderFailure(
-                error_kind=self._classify_error(
-                    status_code=response.status_code,
-                    body=response.body,
-                ),
+                error_kind=error_kind,
                 wait_until=quota_snapshot.unavailable_until,
             ),
             quota_snapshot=quota_snapshot,
+            matched_rule=matched_rule,
         )
 
     def _extract_chat_content(self, body: JsonObject) -> str:
@@ -132,11 +136,11 @@ class GroqProviderResponseMapper:
         *,
         status_code: int,
         body: JsonObject,
-    ) -> LlmErrorKind:
+    ) -> tuple[LlmErrorKind, str]:
         error_text = self._error_text(body)
 
         if status_code == 401 or status_code == 403:
-            return LlmErrorKind.AUTH_ERROR
+            return LlmErrorKind.AUTH_ERROR, "auth_status"
 
         if status_code == 429:
             if (
@@ -145,11 +149,11 @@ class GroqProviderResponseMapper:
                 or "rpd" in error_text
                 or "tpd" in error_text
             ):
-                return LlmErrorKind.DAILY_LIMIT
-            return LlmErrorKind.MINUTE_LIMIT
+                return LlmErrorKind.DAILY_LIMIT, "daily_limit_429"
+            return LlmErrorKind.MINUTE_LIMIT, "minute_limit_429"
 
         if status_code == 413:
-            return LlmErrorKind.REQUEST_TOO_LARGE
+            return LlmErrorKind.REQUEST_TOO_LARGE, "request_too_large_413"
 
         if status_code == 400:
             if (
@@ -157,19 +161,22 @@ class GroqProviderResponseMapper:
                 or "too large" in error_text
                 or "maximum context" in error_text
             ):
-                return LlmErrorKind.REQUEST_TOO_LARGE
+                return (
+                    LlmErrorKind.REQUEST_TOO_LARGE,
+                    "request_too_large_400_context",
+                )
             if (
                 "max_completion" in error_text
                 or "completion tokens" in error_text
                 or "output" in error_text
             ):
-                return LlmErrorKind.OUTPUT_TOO_LARGE
-            return LlmErrorKind.INVALID_OUTPUT
+                return LlmErrorKind.OUTPUT_TOO_LARGE, "output_too_large_400"
+            return LlmErrorKind.INVALID_OUTPUT, "unknown_http_400_fallback"
 
         if 500 <= status_code < 600:
-            return LlmErrorKind.NETWORK_ERROR
+            return LlmErrorKind.NETWORK_ERROR, "server_error"
 
-        return LlmErrorKind.UNKNOWN
+        return LlmErrorKind.UNKNOWN, "unknown_status_fallback"
 
     def _error_text(self, body: JsonObject) -> str:
         error = body.get("error")

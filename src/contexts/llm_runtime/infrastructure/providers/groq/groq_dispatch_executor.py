@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -88,26 +89,42 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                     execution_settings=parsed.execution_settings,
                 ),
             )
+            message_diagnostics = _message_diagnostics(parsed.messages)
             LOGGER.info(
-                "knowledge_llm_groq_request_prepared",
-                attempt_id=execution_input.attempt_id,
+                "llm_groq_request_started",
+                workflow_run_id=parsed.workflow_run_id,
                 work_item_id=execution_input.work_item_id,
+                dispatch_attempt_id=execution_input.attempt_id,
                 attempt_number=execution_input.attempt_number,
                 provider=parsed.provider,
                 account_ref=parsed.account_ref,
                 model_ref=parsed.model_ref,
-                message_count=len(parsed.messages),
-                message_char_count=sum(
-                    len(message.content) for message in parsed.messages
+                request_started_at=request_started_at.isoformat(),
+                timeout_seconds=getattr(
+                    _transport_for_account(
+                        fallback_transport=self.transport,
+                        transports_by_account_ref=self.transports_by_account_ref,
+                        account_ref=parsed.account_ref,
+                    ),
+                    "timeout_seconds",
+                    None,
                 ),
-                payload_keys=sorted(request.payload.keys()),
-                has_max_completion_tokens="max_completion_tokens" in request.payload,
-                max_completion_tokens=request.payload.get("max_completion_tokens"),
-                input_tokens=parsed.input_tokens,
+                estimated_input_tokens=parsed.input_tokens,
                 planned_output_tokens=parsed.planned_output_tokens,
                 required_window_tokens=parsed.required_window_tokens,
+                max_completion_tokens=request.payload.get("max_completion_tokens"),
+                message_count=len(parsed.messages),
+                system_message_char_count=message_diagnostics[
+                    "system_message_char_count"
+                ],
+                user_message_char_count=message_diagnostics["user_message_char_count"],
+                total_message_char_count=message_diagnostics[
+                    "total_message_char_count"
+                ],
+                input_tokens=parsed.input_tokens,
                 response_format=request.payload.get("response_format"),
                 temperature=request.payload.get("temperature"),
+                reasoning_enabled=parsed.execution_settings.reasoning_enabled,
                 reasoning_effort=request.payload.get("reasoning_effort"),
             )
         except (TypeError, ValueError) as exc:
@@ -124,6 +141,20 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             fallback_transport=self.transport,
             transports_by_account_ref=self.transports_by_account_ref,
             account_ref=parsed.account_ref,
+        )
+        LOGGER.info(
+            "llm_dispatch_transport_context",
+            workflow_run_id=parsed.workflow_run_id,
+            dispatch_attempt_id=execution_input.attempt_id,
+            work_item_id=execution_input.work_item_id,
+            attempt_number=execution_input.attempt_number,
+            account_ref=parsed.account_ref,
+            model_ref=parsed.model_ref,
+            request_started_at=request_started_at.isoformat(),
+            estimated_input_tokens=parsed.input_tokens,
+            planned_output_tokens=parsed.planned_output_tokens,
+            required_window_tokens=parsed.required_window_tokens,
+            max_completion_tokens=request.payload.get("max_completion_tokens"),
         )
         LOGGER.info(
             "knowledge_llm_groq_transport_start",
@@ -148,18 +179,55 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
             )
             raise
 
+        response_received_at = datetime.now(timezone.utc)
+        duration_ms = int(
+            (response_received_at - request_started_at).total_seconds() * 1000
+        )
+        body_diagnostics = _response_body_diagnostics(transport_response.body)
+        rate_limit_headers = _rate_limit_header_diagnostics(transport_response.headers)
+        provider_request_id = _provider_request_id(transport_response.headers)
         LOGGER.info(
-            "knowledge_llm_groq_transport_response",
-            attempt_id=execution_input.attempt_id,
+            "llm_groq_response_received",
+            workflow_run_id=parsed.workflow_run_id,
+            dispatch_attempt_id=execution_input.attempt_id,
             work_item_id=execution_input.work_item_id,
+            attempt_number=execution_input.attempt_number,
             provider=parsed.provider,
             account_ref=parsed.account_ref,
             model_ref=parsed.model_ref,
             status_code=transport_response.status_code,
-            response_header_keys=sorted(transport_response.headers.keys()),
-            response_body_char_count=len(transport_response.body),
+            duration_ms=duration_ms,
+            content_type=_header_value(transport_response.headers, "content-type"),
+            provider_request_id=provider_request_id,
+            response_body_serialized_char_count=body_diagnostics[
+                "serialized_char_count"
+            ],
+            response_body_top_level_keys=body_diagnostics["top_level_key_count"],
+            response_body_type=body_diagnostics["body_type"],
+            **rate_limit_headers,
         )
-        observed_at = datetime.now(timezone.utc)
+        if transport_response.status_code >= 400:
+            error_diagnostics = _provider_error_diagnostics(transport_response.body)
+            LOGGER.warning(
+                "llm_groq_provider_error",
+                workflow_run_id=parsed.workflow_run_id,
+                dispatch_attempt_id=execution_input.attempt_id,
+                work_item_id=execution_input.work_item_id,
+                attempt_number=execution_input.attempt_number,
+                provider=parsed.provider,
+                account_ref=parsed.account_ref,
+                model_ref=parsed.model_ref,
+                status_code=transport_response.status_code,
+                error_message=error_diagnostics["error_message"],
+                error_type=error_diagnostics["error_type"],
+                error_code=error_diagnostics["error_code"],
+                provider_error_shape=error_diagnostics["error_shape"],
+                provider_request_id=provider_request_id,
+                provider_error_extra_keys=error_diagnostics["extra_keys"],
+            )
+        else:
+            error_diagnostics = None
+        observed_at = response_received_at
         mapped = self.response_mapper.map_response(
             response=GroqProviderHttpResponse(
                 status_code=transport_response.status_code,
@@ -170,14 +238,36 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
         )
 
         provider_result = mapped.provider_result
+        classification = _classification_diagnostics(
+            body=transport_response.body,
+            status_code=transport_response.status_code,
+            provider_result=provider_result,
+            mapped=mapped,
+            error_diagnostics=error_diagnostics,
+        )
         LOGGER.info(
-            "knowledge_llm_groq_mapped_response",
-            attempt_id=execution_input.attempt_id,
+            "llm_groq_response_classified",
+            workflow_run_id=parsed.workflow_run_id,
+            dispatch_attempt_id=execution_input.attempt_id,
             work_item_id=execution_input.work_item_id,
+            attempt_number=execution_input.attempt_number,
             provider=parsed.provider,
             account_ref=parsed.account_ref,
             model_ref=parsed.model_ref,
-            provider_result_type=type(provider_result).__name__,
+            status_code=transport_response.status_code,
+            mapped_status=classification["mapped_status"],
+            mapped_error_kind=classification["mapped_error_kind"],
+            matched_rule=classification["matched_rule"],
+            has_provider_error=classification["has_provider_error"],
+            has_structured_provider_error_message=classification[
+                "has_structured_provider_error_message"
+            ],
+            provider_error_shape=classification["provider_error_shape"],
+            has_usage=classification["has_usage"],
+            has_rate_limit_headers=any(
+                value is not None for value in rate_limit_headers.values()
+            ),
+            next_attempt_at=classification["next_attempt_at"],
             quota_remaining_minute_requests=mapped.quota_snapshot.remaining_requests_minute,
             quota_remaining_minute_tokens=mapped.quota_snapshot.remaining_tokens_minute,
             quota_remaining_daily_requests=mapped.quota_snapshot.remaining_requests_day,
@@ -302,6 +392,7 @@ def _transport_for_account(
 
 @dataclass(frozen=True, slots=True)
 class _ParsedGroqDispatchPayload:
+    workflow_run_id: str | None
     provider: str
     account_ref: str
     model_ref: str
@@ -366,6 +457,7 @@ class _ParsedGroqDispatchPayload:
             )
 
         return cls(
+            workflow_run_id=_optional_text(schedule_payload, "workflow_run_id"),
             provider=provider,
             account_ref=account_ref,
             model_ref=model_ref,
@@ -511,6 +603,13 @@ def _parse_provider_messages(
     return tuple(messages)
 
 
+def _optional_text(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if isinstance(value, str) and value.strip():
+        return value
+    return None
+
+
 def _parse_execution_settings(
     payload: Mapping[str, object],
 ) -> LlmModelExecutionSettings:
@@ -601,3 +700,152 @@ def _require_non_empty_text(value: str, *, field_name: str) -> None:
         raise TypeError(f"{field_name} must be str")
     if not value.strip():
         raise ValueError(f"{field_name} must be non-empty")
+
+
+def _message_diagnostics(
+    messages: tuple[GroqChatMessage, ...],
+) -> dict[str, int]:
+    system_chars = 0
+    user_chars = 0
+    total_chars = 0
+    for message in messages:
+        content_chars = len(message.content)
+        total_chars += content_chars
+        if message.role is GroqChatMessageRole.SYSTEM:
+            system_chars += content_chars
+        elif message.role is GroqChatMessageRole.USER:
+            user_chars += content_chars
+    return {
+        "system_message_char_count": system_chars,
+        "user_message_char_count": user_chars,
+        "total_message_char_count": total_chars,
+    }
+
+
+def _response_body_diagnostics(body: object) -> dict[str, object]:
+    try:
+        serialized = json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+    except TypeError:
+        serialized = str(body)
+    top_level_key_count = len(body) if isinstance(body, Mapping) else None
+    return {
+        "serialized_char_count": len(serialized),
+        "top_level_key_count": top_level_key_count,
+        "body_type": type(body).__name__,
+    }
+
+
+def _provider_error_diagnostics(body: Mapping[str, object]) -> dict[str, object]:
+    error = body.get("error")
+    if isinstance(error, Mapping):
+        known_keys = {"message", "type", "code"}
+        return {
+            "error_message": _optional_string_value(error.get("message")),
+            "error_type": _optional_string_value(error.get("type")),
+            "error_code": _optional_string_value(error.get("code")),
+            "error_shape": "nested_error_object",
+            "extra_keys": tuple(
+                sorted(str(key) for key in error.keys() if key not in known_keys)
+            ),
+        }
+    if isinstance(error, str):
+        return {
+            "error_message": None,
+            "error_type": None,
+            "error_code": None,
+            "error_shape": "error_string_omitted",
+            "extra_keys": ("error",),
+        }
+    return {
+        "error_message": None,
+        "error_type": None,
+        "error_code": None,
+        "error_shape": "unknown_mapping",
+        "extra_keys": tuple(sorted(str(key) for key in body.keys())),
+    }
+
+
+def _optional_string_value(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value[:500]
+    return str(value)[:500]
+
+
+def _rate_limit_header_diagnostics(
+    headers: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "limit_requests": _header_value(headers, "x-ratelimit-limit-requests"),
+        "remaining_requests": _header_value(
+            headers,
+            "x-ratelimit-remaining-requests",
+        ),
+        "reset_requests": _header_value(headers, "x-ratelimit-reset-requests"),
+        "limit_tokens": _header_value(headers, "x-ratelimit-limit-tokens"),
+        "remaining_tokens": _header_value(headers, "x-ratelimit-remaining-tokens"),
+        "reset_tokens": _header_value(headers, "x-ratelimit-reset-tokens"),
+        "retry_after": _header_value(headers, "retry-after"),
+    }
+
+
+def _provider_request_id(headers: Mapping[str, object]) -> str | None:
+    for key in ("x-request-id", "x-groq-request-id", "request-id"):
+        value = _header_value(headers, key)
+        if value:
+            return value
+    return None
+
+
+def _header_value(headers: Mapping[str, object], name: str) -> str | None:
+    normalized_name = name.lower()
+    for key, value in headers.items():
+        if str(key).lower() == normalized_name:
+            return str(value) if value is not None else None
+    return None
+
+
+def _classification_diagnostics(
+    *,
+    body: Mapping[str, object],
+    status_code: int,
+    provider_result: object,
+    mapped: GroqProviderMappedResponse,
+    error_diagnostics: Mapping[str, object] | None,
+) -> dict[str, object]:
+    error_kind = getattr(provider_result, "error_kind", None)
+    mapped_error_kind = (
+        error_kind.value if isinstance(error_kind, LlmErrorKind) else None
+    )
+    wait_until = getattr(provider_result, "wait_until", None)
+    mapped_status = (
+        _map_error_kind_to_status(
+            error_kind=error_kind,
+            wait_until=wait_until,
+        ).value
+        if isinstance(error_kind, LlmErrorKind)
+        else LlmDispatchExecutionStatus.SUCCEEDED.value
+    )
+    return {
+        "mapped_status": mapped_status,
+        "mapped_error_kind": mapped_error_kind,
+        "matched_rule": mapped.matched_rule,
+        "has_provider_error": status_code >= 400,
+        "has_structured_provider_error_message": (
+            error_diagnostics is not None
+            and error_diagnostics.get("error_message") is not None
+        ),
+        "provider_error_shape": error_diagnostics.get("error_shape")
+        if error_diagnostics is not None
+        else None,
+        "has_usage": isinstance(body.get("usage"), Mapping),
+        "next_attempt_at": wait_until.isoformat()
+        if isinstance(wait_until, datetime)
+        else None,
+    }

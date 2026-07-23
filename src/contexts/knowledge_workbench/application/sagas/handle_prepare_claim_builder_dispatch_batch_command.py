@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Protocol, cast
 
+import structlog
+
 from src.contexts.execution_runtime.domain.value_objects.work_item_retry_plan import (
     WorkItemRetryPlan,
 )
@@ -56,6 +58,7 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
 
 
 CLAIM_BUILDER_ACTIVE_MODEL_REF = "qwen/qwen3.6-27b"
+LOGGER = structlog.get_logger(__name__)
 
 
 class PrepareLlmDispatchBatchPort(Protocol):
@@ -117,6 +120,20 @@ class HandlePrepareClaimBuilderDispatchBatchCommandHandler:
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
             occurred_at=occurred_at,
+        )
+        LOGGER.info(
+            "claim_builder_prepare_started",
+            prepare_command_id=workflow_command.command_id.value,
+            causation_command_id=_optional_payload_text(
+                workflow_command.payload,
+                "causation_command_id",
+            ),
+            causation_dispatch_attempt_id=_optional_payload_text(
+                workflow_command.payload,
+                "causation_dispatch_attempt_id",
+            ),
+            workflow_run_id=workflow_run_id,
+            started_at=occurred_at.isoformat(),
         )
         prepare_result = await prepare_llm_dispatch_batch.execute(
             prepare_command,
@@ -372,6 +389,10 @@ def _prepare_llm_dispatch_batch_command(
         provider_account_refs=_provider_account_refs_from_payload(
             workflow_command.payload,
         ),
+        correlation_context=_prepare_correlation_context(
+            workflow_command=workflow_command,
+            workflow_run_id=workflow_run_id,
+        ),
     )
 
 
@@ -395,6 +416,32 @@ def _provider_account_refs_from_payload(
             )
         refs.append(item)
     return tuple(refs)
+
+
+def _prepare_correlation_context(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+) -> Mapping[str, str]:
+    context = {
+        "prepare_command_id": workflow_command.command_id.value,
+        "workflow_run_id": workflow_run_id,
+    }
+    causation_command_id = _optional_payload_text(
+        workflow_command.payload,
+        "causation_command_id",
+    )
+    if causation_command_id is not None:
+        context["causation_command_id"] = causation_command_id
+
+    causation_dispatch_attempt_id = _optional_payload_text(
+        workflow_command.payload,
+        "causation_dispatch_attempt_id",
+    )
+    if causation_dispatch_attempt_id is not None:
+        context["causation_dispatch_attempt_id"] = causation_dispatch_attempt_id
+
+    return context
 
 
 def _active_model_ref_from_payload(payload: Mapping[str, object]) -> str:
@@ -495,6 +542,15 @@ def _optional_payload_mapping(
         return None
     if not isinstance(value, Mapping):
         raise ValueError(f"workflow command payload {key} must be mapping")
+    return value
+
+
+def _optional_payload_text(payload: Mapping[str, object], key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"workflow command payload {key} must be non-empty text")
     return value
 
 

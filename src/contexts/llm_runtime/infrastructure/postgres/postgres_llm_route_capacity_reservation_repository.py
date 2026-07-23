@@ -5,11 +5,22 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+import structlog
+
+
+LOGGER = structlog.get_logger(__name__)
+
 
 class LlmRouteCapacityReservationConnectionLike(Protocol):
     async def execute(self, query: str, *args: object) -> str: ...
 
     async def fetch(self, query: str, *args: object) -> list[Mapping[str, object]]: ...
+
+    async def fetchrow(
+        self,
+        query: str,
+        *args: object,
+    ) -> Mapping[str, object] | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +177,16 @@ class PostgresLlmRouteCapacityReservationRepository:
             raise ValueError("actual_tokens must be >= 0 when provided")
         _require_timezone_aware(finalized_at, field_name="finalized_at")
 
-        await self._connection.execute(
+        LOGGER.info(
+            "llm_capacity_reservation_transition_started",
+            reservation_id=attempt_id,
+            dispatch_attempt_id=attempt_id,
+            status_before="active",
+            status_after=final_status,
+            transition_reason="dispatch_outcome_recorded",
+            transitioned_at=finalized_at.isoformat(),
+        )
+        row = await self._connection.fetchrow(
             """
             UPDATE llm_route_capacity_reservations
             SET
@@ -175,11 +195,49 @@ class PostgresLlmRouteCapacityReservationRepository:
                 finalized_at = $4
             WHERE attempt_id = $1
               AND status = 'active'
+            RETURNING
+                attempt_id,
+                provider,
+                account_ref,
+                model_ref,
+                reserved_requests,
+                reserved_tokens,
+                created_at,
+                finalized_at,
+                status
             """,
             attempt_id,
             final_status,
             actual_tokens,
             finalized_at,
+        )
+        if row is None:
+            LOGGER.info(
+                "llm_capacity_reservation_transition_skipped",
+                reservation_id=attempt_id,
+                dispatch_attempt_id=attempt_id,
+                requested_status_after=final_status,
+                transition_reason="dispatch_outcome_recorded",
+                skip_reason="no_active_reservation_matched",
+                transitioned_at=finalized_at.isoformat(),
+            )
+            return
+
+        LOGGER.info(
+            "llm_capacity_reservation_transition_completed",
+            reservation_id=_row_text(row, "attempt_id"),
+            dispatch_attempt_id=_row_text(row, "attempt_id"),
+            provider=_row_text(row, "provider"),
+            account_ref=_row_text(row, "account_ref"),
+            model_ref=_row_text(row, "model_ref"),
+            status_before="active",
+            status_after=_row_text(row, "status"),
+            reserved_requests=_row_non_negative_int(row, "reserved_requests"),
+            reserved_tokens=_row_non_negative_int(row, "reserved_tokens"),
+            transition_reason="dispatch_outcome_recorded",
+            created_at=_row_datetime(row, "created_at").isoformat(),
+            transitioned_at=_row_datetime(row, "finalized_at").isoformat(),
+            actual_tokens=actual_tokens,
         )
 
 
@@ -215,6 +273,14 @@ def _row_non_negative_int(row: Mapping[str, object], key: str) -> int:
     value = row.get(key)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ValueError(f"{key} must be non-negative int")
+    return value
+
+
+def _row_datetime(row: Mapping[str, object], key: str) -> datetime:
+    value = row.get(key)
+    if not isinstance(value, datetime):
+        raise ValueError(f"{key} must be datetime")
+    _require_timezone_aware(value, field_name=key)
     return value
 
 

@@ -8,6 +8,8 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Protocol
 
+import structlog
+
 from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
     WorkItemProgressReadRepositoryPort,
     WorkItemProgressSummary,
@@ -51,6 +53,9 @@ from src.contexts.workflow_runtime.domain.value_objects.workflow_event_id import
 from src.contexts.workflow_runtime.domain.value_objects.workflow_idempotency_key import (
     WorkflowIdempotencyKey,
 )
+
+
+LOGGER = structlog.get_logger(__name__)
 
 
 class ClaimBuilderProgressReconcileDecision(StrEnum):
@@ -151,6 +156,34 @@ class HandleReconcileClaimBuilderProgressCommandHandler:
             summary=summary,
             retry_action_summary=retry_action_summary,
             occurred_at=occurred_at,
+        )
+        LOGGER.info(
+            "claim_builder_reconcile_decision",
+            workflow_run_id=workflow_run_id,
+            source_dispatch_attempt_id=_optional_payload_text(
+                workflow_command.payload,
+                "dispatch_attempt_id",
+            ),
+            total_count=summary.total_count,
+            due_waiting_count=summary.due_waiting_count,
+            retryable_failed_count=summary.retryable_failed_count,
+            completed_count=summary.completed_count,
+            terminal_coverage_count=summary.terminal_coverage_count,
+            split_required_count=retry_action_summary.split_required_count,
+            retry_next_run_after=retry_action_summary.next_run_after.isoformat()
+            if retry_action_summary.next_run_after is not None
+            else None,
+            decision=decision.value,
+            next_prepare_command_id=next_command.command_id.value
+            if next_command is not None
+            and next_command.command_type
+            == KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+            else None,
+            next_prepare_run_after=next_command.run_after.isoformat()
+            if next_command is not None
+            and next_command.command_type
+            == KnowledgeExtractionCanonicalCommandType.PREPARE_CLAIM_BUILDER_DISPATCH_BATCH.value
+            else None,
         )
         appended_next_command_count = 0
         if next_command is not None:
