@@ -119,7 +119,14 @@ class GroqChatRequestBuilder:
 
         reasoning_effort: ReasoningEffort | None = None
         if options.execution_settings is not None:
-            if options.execution_settings.reasoning_enabled:
+            if not options.execution_settings.reasoning_enabled:
+                if (
+                    model_profile.reasoning_profile is not None
+                    and ReasoningEffort.NONE
+                    in model_profile.reasoning_profile.supported_efforts
+                ):
+                    reasoning_effort = ReasoningEffort.NONE
+            else:
                 reasoning_effort = options.reasoning_effort
                 if (
                     reasoning_effort is None
