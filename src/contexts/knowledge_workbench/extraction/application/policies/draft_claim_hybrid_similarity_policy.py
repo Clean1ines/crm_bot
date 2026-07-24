@@ -37,20 +37,35 @@ class DraftClaimHybridSimilarityPolicy:
     supported_vector_threshold: float = 0.925
     question_bridge_threshold: float = 0.10
     lexical_bridge_threshold: float = 0.15
+    max_edges_per_claim: int = 32
+
+    def __post_init__(self) -> None:
+        if self.max_edges_per_claim <= 0:
+            raise ValueError("max_edges_per_claim must be > 0")
 
     def build_edges(
         self,
         claims: tuple[DraftClaimForCompaction, ...],
     ) -> tuple[DraftClaimCompactionEdgeCandidate, ...]:
         ordered = tuple(sorted(claims, key=lambda claim: claim.observation_ref))
-        edges: list[DraftClaimCompactionEdgeCandidate] = []
+        bounded_edges: list[DraftClaimCompactionEdgeCandidate] = []
         for index, left in enumerate(ordered):
+            left_edges: list[DraftClaimCompactionEdgeCandidate] = []
             for right in ordered[index + 1 :]:
                 edge = self._build_edge(left, right)
                 if edge.signals["admitted_by_policy"] is True:
-                    edges.append(edge)
+                    left_edges.append(edge)
+
+            left_edges.sort(
+                key=lambda edge: (-edge.combined_score, edge.edge_ref)
+            )
+            bounded_edges.extend(left_edges[: self.max_edges_per_claim])
+
         return tuple(
-            sorted(edges, key=lambda edge: (-edge.combined_score, edge.edge_ref))
+            sorted(
+                bounded_edges,
+                key=lambda edge: (-edge.combined_score, edge.edge_ref),
+            )
         )
 
     def _build_edge(

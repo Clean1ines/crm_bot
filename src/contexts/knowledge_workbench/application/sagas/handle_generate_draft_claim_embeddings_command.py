@@ -97,11 +97,15 @@ class HandleGenerateDraftClaimEmbeddingsCommandHandler:
         *,
         input_builder: DraftClaimEmbeddingInputBuilder | None = None,
         read_limit: int = 1000,
+        generation_batch_size: int = 4,
     ) -> None:
         if read_limit <= 0:
             raise ValueError("read_limit must be > 0")
+        if generation_batch_size <= 0:
+            raise ValueError("generation_batch_size must be > 0")
         self._input_builder = input_builder or DraftClaimEmbeddingInputBuilder()
         self._read_limit = read_limit
+        self._generation_batch_size = generation_batch_size
 
     async def execute(
         self,
@@ -130,47 +134,73 @@ class HandleGenerateDraftClaimEmbeddingsCommandHandler:
             raise ValueError("payload workflow_run_id must match workflow command")
 
         occurred_at = workflow_command.updated_at
-        observations = await draft_claim_embedding_read_repository.list_unembedded_claim_observations_by_workflow_run_id(
-            workflow_run_id=workflow_run_id,
-            embedding_model_id=embedding_model_id,
-            limit=self._read_limit,
-        )
-        inputs = self._input_builder.build(observations)
+        requested_count = 0
+        inserted_count = 0
+        already_exists_count = 0
+        processed_any = False
+        seen_observation_refs: set[str] = set()
 
-        persistence_result = PersistDraftClaimEmbeddingsResult(
-            requested_count=0,
-            inserted_count=0,
-            already_exists_count=0,
-        )
-        if inputs:
-            embedding_result = await embedding_generation_port.embed(
-                EmbeddingGenerationRequest(
-                    texts=tuple(item.text for item in inputs),
-                    model_id=embedding_model_id,
-                    expected_dimensions=embedding_dimensions,
-                    task="retrieval.passage",
-                )
+        while True:
+            observations = await draft_claim_embedding_read_repository.list_unembedded_claim_observations_by_workflow_run_id(
+                workflow_run_id=workflow_run_id,
+                embedding_model_id=embedding_model_id,
+                limit=self._read_limit,
             )
-            if len(embedding_result.embeddings) != len(inputs):
-                raise ValueError("embedding result count must match input count")
-            if embedding_result.dimensions != embedding_dimensions:
-                raise ValueError(
-                    "embedding result dimensions must match expected dimensions"
-                )
+            inputs = self._input_builder.build(observations)
+            if not inputs:
+                break
 
-            persistence_result = (
-                await draft_claim_embedding_persistence.persist_draft_claim_embeddings(
-                    _candidates(
-                        workflow_command=workflow_command,
-                        workflow_run_id=workflow_run_id,
-                        inputs=inputs,
-                        vectors=embedding_result.embeddings,
-                        embedding_model_id=embedding_model_id,
-                        dimensions=embedding_dimensions,
+            page_refs = {item.observation_ref.value for item in inputs}
+            repeated_refs = page_refs & seen_observation_refs
+            if repeated_refs:
+                raise RuntimeError(
+                    "embedding pagination made no progress; repeated observations"
+                )
+            seen_observation_refs.update(page_refs)
+
+            for input_batch in _chunked(inputs, self._generation_batch_size):
+                embedding_result = await embedding_generation_port.embed(
+                    EmbeddingGenerationRequest(
+                        texts=tuple(item.text for item in input_batch),
+                        model_id=embedding_model_id,
+                        expected_dimensions=embedding_dimensions,
+                        task="retrieval.passage",
                     )
                 )
-            )
+                if len(embedding_result.embeddings) != len(input_batch):
+                    raise ValueError("embedding result count must match input count")
+                if embedding_result.dimensions != embedding_dimensions:
+                    raise ValueError(
+                        "embedding result dimensions must match expected dimensions"
+                    )
 
+                batch_result = (
+                    await draft_claim_embedding_persistence.persist_draft_claim_embeddings(
+                        _candidates(
+                            workflow_command=workflow_command,
+                            workflow_run_id=workflow_run_id,
+                            inputs=input_batch,
+                            vectors=embedding_result.embeddings,
+                            embedding_model_id=embedding_model_id,
+                            dimensions=embedding_dimensions,
+                        )
+                    )
+                )
+                requested_count += batch_result.requested_count
+                inserted_count += batch_result.inserted_count
+                already_exists_count += batch_result.already_exists_count
+                processed_any = True
+
+            if len(observations) < self._read_limit:
+                break
+
+        persistence_result = PersistDraftClaimEmbeddingsResult(
+            requested_count=requested_count,
+            inserted_count=inserted_count,
+            already_exists_count=already_exists_count,
+        )
+
+        if processed_any:
             persisted_batch_event = await workflow_unit_of_work.outbox.append_event(
                 _batch_completed_event(
                     workflow_command=workflow_command,
@@ -225,10 +255,20 @@ class HandleGenerateDraftClaimEmbeddingsCommandHandler:
             workflow_run_id=workflow_run_id,
             requested_embedding_count=persistence_result.requested_count,
             persisted_embedding_count=persistence_result.inserted_count,
-            appended_event_count=2 if inputs else 1,
+            appended_event_count=2 if processed_any else 1,
             appended_next_command_count=1,
             completed_command_id=workflow_command.command_id,
         )
+
+
+def _chunked(
+    inputs: tuple[DraftClaimEmbeddingInput, ...],
+    batch_size: int,
+) -> tuple[tuple[DraftClaimEmbeddingInput, ...], ...]:
+    return tuple(
+        inputs[index : index + batch_size]
+        for index in range(0, len(inputs), batch_size)
+    )
 
 
 def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
