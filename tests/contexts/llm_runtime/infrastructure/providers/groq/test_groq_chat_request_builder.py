@@ -122,7 +122,7 @@ def test_qwen_default_reasoning_effort_is_none_to_preserve_output_budget() -> No
     assert request.payload["reasoning_effort"] == "none"
 
 
-def test_disabled_execution_settings_suppress_model_default_reasoning() -> None:
+def test_disabled_execution_settings_send_none_reasoning_effort() -> None:
     qwen_profile = build_groq_free_plan_model_profiles()[0]
 
     request = GroqChatRequestBuilder().build(
@@ -134,10 +134,10 @@ def test_disabled_execution_settings_suppress_model_default_reasoning() -> None:
         ),
     )
 
-    assert "reasoning_effort" not in request.payload
+    assert request.payload["reasoning_effort"] == "none"
 
 
-def test_qwen_default_catalog_settings_suppress_reasoning() -> None:
+def test_qwen_default_catalog_settings_send_none_reasoning_effort() -> None:
     qwen_profile = build_groq_free_plan_model_profiles()[0]
     settings = default_groq_llm_model_route_catalog().execution_settings_for_model_ref(
         "qwen/qwen3.6-27b",
@@ -150,7 +150,7 @@ def test_qwen_default_catalog_settings_suppress_reasoning() -> None:
         options=GroqChatRequestOptions(execution_settings=settings),
     )
 
-    assert "reasoning_effort" not in request.payload
+    assert request.payload["reasoning_effort"] == "none"
 
 
 def test_execution_settings_enabled_uses_explicit_reasoning_effort() -> None:

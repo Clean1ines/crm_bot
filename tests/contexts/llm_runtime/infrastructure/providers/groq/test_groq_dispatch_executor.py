@@ -162,12 +162,13 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
             "content": "Extract claims",
         },
     ]
-    assert "reasoning_effort" not in request_payload
-    assert request_payload["max_completion_tokens"] == 6700
+    assert request_payload["reasoning_effort"] == "none"
+    assert "max_completion_tokens" not in request_payload
+    assert "max_tokens" not in request_payload
 
 
 @pytest.mark.asyncio
-async def test_claim_builder_budget_caps_completion_tokens_by_remaining_tpm() -> None:
+async def test_claim_builder_budget_is_not_sent_as_provider_completion_cap() -> None:
     transport = FakeGroqTransport(response=_success_response(raw_text='{"done": true}'))
     schedule_payload = {
         "provider_messages": [
@@ -202,8 +203,9 @@ async def test_claim_builder_budget_caps_completion_tokens_by_remaining_tpm() ->
 
     assert result.status is LlmDispatchExecutionStatus.SUCCEEDED
     request_payload = transport.payloads[0]
-    assert request_payload["max_completion_tokens"] == 4323
-    assert 3357 + request_payload["max_completion_tokens"] <= 8000
+    assert "max_completion_tokens" not in request_payload
+    assert "max_tokens" not in request_payload
+    assert request_payload["reasoning_effort"] == "none"
 
 
 @pytest.mark.asyncio

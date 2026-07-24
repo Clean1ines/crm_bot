@@ -75,17 +75,11 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 execution_input,
             )
             model_profile = self._find_model_profile(route=parsed.route)
-            max_completion_tokens = _resolve_max_completion_tokens(
-                parsed=parsed,
-                model_profile=model_profile,
-                completion_gap_tokens=self.max_completion_token_gap,
-            )
             request = self.request_builder.build(
                 route=parsed.route,
                 model_profile=model_profile,
                 messages=parsed.messages,
                 options=GroqChatRequestOptions(
-                    max_completion_tokens=max_completion_tokens,
                     execution_settings=parsed.execution_settings,
                 ),
             )
