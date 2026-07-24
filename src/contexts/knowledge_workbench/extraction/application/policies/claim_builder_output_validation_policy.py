@@ -18,7 +18,9 @@ _CLAIM_FIELDS = frozenset(
         "exclusion_scope",
     }
 )
-_LATIN_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+_LATIN_TOKEN_RE = re.compile(
+    r"[A-Za-z][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*"
+)
 
 
 class ClaimBuilderOutputValidationDecision(Enum):
