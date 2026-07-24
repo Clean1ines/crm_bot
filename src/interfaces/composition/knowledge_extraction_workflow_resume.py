@@ -84,6 +84,12 @@ from src.contexts.knowledge_workbench.application.sagas.drain_knowledge_extracti
 from src.contexts.knowledge_workbench.application.sagas.handle_execute_claim_builder_section_command import (
     ExecutePreparedLlmDispatchAttemptPort,
 )
+from src.contexts.knowledge_workbench.application.sagas.draft_claim_compaction_dispatch_preparation import (
+    DraftClaimCompactionDispatchPreparationBuilder,
+)
+from src.contexts.knowledge_workbench.application.sagas.handle_prepare_draft_claim_compaction_dispatch_batch_command import (
+    DRAFT_CLAIM_COMPACTION_WORK_KIND,
+)
 from src.contexts.knowledge_workbench.application.sagas.handle_prepare_claim_builder_dispatch_batch_command import (
     PrepareLlmDispatchBatchPort,
 )
@@ -155,6 +161,7 @@ from src.interfaces.composition.execute_prepared_llm_dispatch_attempt import (
 )
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     AsyncPool,
+    DispatchPreparationBuilderRegistry,
     PrepareLlmDispatchBatch,
 )
 
@@ -628,6 +635,15 @@ def make_knowledge_extraction_workflow_resume(
                 account.account_seed.account_ref for account in groq_env_config.accounts
             ),
             model_profiles=build_groq_free_plan_model_profiles(),
+            dispatch_preparation_builder_registry=(
+                DispatchPreparationBuilderRegistry(
+                    builders_by_work_kind={
+                        DRAFT_CLAIM_COMPACTION_WORK_KIND: (
+                            DraftClaimCompactionDispatchPreparationBuilder()
+                        ),
+                    },
+                )
+            ),
         ),
         execute_prepared_llm_dispatch_attempt=(
             _TransactionalExecutePreparedLlmDispatchAttempt(
