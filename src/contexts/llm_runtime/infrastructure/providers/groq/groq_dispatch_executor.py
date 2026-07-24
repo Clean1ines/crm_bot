@@ -224,6 +224,17 @@ class GroqDispatchExecutor(LlmDispatchExecutorPort):
                 provider_error_shape=error_diagnostics["error_shape"],
                 provider_request_id=provider_request_id,
                 provider_error_extra_keys=error_diagnostics["extra_keys"],
+                failed_generation_char_count=error_diagnostics[
+                    "failed_generation_char_count"
+                ],
+            )
+            _log_failed_generation_chunks(
+                failed_generation=error_diagnostics["failed_generation"],
+                workflow_run_id=parsed.workflow_run_id,
+                dispatch_attempt_id=execution_input.attempt_id,
+                work_item_id=execution_input.work_item_id,
+                attempt_number=execution_input.attempt_number,
+                provider_request_id=provider_request_id,
             )
         else:
             error_diagnostics = None
@@ -743,7 +754,13 @@ def _response_body_diagnostics(body: object) -> dict[str, object]:
 def _provider_error_diagnostics(body: Mapping[str, object]) -> dict[str, object]:
     error = body.get("error")
     if isinstance(error, Mapping):
-        known_keys = {"message", "type", "code"}
+        failed_generation_value = error.get("failed_generation")
+        failed_generation = (
+            failed_generation_value
+            if isinstance(failed_generation_value, str)
+            else None
+        )
+        known_keys = {"message", "type", "code", "failed_generation"}
         return {
             "error_message": _optional_string_value(error.get("message")),
             "error_type": _optional_string_value(error.get("type")),
@@ -751,6 +768,12 @@ def _provider_error_diagnostics(body: Mapping[str, object]) -> dict[str, object]
             "error_shape": "nested_error_object",
             "extra_keys": tuple(
                 sorted(str(key) for key in error.keys() if key not in known_keys)
+            ),
+            "failed_generation": failed_generation,
+            "failed_generation_char_count": (
+                len(failed_generation)
+                if failed_generation is not None
+                else None
             ),
         }
     if isinstance(error, str):
@@ -760,6 +783,8 @@ def _provider_error_diagnostics(body: Mapping[str, object]) -> dict[str, object]
             "error_code": None,
             "error_shape": "error_string_omitted",
             "extra_keys": ("error",),
+            "failed_generation": None,
+            "failed_generation_char_count": None,
         }
     return {
         "error_message": None,
@@ -767,7 +792,45 @@ def _provider_error_diagnostics(body: Mapping[str, object]) -> dict[str, object]
         "error_code": None,
         "error_shape": "unknown_mapping",
         "extra_keys": tuple(sorted(str(key) for key in body.keys())),
+        "failed_generation": None,
+        "failed_generation_char_count": None,
     }
+
+
+def _log_failed_generation_chunks(
+    *,
+    failed_generation: object,
+    workflow_run_id: str | None,
+    dispatch_attempt_id: str,
+    work_item_id: str,
+    attempt_number: int,
+    provider_request_id: str | None,
+    chunk_size: int = 3000,
+) -> None:
+    if not isinstance(failed_generation, str):
+        return
+    if not failed_generation:
+        return
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be > 0")
+
+    chunk_count = (len(failed_generation) + chunk_size - 1) // chunk_size
+
+    for chunk_index in range(chunk_count):
+        chunk_start = chunk_index * chunk_size
+        chunk = failed_generation[chunk_start : chunk_start + chunk_size]
+        LOGGER.warning(
+            "llm_groq_failed_generation_chunk",
+            workflow_run_id=workflow_run_id,
+            dispatch_attempt_id=dispatch_attempt_id,
+            work_item_id=work_item_id,
+            attempt_number=attempt_number,
+            provider_request_id=provider_request_id,
+            chunk_index=chunk_index,
+            chunk_count=chunk_count,
+            chunk_start=chunk_start,
+            chunk=chunk,
+        )
 
 
 def _optional_string_value(value: object) -> str | None:
