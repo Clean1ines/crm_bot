@@ -46,6 +46,9 @@ _PROJECTION_TYPES = {
     KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED.value: (
         "workflow_draft_claim_compaction_progress_reconciled"
     ),
+    KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED.value: (
+        "workflow_draft_claim_compaction_progress_blocked"
+    ),
     KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE.value: (
         "workflow_draft_claim_compaction_waiting_user_model_choice"
     ),
@@ -93,6 +96,9 @@ _ALLOWED_PAYLOAD_KEYS = frozenset(
         "next_command_type",
         "next_batch",
         "summary",
+        "group_counters",
+        "execution_counters",
+        "next_due_at",
         "primary_model_id",
         "degraded_candidate_model_id",
         "node_refs",

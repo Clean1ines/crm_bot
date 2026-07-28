@@ -90,6 +90,7 @@ class KnowledgeExtractionCanonicalEventType(StrEnum):
     DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED = (
         "DraftClaimCompactionProgressReconciled"
     )
+    DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED = "DraftClaimCompactionProgressBlocked"
     DRAFT_CLAIM_COMPACTION_ALL_GROUPS_COMPACTED = (
         "DraftClaimCompactionAllGroupsCompacted"
     )
@@ -604,6 +605,7 @@ DEFAULT_KNOWLEDGE_EXTRACTION_WORKFLOW_CONTRACT = KnowledgeExtractionWorkflowCont
             intermediate_event_types=(
                 KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED,
                 KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE,
+                KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED,
             ),
             next_command_types=(
                 KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE,

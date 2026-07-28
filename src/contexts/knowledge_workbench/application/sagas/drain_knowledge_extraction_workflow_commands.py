@@ -293,6 +293,7 @@ class DrainKnowledgeExtractionWorkflowCommands:
                 curation_workspace_repository=curation_workspace_repository,
                 curation_publication_repository=curation_publication_repository,
                 workflow_state_repository=workflow_state_repository,
+                command_log_repository=workflow_unit_of_work.command_log,
                 draft_claim_compaction_output_validator=(
                     draft_claim_compaction_output_validator
                 ),

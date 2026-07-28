@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import datetime
 
 import asyncpg
@@ -232,6 +232,40 @@ class PostgresCommandLogRepository(CommandLogRepositoryPort):
             limit,
         )
         return tuple(_hydrate_command(row) for row in rows)
+
+    async def has_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        command_types: Collection[str],
+        excluding_command_id: WorkflowCommandId | None = None,
+    ) -> bool:
+        if not workflow_run_id.strip():
+            raise ValueError("workflow_run_id must be non-empty")
+        command_type_values = tuple(command_types)
+        if not command_type_values:
+            return False
+
+        return bool(
+            await self._connection.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM workflow_runtime_command_log
+                    WHERE workflow_run_id = $1
+                      AND status = $2
+                      AND command_type = ANY($3::text[])
+                      AND ($4::text IS NULL OR command_id != $4)
+                )
+                """,
+                workflow_run_id,
+                WorkflowCommandStatus.PENDING.value,
+                list(command_type_values),
+                excluding_command_id.value
+                if excluding_command_id is not None
+                else None,
+            )
+        )
 
     async def _load_by_idempotency_key(
         self,

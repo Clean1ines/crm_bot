@@ -6,6 +6,10 @@ from datetime import datetime, timezone
 import pytest
 
 from src.contexts.execution_runtime.domain.entities.work_item import WorkItem
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressSummary,
+)
+from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.interfaces.composition.prepare_llm_dispatch_batch import (
     PrepareLlmDispatchBatchCommand,
 )
@@ -294,6 +298,21 @@ class FakeCommandLogRepository:
     ) -> tuple[WorkflowCommand, ...]:
         del workflow_run_id, limit
         return ()
+
+    async def has_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        command_types: tuple[str, ...],
+        excluding_command_id: WorkflowCommandId | None = None,
+    ) -> bool:
+        return any(
+            command.workflow_run_id == workflow_run_id
+            and command.status is WorkflowCommandStatus.PENDING
+            and command.command_type in command_types
+            and command.command_id != excluding_command_id
+            for command in self.pending_commands
+        )
 
 
 @dataclass(slots=True)
@@ -656,6 +675,31 @@ class FakeDraftClaimCompactionReductionStateRepository:
         return _apply_persistence_result()
 
 
+@dataclass(slots=True)
+class FakeWorkItemProgressReadRepository:
+    async def summarize_by_work_kind_and_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        work_kind: WorkKind,
+        now: datetime,
+    ) -> WorkItemProgressSummary:
+        del workflow_run_id, work_kind, now
+        return WorkItemProgressSummary(
+            ready_count=1,
+            leased_count=0,
+            deferred_count=0,
+            retryable_failed_count=0,
+            completed_count=0,
+            terminal_failed_count=0,
+            cancelled_count=0,
+            split_superseded_count=0,
+            user_action_required_count=0,
+            total_count=1,
+            next_due_at=None,
+        )
+
+
 @pytest.mark.asyncio
 async def test_cluster_draft_claims_requires_reduction_state_repository() -> None:
     result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
@@ -751,6 +795,7 @@ async def test_apply_draft_claim_compaction_result_requires_raw_claim_read_repos
         draft_claim_compaction_reduction_state_repository=(
             FakeDraftClaimCompactionReductionStateRepository()
         ),
+        work_item_progress_read_repository=FakeWorkItemProgressReadRepository(),
     )
 
     assert result.dispatched is False
@@ -850,6 +895,7 @@ async def test_reconcile_draft_claim_compaction_progress_requires_reduction_stat
 async def test_reconcile_draft_claim_compaction_progress_dispatches_when_dependency_exists() -> (
     None
 ):
+    workflow_unit_of_work = FakeWorkflowRuntimeUnitOfWork()
     result = await DispatchKnowledgeExtractionWorkflowCommandHandler().execute(
         DispatchKnowledgeExtractionWorkflowCommand(
             workflow_command=_workflow_command(
@@ -858,10 +904,12 @@ async def test_reconcile_draft_claim_compaction_progress_dispatches_when_depende
         ),
         source_unit_repository=FakeSourceManagementRepository(),
         knowledge_unit_of_work=FakeWorkItemSchedulingRepository(),
-        workflow_unit_of_work=FakeWorkflowRuntimeUnitOfWork(),
+        workflow_unit_of_work=workflow_unit_of_work,
         draft_claim_compaction_reduction_state_repository=(
             FakeDraftClaimCompactionReductionStateRepository()
         ),
+        work_item_progress_read_repository=FakeWorkItemProgressReadRepository(),
+        command_log_repository=workflow_unit_of_work.command_log,
     )
 
     assert result.dispatched is True

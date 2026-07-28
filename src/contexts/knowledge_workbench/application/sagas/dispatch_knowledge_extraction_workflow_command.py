@@ -127,6 +127,9 @@ from src.contexts.knowledge_workbench.source_management.application.ports.source
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
 )
+from src.contexts.workflow_runtime.application.ports.command_log_repository_port import (
+    CommandLogRepositoryPort,
+)
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
 )
@@ -221,6 +224,7 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
         | None = None,
         workflow_state_repository: KnowledgeExtractionSagaStateRepositoryPort
         | None = None,
+        command_log_repository: CommandLogRepositoryPort | None = None,
         draft_claim_compaction_output_validator: (
             DraftClaimCompactionOutputValidator | None
         ) = None,
@@ -635,7 +639,11 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
             command_type
             is KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS
         ):
-            if draft_claim_compaction_reduction_state_repository is None:
+            if (
+                draft_claim_compaction_reduction_state_repository is None
+                or work_item_progress_read_repository is None
+                or command_log_repository is None
+            ):
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
                     command_type=command_type.value,
@@ -654,6 +662,8 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 compaction_reduction_state_repository=(
                     draft_claim_compaction_reduction_state_repository
                 ),
+                work_item_progress_read_repository=work_item_progress_read_repository,
+                command_log_repository=command_log_repository,
                 frontend_event_projection_writer=frontend_event_projection_writer,
             )
             return DispatchKnowledgeExtractionWorkflowCommandResult(

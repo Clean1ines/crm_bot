@@ -94,6 +94,7 @@ def _command(
     expected_output_kind: str = "compacted_claims",
     source_node_refs: tuple[str, ...] = (),
     status: WorkflowCommandStatus = WorkflowCommandStatus.PENDING,
+    include_prepare_provenance: bool = False,
 ) -> WorkflowCommand:
     payload: dict[str, object] = {
         "workflow_run_id": _workflow_run_id(),
@@ -106,6 +107,34 @@ def _command(
         "source_claim_refs": ["claim-a", "claim-b"],
         "source_node_refs": list(source_node_refs),
     }
+    if include_prepare_provenance:
+        payload.update(
+            {
+                "work_kind": "knowledge_workbench.draft_claim_compaction",
+                "scheduled_work_item_count": 7,
+                "active_model_ref": "openai/gpt-oss-120b",
+                "capacity_window_provider": "groq",
+                "capacity_window_provider_account_refs": [
+                    "groq_org_primary",
+                    "groq_org_secondary",
+                ],
+                "capacity_window_model_ref": "openai/gpt-oss-120b",
+                "llm_dispatch_preparation": {
+                    "active_model_ref": "openai/gpt-oss-120b",
+                    "requested_items": 7,
+                    "worker_ref": (
+                        "knowledge-workbench-draft-claim-compaction-dispatch"
+                    ),
+                    "account_capacities": (
+                        {
+                            "provider": "groq",
+                            "account_ref": "groq_org_primary",
+                            "model_ref": "openai/gpt-oss-120b",
+                        },
+                    ),
+                },
+            }
+        )
     return WorkflowCommand(
         command_id=WorkflowCommandId("workflow-command:ExecuteDraftClaimCompaction"),
         command_type=KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value,
@@ -340,6 +369,7 @@ def _execution_result(
     status: LlmDispatchExecutionStatus,
     output_payload: Mapping[str, object] | None,
     validation_metadata: Mapping[str, object] | None,
+    minute_reset_at: datetime | None = None,
 ) -> ExecutePreparedLlmDispatchAttemptResult:
     return ExecutePreparedLlmDispatchAttemptResult(
         dispatch=_dispatch(),
@@ -359,6 +389,7 @@ def _execution_result(
                 "model_ref": "openai/gpt-oss-120b",
                 "outcome_class": status.value,
                 "observed_at": _now(),
+                "minute_reset_at": minute_reset_at,
                 "actual_prompt_tokens": 10,
                 "actual_completion_tokens": 5,
                 "actual_total_tokens": 15,
@@ -494,6 +525,61 @@ async def test_handler_success_creates_apply_command_and_records_capacity() -> N
     assert workflow_uow.progress_snapshots.snapshot is not None
     assert len(workflow_uow.timeline.entries) == 1
     assert workflow_uow.command_log.completed == [_command().command_id]
+
+
+@pytest.mark.asyncio
+async def test_capacity_observation_with_minute_reset_appends_prepare_wakeup() -> None:
+    validator = DraftClaimCompactionLlmDispatchOutputValidator(
+        expected_output_kind=DraftClaimCompactionExpectedOutputKind.COMPACTED_CLAIMS,
+        output_validator=DraftClaimCompactionOutputValidator(),
+        source_claim_refs=("claim-a", "claim-b"),
+    )
+    validation = validator.validate(
+        dispatch_payload=_dispatch_payload(),
+        output_payload={"raw_text": _valid_compacted_raw_text()},
+        llm_status=LlmDispatchExecutionStatus.SUCCEEDED,
+        finished_at=_now(),
+        attempt_number=1,
+    )
+    workflow_uow = FakeWorkflowUnitOfWork()
+    minute_reset_at = _now() + timedelta(seconds=45)
+    command = _command(include_prepare_provenance=True)
+
+    result = await HandleExecuteDraftClaimCompactionCommandHandler().execute(
+        HandleExecuteDraftClaimCompactionCommand(workflow_command=command),
+        execute_prepared_llm_dispatch_attempt=FakeExecutePreparedDispatchAttempt(
+            _execution_result(
+                status=LlmDispatchExecutionStatus.SUCCEEDED,
+                output_payload={"raw_text": _valid_compacted_raw_text()},
+                validation_metadata=validation.metadata,
+                minute_reset_at=minute_reset_at,
+            )
+        ),
+        capacity_observation_repository=FakeCapacityObservationRepository(),
+        draft_claim_compaction_output_validator=DraftClaimCompactionOutputValidator(),
+        workflow_unit_of_work=workflow_uow,
+    )
+
+    assert result.appended_next_command_count == 2
+    assert len(workflow_uow.command_log.pending_commands) == 2
+    wakeup_command = workflow_uow.command_log.pending_commands[0]
+    assert wakeup_command.command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+    assert wakeup_command.run_after == minute_reset_at
+    assert wakeup_command.payload["scheduled_work_item_count"] == 7
+    assert wakeup_command.payload["capacity_window_provider"] == "groq"
+    assert wakeup_command.payload["capacity_window_provider_account_refs"] == [
+        "groq_org_primary"
+    ]
+    assert wakeup_command.payload["capacity_window_model_ref"] == (
+        "openai/gpt-oss-120b"
+    )
+    assert wakeup_command.payload["active_model_ref"] == "openai/gpt-oss-120b"
+    dispatch_preparation = wakeup_command.payload["llm_dispatch_preparation"]
+    assert isinstance(dispatch_preparation, dict)
+    assert dispatch_preparation["active_model_ref"] == "openai/gpt-oss-120b"
+    assert "account_capacities" not in dispatch_preparation
 
 
 @pytest.mark.asyncio

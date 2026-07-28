@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
@@ -46,3 +47,11 @@ class CommandLogRepositoryPort(Protocol):
         workflow_run_id: str,
         limit: int,
     ) -> tuple[WorkflowCommand, ...]: ...
+
+    async def has_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        command_types: Collection[str],
+        excluding_command_id: WorkflowCommandId | None = None,
+    ) -> bool: ...

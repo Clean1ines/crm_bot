@@ -36,18 +36,20 @@ def _command(
     command_id: str = "command-1",
     idempotency_key: str = "source-ingestion:workflow-1",
     command_type: str = "IngestSourceDocument",
+    workflow_run_id: str = "workflow-1",
+    run_after: datetime | None = None,
     payload: Mapping[str, object] | None = None,
 ) -> WorkflowCommand:
     return WorkflowCommand(
         command_id=WorkflowCommandId(command_id),
         command_type=command_type,
-        workflow_run_id="workflow-1",
+        workflow_run_id=workflow_run_id,
         idempotency_key=WorkflowIdempotencyKey(idempotency_key),
         payload={"source_document_ref": "source-document-1"}
         if payload is None
         else payload,
         status=WorkflowCommandStatus.PENDING,
-        run_after=_now(),
+        run_after=_now() if run_after is None else run_after,
         created_at=_now(),
         updated_at=_now(),
     )
@@ -117,6 +119,25 @@ class FakeConnection:
             ),
         )
         return rows[:limit]
+
+    async def fetchval(self, query: str, *args: object) -> object:
+        if "SELECT EXISTS" not in query:
+            raise AssertionError(query)
+        workflow_run_id = _arg_str(args, 0)
+        status = _arg_str(args, 1)
+        command_types = args[2]
+        if not isinstance(command_types, list):
+            raise TypeError("expected command type list")
+        excluded_command_id = args[3]
+        if excluded_command_id is not None and not isinstance(excluded_command_id, str):
+            raise TypeError("expected excluded command id")
+        return any(
+            row["workflow_run_id"] == workflow_run_id
+            and row["status"] == status
+            and row["command_type"] in command_types
+            and row["command_id"] != excluded_command_id
+            for row in self.rows_by_command_id.values()
+        )
 
 
 def _arg_str(args: tuple[object, ...], index: int) -> str:
@@ -236,3 +257,118 @@ async def test_list_pending_commands_returns_due_pending_commands_ordered() -> N
     )
     assert pending[0].run_after == _now()
     assert pending[1].run_after == _later()
+
+
+@pytest.mark.asyncio
+async def test_has_pending_commands_returns_true_for_due_pending_matching_type() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+    await repository.append_pending_command(_command(command_type="Prepare"))
+
+    assert await repository.has_pending_commands(
+        workflow_run_id="workflow-1",
+        command_types=("Prepare",),
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_pending_commands_returns_true_for_future_pending_matching_type() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+    await repository.append_pending_command(
+        _command(command_type="Prepare", run_after=_later())
+    )
+
+    assert await repository.has_pending_commands(
+        workflow_run_id="workflow-1",
+        command_types=("Prepare",),
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_pending_commands_ignores_completed_matching_type() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+    command = await repository.append_pending_command(_command(command_type="Prepare"))
+    await repository.mark_command_completed(
+        command_id=command.command_id,
+        completed_at=_later(),
+    )
+
+    assert not await repository.has_pending_commands(
+        workflow_run_id="workflow-1",
+        command_types=("Prepare",),
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_pending_commands_ignores_pending_different_type() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+    await repository.append_pending_command(_command(command_type="Different"))
+
+    assert not await repository.has_pending_commands(
+        workflow_run_id="workflow-1",
+        command_types=("Prepare",),
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_pending_commands_excludes_current_command_only() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+    command = await repository.append_pending_command(_command(command_type="Reconcile"))
+
+    assert not await repository.has_pending_commands(
+        workflow_run_id="workflow-1",
+        command_types=("Reconcile",),
+        excluding_command_id=command.command_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_pending_commands_sees_another_pending_when_current_excluded() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+    current = await repository.append_pending_command(
+        _command(command_id="command-1", idempotency_key="key-1", command_type="Reconcile")
+    )
+    await repository.append_pending_command(
+        _command(command_id="command-2", idempotency_key="key-2", command_type="Reconcile")
+    )
+
+    assert await repository.has_pending_commands(
+        workflow_run_id="workflow-1",
+        command_types=("Reconcile",),
+        excluding_command_id=current.command_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_pending_commands_empty_command_types_returns_false() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+    await repository.append_pending_command(_command(command_type="Prepare"))
+
+    assert not await repository.has_pending_commands(
+        workflow_run_id="workflow-1",
+        command_types=(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_has_pending_commands_ignores_different_workflow_run_id() -> None:
+    connection = FakeConnection()
+    repository = PostgresCommandLogRepository(cast(asyncpg.Connection, connection))
+    await repository.append_pending_command(
+        _command(
+            command_type="Prepare",
+            workflow_run_id="workflow-2",
+            idempotency_key="key-workflow-2",
+        )
+    )
+
+    assert not await repository.has_pending_commands(
+        workflow_run_id="workflow-1",
+        command_types=("Prepare",),
+    )

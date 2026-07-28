@@ -83,6 +83,10 @@ def _payload() -> dict[str, object]:
     return {
         "workflow_run_id": _workflow_run_id(),
         "scheduled_work_item_count": 1,
+        "retry_plan": {"max_attempts": 2},
+        "capacity_window_provider": "groq",
+        "capacity_window_provider_account_refs": ["groq_org_primary"],
+        "capacity_window_model_ref": "openai/gpt-oss-120b",
         "llm_dispatch_preparation": {
             "profile": {
                 "profile_id": "draft_claim_compaction",
@@ -350,6 +354,26 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     )
     assert execute_command.payload["dispatch_attempt_id"] == "attempt-1"
     assert execute_command.payload["work_item_id"] == "work-item-1"
+    assert execute_command.payload["work_kind"] == (
+        DRAFT_CLAIM_COMPACTION_WORK_KIND.value
+    )
+    assert execute_command.payload["draft_claim_compaction_prepare_command_id"] == (
+        _command().command_id.value
+    )
+    assert execute_command.payload[
+        "draft_claim_compaction_prepare_idempotency_key"
+    ] == _command().idempotency_key.value
+    assert execute_command.payload["scheduled_work_item_count"] == 1
+    assert execute_command.payload["active_model_ref"] == "openai/gpt-oss-120b"
+    assert execute_command.payload["llm_dispatch_preparation"] == _payload()[
+        "llm_dispatch_preparation"
+    ]
+    assert execute_command.payload["retry_plan"] == {"max_attempts": 2}
+    assert execute_command.payload["capacity_window_provider"] == "groq"
+    assert execute_command.payload["capacity_window_provider_account_refs"] == [
+        "groq_org_primary"
+    ]
+    assert execute_command.payload["capacity_window_model_ref"] == "openai/gpt-oss-120b"
     assert execute_command.payload["group_ref"] == "group-1"
     assert execute_command.payload["batch_ref"] == "batch-1"
     assert execute_command.payload["expected_output_kind"] == "compacted_claims"

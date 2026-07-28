@@ -251,6 +251,7 @@ class HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler:
             appended_event_count = 1
 
             next_commands = _execute_draft_claim_compaction_commands(
+                workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
                 started_attempts=started_attempts,
                 occurred_at=occurred_at,
@@ -536,10 +537,15 @@ async def _save_progress_snapshot(
 
 def _execute_draft_claim_compaction_commands(
     *,
+    workflow_command: WorkflowCommand,
     workflow_run_id: str,
     started_attempts: Sequence[object],
     occurred_at: datetime,
 ) -> tuple[WorkflowCommand, ...]:
+    scheduled_work_item_count = _payload_positive_int(
+        workflow_command.payload,
+        "scheduled_work_item_count",
+    )
     commands: list[WorkflowCommand] = []
     for attempt in started_attempts:
         dispatch_attempt_id = _attempt_text(attempt, "attempt_id")
@@ -548,6 +554,17 @@ def _execute_draft_claim_compaction_commands(
 
         command_payload: dict[str, object] = {
             "workflow_run_id": workflow_run_id,
+            "work_kind": DRAFT_CLAIM_COMPACTION_WORK_KIND.value,
+            "draft_claim_compaction_prepare_command_id": (
+                workflow_command.command_id.value
+            ),
+            "draft_claim_compaction_prepare_idempotency_key": (
+                workflow_command.idempotency_key.value
+            ),
+            "scheduled_work_item_count": scheduled_work_item_count,
+            "active_model_ref": _active_model_ref_from_payload(
+                workflow_command.payload,
+            ),
             "dispatch_attempt_id": dispatch_attempt_id,
             "work_item_id": work_item_id,
             "group_ref": _mapping_text(schedule_payload, "group_ref"),
@@ -559,6 +576,34 @@ def _execute_draft_claim_compaction_commands(
                 fallback="compacted_claims",
             ),
         }
+
+        llm_dispatch_preparation = workflow_command.payload.get(
+            "llm_dispatch_preparation"
+        )
+        if llm_dispatch_preparation is not None:
+            if not isinstance(llm_dispatch_preparation, Mapping):
+                raise ValueError(
+                    "workflow command payload llm_dispatch_preparation must be object"
+                )
+            command_payload["llm_dispatch_preparation"] = dict(
+                llm_dispatch_preparation
+            )
+
+        for copied_key in (
+            "retry_plan",
+            "selected_retry_plan",
+            "draft_claim_compaction_retry_plan",
+            "llm_dispatch_preparation_strategy",
+            "draft_claim_compaction_next_model_strategy",
+            "selected_retry_strategy",
+            "capacity_window_provider",
+            "capacity_window_provider_account_refs",
+            "capacity_window_model_ref",
+            "worker_ref",
+        ):
+            copied_value = workflow_command.payload.get(copied_key)
+            if copied_value is not None:
+                command_payload[copied_key] = copied_value
 
         for copied_key in (
             "source_claim_refs",

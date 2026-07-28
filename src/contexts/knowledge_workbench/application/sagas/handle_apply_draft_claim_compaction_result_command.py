@@ -178,7 +178,7 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
         if schedule.conflict_count:
             raise ValueError("draft claim compaction next work item schedule conflict")
 
-        next_workflow_command = _next_workflow_command_after_apply(
+        next_workflow_commands = _next_workflow_commands_after_apply(
             workflow_command=workflow_command,
             apply_command=apply_command,
             outcome=outcome,
@@ -186,12 +186,13 @@ class HandleApplyDraftClaimCompactionResultCommandHandler:
         )
         appended_next_command_count = 0
         next_command_type: str | None = None
-        if next_workflow_command is not None:
+        for next_workflow_command in next_workflow_commands:
             await workflow_unit_of_work.command_log.append_pending_command(
                 next_workflow_command,
             )
-            appended_next_command_count = 1
-            next_command_type = next_workflow_command.command_type
+            appended_next_command_count += 1
+            if next_command_type is None:
+                next_command_type = next_workflow_command.command_type
 
         await _append_applied_event(
             workflow_unit_of_work=workflow_unit_of_work,
@@ -585,13 +586,13 @@ def _raw_claim_ref_from_node_ref(node_ref: str) -> str | None:
     return raw_claim_ref
 
 
-def _next_workflow_command_after_apply(
+def _next_workflow_commands_after_apply(
     *,
     workflow_command: WorkflowCommand,
     apply_command: DraftClaimCompactionApplyResultCommand,
     outcome: DraftClaimCompactionApplyResultOutcome,
     schedule: EnsureWorkItemsScheduledResult,
-) -> WorkflowCommand | None:
+) -> tuple[WorkflowCommand, ...]:
     work_type = outcome.next_decision.work_type
     if work_type in {
         DraftClaimCompactionNextWorkItemType.DRAFT_VS_DRAFT,
@@ -599,30 +600,41 @@ def _next_workflow_command_after_apply(
         DraftClaimCompactionNextWorkItemType.MIXED,
         DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
     }:
-        scheduled_count = schedule.created_count + schedule.already_exists_count
-        if scheduled_count <= 0:
-            return None
-        batch_ref = _next_batch_ref(
-            group_ref=apply_command.group_ref,
-            next_work_item=outcome.next_decision.next_work_item,
+        commands: list[WorkflowCommand] = []
+        if schedule.created_count > 0:
+            batch_ref = _next_batch_ref(
+                group_ref=apply_command.group_ref,
+                next_work_item=outcome.next_decision.next_work_item,
+            )
+            commands.append(
+                _prepare_dispatch_batch_command(
+                    workflow_command=workflow_command,
+                    workflow_run_id=apply_command.workflow_run_id,
+                    batch_ref=batch_ref,
+                    next_work_item=outcome.next_decision.next_work_item,
+                    scheduled_work_item_count=schedule.created_count,
+                    occurred_at=workflow_command.updated_at,
+                )
+            )
+        commands.append(
+            _reconcile_progress_command(
+                workflow_command=workflow_command,
+                apply_command=apply_command,
+                reason=f"next-work:{work_type.value}",
+            )
         )
-        return _prepare_dispatch_batch_command(
-            workflow_command=workflow_command,
-            workflow_run_id=apply_command.workflow_run_id,
-            batch_ref=batch_ref,
-            next_work_item=outcome.next_decision.next_work_item,
-            scheduled_work_item_count=scheduled_count,
-            occurred_at=workflow_command.updated_at,
-        )
+        return tuple(commands)
 
     if work_type is DraftClaimCompactionNextWorkItemType.DONE:
-        return _reconcile_progress_command(
-            workflow_command=workflow_command,
-            apply_command=apply_command,
-            reason="done",
+        return (
+            _reconcile_progress_command(
+                workflow_command=workflow_command,
+                apply_command=apply_command,
+                reason="done",
+            ),
         )
 
-    return None
+    return ()
 
 
 def _prepare_dispatch_batch_command(
@@ -656,13 +668,11 @@ def _prepare_dispatch_batch_command(
                 "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
                 "requested_items": scheduled_work_item_count,
                 "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-                "account_capacities": (),
                 "profile": {
-                    "prompt_tokens": next_work_item.prompt_tokens,
-                    "artifact_tokens": next_work_item.artifact_tokens,
-                    "input_tokens": next_work_item.input_tokens,
-                    "required_window_tokens": next_work_item.required_window_tokens,
-                    "request_count": next_work_item.request_count,
+                    "profile_id": "draft_claim_compaction",
+                    "estimated_prompt_tokens": next_work_item.prompt_tokens,
+                    "estimated_completion_tokens": next_work_item.artifact_tokens,
+                    "estimated_requests": next_work_item.request_count,
                 },
             },
         },

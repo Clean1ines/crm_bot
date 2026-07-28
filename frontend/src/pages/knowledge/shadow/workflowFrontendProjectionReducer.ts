@@ -1657,6 +1657,10 @@ export const reduceWorkflowFrontendProjectionEvent = (
     }
 
     case "workflow_draft_claim_compaction_progress_reconciled": {
+      if (stageById(next, "draft_claim_compaction").status === "failed") {
+        appendTimeline(next, normalizedEvent, "Прогресс compaction сверён");
+        break;
+      }
       const summary = recordValue(payload, "summary");
       const totalGroups =
         intValue(summary ?? {}, "total_group_count") ??
@@ -1679,6 +1683,23 @@ export const reduceWorkflowFrontendProjectionEvent = (
       );
       next.workflow.current_phase = "draft_claim_compaction";
       appendTimeline(next, normalizedEvent, "Прогресс compaction сверён");
+      break;
+    }
+
+    case "workflow_draft_claim_compaction_progress_blocked": {
+      const reason = text(payload, "reason") ?? "unknown";
+      markStage(next, "draft_claim_compaction", "failed", normalizedEvent.occurred_at);
+      next.workflow.workflow_status = "failed";
+      next.document_status = "failed";
+      next.workflow.current_phase = "draft_claim_compaction";
+      freezeWorkflowTimer(next, normalizedEvent.occurred_at, "stopped");
+      hideActiveProcessingActions(next);
+      setWorkflowActionState(next, "open_curation", {
+        visible: false,
+        enabled: false,
+        reason_code: reason,
+      });
+      appendTimeline(next, normalizedEvent, `Compaction blocked: ${reason}`);
       break;
     }
 

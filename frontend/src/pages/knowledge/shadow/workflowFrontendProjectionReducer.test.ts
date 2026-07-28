@@ -320,6 +320,65 @@ describe("workflowFrontendProjectionReducer", () => {
     expect(state.workflow.usage.total_tokens).toBe(3877);
   });
 
+  it("keeps draft claim compaction failed after blocked and later progress events", () => {
+    let state = seed();
+
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_draft_claim_compaction_progress_blocked",
+        {
+          workflow_run_id: "knowledge-extraction:source-document:project-1:doc-1",
+          reason: "terminal_execution_failure",
+          group_counters: {
+            group_count: 2,
+            done_group_count: 1,
+            active_group_count: 1,
+          },
+          execution_counters: {
+            total_count: 2,
+            terminal_failed_count: 1,
+          },
+        },
+        3,
+      ),
+    );
+
+    expect(state.document_status).toBe("failed");
+    expect(state.workflow.workflow_status).toBe("failed");
+    expect(state.workflow.timer.mode).toBe("stopped");
+    expect(state.workflow.stages.find((item) => item.id === "draft_claim_compaction")).toMatchObject({
+      status: "failed",
+    });
+    expect(state.workflow.actions.find((item) => item.action_id === "open_curation")).toMatchObject({
+      visible: false,
+      enabled: false,
+      reason_code: "terminal_execution_failure",
+    });
+
+    state = reduceWorkflowFrontendProjectionEvent(
+      state,
+      baseEvent(
+        "workflow_draft_claim_compaction_progress_reconciled",
+        {
+          workflow_run_id: "knowledge-extraction:source-document:project-1:doc-1",
+          decision: "ACTIVE",
+          summary: {
+            group_count: 2,
+            done_group_count: 1,
+          },
+        },
+        4,
+      ),
+    );
+
+    expect(state.document_status).toBe("failed");
+    expect(state.workflow.workflow_status).toBe("failed");
+    expect(state.workflow.stages.find((item) => item.id === "draft_claim_compaction")).toMatchObject({
+      status: "failed",
+    });
+  });
+
   const seed = () =>
     createInitialWorkflowLiveStateResponse({
       documentId: "source-document:project-1:doc-1",

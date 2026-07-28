@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressReadRepositoryPort,
+    WorkItemProgressSummary,
+)
+from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -22,6 +27,9 @@ from src.contexts.knowledge_workbench.observability.application.projectors.proje
 )
 from src.contexts.workflow_runtime.application.ports.workflow_runtime_unit_of_work_port import (
     WorkflowRuntimeUnitOfWorkPort,
+)
+from src.contexts.workflow_runtime.application.ports.command_log_repository_port import (
+    CommandLogRepositoryPort,
 )
 from src.contexts.workflow_runtime.domain.entities.workflow_command import (
     WorkflowCommand,
@@ -52,12 +60,20 @@ class DraftClaimCompactionProgressDecision(StrEnum):
     PREPARE_NEXT_BATCH_LATER = "PREPARE_NEXT_BATCH_LATER"
     WAITING_USER_MODEL_CHOICE = "WAITING_USER_MODEL_CHOICE"
     ALL_GROUPS_COMPACTED = "ALL_GROUPS_COMPACTED"
+    COMPACTION_PROGRESS_BLOCKED = "COMPACTION_PROGRESS_BLOCKED"
 
 
 DRAFT_CLAIM_COMPACTION_WORK_KIND = "knowledge_workbench.draft_claim_compaction"
 DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
 DRAFT_CLAIM_COMPACTION_WORKER_REF = (
     "knowledge-workbench-draft-claim-compaction-dispatch"
+)
+PENDING_COMPACTION_CONTINUATION_COMMAND_TYPES = (
+    KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value,
+    KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value,
+    KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT.value,
+    KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value,
+    KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE.value,
 )
 
 
@@ -84,6 +100,8 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
         compaction_reduction_state_repository: (
             DraftClaimCompactionReductionStateRepositoryPort
         ),
+        work_item_progress_read_repository: WorkItemProgressReadRepositoryPort,
+        command_log_repository: CommandLogRepositoryPort | None = None,
         frontend_event_projection_writer: ProjectFrontendWorkflowEvent | None = None,
     ) -> HandleReconcileDraftClaimCompactionProgressResult:
         workflow_command = command.workflow_command
@@ -98,17 +116,41 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
             raise ValueError("payload workflow_run_id must match workflow command")
 
         occurred_at = workflow_command.updated_at
-        summary = (
+        command_log_read_repository = (
+            workflow_unit_of_work.command_log
+            if command_log_repository is None
+            else command_log_repository
+        )
+        reduction_summary = (
             await compaction_reduction_state_repository.summarize_compaction_progress(
                 workflow_run_id=workflow_run_id,
             )
         )
-        decision = _decide(summary)
+        execution_summary = (
+            await work_item_progress_read_repository.summarize_by_work_kind_and_workflow(
+                workflow_run_id=workflow_run_id,
+                work_kind=WorkKind(DRAFT_CLAIM_COMPACTION_WORK_KIND),
+                now=occurred_at,
+            )
+        )
+        has_pending_compaction_continuation = (
+            await command_log_read_repository.has_pending_commands(
+                workflow_run_id=workflow_run_id,
+                command_types=PENDING_COMPACTION_CONTINUATION_COMMAND_TYPES,
+                excluding_command_id=workflow_command.command_id,
+            )
+        )
+        decision = _decide(
+            reduction_summary,
+            execution_summary,
+            has_pending_compaction_continuation=has_pending_compaction_continuation,
+        )
 
         next_command = _next_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
-            summary=summary,
+            reduction_summary=reduction_summary,
+            execution_summary=execution_summary,
             decision=decision,
             occurred_at=occurred_at,
         )
@@ -120,7 +162,8 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
         progress_event = _progress_reconciled_event(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
-            summary=summary,
+            reduction_summary=reduction_summary,
+            execution_summary=execution_summary,
             decision=decision,
             occurred_at=occurred_at,
             next_command=next_command,
@@ -136,7 +179,8 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
             all_groups_compacted_event = _all_groups_compacted_event(
                 workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
-                summary=summary,
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
                 occurred_at=occurred_at,
                 next_command=next_command,
             )
@@ -154,7 +198,8 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
             waiting_user_choice_event = _waiting_user_choice_event(
                 workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
-                summary=summary,
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
                 occurred_at=occurred_at,
             )
             persisted_waiting_user_choice_event = (
@@ -167,11 +212,26 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
                     persisted_waiting_user_choice_event
                 )
             appended_event_count += 1
+        elif decision is DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED:
+            blocked_event = _progress_blocked_event(
+                workflow_command=workflow_command,
+                workflow_run_id=workflow_run_id,
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
+                occurred_at=occurred_at,
+            )
+            persisted_blocked_event = await workflow_unit_of_work.outbox.append_event(
+                blocked_event
+            )
+            if frontend_event_projection_writer is not None:
+                await frontend_event_projection_writer.execute(persisted_blocked_event)
+            appended_event_count += 1
 
         await _save_progress_snapshot(
             workflow_unit_of_work=workflow_unit_of_work,
             workflow_run_id=workflow_run_id,
-            summary=summary,
+            reduction_summary=reduction_summary,
+            execution_summary=execution_summary,
             decision=decision,
             occurred_at=occurred_at,
         )
@@ -179,7 +239,8 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
             _timeline_entry(
                 workflow_command=workflow_command,
                 workflow_run_id=workflow_run_id,
-                summary=summary,
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
                 decision=decision,
                 next_command=next_command,
                 occurred_at=occurred_at,
@@ -212,47 +273,66 @@ def _validate_workflow_command(workflow_command: WorkflowCommand) -> None:
 
 
 def _decide(
-    summary: DraftClaimCompactionProgressSummary,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
+    *,
+    has_pending_compaction_continuation: bool = False,
 ) -> DraftClaimCompactionProgressDecision:
-    if summary.has_waiting_user_model_choice:
+    if reduction_summary.has_waiting_user_model_choice:
         return DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE
-    if summary.all_groups_done and not summary.has_active_compaction_work_items:
-        return DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED
-    if summary.has_due_compaction_work_items:
+    if execution_summary.terminal_failed_count > 0:
+        return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
+    if execution_summary.due_waiting_count > 0:
         return DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_NOW
-    if summary.has_future_waiting_work:
+    if _has_future_waiting_work(execution_summary):
         return DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_LATER
-    return DraftClaimCompactionProgressDecision.ACTIVE
+    if execution_summary.leased_count > 0:
+        return DraftClaimCompactionProgressDecision.ACTIVE
+    if execution_summary.user_action_required_count > 0:
+        return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
+    if execution_summary.deferred_count > 0:
+        return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
+    if reduction_summary.all_groups_done:
+        if _has_clean_terminal_coverage(execution_summary):
+            return DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED
+        if has_pending_compaction_continuation:
+            return DraftClaimCompactionProgressDecision.ACTIVE
+        return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
+    if has_pending_compaction_continuation:
+        return DraftClaimCompactionProgressDecision.ACTIVE
+    return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
 
 
 def _next_command(
     *,
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
-    summary: DraftClaimCompactionProgressSummary,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
     decision: DraftClaimCompactionProgressDecision,
     occurred_at: datetime,
 ) -> WorkflowCommand | None:
+    del reduction_summary
     if decision is DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_NOW:
         return _prepare_dispatch_batch_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
-            scheduled_work_item_count=summary.due_waiting_work_item_count,
+            scheduled_work_item_count=execution_summary.due_waiting_count,
             run_after=occurred_at,
             occurred_at=occurred_at,
             suffix="now",
         )
 
     if decision is DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_LATER:
-        if summary.next_due_at is None:
+        if execution_summary.next_due_at is None:
             raise ValueError("next_due_at is required for delayed compaction prepare")
         return _prepare_dispatch_batch_command(
             workflow_command=workflow_command,
             workflow_run_id=workflow_run_id,
-            scheduled_work_item_count=summary.active_work_item_count,
-            run_after=summary.next_due_at,
+            scheduled_work_item_count=_future_waiting_count(execution_summary),
+            run_after=execution_summary.next_due_at,
             occurred_at=occurred_at,
-            suffix=f"later:{summary.next_due_at.isoformat()}",
+            suffix=f"later:{execution_summary.next_due_at.isoformat()}",
         )
 
     if decision is not DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED:
@@ -323,11 +403,43 @@ def _command_causation_scope(workflow_command: WorkflowCommand) -> str:
     ).hexdigest()[:12]
 
 
+def _future_waiting_count(summary: WorkItemProgressSummary) -> int:
+    future_retryable_count = (
+        summary.retryable_failed_count - summary.due_retryable_failed_count
+    )
+    future_deferred_count = summary.deferred_count - summary.due_deferred_count
+    if future_retryable_count < 0:
+        raise ValueError("future retryable work count cannot be negative")
+    if future_deferred_count < 0:
+        raise ValueError("future deferred work count cannot be negative")
+    future_waiting_count = future_retryable_count + future_deferred_count
+    if future_waiting_count <= 0:
+        raise ValueError("future waiting work count must be positive")
+    if summary.next_due_at is None:
+        raise ValueError("next_due_at is required for future waiting work")
+    return future_waiting_count
+
+
+def _has_future_waiting_work(summary: WorkItemProgressSummary) -> bool:
+    future_retryable_count = (
+        summary.retryable_failed_count - summary.due_retryable_failed_count
+    )
+    future_deferred_count = summary.deferred_count - summary.due_deferred_count
+    return future_retryable_count + future_deferred_count > 0
+
+
+def _has_clean_terminal_coverage(summary: WorkItemProgressSummary) -> bool:
+    if summary.total_count == 0:
+        return True
+    return summary.terminal_coverage_count >= summary.total_count
+
+
 def _progress_reconciled_event(
     *,
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
-    summary: DraftClaimCompactionProgressSummary,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
     decision: DraftClaimCompactionProgressDecision,
     occurred_at: datetime,
     next_command: WorkflowCommand | None,
@@ -346,7 +458,10 @@ def _progress_reconciled_event(
         payload={
             "workflow_run_id": workflow_run_id,
             "decision": decision.value,
-            "summary": summary.to_payload(),
+            "summary": _summary_payload(
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
+            ),
             "next_command_type": next_command.command_type if next_command else None,
         },
         occurred_at=occurred_at,
@@ -359,7 +474,8 @@ def _all_groups_compacted_event(
     *,
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
-    summary: DraftClaimCompactionProgressSummary,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
     occurred_at: datetime,
     next_command: WorkflowCommand | None,
 ) -> WorkflowEvent:
@@ -376,7 +492,10 @@ def _all_groups_compacted_event(
         workflow_run_id=workflow_run_id,
         payload={
             "workflow_run_id": workflow_run_id,
-            "summary": summary.to_payload(),
+            "summary": _summary_payload(
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
+            ),
             "next_command_type": next_command.command_type if next_command else None,
         },
         occurred_at=occurred_at,
@@ -389,7 +508,8 @@ def _waiting_user_choice_event(
     *,
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
-    summary: DraftClaimCompactionProgressSummary,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
     occurred_at: datetime,
 ) -> WorkflowEvent:
     return WorkflowEvent(
@@ -405,7 +525,10 @@ def _waiting_user_choice_event(
         workflow_run_id=workflow_run_id,
         payload={
             "workflow_run_id": workflow_run_id,
-            "summary": summary.to_payload(),
+            "summary": _summary_payload(
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
+            ),
         },
         occurred_at=occurred_at,
         causation_command_id=workflow_command.command_id,
@@ -413,11 +536,70 @@ def _waiting_user_choice_event(
     )
 
 
+def _progress_blocked_event(
+    *,
+    workflow_command: WorkflowCommand,
+    workflow_run_id: str,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
+    occurred_at: datetime,
+) -> WorkflowEvent:
+    reason = _blocked_reason(
+        reduction_summary=reduction_summary,
+        execution_summary=execution_summary,
+    )
+    return WorkflowEvent(
+        event_id=WorkflowEventId(
+            "workflow-event:"
+            f"{workflow_run_id}:"
+            f"{KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED.value}:"
+            f"{workflow_command.command_id.value}"
+        ),
+        event_type=(
+            KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED.value
+        ),
+        workflow_run_id=workflow_run_id,
+        payload={
+            "workflow_run_id": workflow_run_id,
+            "reason": reason,
+            "group_counters": _group_counters_payload(reduction_summary),
+            "execution_counters": _execution_counters_payload(execution_summary),
+            "next_due_at": execution_summary.next_due_at.isoformat()
+            if execution_summary.next_due_at is not None
+            else None,
+            "summary": _summary_payload(
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
+            ),
+        },
+        occurred_at=occurred_at,
+        causation_command_id=workflow_command.command_id,
+        correlation_id=workflow_command.command_id.value,
+    )
+
+
+def _blocked_reason(
+    *,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
+) -> str:
+    if execution_summary.terminal_failed_count > 0:
+        return "terminal_execution_failure"
+    if execution_summary.user_action_required_count > 0:
+        return "unexplained_user_action_required_work"
+    if execution_summary.deferred_count > 0:
+        return "unexplained_deferred_work"
+    if not reduction_summary.all_groups_done:
+        return "incomplete_groups_without_continuation"
+    return "unclean_terminal_coverage"
+
+
 async def _save_progress_snapshot(
     *,
     workflow_unit_of_work: WorkflowRuntimeUnitOfWorkPort,
     workflow_run_id: str,
-    summary: DraftClaimCompactionProgressSummary,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
     decision: DraftClaimCompactionProgressDecision,
     occurred_at: datetime,
 ) -> None:
@@ -425,7 +607,10 @@ async def _save_progress_snapshot(
         workflow_run_id,
     )
     domain_counters = dict(existing.domain_counters) if existing is not None else {}
-    for key, value in summary.to_payload().items():
+    for key, value in _summary_payload(
+        reduction_summary=reduction_summary,
+        execution_summary=execution_summary,
+    ).items():
         if isinstance(value, int):
             domain_counters[f"draft_claim_compaction_{key}"] = value
 
@@ -436,21 +621,35 @@ async def _save_progress_snapshot(
             workflow_status=(
                 "BLOCKED"
                 if decision
-                is DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE
+                in {
+                    DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE,
+                    DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED,
+                }
                 else "RUNNING"
             ),
-            total_work_items=summary.group_count,
-            scheduled_work_items=summary.group_count,
-            running_work_items=summary.active_group_count,
-            completed_work_items=summary.done_group_count,
-            deferred_work_items=summary.deferred_work_item_count,
-            retryable_failed_work_items=summary.retryable_failed_work_item_count,
-            terminal_failed_work_items=summary.terminal_failed_work_item_count,
-            blocked_work_items=summary.waiting_user_model_choice_group_count,
+            total_work_items=execution_summary.total_count,
+            scheduled_work_items=execution_summary.total_count,
+            running_work_items=execution_summary.leased_count,
+            completed_work_items=execution_summary.completed_count,
+            deferred_work_items=execution_summary.deferred_count,
+            retryable_failed_work_items=execution_summary.retryable_failed_count,
+            terminal_failed_work_items=execution_summary.terminal_failed_count,
+            blocked_work_items=(
+                reduction_summary.waiting_user_model_choice_group_count
+                if decision
+                is DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE
+                else execution_summary.user_action_required_count
+                + execution_summary.terminal_failed_count
+            ),
             domain_counters=domain_counters,
             started_at=existing.started_at if existing is not None else occurred_at,
             updated_at=occurred_at,
-            completed_at=existing.completed_at if existing is not None else None,
+            completed_at=(
+                occurred_at
+                if decision
+                is DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
+                else existing.completed_at if existing is not None else None
+            ),
         )
     )
 
@@ -459,7 +658,8 @@ def _timeline_entry(
     *,
     workflow_command: WorkflowCommand,
     workflow_run_id: str,
-    summary: DraftClaimCompactionProgressSummary,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
     decision: DraftClaimCompactionProgressDecision,
     next_command: WorkflowCommand | None,
     occurred_at: datetime,
@@ -477,14 +677,20 @@ def _timeline_entry(
         severity=(
             WorkflowTimelineSeverity.WARNING
             if decision
-            is DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE
+            in {
+                DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE,
+                DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED,
+            }
             else WorkflowTimelineSeverity.INFO
         ),
         message=_timeline_message(decision),
         payload_summary={
             "workflow_run_id": workflow_run_id,
             "decision": decision.value,
-            "summary": summary.to_payload(),
+            "summary": _summary_payload(
+                reduction_summary=reduction_summary,
+                execution_summary=execution_summary,
+            ),
             "next_command_type": next_command.command_type if next_command else None,
         },
         occurred_at=occurred_at,
@@ -497,7 +703,39 @@ def _timeline_message(decision: DraftClaimCompactionProgressDecision) -> str:
         return "Draft claim compaction all groups compacted"
     if decision is DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE:
         return "Draft claim compaction waiting for user model choice"
+    if decision is DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED:
+        return "Draft claim compaction blocked"
     return "Draft claim compaction progress reconciled"
+
+
+def _summary_payload(
+    *,
+    reduction_summary: DraftClaimCompactionProgressSummary,
+    execution_summary: WorkItemProgressSummary,
+) -> dict[str, object]:
+    payload = reduction_summary.to_payload()
+    payload.update(_execution_counters_payload(execution_summary))
+    return payload
+
+
+def _group_counters_payload(
+    summary: DraftClaimCompactionProgressSummary,
+) -> dict[str, object]:
+    return {
+        "group_count": summary.group_count,
+        "done_group_count": summary.done_group_count,
+        "active_group_count": summary.active_group_count,
+    }
+
+
+def _execution_counters_payload(
+    summary: WorkItemProgressSummary,
+) -> dict[str, object]:
+    payload = summary.to_payload()
+    payload["due_waiting_count"] = summary.due_waiting_count
+    payload["terminal_coverage_count"] = summary.terminal_coverage_count
+    payload["has_future_waiting_work"] = _has_future_waiting_work(summary)
+    return payload
 
 
 def _payload_text(

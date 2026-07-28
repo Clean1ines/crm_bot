@@ -9,6 +9,10 @@ from src.contexts.knowledge_workbench.application.sagas.handle_reconcile_draft_c
     HandleReconcileDraftClaimCompactionProgressCommand,
     HandleReconcileDraftClaimCompactionProgressCommandHandler,
 )
+from src.contexts.execution_runtime.application.ports.work_item_progress_read_repository_port import (
+    WorkItemProgressSummary,
+)
+from src.contexts.execution_runtime.domain.value_objects.work_kind import WorkKind
 from src.contexts.knowledge_workbench.application.sagas.knowledge_extraction_workflow_definition import (
     KnowledgeExtractionCanonicalCommandType,
     KnowledgeExtractionCanonicalEventType,
@@ -72,6 +76,30 @@ def _command(
     )
 
 
+def _pending_command(
+    command_type: KnowledgeExtractionCanonicalCommandType,
+    *,
+    command_id: str | None = None,
+    run_after: datetime | None = None,
+) -> WorkflowCommand:
+    command_id_value = (
+        f"workflow-command:{command_type.value}:pending"
+        if command_id is None
+        else command_id
+    )
+    return WorkflowCommand(
+        command_id=WorkflowCommandId(command_id_value),
+        command_type=command_type.value,
+        workflow_run_id=_workflow_run_id(),
+        idempotency_key=WorkflowIdempotencyKey(f"{command_id_value}:idempotency"),
+        payload={"workflow_run_id": _workflow_run_id()},
+        status=WorkflowCommandStatus.PENDING,
+        run_after=_now() if run_after is None else run_after,
+        created_at=_now(),
+        updated_at=_now(),
+    )
+
+
 @dataclass(slots=True)
 class FakeReductionStateRepository:
     summary: DraftClaimCompactionProgressSummary
@@ -82,6 +110,22 @@ class FakeReductionStateRepository:
         workflow_run_id: str,
     ) -> DraftClaimCompactionProgressSummary:
         assert workflow_run_id == _workflow_run_id()
+        return self.summary
+
+
+@dataclass(slots=True)
+class FakeWorkItemProgressReadRepository:
+    summary: WorkItemProgressSummary
+    calls: list[tuple[str, WorkKind, datetime]] = field(default_factory=list)
+
+    async def summarize_by_work_kind_and_workflow(
+        self,
+        *,
+        workflow_run_id: str,
+        work_kind: WorkKind,
+        now: datetime,
+    ) -> WorkItemProgressSummary:
+        self.calls.append((workflow_run_id, work_kind, now))
         return self.summary
 
 
@@ -112,6 +156,22 @@ class FakeCommandLog:
     ) -> tuple[WorkflowCommand, ...]:
         del workflow_run_id, limit
         return ()
+
+    async def has_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        command_types: tuple[str, ...],
+        excluding_command_id: WorkflowCommandId | None = None,
+    ) -> bool:
+        return any(
+            command.workflow_run_id == workflow_run_id
+            and command.status is WorkflowCommandStatus.PENDING
+            and command.command_id not in self.completed
+            and command.command_type in command_types
+            and command.command_id != excluding_command_id
+            for command in self.pending_commands
+        )
 
 
 @dataclass(slots=True)
@@ -221,17 +281,28 @@ class FakeWorkflowUnitOfWork:
 
 
 @pytest.mark.asyncio
-async def test_active_groups_reconciles_progress_and_completes_command() -> None:
+async def test_leased_work_reconciles_active_without_prepare() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     repository = FakeReductionStateRepository(_summary(active_group_count=2))
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(leased_count=1)
+    )
 
     result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
         HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
     )
 
     assert result.decision == "ACTIVE"
+    assert execution_repository.calls == [
+        (
+            _workflow_run_id(),
+            WorkKind("knowledge_workbench.draft_claim_compaction"),
+            _now(),
+        )
+    ]
     assert [event.event_type for event in workflow_uow.outbox.events] == [
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED.value,
     ]
@@ -247,16 +318,15 @@ async def test_active_due_work_items_appends_prepare_command() -> None:
     repository = FakeReductionStateRepository(
         _summary(
             active_group_count=2,
-            active_work_item_count=1,
-            ready_work_item_count=1,
-            due_waiting_work_item_count=1,
         )
     )
+    execution_repository = FakeWorkItemProgressReadRepository(_work_summary(ready_count=1))
 
     result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
         HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
     )
 
     assert result.decision == "PREPARE_NEXT_BATCH_NOW"
@@ -280,16 +350,18 @@ async def test_active_due_work_items_appends_prepare_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_future_due_work_items_append_delayed_prepare_command() -> None:
+async def test_future_retryable_work_items_append_delayed_prepare_command() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     next_due_at = _now() + timedelta(seconds=45)
     repository = FakeReductionStateRepository(
         _summary(
             active_group_count=2,
-            active_work_item_count=3,
-            deferred_work_item_count=2,
-            retryable_failed_work_item_count=1,
-            due_waiting_work_item_count=0,
+        )
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(
+            retryable_failed_count=3,
+            due_retryable_failed_count=0,
             next_due_at=next_due_at,
         )
     )
@@ -298,6 +370,7 @@ async def test_future_due_work_items_append_delayed_prepare_command() -> None:
         HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
     )
 
     assert result.decision == "PREPARE_NEXT_BATCH_LATER"
@@ -318,16 +391,93 @@ async def test_future_due_work_items_append_delayed_prepare_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_all_groups_done_appends_done_event_and_curation_command() -> None:
+async def test_future_deferred_work_items_are_counted_for_delayed_prepare() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
-    repository = FakeReductionStateRepository(
-        _summary(group_count=2, done_group_count=2, active_group_count=0)
+    next_due_at = _now() + timedelta(seconds=45)
+    repository = FakeReductionStateRepository(_summary(active_group_count=2))
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(
+            deferred_count=4,
+            due_deferred_count=0,
+            next_due_at=next_due_at,
+        )
     )
 
     result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
         HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "PREPARE_NEXT_BATCH_LATER"
+    assert workflow_uow.command_log.pending_commands[0].payload[
+        "scheduled_work_item_count"
+    ] == 4
+
+
+@pytest.mark.asyncio
+async def test_future_retryable_and_deferred_counts_are_combined() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    next_due_at = _now() + timedelta(seconds=45)
+    repository = FakeReductionStateRepository(_summary(active_group_count=2))
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(
+            deferred_count=3,
+            due_deferred_count=0,
+            retryable_failed_count=2,
+            due_retryable_failed_count=0,
+            next_due_at=next_due_at,
+        )
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "PREPARE_NEXT_BATCH_LATER"
+    assert workflow_uow.command_log.pending_commands[0].payload[
+        "scheduled_work_item_count"
+    ] == 5
+
+
+@pytest.mark.asyncio
+async def test_future_decision_requires_next_due_at() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(_summary(active_group_count=2))
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(retryable_failed_count=1, due_retryable_failed_count=0)
+    )
+
+    with pytest.raises(ValueError, match="next_due_at"):
+        await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+            HandleReconcileDraftClaimCompactionProgressCommand(
+                workflow_command=_command()
+            ),
+            workflow_unit_of_work=workflow_uow,
+            compaction_reduction_state_repository=repository,
+            work_item_progress_read_repository=execution_repository,
+        )
+
+
+@pytest.mark.asyncio
+async def test_all_groups_done_appends_done_event_and_curation_command() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=2, active_group_count=0)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(completed_count=2)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
     )
 
     assert result.decision == "ALL_GROUPS_COMPACTED"
@@ -344,6 +494,98 @@ async def test_all_groups_done_appends_done_event_and_curation_command() -> None
 
 
 @pytest.mark.asyncio
+async def test_all_groups_done_with_terminal_failure_blocks_without_curation() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=2, active_group_count=0)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(completed_count=1, terminal_failed_count=1)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "COMPACTION_PROGRESS_BLOCKED"
+    assert workflow_uow.outbox.events[-1].payload["reason"] == (
+        "terminal_execution_failure"
+    )
+    assert workflow_uow.command_log.pending_commands == []
+
+
+@pytest.mark.asyncio
+async def test_all_groups_done_with_due_work_prepares_without_curation() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=2, active_group_count=0)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(completed_count=1, retryable_failed_count=1, due_retryable_failed_count=1)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "PREPARE_NEXT_BATCH_NOW"
+    assert workflow_uow.command_log.pending_commands[0].command_type == (
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_groups_done_with_unclean_terminal_coverage_blocks() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=2, active_group_count=0)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _unchecked_work_summary(completed_count=1, total_count=2)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "COMPACTION_PROGRESS_BLOCKED"
+    assert workflow_uow.outbox.events[-1].payload["reason"] == (
+        "unclean_terminal_coverage"
+    )
+    assert workflow_uow.command_log.pending_commands == []
+
+
+@pytest.mark.asyncio
+async def test_all_groups_done_with_leased_work_stays_active_without_curation() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=2, active_group_count=0)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(completed_count=1, leased_count=1)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "ACTIVE"
+    assert workflow_uow.command_log.pending_commands == []
+
+
+@pytest.mark.asyncio
 async def test_waiting_user_choice_blocks_without_preview_command() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     repository = FakeReductionStateRepository(
@@ -353,11 +595,13 @@ async def test_waiting_user_choice_blocks_without_preview_command() -> None:
             active_group_count=1,
         )
     )
+    execution_repository = FakeWorkItemProgressReadRepository(_work_summary())
 
     result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
         HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
         workflow_unit_of_work=workflow_uow,
         compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
     )
 
     assert result.decision == "WAITING_USER_MODEL_CHOICE"
@@ -384,6 +628,9 @@ async def test_rejects_wrong_command_type() -> None:
             compaction_reduction_state_repository=FakeReductionStateRepository(
                 _summary()
             ),
+            work_item_progress_read_repository=FakeWorkItemProgressReadRepository(
+                _work_summary()
+            ),
         )
 
 
@@ -398,7 +645,203 @@ async def test_rejects_non_pending_command() -> None:
             compaction_reduction_state_repository=FakeReductionStateRepository(
                 _summary()
             ),
+            work_item_progress_read_repository=FakeWorkItemProgressReadRepository(
+                _work_summary()
+            ),
         )
+
+
+@pytest.mark.asyncio
+async def test_terminal_failed_work_blocks_without_curation_command() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=1, active_group_count=1)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(completed_count=1, terminal_failed_count=1)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "COMPACTION_PROGRESS_BLOCKED"
+    assert [event.event_type for event in workflow_uow.outbox.events] == [
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_RECONCILED.value,
+        KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED.value,
+    ]
+    assert workflow_uow.outbox.events[-1].payload["reason"] == (
+        "terminal_execution_failure"
+    )
+    assert workflow_uow.command_log.pending_commands == []
+    assert workflow_uow.progress_snapshots.snapshot is not None
+    assert workflow_uow.progress_snapshots.snapshot.workflow_status == "BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_incomplete_group_without_queue_continuation_blocks() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=1, active_group_count=1)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(_work_summary())
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "COMPACTION_PROGRESS_BLOCKED"
+    assert workflow_uow.outbox.events[-1].payload["reason"] == (
+        "incomplete_groups_without_continuation"
+    )
+    assert workflow_uow.command_log.pending_commands == []
+
+
+@pytest.mark.parametrize(
+    "continuation_type",
+    [
+        KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT,
+        KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION,
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS,
+    ],
+)
+@pytest.mark.asyncio
+async def test_incomplete_zero_queue_with_pending_continuation_stays_active(
+    continuation_type: KnowledgeExtractionCanonicalCommandType,
+) -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    workflow_uow.command_log.pending_commands.append(
+        _pending_command(continuation_type, command_id=f"pending:{continuation_type.value}")
+    )
+    repository = FakeReductionStateRepository(_summary(active_group_count=1))
+    execution_repository = FakeWorkItemProgressReadRepository(_work_summary())
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "ACTIVE"
+    assert all(
+        event.event_type
+        != KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED.value
+        for event in workflow_uow.outbox.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_incomplete_zero_queue_with_future_pending_prepare_stays_active() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    workflow_uow.command_log.pending_commands.append(
+        _pending_command(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+            run_after=_now() + timedelta(minutes=5),
+        )
+    )
+    repository = FakeReductionStateRepository(_summary(active_group_count=1))
+    execution_repository = FakeWorkItemProgressReadRepository(_work_summary())
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "ACTIVE"
+    assert all(
+        event.event_type
+        != KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED.value
+        for event in workflow_uow.outbox.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_incomplete_zero_queue_with_only_current_reconcile_blocks() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    current_command = _command()
+    workflow_uow.command_log.pending_commands.append(current_command)
+    repository = FakeReductionStateRepository(_summary(active_group_count=1))
+    execution_repository = FakeWorkItemProgressReadRepository(_work_summary())
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(
+            workflow_command=current_command
+        ),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "COMPACTION_PROGRESS_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_terminal_failure_blocks_despite_pending_apply() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    workflow_uow.command_log.pending_commands.append(
+        _pending_command(
+            KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT
+        )
+    )
+    repository = FakeReductionStateRepository(_summary(active_group_count=1))
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(terminal_failed_count=1)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "COMPACTION_PROGRESS_BLOCKED"
+    assert workflow_uow.outbox.events[-1].payload["reason"] == (
+        "terminal_execution_failure"
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_groups_done_unclean_coverage_with_pending_open_stays_active() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    workflow_uow.command_log.pending_commands.append(
+        _pending_command(
+            KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE
+        )
+    )
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=2, active_group_count=0)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _unchecked_work_summary(completed_count=1, total_count=2)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "ACTIVE"
+    assert len(workflow_uow.command_log.pending_commands) == 1
+    assert workflow_uow.command_log.pending_commands[0].command_type == (
+        KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE.value
+    )
+    assert all(
+        event.event_type
+        != KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_PROGRESS_BLOCKED.value
+        for event in workflow_uow.outbox.events
+    )
 
 
 def _summary(
@@ -437,3 +880,70 @@ def _summary(
         due_waiting_work_item_count=due_waiting_work_item_count,
         next_due_at=next_due_at,
     )
+
+
+def _work_summary(
+    *,
+    ready_count: int = 0,
+    leased_count: int = 0,
+    deferred_count: int = 0,
+    retryable_failed_count: int = 0,
+    completed_count: int = 0,
+    terminal_failed_count: int = 0,
+    cancelled_count: int = 0,
+    split_superseded_count: int = 0,
+    user_action_required_count: int = 0,
+    next_due_at: datetime | None = None,
+    due_deferred_count: int = 0,
+    due_retryable_failed_count: int = 0,
+) -> WorkItemProgressSummary:
+    return WorkItemProgressSummary(
+        ready_count=ready_count,
+        leased_count=leased_count,
+        deferred_count=deferred_count,
+        retryable_failed_count=retryable_failed_count,
+        completed_count=completed_count,
+        terminal_failed_count=terminal_failed_count,
+        cancelled_count=cancelled_count,
+        split_superseded_count=split_superseded_count,
+        user_action_required_count=user_action_required_count,
+        total_count=(
+            ready_count
+            + leased_count
+            + deferred_count
+            + retryable_failed_count
+            + completed_count
+            + terminal_failed_count
+            + cancelled_count
+            + split_superseded_count
+            + user_action_required_count
+        ),
+        next_due_at=next_due_at,
+        due_deferred_count=due_deferred_count,
+        due_retryable_failed_count=due_retryable_failed_count,
+    )
+
+
+def _unchecked_work_summary(
+    *,
+    completed_count: int,
+    total_count: int,
+) -> WorkItemProgressSummary:
+    summary = object.__new__(WorkItemProgressSummary)
+    for field_name, value in {
+        "ready_count": 0,
+        "leased_count": 0,
+        "deferred_count": 0,
+        "retryable_failed_count": 0,
+        "completed_count": completed_count,
+        "terminal_failed_count": 0,
+        "cancelled_count": 0,
+        "split_superseded_count": 0,
+        "user_action_required_count": 0,
+        "total_count": total_count,
+        "next_due_at": None,
+        "due_deferred_count": 0,
+        "due_retryable_failed_count": 0,
+    }.items():
+        object.__setattr__(summary, field_name, value)
+    return summary

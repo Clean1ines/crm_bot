@@ -172,6 +172,22 @@ class FakeCommandLogRepository:
             return ()
         return (self.command,)[:limit]
 
+    async def has_pending_commands(
+        self,
+        *,
+        workflow_run_id: str,
+        command_types: tuple[str, ...],
+        excluding_command_id: WorkflowCommandId | None = None,
+    ) -> bool:
+        if self.command is None:
+            return False
+        return (
+            self.command.workflow_run_id == workflow_run_id
+            and self.command.status is WorkflowCommandStatus.PENDING
+            and self.command.command_type in command_types
+            and self.command.command_id != excluding_command_id
+        )
+
 
 @dataclass(slots=True)
 class FakeOutboxRepository:
