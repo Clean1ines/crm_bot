@@ -325,8 +325,6 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 execute_prepared_llm_dispatch_attempt is None
                 or capacity_observation_repository is None
                 or draft_claim_compaction_output_validator is None
-                or draft_claim_compaction_reduction_state_repository is None
-                or draft_claim_observation_read_repository is None
             ):
                 return DispatchKnowledgeExtractionWorkflowCommandResult(
                     workflow_run_id=workflow_command.workflow_run_id,
@@ -348,13 +346,6 @@ class DispatchKnowledgeExtractionWorkflowCommandHandler:
                 draft_claim_compaction_output_validator=(
                     draft_claim_compaction_output_validator
                 ),
-                draft_claim_compaction_reduction_state_repository=(
-                    draft_claim_compaction_reduction_state_repository
-                ),
-                draft_claim_observation_read_repository=(
-                    draft_claim_observation_read_repository
-                ),
-                work_item_scheduling_repository=knowledge_unit_of_work,
                 workflow_unit_of_work=workflow_unit_of_work,
                 frontend_event_projection_writer=frontend_event_projection_writer,
             )

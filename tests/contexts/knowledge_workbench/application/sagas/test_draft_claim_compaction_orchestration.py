@@ -176,22 +176,43 @@ async def test_draft_claim_compaction_orchestrates_prepare_apply_reconcile_to_cu
         workflow_uow,
         KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS,
     )
-    assert len(apply_prepare_commands) == 1
+    assert len(apply_prepare_commands) == 0
     assert len(apply_reconcile_commands) == 1
-    second_prepare_command = apply_prepare_commands[0]
+
+    reduction_repository.summary = _summary(
+        group_count=1,
+        done_group_count=0,
+        active_group_count=1,
+    )
+    first_reconcile_result = (
+        await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+            HandleReconcileDraftClaimCompactionProgressCommand(
+                workflow_command=apply_reconcile_commands[0]
+            ),
+            workflow_unit_of_work=workflow_uow,
+            compaction_reduction_state_repository=reduction_repository,
+            work_item_progress_read_repository=FakeWorkItemProgressReadRepository(
+                _work_summary(ready_count=1)
+            ),
+            command_log_repository=workflow_uow.command_log,
+        )
+    )
+    assert first_reconcile_result.decision == "PREPARE_NEXT_BATCH_NOW"
+
+    reconcile_prepare_commands = _commands(
+        workflow_uow,
+        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+    )
+    assert len(reconcile_prepare_commands) == 1
+    second_prepare_command = reconcile_prepare_commands[0]
+    assert (
+        second_prepare_command.payload["work_kind"]
+        == DRAFT_CLAIM_COMPACTION_WORK_KIND.value
+    )
+    assert second_prepare_command.payload["scheduled_work_item_count"] == 1
     dispatch_preparation = second_prepare_command.payload["llm_dispatch_preparation"]
     assert isinstance(dispatch_preparation, dict)
-    assert dispatch_preparation["profile"] == {
-        "profile_id": "draft_claim_compaction",
-        "estimated_prompt_tokens": 1,
-        "estimated_completion_tokens": 4000,
-        "estimated_requests": 1,
-    }
-    assert "prompt_tokens" not in dispatch_preparation["profile"]
-    assert "artifact_tokens" not in dispatch_preparation["profile"]
-    assert "input_tokens" not in dispatch_preparation["profile"]
-    assert "required_window_tokens" not in dispatch_preparation["profile"]
-    assert "request_count" not in dispatch_preparation["profile"]
+    assert dispatch_preparation["requested_items"] == 1
 
     await HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler().execute(
         HandlePrepareDraftClaimCompactionDispatchBatchCommand(
@@ -200,7 +221,6 @@ async def test_draft_claim_compaction_orchestrates_prepare_apply_reconcile_to_cu
         prepare_llm_dispatch_batch=prepare,
         workflow_unit_of_work=workflow_uow,
     )
-    assert prepare.calls[-1].profile is not None
     second_execute_command = [
         command
         for command in _commands(
@@ -277,7 +297,6 @@ async def test_draft_claim_compaction_orchestrates_prepare_apply_reconcile_to_cu
             KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE,
         )
     ) == 1
-    assert len(apply_prepare_commands) == 1
     assert len(apply_reconcile_commands) == 1
 
 

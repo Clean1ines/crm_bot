@@ -916,6 +916,7 @@ def _input_admitted_candidates(
         for record in due_records
         if record.work_item.status is WorkItemStatus.READY
     ]
+    due_retry_barrier_active = bool(pending_retry_records)
 
     for account in mutable_accounts:
         if len(candidates) >= requested_items:
@@ -926,7 +927,7 @@ def _input_admitted_candidates(
             account=account,
             correlation_context=correlation_context,
         )
-        if selected_record is None:
+        if selected_record is None and not due_retry_barrier_active:
             selected_record = _pop_first_record_that_fits(
                 records=pending_fresh_records,
                 account=account,

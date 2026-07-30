@@ -1096,7 +1096,9 @@ async def test_execute_draft_claim_compaction_blocks_when_validator_missing() ->
 
 
 @pytest.mark.asyncio
-async def test_execute_draft_claim_compaction_no_implemented_unwired_gap() -> None:
+async def test_execute_draft_claim_compaction_passes_without_apply_dependencies() -> (
+    None
+):
     execute_dependency = FakeExecutePreparedLlmDispatchAttempt()
 
     with pytest.raises(RuntimeError, match="fake execute should not be reached"):

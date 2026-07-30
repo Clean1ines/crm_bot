@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -82,12 +81,6 @@ def _now() -> datetime:
 
 def _workflow_run_id() -> str:
     return "workflow-1"
-
-
-def _command_causation_scope(command: WorkflowCommand) -> str:
-    return hashlib.sha256(
-        command.command_id.value.encode("utf-8"),
-    ).hexdigest()[:12]
 
 
 def _command(
@@ -578,20 +571,8 @@ async def test_schedules_next_work_item_for_reduced_rewrite_decision() -> None:
     assert [
         command.command_type for command in workflow_uow.command_log.pending_commands
     ] == [
-        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value,
         KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value,
     ]
-    prepare_payload = workflow_uow.command_log.pending_commands[0].payload
-    assert prepare_payload["scheduled_work_item_count"] == 1
-    assert prepare_payload["llm_dispatch_preparation"]["requested_items"] == 1
-    assert (
-        prepare_payload["llm_dispatch_preparation"]["active_model_ref"]
-        == "openai/gpt-oss-120b"
-    )
-    assert (
-        prepare_payload["llm_dispatch_preparation"]["worker_ref"]
-        == "knowledge-workbench-draft-claim-compaction-dispatch"
-    )
 
 
 @pytest.mark.asyncio
@@ -724,7 +705,7 @@ def _apply_persistence() -> DraftClaimCompactionApplyPersistenceResult:
 
 
 @pytest.mark.asyncio
-async def test_schedules_prepare_command_after_next_compacted_work_item() -> None:
+async def test_apply_schedules_next_work_item_and_appends_only_reconcile() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     scheduling = FakeWorkItemSchedulingRepository()
     repository = FakeReductionStateRepository(
@@ -751,9 +732,9 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
     )
 
     assert len(scheduling.saved_payloads) == 1
-    assert result.appended_next_command_count == 2
+    assert result.appended_next_command_count == 1
     assert result.next_command_type == (
-        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
     )
     assert [event.event_type for event in workflow_uow.outbox.events] == [
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_RESULT_APPLIED.value,
@@ -762,36 +743,14 @@ async def test_schedules_prepare_command_after_next_compacted_work_item() -> Non
 
     commands = workflow_uow.command_log.pending_commands
     assert [command.command_type for command in commands] == [
-        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value,
         KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value,
     ]
     command = commands[0]
     assert command.command_type == (
-        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
-    )
-    assert command.idempotency_key.value == (
-        "draft-claim-compaction-dispatch:"
-        "workflow-1:group-1:compacted_vs_compacted:compacted-a--compacted-b:"
-        f"{_command_causation_scope(_command())}"
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
     )
     payload = command.payload
     assert payload["workflow_run_id"] == _workflow_run_id()
-    assert payload["work_kind"] == "knowledge_workbench.draft_claim_compaction"
-    assert payload["scheduled_work_item_count"] == 1
-    dispatch_payload = payload["llm_dispatch_preparation"]
-    assert dispatch_payload["requested_items"] == 1
-    assert dispatch_payload["active_model_ref"] == "openai/gpt-oss-120b"
-    assert (
-        dispatch_payload["worker_ref"]
-        == "knowledge-workbench-draft-claim-compaction-dispatch"
-    )
-    assert "account_capacities" not in dispatch_payload
-    assert dispatch_payload["profile"] == {
-        "profile_id": "draft_claim_compaction",
-        "estimated_prompt_tokens": 1,
-        "estimated_completion_tokens": 4000,
-        "estimated_requests": 1,
-    }
     scheduled_payload = scheduling.saved_payloads[0]
     assert isinstance(scheduled_payload, dict)
     assert scheduled_payload["compacted_node_refs"] == [
@@ -938,7 +897,7 @@ def _compacted_node(node_ref: str) -> DraftClaimCompactionNode:
 
 
 @pytest.mark.asyncio
-async def test_repeated_apply_dispatch_does_not_duplicate_next_prepare_command() -> (
+async def test_repeated_apply_dispatch_does_not_duplicate_reconcile_command() -> (
     None
 ):
     workflow_uow = FakeWorkflowUnitOfWork()
@@ -970,10 +929,10 @@ async def test_repeated_apply_dispatch_does_not_duplicate_next_prepare_command()
         work_item_scheduling_repository=scheduling,
     )
 
-    assert first.appended_next_command_count == 2
+    assert first.appended_next_command_count == 1
     assert second.appended_next_command_count == 1
     assert first.next_command_type == (
-        KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
+        KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
     )
     assert second.next_command_type == (
         KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
@@ -990,11 +949,10 @@ async def test_repeated_apply_dispatch_does_not_duplicate_next_prepare_command()
         if command.command_type
         == KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
     ]
-    assert len(physical_prepare_commands) == 1
+    assert len(physical_prepare_commands) == 0
     assert len(physical_reconcile_commands) == 1
-    assert len({command.idempotency_key for command in physical_prepare_commands}) == 1
     assert len({command.idempotency_key for command in physical_reconcile_commands}) == 1
-    assert len(workflow_uow.command_log.pending_commands) == 2
+    assert len(workflow_uow.command_log.pending_commands) == 1
     assert len(workflow_uow.outbox.events) == 2
     assert len({event.event_id for event in workflow_uow.outbox.events}) == 2
     assert [event.event_type for event in workflow_uow.outbox.events] == [
@@ -1002,11 +960,6 @@ async def test_repeated_apply_dispatch_does_not_duplicate_next_prepare_command()
         KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_NEXT_WORK_SCHEDULED.value,
     ]
     assert len(scheduling.saved_payloads) == 1
-    assert workflow_uow.command_log.pending_commands[0].idempotency_key.value == (
-        "draft-claim-compaction-dispatch:"
-        "workflow-1:group-1:compacted_vs_compacted:compacted-a--compacted-b:"
-        f"{_command_causation_scope(_command())}"
-    )
-    assert workflow_uow.command_log.pending_commands[1].command_type == (
+    assert workflow_uow.command_log.pending_commands[0].command_type == (
         KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value
     )

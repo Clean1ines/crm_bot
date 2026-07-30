@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
@@ -99,10 +98,6 @@ class DraftClaimCompactionApplyResultUseCasePort(Protocol):
 
 
 WORK_KIND = WorkKind("knowledge_workbench.draft_claim_compaction")
-DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
-DRAFT_CLAIM_COMPACTION_WORKER_REF = (
-    "knowledge-workbench-draft-claim-compaction-dispatch"
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -600,30 +595,13 @@ def _next_workflow_commands_after_apply(
         DraftClaimCompactionNextWorkItemType.MIXED,
         DraftClaimCompactionNextWorkItemType.REDUCED_REWRITE,
     }:
-        commands: list[WorkflowCommand] = []
-        if schedule.created_count > 0:
-            batch_ref = _next_batch_ref(
-                group_ref=apply_command.group_ref,
-                next_work_item=outcome.next_decision.next_work_item,
-            )
-            commands.append(
-                _prepare_dispatch_batch_command(
-                    workflow_command=workflow_command,
-                    workflow_run_id=apply_command.workflow_run_id,
-                    batch_ref=batch_ref,
-                    next_work_item=outcome.next_decision.next_work_item,
-                    scheduled_work_item_count=schedule.created_count,
-                    occurred_at=workflow_command.updated_at,
-                )
-            )
-        commands.append(
+        return (
             _reconcile_progress_command(
                 workflow_command=workflow_command,
                 apply_command=apply_command,
                 reason=f"next-work:{work_type.value}",
-            )
+            ),
         )
-        return tuple(commands)
 
     if work_type is DraftClaimCompactionNextWorkItemType.DONE:
         return (
@@ -635,58 +613,6 @@ def _next_workflow_commands_after_apply(
         )
 
     return ()
-
-
-def _prepare_dispatch_batch_command(
-    *,
-    workflow_command: WorkflowCommand,
-    workflow_run_id: str,
-    batch_ref: str,
-    next_work_item: DraftClaimCompactionNextWorkItem,
-    scheduled_work_item_count: int,
-    occurred_at,
-) -> WorkflowCommand:
-    idempotency_key = (
-        "draft-claim-compaction-dispatch:"
-        f"{workflow_run_id}:{batch_ref}:{_command_causation_scope(workflow_command)}"
-    )
-    return WorkflowCommand(
-        command_id=WorkflowCommandId(f"workflow-command:{idempotency_key}"),
-        command_type=(
-            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
-        ),
-        workflow_run_id=workflow_run_id,
-        idempotency_key=WorkflowIdempotencyKey(idempotency_key),
-        payload={
-            "workflow_run_id": workflow_run_id,
-            "work_kind": WORK_KIND.value,
-            "scheduled_work_item_count": scheduled_work_item_count,
-            "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-            "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-            "caused_by_command_id": workflow_command.command_id.value,
-            "llm_dispatch_preparation": {
-                "active_model_ref": DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF,
-                "requested_items": scheduled_work_item_count,
-                "worker_ref": DRAFT_CLAIM_COMPACTION_WORKER_REF,
-                "profile": {
-                    "profile_id": "draft_claim_compaction",
-                    "estimated_prompt_tokens": next_work_item.prompt_tokens,
-                    "estimated_completion_tokens": next_work_item.artifact_tokens,
-                    "estimated_requests": next_work_item.request_count,
-                },
-            },
-        },
-        status=WorkflowCommandStatus.PENDING,
-        run_after=occurred_at,
-        created_at=occurred_at,
-        updated_at=occurred_at,
-    )
-
-
-def _command_causation_scope(workflow_command: WorkflowCommand) -> str:
-    return hashlib.sha256(
-        workflow_command.command_id.value.encode("utf-8"),
-    ).hexdigest()[:12]
 
 
 def _reconcile_progress_command(
