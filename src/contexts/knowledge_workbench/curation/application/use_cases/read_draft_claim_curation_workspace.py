@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_workspace import (
-    DraftClaimCurationWorkspaceItem,
     DraftClaimCurationWorkspaceSnapshot,
 )
 from src.contexts.knowledge_workbench.curation.application.ports.draft_claim_curation_workspace_repository_port import (
@@ -21,6 +21,9 @@ from src.contexts.knowledge_workbench.source_management.application.ports.source
 )
 from src.contexts.knowledge_workbench.source_management.domain.entities.source_unit import (
     SourceUnit,
+)
+from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_document_ref import (
+    SourceDocumentRef,
 )
 from src.contexts.knowledge_workbench.source_management.domain.value_objects.source_unit_ref import (
     SourceUnitRef,
@@ -91,10 +94,7 @@ class ReadDraftClaimCurationWorkspace:
         if snapshot is None:
             return None
         progress = await self._progress(workflow_run_id)
-        provenance_items: list[DraftClaimCurationItemProvenance] = []
-        for item in snapshot.items:
-            provenance_items.append(await self._item_provenance(item))
-        provenance = tuple(provenance_items)
+        provenance = await self._items_provenance(snapshot)
         return DraftClaimCurationWorkspaceReadResult(
             snapshot=snapshot,
             progress=progress,
@@ -119,38 +119,90 @@ class ReadDraftClaimCurationWorkspace:
             "pending_comparison_count": summary.pending_comparison_count,
         }
 
-    async def _item_provenance(
+    async def _items_provenance(
         self,
-        item: DraftClaimCurationWorkspaceItem,
-    ) -> DraftClaimCurationItemProvenance:
+        snapshot: DraftClaimCurationWorkspaceSnapshot,
+    ) -> tuple[DraftClaimCurationItemProvenance, ...]:
+        observation_refs = _ordered_unique(
+            ref for item in snapshot.items for ref in item.source_claim_refs
+        )
         raw_claims = (
             await self.draft_claim_observation_read_repository.list_by_observation_refs(
-                observation_refs=item.source_claim_refs,
+                observation_refs=observation_refs,
             )
+            if observation_refs
+            else ()
         )
-        source_units = await self._source_units_for_raw_claims(raw_claims)
-        return DraftClaimCurationItemProvenance(
-            item_ref=item.item_ref,
+        raw_claims_by_ref = {claim.observation_ref: claim for claim in raw_claims}
+        source_units_by_ref = await self._source_units_by_ref(
+            snapshot=snapshot,
             raw_claims=raw_claims,
-            source_units=source_units,
         )
 
-    async def _source_units_for_raw_claims(
+        provenance_items: list[DraftClaimCurationItemProvenance] = []
+        for item in snapshot.items:
+            item_raw_claims = tuple(
+                raw_claims_by_ref[ref]
+                for ref in item.source_claim_refs
+                if ref in raw_claims_by_ref
+            )
+            provenance_items.append(
+                DraftClaimCurationItemProvenance(
+                    item_ref=item.item_ref,
+                    raw_claims=item_raw_claims,
+                    source_units=_source_units_for_raw_claims(
+                        item_raw_claims,
+                        source_units_by_ref=source_units_by_ref,
+                    ),
+                )
+            )
+        return tuple(provenance_items)
+
+    async def _source_units_by_ref(
         self,
+        *,
+        snapshot: DraftClaimCurationWorkspaceSnapshot,
         raw_claims: tuple[DraftClaimObservationReadModel, ...],
-    ) -> tuple[SourceUnit, ...]:
-        seen: set[str] = set()
-        result: list[SourceUnit] = []
-        for raw_claim in raw_claims:
-            if raw_claim.source_unit_ref in seen:
-                continue
-            seen.add(raw_claim.source_unit_ref)
+    ) -> dict[str, SourceUnit]:
+        if snapshot.workspace.source_document_ref is not None:
+            source_units = await self.source_management_repository.list_source_units_for_document(
+                SourceDocumentRef(snapshot.workspace.source_document_ref)
+            )
+            return {unit.unit_ref.value: unit for unit in source_units}
+
+        refs = _ordered_unique(claim.source_unit_ref for claim in raw_claims)
+        result: dict[str, SourceUnit] = {}
+        for ref in refs:
             source_unit = await self.source_management_repository.load_source_unit(
-                SourceUnitRef(raw_claim.source_unit_ref)
+                SourceUnitRef(ref)
             )
             if source_unit is not None:
-                result.append(source_unit)
-        return tuple(result)
+                result[ref] = source_unit
+        return result
+
+
+def _source_units_for_raw_claims(
+    raw_claims: tuple[DraftClaimObservationReadModel, ...],
+    *,
+    source_units_by_ref: dict[str, SourceUnit],
+) -> tuple[SourceUnit, ...]:
+    refs = _ordered_unique(claim.source_unit_ref for claim in raw_claims)
+    return tuple(
+        source_units_by_ref[ref]
+        for ref in refs
+        if ref in source_units_by_ref
+    )
+
+
+def _ordered_unique(values: Iterable[str]) -> tuple[str, ...]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return tuple(result)
 
 
 def _raw_claim_json(raw_claim: DraftClaimObservationReadModel) -> JsonObject:
