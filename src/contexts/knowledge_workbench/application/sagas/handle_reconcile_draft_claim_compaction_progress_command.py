@@ -73,6 +73,8 @@ PENDING_COMPACTION_CONTINUATION_COMMAND_TYPES = (
     KnowledgeExtractionCanonicalCommandType.EXECUTE_DRAFT_CLAIM_COMPACTION.value,
     KnowledgeExtractionCanonicalCommandType.APPLY_DRAFT_CLAIM_COMPACTION_RESULT.value,
     KnowledgeExtractionCanonicalCommandType.RECONCILE_DRAFT_CLAIM_COMPACTION_PROGRESS.value,
+)
+PENDING_CURATION_OPEN_COMMAND_TYPES = (
     KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE.value,
 )
 
@@ -140,10 +142,18 @@ class HandleReconcileDraftClaimCompactionProgressCommandHandler:
                 excluding_command_id=workflow_command.command_id,
             )
         )
+        has_pending_curation_open = (
+            await command_log_read_repository.has_pending_commands(
+                workflow_run_id=workflow_run_id,
+                command_types=PENDING_CURATION_OPEN_COMMAND_TYPES,
+                excluding_command_id=workflow_command.command_id,
+            )
+        )
         decision = _decide(
             reduction_summary,
             execution_summary,
             has_pending_compaction_continuation=has_pending_compaction_continuation,
+            has_pending_curation_open=has_pending_curation_open,
         )
 
         next_command = _next_command(
@@ -277,16 +287,19 @@ def _decide(
     execution_summary: WorkItemProgressSummary,
     *,
     has_pending_compaction_continuation: bool = False,
+    has_pending_curation_open: bool = False,
 ) -> DraftClaimCompactionProgressDecision:
     if reduction_summary.has_waiting_user_model_choice:
         return DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE
     if execution_summary.terminal_failed_count > 0:
         return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
-    if has_pending_compaction_continuation:
-        return DraftClaimCompactionProgressDecision.ACTIVE
     if execution_summary.due_waiting_count > 0:
+        if has_pending_compaction_continuation:
+            return DraftClaimCompactionProgressDecision.ACTIVE
         return DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_NOW
     if _has_future_waiting_work(execution_summary):
+        if has_pending_compaction_continuation:
+            return DraftClaimCompactionProgressDecision.ACTIVE
         return DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_LATER
     if execution_summary.leased_count > 0:
         return DraftClaimCompactionProgressDecision.ACTIVE
@@ -295,9 +308,15 @@ def _decide(
     if execution_summary.deferred_count > 0:
         return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
     if reduction_summary.all_groups_done:
+        if has_pending_curation_open:
+            return DraftClaimCompactionProgressDecision.ACTIVE
         if _has_clean_terminal_coverage(execution_summary):
             return DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED
+        if has_pending_compaction_continuation:
+            return DraftClaimCompactionProgressDecision.ACTIVE
         return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
+    if has_pending_compaction_continuation:
+        return DraftClaimCompactionProgressDecision.ACTIVE
     return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
 
 

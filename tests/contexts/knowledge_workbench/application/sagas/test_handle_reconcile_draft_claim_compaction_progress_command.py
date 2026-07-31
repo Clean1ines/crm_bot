@@ -573,6 +573,35 @@ async def test_due_work_with_pending_compaction_continuation_stays_active() -> N
 
 
 @pytest.mark.asyncio
+async def test_all_groups_done_ignores_stale_pending_prepare_wakeup() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    workflow_uow.command_log.pending_commands.append(
+        _pending_command(
+            KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH,
+            run_after=_now() + timedelta(minutes=1),
+        )
+    )
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=2, active_group_count=0)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(completed_count=2)
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "ALL_GROUPS_COMPACTED"
+    assert workflow_uow.command_log.pending_commands[-1].command_type == (
+        KnowledgeExtractionCanonicalCommandType.OPEN_DRAFT_CLAIM_CURATION_WORKSPACE.value
+    )
+
+
+@pytest.mark.asyncio
 async def test_all_groups_done_with_unclean_terminal_coverage_blocks() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     repository = FakeReductionStateRepository(
