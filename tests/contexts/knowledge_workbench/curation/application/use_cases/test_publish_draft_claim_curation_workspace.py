@@ -65,15 +65,18 @@ def _payload(claim: str) -> dict[str, object]:
     }
 
 
-def _item(*, excluded: bool = False) -> DraftClaimCurationWorkspaceItem:
+def _item(
+    *,
+    item_ref: str = "item-1",
+    claim: str = "Edited claim",
+    excluded: bool = False,
+) -> DraftClaimCurationWorkspaceItem:
     original = DraftClaimCurationItemEditablePayload.from_payload(
         _payload("Original claim")
     )
-    editable = DraftClaimCurationItemEditablePayload.from_payload(
-        _payload("Edited claim")
-    )
+    editable = DraftClaimCurationItemEditablePayload.from_payload(_payload(claim))
     return DraftClaimCurationWorkspaceItem(
-        item_ref="item-1",
+        item_ref=item_ref,
         workspace_ref="workspace-1",
         workflow_run_id="workflow-1",
         group_ref="group-1",
@@ -258,6 +261,31 @@ async def test_publish_needs_republish_regenerates_runtime_entries() -> None:
     assert publication_repo.candidate is not None
     assert result.published_item_count == 1
     assert len(embedding_port.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_generates_runtime_embeddings_in_small_batches() -> None:
+    publication_repo = FakePublicationRepository()
+    embedding_port = FakeEmbeddingPort()
+    items = tuple(
+        _item(item_ref=f"item-{index}", claim=f"Edited claim {index}")
+        for index in range(9)
+    )
+
+    result = await PublishDraftClaimCurationWorkspace(
+        curation_workspace_repository=FakeWorkspaceRepository(
+            snapshot=_snapshot(items=items)
+        ),
+        curation_publication_repository=publication_repo,
+        embedding_generation_port=embedding_port,
+        embedding_model_id="test-model",
+        embedding_dimensions=384,
+    ).execute(workflow_run_id="workflow-1", published_at=_now())
+
+    assert result.published_item_count == 9
+    assert [len(request.texts) for request in embedding_port.requests] == [4, 4, 1]
+    assert publication_repo.candidate is not None
+    assert len(publication_repo.candidate.items) == 9
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from hashlib import sha256
 from src.contexts.embedding_runtime.application.ports.embedding_generation_port import (
     EmbeddingGenerationPort,
     EmbeddingGenerationRequest,
+    EmbeddingGenerationResult,
 )
 from src.contexts.knowledge_workbench.curation.application.models.draft_claim_curation_publication import (
     DraftClaimCurationPublicationCandidate,
@@ -58,6 +59,11 @@ class PublishDraftClaimCurationWorkspace:
     embedding_input_builder: CuratedClaimEmbeddingInputBuilder = (
         CuratedClaimEmbeddingInputBuilder()
     )
+    generation_batch_size: int = 4
+
+    def __post_init__(self) -> None:
+        if self.generation_batch_size <= 0:
+            raise ValueError("generation_batch_size must be > 0")
 
     async def execute(
         self,
@@ -134,30 +140,51 @@ class PublishDraftClaimCurationWorkspace:
     async def _embed(
         self,
         embedding_inputs: tuple[CuratedClaimEmbeddingInput, ...],
-    ):
-        try:
-            result = await self.embedding_generation_port.embed(
-                EmbeddingGenerationRequest(
-                    texts=tuple(item.text for item in embedding_inputs),
-                    model_id=self.embedding_model_id,
-                    expected_dimensions=self.embedding_dimensions,
-                    task="retrieval.passage",
-                )
-            )
-        except Exception as exc:
-            raise DraftClaimCurationPublicationEmbeddingError(
-                "failed to generate runtime retrieval embeddings"
-            ) from exc
+    ) -> EmbeddingGenerationResult:
+        embeddings: list[tuple[float, ...]] = []
+        model_id = self.embedding_model_id
 
-        if len(result.embeddings) != len(embedding_inputs):
-            raise DraftClaimCurationPublicationEmbeddingError(
-                "embedding result count must match publishable item count"
-            )
-        if result.dimensions != self.embedding_dimensions:
-            raise DraftClaimCurationPublicationEmbeddingError(
-                "embedding result dimensions must match expected dimensions"
-            )
-        return result
+        for input_batch in _chunked(embedding_inputs, self.generation_batch_size):
+            try:
+                result = await self.embedding_generation_port.embed(
+                    EmbeddingGenerationRequest(
+                        texts=tuple(item.text for item in input_batch),
+                        model_id=self.embedding_model_id,
+                        expected_dimensions=self.embedding_dimensions,
+                        task="retrieval.passage",
+                    )
+                )
+            except Exception as exc:
+                raise DraftClaimCurationPublicationEmbeddingError(
+                    "failed to generate runtime retrieval embeddings"
+                ) from exc
+
+            if len(result.embeddings) != len(input_batch):
+                raise DraftClaimCurationPublicationEmbeddingError(
+                    "embedding result count must match publishable item count"
+                )
+            if result.dimensions != self.embedding_dimensions:
+                raise DraftClaimCurationPublicationEmbeddingError(
+                    "embedding result dimensions must match expected dimensions"
+                )
+            model_id = result.model_id
+            embeddings.extend(result.embeddings)
+
+        return EmbeddingGenerationResult(
+            embeddings=tuple(embeddings),
+            model_id=model_id,
+            dimensions=self.embedding_dimensions,
+        )
+
+
+def _chunked(
+    inputs: tuple[CuratedClaimEmbeddingInput, ...],
+    batch_size: int,
+) -> tuple[tuple[CuratedClaimEmbeddingInput, ...], ...]:
+    return tuple(
+        inputs[index : index + batch_size]
+        for index in range(0, len(inputs), batch_size)
+    )
 
 
 def _publication_item(
