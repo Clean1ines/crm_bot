@@ -558,7 +558,7 @@ class PrepareLlmDispatchBatch:
                     due_records=admission_due_records,
                     account_capacities=account_capacities,
                     active_model_ref=resolved_active_model_ref,
-                    requested_items=command.requested_items,
+                    requested_items=len(admission_due_records),
                     worker=command.worker,
                     lease_token_prefix=command.lease_token_prefix,
                     lease_expires_at=command.lease_expires_at,
@@ -910,11 +910,16 @@ def _input_admitted_candidates(
         record
         for record in due_records
         if record.work_item.status is WorkItemStatus.RETRYABLE_FAILED
+        or (
+            record.work_item.status is WorkItemStatus.READY
+            and record.work_item.attempt_count > 0
+        )
     ]
     pending_fresh_records = [
         record
         for record in due_records
         if record.work_item.status is WorkItemStatus.READY
+        and record.work_item.attempt_count == 0
     ]
     due_retry_barrier_active = bool(pending_retry_records)
 

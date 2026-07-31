@@ -33,6 +33,10 @@ from src.interfaces.composition.workbench_rag_eval_workflow_runtime import (
 
 LOGGER = structlog.get_logger(__name__)
 
+MAINTENANCE_LOCK_TIMEOUT_MS = 2_000
+MAINTENANCE_STATEMENT_TIMEOUT_MS = 15_000
+MAINTENANCE_STEP_TIMEOUT_SECONDS = 20.0
+
 
 class AsyncPoolLike(Protocol):
     async def acquire(self) -> object: ...
@@ -89,28 +93,19 @@ async def run_knowledge_extraction_workflow_runtime_loop(
     LOGGER.info("knowledge_extraction_workflow_runtime_started")
 
     while not shutdown_event.is_set():
-        connection = await pool.acquire()
         try:
-            asyncpg_connection = cast(asyncpg.Connection, connection)
-            async with asyncpg_connection.transaction():
-                recovery = await PostgresExpiredLeaseRecoveryRepository(
-                    asyncpg_connection
-                ).reclaim_expired(
-                    now=datetime.now(timezone.utc),
-                    limit=stale_lease_batch_size,
-                )
-                due_reader = PostgresDueKnowledgeExtractionWorkflowReader(
-                    asyncpg_connection
-                )
-                due_workflows = await due_reader.list_due_workflows(
-                    limit=workflow_batch_size
-                )
+            recovery, due_workflows = await asyncio.wait_for(
+                _run_maintenance_once(
+                    pool=pool,
+                    workflow_batch_size=workflow_batch_size,
+                    stale_lease_batch_size=stale_lease_batch_size,
+                ),
+                timeout=MAINTENANCE_STEP_TIMEOUT_SECONDS,
+            )
         except Exception:
             LOGGER.exception("knowledge_extraction_workflow_runtime_maintenance_failed")
             due_workflows = ()
             recovery = None
-        finally:
-            await pool.release(connection)
 
         if recovery is not None and recovery.reclaimed_count:
             LOGGER.warning(
@@ -120,10 +115,19 @@ async def run_knowledge_extraction_workflow_runtime_loop(
             )
 
         if due_workflows:
-            await KnowledgeExtractionWorkflowRuntimePump(
-                due_workflow_reader=_StaticDueWorkflowReader(due_workflows),
-                workflow_runner=workflow_runner,
-            ).run_once(limit=len(due_workflows))
+            try:
+                pump_result = await KnowledgeExtractionWorkflowRuntimePump(
+                    due_workflow_reader=_StaticDueWorkflowReader(due_workflows),
+                    workflow_runner=workflow_runner,
+                ).run_once(limit=len(due_workflows))
+                LOGGER.info(
+                    "knowledge_extraction_workflow_runtime_pump_completed",
+                    inspected_count=pump_result.inspected_count,
+                    succeeded_count=pump_result.succeeded_count,
+                    failed_count=pump_result.failed_count,
+                )
+            except Exception:
+                LOGGER.exception("knowledge_extraction_workflow_runtime_pump_failed")
 
         try:
             await rag_eval_runtime.run_due_once(
@@ -142,6 +146,39 @@ async def run_knowledge_extraction_workflow_runtime_loop(
             continue
 
     LOGGER.info("knowledge_extraction_workflow_runtime_stopped")
+
+
+async def _run_maintenance_once(
+    *,
+    pool: AsyncPoolLike,
+    workflow_batch_size: int,
+    stale_lease_batch_size: int,
+) -> tuple[object, tuple[DueKnowledgeExtractionWorkflow, ...]]:
+    connection = await pool.acquire()
+    try:
+        asyncpg_connection = cast(asyncpg.Connection, connection)
+        async with asyncpg_connection.transaction():
+            await asyncpg_connection.execute(
+                f"""
+                SET LOCAL lock_timeout = '{MAINTENANCE_LOCK_TIMEOUT_MS}ms';
+                SET LOCAL statement_timeout = '{MAINTENANCE_STATEMENT_TIMEOUT_MS}ms';
+                """,
+            )
+            recovery = await PostgresExpiredLeaseRecoveryRepository(
+                asyncpg_connection
+            ).reclaim_expired(
+                now=datetime.now(timezone.utc),
+                limit=stale_lease_batch_size,
+            )
+            due_reader = PostgresDueKnowledgeExtractionWorkflowReader(
+                asyncpg_connection
+            )
+            due_workflows = await due_reader.list_due_workflows(
+                limit=workflow_batch_size
+            )
+            return recovery, due_workflows
+    finally:
+        await pool.release(connection)
 
 
 @dataclass(frozen=True, slots=True)

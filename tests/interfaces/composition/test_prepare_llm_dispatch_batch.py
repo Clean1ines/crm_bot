@@ -2118,6 +2118,63 @@ async def test_multiple_due_retries_block_fresh_admission() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reclaimed_ready_retry_blocks_fresh_admission() -> None:
+    connection = FakeConnection()
+
+    reclaimed_retry = _work_item_row("work-reclaimed-retry", ordinal=1)
+    reclaimed_retry["status"] = WorkItemStatus.READY.value
+    reclaimed_retry["attempt_count"] = 1
+    reclaimed_retry["next_attempt_at"] = None
+    reclaimed_retry["last_error_kind"] = "lease_expired"
+
+    fresh = _work_item_row("work-fresh", ordinal=2)
+    fresh["status"] = WorkItemStatus.READY.value
+    fresh["attempt_count"] = 0
+    fresh["next_attempt_at"] = None
+
+    connection.work_items["work-reclaimed-retry"] = reclaimed_retry
+    connection.work_items["work-fresh"] = fresh
+    connection.schedules["work-reclaimed-retry"] = _schedule_payload(
+        source_unit_ref="unit-reclaimed-retry",
+        profile=_large_input_profile(1000),
+    )
+    connection.schedules["work-fresh"] = _schedule_payload(
+        source_unit_ref="unit-fresh",
+        profile=_large_input_profile(1000),
+    )
+
+    result = await _runner(FakePool(connection=connection)).execute(
+        _command(
+            account_capacities=(
+                _account(
+                    account_ref="org-1",
+                    minute_requests=2,
+                    minute_tokens=4000,
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+                _account(
+                    account_ref="org-2",
+                    minute_requests=2,
+                    minute_tokens=4000,
+                    daily_requests=100,
+                    daily_tokens=50000,
+                ),
+            ),
+            requested_items=2,
+        ),
+    )
+
+    assert len(result.lease_result.leased) == 1
+    assert len(result.attempt_result.started_attempts) == 1
+    assert connection.work_items["work-reclaimed-retry"]["status"] == "leased"
+    assert connection.work_items["work-fresh"]["status"] == WorkItemStatus.READY.value
+    assert {
+        str(dispatch["work_item_id"]) for dispatch in connection.dispatches.values()
+    } == {"work-reclaimed-retry"}
+
+
+@pytest.mark.asyncio
 async def test_local_active_model_minute_window_uses_first_observation_reset() -> None:
     connection = _connection_with_due_items(1)
     connection.capacity_observations.extend(
