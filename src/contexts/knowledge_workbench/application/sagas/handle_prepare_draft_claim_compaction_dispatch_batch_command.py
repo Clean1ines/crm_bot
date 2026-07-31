@@ -379,7 +379,8 @@ def _prepare_llm_dispatch_batch_command(
             ),
         ),
         lease_token_prefix=f"draft-claim-compaction-dispatch:{workflow_run_id}",
-        lease_expires_at=occurred_at + timedelta(seconds=90),
+        lease_expires_at=occurred_at
+        + timedelta(seconds=_lease_ttl_seconds_from_payload(workflow_command.payload)),
         now=occurred_at,
         started_at=occurred_at,
         dispatch_preparation_strategy=_dispatch_preparation_strategy(
@@ -391,6 +392,20 @@ def _prepare_llm_dispatch_batch_command(
             workflow_command.payload,
         ),
     )
+
+
+def _lease_ttl_seconds_from_payload(payload: Mapping[str, object]) -> int:
+    if payload.get("lease_ttl_seconds") is not None:
+        return _payload_positive_int(payload, "lease_ttl_seconds")
+
+    llm_dispatch_preparation = payload.get("llm_dispatch_preparation")
+    if (
+        isinstance(llm_dispatch_preparation, Mapping)
+        and llm_dispatch_preparation.get("lease_ttl_seconds") is not None
+    ):
+        return _payload_positive_int(llm_dispatch_preparation, "lease_ttl_seconds")
+
+    return 90
 
 
 def _profile_from_payload(

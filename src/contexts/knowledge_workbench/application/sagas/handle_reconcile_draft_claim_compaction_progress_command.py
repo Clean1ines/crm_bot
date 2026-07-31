@@ -282,6 +282,8 @@ def _decide(
         return DraftClaimCompactionProgressDecision.WAITING_USER_MODEL_CHOICE
     if execution_summary.terminal_failed_count > 0:
         return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
+    if has_pending_compaction_continuation:
+        return DraftClaimCompactionProgressDecision.ACTIVE
     if execution_summary.due_waiting_count > 0:
         return DraftClaimCompactionProgressDecision.PREPARE_NEXT_BATCH_NOW
     if _has_future_waiting_work(execution_summary):
@@ -295,11 +297,7 @@ def _decide(
     if reduction_summary.all_groups_done:
         if _has_clean_terminal_coverage(execution_summary):
             return DraftClaimCompactionProgressDecision.ALL_GROUPS_COMPACTED
-        if has_pending_compaction_continuation:
-            return DraftClaimCompactionProgressDecision.ACTIVE
         return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
-    if has_pending_compaction_continuation:
-        return DraftClaimCompactionProgressDecision.ACTIVE
     return DraftClaimCompactionProgressDecision.COMPACTION_PROGRESS_BLOCKED
 
 

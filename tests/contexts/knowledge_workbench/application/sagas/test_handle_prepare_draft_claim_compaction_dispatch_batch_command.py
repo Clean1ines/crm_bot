@@ -333,6 +333,7 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
     assert prepare.calls[0].allow_automatic_fallbacks is False
     assert prepare.calls[0].use_local_active_model_tpm_budget is True
+    assert (prepare.calls[0].lease_expires_at - prepare.calls[0].now).total_seconds() == 300
     assert prepare.calls[0].profile is not None
     assert prepare.calls[0].profile.estimated_prompt_tokens == 12345
     assert prepare.calls[0].profile.estimated_completion_tokens == 4000

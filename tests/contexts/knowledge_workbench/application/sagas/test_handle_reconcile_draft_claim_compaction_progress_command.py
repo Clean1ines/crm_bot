@@ -541,6 +541,38 @@ async def test_all_groups_done_with_due_work_prepares_without_curation() -> None
 
 
 @pytest.mark.asyncio
+async def test_due_work_with_pending_compaction_continuation_stays_active() -> None:
+    workflow_uow = FakeWorkflowUnitOfWork()
+    workflow_uow.command_log.pending_commands.append(
+        _command(
+            command_type=(
+                KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH
+            )
+        )
+    )
+    repository = FakeReductionStateRepository(
+        _summary(group_count=2, done_group_count=1, active_group_count=1)
+    )
+    execution_repository = FakeWorkItemProgressReadRepository(
+        _work_summary(
+            completed_count=1,
+            retryable_failed_count=1,
+            due_retryable_failed_count=1,
+        )
+    )
+
+    result = await HandleReconcileDraftClaimCompactionProgressCommandHandler().execute(
+        HandleReconcileDraftClaimCompactionProgressCommand(workflow_command=_command()),
+        workflow_unit_of_work=workflow_uow,
+        compaction_reduction_state_repository=repository,
+        work_item_progress_read_repository=execution_repository,
+    )
+
+    assert result.decision == "ACTIVE"
+    assert len(workflow_uow.command_log.pending_commands) == 1
+
+
+@pytest.mark.asyncio
 async def test_all_groups_done_with_unclean_terminal_coverage_blocks() -> None:
     workflow_uow = FakeWorkflowUnitOfWork()
     repository = FakeReductionStateRepository(
