@@ -1196,7 +1196,7 @@ async def test_dispatch_repairs_compaction_prepare_command_without_dispatch_prep
     assert result.blocked_reason is None
     assert len(prepare.calls) == 1
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
-    assert prepare.calls[0].requested_items == 2
+    assert prepare.calls[0].requested_items == 1
     assert prepare.calls[0].worker.value == (
         "knowledge-workbench-draft-claim-compaction-dispatch"
     )

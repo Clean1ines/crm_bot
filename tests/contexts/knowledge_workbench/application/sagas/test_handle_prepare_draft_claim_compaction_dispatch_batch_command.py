@@ -330,6 +330,7 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     assert result.appended_event_count == 1
     assert result.appended_next_command_count == 1
     assert prepare.calls[0].work_kind == DRAFT_CLAIM_COMPACTION_WORK_KIND
+    assert prepare.calls[0].requested_items == 1
     assert prepare.calls[0].active_model_ref == "openai/gpt-oss-120b"
     assert prepare.calls[0].allow_automatic_fallbacks is False
     assert prepare.calls[0].use_local_active_model_tpm_budget is True
@@ -380,6 +381,73 @@ async def test_prepares_dispatch_batch_event_progress_timeline_and_completion() 
     assert execute_command.payload["expected_output_kind"] == "compacted_claims"
     assert execute_command.payload["source_claim_refs"] == ["claim-a", "claim-b"]
     assert workflow_uow.command_log.completed == [_command().command_id]
+
+
+@pytest.mark.asyncio
+async def test_caps_prepare_admission_to_one_item_per_provider_account() -> None:
+    payload = _payload()
+    payload["scheduled_work_item_count"] = 33
+    payload["capacity_window_provider_account_refs"] = [
+        "groq_org_primary",
+        "groq_org_secondary",
+        "groq_org_third",
+        "groq_org_fourth",
+    ]
+    preparation_value = payload["llm_dispatch_preparation"]
+    assert isinstance(preparation_value, dict)
+    preparation = dict(preparation_value)
+    preparation["requested_items"] = 33
+    preparation["account_capacities"] = (
+        {
+            "provider": "groq",
+            "account_ref": "groq_org_primary",
+            "model_ref": "openai/gpt-oss-120b",
+            "remaining_minute_requests": 1,
+            "remaining_minute_tokens": 100000,
+            "remaining_daily_requests": 100,
+            "remaining_daily_tokens": 1000000,
+        },
+        {
+            "provider": "groq",
+            "account_ref": "groq_org_secondary",
+            "model_ref": "openai/gpt-oss-120b",
+            "remaining_minute_requests": 1,
+            "remaining_minute_tokens": 100000,
+            "remaining_daily_requests": 100,
+            "remaining_daily_tokens": 1000000,
+        },
+        {
+            "provider": "groq",
+            "account_ref": "groq_org_third",
+            "model_ref": "openai/gpt-oss-120b",
+            "remaining_minute_requests": 1,
+            "remaining_minute_tokens": 100000,
+            "remaining_daily_requests": 100,
+            "remaining_daily_tokens": 1000000,
+        },
+        {
+            "provider": "groq",
+            "account_ref": "groq_org_fourth",
+            "model_ref": "openai/gpt-oss-120b",
+            "remaining_minute_requests": 1,
+            "remaining_minute_tokens": 100000,
+            "remaining_daily_requests": 100,
+            "remaining_daily_tokens": 1000000,
+        },
+    )
+    payload["llm_dispatch_preparation"] = preparation
+    prepare = FakePrepareLlmDispatchBatch(started_attempts=())
+    workflow_uow = FakeWorkflowUnitOfWork()
+
+    await HandlePrepareDraftClaimCompactionDispatchBatchCommandHandler().execute(
+        HandlePrepareDraftClaimCompactionDispatchBatchCommand(
+            workflow_command=_command(payload=payload)
+        ),
+        prepare_llm_dispatch_batch=prepare,
+        workflow_unit_of_work=workflow_uow,
+    )
+
+    assert prepare.calls[0].requested_items == 4
 
 
 @pytest.mark.asyncio

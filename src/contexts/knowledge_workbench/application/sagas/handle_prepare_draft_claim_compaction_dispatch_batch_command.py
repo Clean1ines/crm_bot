@@ -56,6 +56,7 @@ DRAFT_CLAIM_COMPACTION_WORKER_REF = (
     "knowledge-workbench-draft-claim-compaction-dispatch"
 )
 DRAFT_CLAIM_COMPACTION_DEGRADED_MODEL_REF = "llama-3.3-70b-versatile"
+MIN_DRAFT_CLAIM_COMPACTION_ADMISSION_SLOTS = 1
 
 
 class PrepareLlmDispatchBatchPort(Protocol):
@@ -362,9 +363,12 @@ def _prepare_llm_dispatch_batch_command(
     workflow_run_id: str,
     occurred_at: datetime,
 ) -> PrepareLlmDispatchBatchCommand:
-    requested_items = _payload_positive_int(
-        workflow_command.payload,
-        "scheduled_work_item_count",
+    scheduled_work_item_count = _payload_positive_int(
+        workflow_command.payload, "scheduled_work_item_count"
+    )
+    requested_items = min(
+        scheduled_work_item_count,
+        _draft_claim_compaction_account_admission_slots(workflow_command.payload),
     )
     return PrepareLlmDispatchBatchCommand(
         work_kind=DRAFT_CLAIM_COMPACTION_WORK_KIND,
@@ -391,6 +395,29 @@ def _prepare_llm_dispatch_batch_command(
         provider_account_refs=_provider_account_refs_from_payload(
             workflow_command.payload,
         ),
+    )
+
+
+def _draft_claim_compaction_account_admission_slots(
+    payload: Mapping[str, object],
+) -> int:
+    provider_account_refs = _provider_account_refs_from_payload(payload)
+    if provider_account_refs:
+        return len(provider_account_refs)
+
+    llm_dispatch_preparation = payload.get("llm_dispatch_preparation")
+    if not isinstance(llm_dispatch_preparation, Mapping):
+        return MIN_DRAFT_CLAIM_COMPACTION_ADMISSION_SLOTS
+
+    account_capacities = llm_dispatch_preparation.get("account_capacities")
+    if not isinstance(account_capacities, Sequence) or isinstance(
+        account_capacities, str | bytes
+    ):
+        return MIN_DRAFT_CLAIM_COMPACTION_ADMISSION_SLOTS
+
+    return max(
+        MIN_DRAFT_CLAIM_COMPACTION_ADMISSION_SLOTS,
+        len(account_capacities),
     )
 
 
