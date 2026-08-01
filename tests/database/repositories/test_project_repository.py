@@ -813,6 +813,7 @@ class TestProjectRepository:
                     "industry": "services",
                     "tone_of_voice": "warm",
                     "default_language": "ru",
+                    "target_language": "en",
                     "default_timezone": "Europe/Moscow",
                     "system_prompt_override": None,
                     "created_at": created_at,
@@ -879,6 +880,7 @@ class TestProjectRepository:
 
         assert result.project_id == str(project_id)
         assert result.settings["brand_name"] == "Acme"
+        assert result.settings["target_language"] == "en"
         assert result.policies["escalation_policy_json"] == {"mode": "manager"}
         assert result.limit_profile["requests_per_minute"] == 30
         assert result.integrations[0].id == str(integration_id)
@@ -898,6 +900,7 @@ class TestProjectRepository:
                 "industry": "services",
                 "tone_of_voice": "warm",
                 "default_language": "ru",
+                "target_language": "en",
                 "default_timezone": "Europe/Moscow",
                 "system_prompt_override": "Custom prompt",
             },
@@ -905,7 +908,53 @@ class TestProjectRepository:
 
         args = mock_pool.mock_conn.execute.await_args.args
         assert "INSERT INTO project_settings" in args[0]
+        assert "target_language" in args[0]
+        assert (
+            "COALESCE(EXCLUDED.target_language, project_settings.target_language)"
+            in args[0]
+        )
         assert args[1] == UUID(project_id)
+        assert args[6] == "en"
+
+    @pytest.mark.asyncio
+    async def test_update_project_settings_preserves_target_language_when_omitted(
+        self, project_repo, mock_pool
+    ):
+        project_id = str(uuid4())
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        await project_repo.update_project_settings(
+            project_id,
+            {
+                "brand_name": "Renamed",
+                "target_language": None,
+                "default_language": "ru",
+            },
+        )
+
+        args = mock_pool.mock_conn.execute.await_args.args
+        assert args[5] == "ru"
+        assert args[6] is None
+        assert "target_language = COALESCE" in args[0]
+
+    @pytest.mark.asyncio
+    async def test_update_project_settings_changes_target_language(
+        self, project_repo, mock_pool
+    ):
+        project_id = str(uuid4())
+        mock_pool.mock_conn.execute = AsyncMock()
+
+        await project_repo.update_project_settings(
+            project_id,
+            {
+                "default_language": "ru",
+                "target_language": "de",
+            },
+        )
+
+        args = mock_pool.mock_conn.execute.await_args.args
+        assert args[5] == "ru"
+        assert args[6] == "de"
 
     @pytest.mark.asyncio
     async def test_update_project_policies(self, project_repo, mock_pool):

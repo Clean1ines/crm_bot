@@ -55,6 +55,7 @@ from src.application.services.project_query_service import ProjectQueryService
 from src.application.services.project_service import ProjectAccessService
 from src.application.services.thread_command_service import ThreadCommandService
 from src.application.services.thread_query_service import ThreadQueryService
+from src.application.services.ticket_resolution_service import TicketResolutionService
 from src.application.services.ticket_command_service import TicketCommandService
 from src.infrastructure.redis.client import get_redis_client
 from src.infrastructure.redis.cache_adapter import RedisCacheAdapter
@@ -342,9 +343,41 @@ def get_thread_command_service(
         get_thread_lifecycle_repo
     ),
     memory_repo: MemoryRepository = Depends(get_memory_repository),
+    thread_runtime_state_repo: ThreadRuntimeStateRepository = Depends(
+        get_thread_runtime_state_repo
+    ),
+    thread_read_repo: ThreadReadRepository = Depends(get_thread_read_repo),
+    thread_message_repo: ThreadMessageRepository = Depends(get_thread_message_repo),
+    event_repo: EventRepository = Depends(get_event_repo),
+    project_service: ProjectAccessService = Depends(get_project_service),
+    project_repo=Depends(get_project_repo),
+    user_repo: UserRepository = Depends(get_user_repository),
 ) -> ThreadCommandService:
     """Return the application write service for thread-focused mutations."""
-    return ThreadCommandService(thread_lifecycle_repo, memory_repo)
+    from src.infrastructure.llm.conversation_summary_generator import (
+        ResponseCompletionConversationSummaryGenerator,
+    )
+
+    summary_generator = ResponseCompletionConversationSummaryGenerator()
+    ticket_resolution_service = TicketResolutionService(
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        event_repo=event_repo,
+        memory_repo=memory_repo,
+        project_configuration_repo=project_repo,
+        summary_generator=summary_generator,
+        logger=logger,
+    )
+    return ThreadCommandService(
+        thread_lifecycle_repo,
+        memory_repo,
+        thread_read_repo=thread_read_repo,
+        event_repo=event_repo,
+        project_access_service=project_service,
+        user_repo=user_repo,
+        ticket_resolution_service=ticket_resolution_service,
+    )
 
 
 async def get_ticket_command_service(

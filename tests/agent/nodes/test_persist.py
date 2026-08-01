@@ -135,7 +135,7 @@ async def test_persist_degrades_when_assistant_message_save_fails():
 
 
 @pytest.mark.asyncio
-async def test_persist_writes_deterministic_memory_candidates():
+async def test_persist_writes_explicit_memory_candidates():
     thread_message_repo = MagicMock()
     thread_message_repo.add_message = AsyncMock()
 
@@ -161,38 +161,24 @@ async def test_persist_writes_deterministic_memory_candidates():
             "thread_id": "thread-1",
             "project_id": "project-1",
             "client_id": "client-1",
-            "user_input": "Слишком дорого, только в чат, интеграция не работает",
-            "intent": "pricing",
-            "topic": "integration",
-            "emotion": "negative",
-            "lifecycle": "warm",
-            "cta": "none",
+            "user_input": "Я использую AmoCRM",
+            "memory_candidates": [
+                {
+                    "key": "uses_crm",
+                    "value": "AmoCRM",
+                    "type": "profile",
+                    "confidence": 0.95,
+                    "evidence_quote": "Я использую AmoCRM",
+                }
+            ],
         }
     )
 
     assert result == {}
-    writes = [
-        {
-            "key": call.kwargs["key"],
-            "value": call.kwargs["value"],
-            "type_": call.kwargs["type_"],
-        }
+    writes = {
+        (call.kwargs["type_"], call.kwargs["key"]): call.kwargs["value"]
         for call in memory_repo.set.await_args_list
-    ]
-
-    assert {
-        "key": "contact_preference",
-        "value": {"preferred_channel": "chat", "avoid_calls": True},
-        "type_": "preferences",
-    } in writes
-    assert {"key": "price_sensitivity", "value": "high", "type_": "behavior"} in writes
-    assert {
-        "key": "pricing_objection",
-        "value": "too_expensive",
-        "type_": "rejections",
-    } in writes
-    assert {
-        "key": "active_issue",
-        "value": {"kind": "integration", "emotion": "negative"},
-        "type_": "issues",
-    } in writes
+    }
+    assert writes[("dialog_state", "dialog_state")]["lifecycle"] == "active_client"
+    assert writes[("lifecycle", "stage")] == {"stage": "active_client"}
+    assert writes[("profile", "uses_crm")] == "AmoCRM"

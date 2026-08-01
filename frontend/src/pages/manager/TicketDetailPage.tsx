@@ -7,6 +7,7 @@ import { threadStatusLabel } from '../../shared/lib/uiLabels';
 
 import type { Client, Message, ThreadState } from '../../entities/thread/model/types';
 import { threadsApi } from '../../shared/api/modules/threads';
+import type { TicketResolution } from '../../shared/api/modules/threads';
 import { getClientDisplayName } from '../../shared/lib/clients';
 import { getMessagePresentation } from '../../shared/lib/threadMessages';
 
@@ -17,10 +18,26 @@ const getMutationErrorMessage = (error: unknown): string => (
   )
 );
 
+const resolutionStatusLabel = (status: TicketResolution['status'] | undefined): string => {
+  switch (status) {
+    case 'pending':
+      return t('manager.ticket.resolution.status.pending');
+    case 'generated':
+      return t('manager.ticket.resolution.status.generated');
+    case 'edited':
+      return t('manager.ticket.resolution.status.edited');
+    case 'failed':
+      return t('manager.ticket.resolution.status.failed');
+    default:
+      return t('manager.ticket.resolution.status.missing');
+  }
+};
+
 export const TicketDetailPage: React.FC = () => {
   const { projectId, threadId } = useParams<{ projectId: string; threadId: string }>();
   const queryClient = useQueryClient();
   const [replyText, setReplyText] = useState('');
+  const [resolutionDraft, setResolutionDraft] = useState({ key: '', text: '' });
 
   const {
     data: messagesData,
@@ -80,11 +97,42 @@ export const TicketDetailPage: React.FC = () => {
     enabled: !!threadId,
   });
 
+  const { data: ticketResolution, isLoading: isResolutionLoading } = useQuery({
+    queryKey: ['ticket_resolution', threadId],
+    queryFn: async () => {
+      if (!threadId) throw new Error(t('manager.ticket.threadNotSelected'));
+
+      const { data, error } = await threadsApi.getResolution(threadId);
+      if (error) throw error;
+
+      return data as TicketResolution;
+    },
+    enabled: !!threadId,
+  });
+
+  const resolutionDraftKey = `${threadId ?? ''}:${ticketResolution?.version ?? 'none'}`;
+  if (resolutionDraft.key !== resolutionDraftKey) {
+    setResolutionDraft({
+      key: resolutionDraftKey,
+      text: ticketResolution?.summary_text ?? '',
+    });
+  }
+  const resolutionText = resolutionDraft.text;
+
   const ticketClient =
     (ticketInfo?.client as Client | undefined) ?? ticketState?.client ?? null;
   const clientName = getClientDisplayName(ticketClient, t('ui.client.fallback'));
   const ticketStatus = ticketInfo?.status || ticketState?.status || 'waiting_manager';
   const isClosed = ticketStatus === 'closed';
+  const hasResolution = ticketResolution !== undefined;
+  const canEdit =
+    isClosed &&
+    hasResolution &&
+    ['generated', 'edited', 'failed'].includes(ticketResolution.status);
+  const canRegenerate =
+    isClosed &&
+    hasResolution &&
+    ['generated', 'edited', 'failed', 'missing'].includes(ticketResolution.status);
 
   const claimMutation = useMutation({
     mutationFn: async () => {
@@ -109,6 +157,34 @@ export const TicketDetailPage: React.FC = () => {
       void queryClient.invalidateQueries({ queryKey: ['ticket_info', threadId] });
       void queryClient.invalidateQueries({ queryKey: ['ticket_state', threadId] });
       void queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket_resolution', threadId] });
+    },
+  });
+
+  const saveResolutionMutation = useMutation({
+    mutationFn: async () => {
+      if (!threadId) throw new Error(t('manager.ticket.threadNotSelected'));
+      const { error } = await threadsApi.updateResolution(threadId, {
+        summary_text: resolutionText,
+        expected_version: ticketResolution?.version ?? 0,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ticket_resolution', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket_state', threadId] });
+    },
+  });
+
+  const regenerateResolutionMutation = useMutation({
+    mutationFn: async () => {
+      if (!threadId) throw new Error(t('manager.ticket.threadNotSelected'));
+      const { error } = await threadsApi.regenerateResolution(threadId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ticket_resolution', threadId] });
+      void queryClient.invalidateQueries({ queryKey: ['ticket_state', threadId] });
     },
   });
 
@@ -215,6 +291,62 @@ export const TicketDetailPage: React.FC = () => {
             );
           })}
         </div>
+      </div>
+
+      <div className="mb-6 rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-medium text-[var(--text-primary)]">{t('manager.ticket.resolution.title')}</h2>
+          <span className="text-xs text-[var(--text-muted)]">
+            {resolutionStatusLabel(ticketResolution?.status)} · v{ticketResolution?.version ?? 0}
+          </span>
+        </div>
+        <textarea
+          value={resolutionText}
+          onChange={(event) =>
+            setResolutionDraft({
+              key: resolutionDraftKey,
+              text: event.target.value,
+            })
+          }
+          className="min-h-28 w-full rounded-lg bg-[var(--control-bg)] p-3 text-sm leading-relaxed text-[var(--text-primary)] shadow-[var(--shadow-sm)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-primary)]/25"
+          rows={4}
+          disabled={saveResolutionMutation.isPending || regenerateResolutionMutation.isPending}
+        />
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => saveResolutionMutation.mutate()}
+            disabled={
+              isResolutionLoading ||
+              saveResolutionMutation.isPending ||
+              !canEdit ||
+              !resolutionText.trim()
+            }
+            className="min-h-10 rounded-lg bg-[var(--accent-primary)] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saveResolutionMutation.isPending ? t('manager.ticket.resolution.saving') : t('manager.ticket.resolution.save')}
+          </button>
+          <button
+            type="button"
+            onClick={() => regenerateResolutionMutation.mutate()}
+            disabled={
+              isResolutionLoading ||
+              regenerateResolutionMutation.isPending ||
+              !canRegenerate
+            }
+            className="min-h-10 rounded-lg border border-[var(--divider-soft)] bg-[var(--surface-secondary)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {regenerateResolutionMutation.isPending ? t('manager.ticket.resolution.regenerating') : t('manager.ticket.resolution.regenerate')}
+          </button>
+        </div>
+        {(saveResolutionMutation.isError || regenerateResolutionMutation.isError) && (
+          <div className="mt-3 rounded-lg bg-[var(--accent-danger-bg)] p-3 text-sm text-[var(--accent-danger-text)]">
+            {getErrorMessage(
+              saveResolutionMutation.error || regenerateResolutionMutation.error,
+              t('manager.ticket.resolution.saveFailed'),
+            )}
+          </div>
+        )}
       </div>
 
       <div className="rounded-2xl bg-[var(--surface-elevated)] p-4 shadow-[var(--shadow-card)]">

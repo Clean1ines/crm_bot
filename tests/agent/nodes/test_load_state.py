@@ -3,9 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent.nodes.load_state import create_load_state_node
+from src.agent.nodes.load_state import (
+    EPHEMERAL_TURN_STATE_KEYS,
+    create_load_state_node,
+)
 from src.domain.project_plane.memory_views import MemoryEntryView
 from src.domain.runtime.persistence import PersistenceContext
+from src.domain.runtime.state_contracts import RECENT_DIALOG_MESSAGES_LIMIT
 
 
 @pytest.mark.asyncio
@@ -51,9 +55,10 @@ async def test_load_state_node_uses_thread_runtime_snapshots():
     assert result["conversation_summary"] == "summary"
     assert result["client_id"] == "client-1"
     assert result["history"] == [{"role": "user", "content": "hello"}]
-    assert result["intent"] == "pricing"
     assert result["lifecycle"] == "warm"
-    assert result["decision"] == "RESPOND"
+    assert "intent" not in result
+    assert "decision" not in result
+    assert "cta" not in result
     assert result["user_memory"] == {}
 
 
@@ -166,6 +171,80 @@ async def test_load_state_indexes_memory_and_hydrates_dialog_state():
 
 
 @pytest.mark.asyncio
+async def test_ticket_resolution_success_flow_loads_prior_resolution_into_prompt():
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-new",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "",
+        }
+    )
+    thread_read_repo.list_recent_closed_ticket_resolutions = AsyncMock(
+        return_value=[
+            {
+                "thread_id": "thread-old",
+                "summary_text": "Менеджер решил вопрос по цене.",
+                "status": "generated",
+                "version": 1,
+            }
+        ]
+    )
+    runtime = MagicMock()
+    runtime.get_analytics_view = AsyncMock(return_value=None)
+    runtime.get_state_json = AsyncMock(return_value={})
+    messages = MagicMock()
+    messages.get_messages_for_langgraph = AsyncMock(return_value=[])
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=messages,
+        thread_runtime_state_repo=runtime,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    state = await node({"thread_id": "thread-new"})
+    assert state["recent_ticket_resolutions"][0]["summary_text"] == (
+        "Менеджер решил вопрос по цене."
+    )
+
+
+@pytest.mark.asyncio
+async def test_ticket_resolution_failed_flow_does_not_load_as_resolved_case():
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-new",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "",
+        }
+    )
+    thread_read_repo.list_recent_closed_ticket_resolutions = AsyncMock(return_value=[])
+    runtime = MagicMock()
+    runtime.get_analytics_view = AsyncMock(return_value=None)
+    runtime.get_state_json = AsyncMock(return_value={})
+    messages = MagicMock()
+    messages.get_messages_for_langgraph = AsyncMock(return_value=[])
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=messages,
+        thread_runtime_state_repo=runtime,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    state = await node({"thread_id": "thread-new"})
+
+    assert state["recent_ticket_resolutions"] == []
+
+
+@pytest.mark.asyncio
 async def test_load_state_reconstruction_does_not_restore_persisted_transient_execution_state():
     turn_one_context = PersistenceContext.from_state(
         {
@@ -254,6 +333,139 @@ async def test_load_state_reconstruction_does_not_restore_persisted_transient_ex
 
 
 @pytest.mark.asyncio
+async def test_load_state_scrubs_legacy_top_level_intent_context_fields():
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "summary",
+        }
+    )
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_runtime_state_repo.get_state_json = AsyncMock(
+        return_value={
+            "current_subject": "legacy top-level subject",
+            "repeat_relation": "repeat_answered",
+            "dissatisfaction": True,
+            "conversation_context": {
+                "current_subject": "durable subject",
+                "repeat_relation": "none",
+                "dissatisfaction": False,
+            },
+        }
+    )
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    result = await node({"thread_id": "thread-1"})
+
+    assert "current_subject" not in result
+    assert "repeat_relation" not in result
+    assert "dissatisfaction" not in result
+    assert result["conversation_context"] == {
+        "current_subject": "durable subject",
+        "repeat_relation": "none",
+        "dissatisfaction": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_load_state_scrubs_all_ephemeral_turn_state_keys_from_persisted_state():
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+        }
+    )
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_runtime_state_repo.get_state_json = AsyncMock(
+        return_value={
+            **{key: f"stale-{key}" for key in EPHEMERAL_TURN_STATE_KEYS},
+            "conversation_context": {
+                "last_standalone_query": "durable query",
+            },
+            "dialog_state": {"handoff_confirmation_pending": True},
+            "technical_failure_count": 1,
+            "technical_ticket_id": "ticket-1",
+            "thread_waiting_manager": False,
+        }
+    )
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    result = await node({"thread_id": "thread-1"})
+
+    for key in EPHEMERAL_TURN_STATE_KEYS:
+        assert key not in result
+    assert result["conversation_context"]["last_standalone_query"] == "durable query"
+    assert result["dialog_state"]["handoff_confirmation_pending"] is True
+    assert result["technical_failure_count"] == 1
+    assert result["technical_ticket_id"] == "ticket-1"
+    assert result["thread_waiting_manager"] is False
+
+
+@pytest.mark.asyncio
+async def test_load_state_intent_failure_cannot_promote_legacy_relation_to_current():
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "summary",
+        }
+    )
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_runtime_state_repo.get_state_json = AsyncMock(
+        return_value={
+            "repeat_relation": "repeat_unresolved",
+            "conversation_context": {"repeat_relation": "none"},
+        }
+    )
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    loaded = await node({"thread_id": "thread-1"})
+
+    assert "repeat_relation" not in loaded
+    assert loaded["conversation_context"]["repeat_relation"] == "none"
+
+
+@pytest.mark.asyncio
 async def test_load_state_reconstructs_handoff_ticket_identity_after_persistence_round_trip():
     turn_one_context = PersistenceContext.from_state(
         {
@@ -322,3 +534,76 @@ async def test_load_state_reconstructs_handoff_ticket_identity_after_persistence
     assert "generation_mode" not in result
     assert "tool_execution_status" not in result
     assert "tool_execution_safe_error_code" not in result
+
+
+@pytest.mark.asyncio
+async def test_load_state_reads_only_configured_recent_history_once():
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+            "context_summary": "summary",
+        }
+    )
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_runtime_state_repo.get_state_json = AsyncMock(return_value={})
+
+    expected_history = [
+        {"role": "user", "content": f"message-{index}"}
+        for index in range(RECENT_DIALOG_MESSAGES_LIMIT)
+    ]
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(
+        return_value=expected_history
+    )
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    result = await node({"thread_id": "thread-1"})
+
+    assert result["history"] == expected_history
+    thread_message_repo.get_messages_for_langgraph.assert_awaited_once_with(
+        "thread-1", limit=RECENT_DIALOG_MESSAGES_LIMIT
+    )
+
+
+@pytest.mark.asyncio
+async def test_load_state_drops_stale_persisted_memory_candidates():
+    thread_read_repo = MagicMock()
+    thread_read_repo.get_thread_with_project_view = AsyncMock(
+        return_value={
+            "id": "thread-1",
+            "client_id": "client-1",
+            "project_id": "project-1",
+            "status": "active",
+        }
+    )
+    thread_runtime_state_repo = MagicMock()
+    thread_runtime_state_repo.get_analytics_view = AsyncMock(return_value=None)
+    thread_runtime_state_repo.get_state_json = AsyncMock(
+        return_value={"memory_candidates": [{"key": "stale"}]}
+    )
+    thread_message_repo = MagicMock()
+    thread_message_repo.get_messages_for_langgraph = AsyncMock(return_value=[])
+
+    node = create_load_state_node(
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        project_repo=MagicMock(),
+        memory_repo=None,
+    )
+
+    result = await node({"thread_id": "thread-1"})
+
+    assert "memory_candidates" not in result

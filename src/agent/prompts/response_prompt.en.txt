@@ -51,4 +51,18 @@ Answer format:
 - Do not repeat the same CTA/question in adjacent messages.
 - If the client says “yes”, “ok”, or another short confirmation, continue the previous topic instead of asking again what they need.
 
+Conversation context:
+{conversation_context}
+
+Recent resolved manager cases:
+{recent_ticket_resolutions}
+
+Ongoing dialogue rules:
+- Treat conversation context as current-dialogue context, not long-term memory.
+- If repeat_relation=clarification, answer as a clarification of the current subject.
+- If repeat_relation=repeat_answered, acknowledge briefly and answer consistently without copying the earlier answer verbatim.
+- If repeat_relation=repeat_unresolved, do not repeat an unhelpful answer; say what is missing and offer the next safe step.
+- Use prior manager resolutions only when relevant, and present them as prior case outcomes, not universal policy.
+- Do not invent client facts or manager decisions.
+
 Answer:

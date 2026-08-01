@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS project_settings (
     industry TEXT,
     tone_of_voice TEXT,
     default_language TEXT,
+    target_language TEXT,
     default_timezone TEXT,
     system_prompt_override TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),

@@ -4,6 +4,8 @@ import type { ThreadStatusFilter } from '../../../entities/thread/model/status';
 
 type ReplyRequest = components['schemas']['ReplyRequest'];
 type UpdateMemoryRequest = components['schemas']['UpdateMemoryRequest'];
+type UpdateResolutionRequest = components['schemas']['UpdateResolutionRequest'];
+export type TicketResolution = components['schemas']['TicketResolutionResponse'];
 
 export type ThreadListParams = {
   project_id: string;
@@ -67,6 +69,22 @@ export const threadsApi = {
 
   getState: (threadId: string) =>
     client.GET('/api/threads/{thread_id}/state', {
+      params: { path: { thread_id: threadId } },
+    }),
+
+  getResolution: (threadId: string) =>
+    client.GET('/api/threads/{thread_id}/resolution', {
+      params: { path: { thread_id: threadId } },
+    }),
+
+  updateResolution: (threadId: string, body: UpdateResolutionRequest) =>
+    client.PATCH('/api/threads/{thread_id}/resolution', {
+      params: { path: { thread_id: threadId } },
+      body,
+    }),
+
+  regenerateResolution: (threadId: string) =>
+    client.POST('/api/threads/{thread_id}/resolution/regenerate', {
       params: { path: { thread_id: threadId } },
     }),
 };

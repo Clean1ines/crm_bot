@@ -7,10 +7,37 @@ from collections.abc import Mapping
 from src.agent.state import AgentState
 from src.domain.runtime.dialog_state import dialog_state_from_memory
 from src.domain.runtime.load_state import LoadStateResult
+from src.domain.runtime.state_contracts import (
+    RECENT_DIALOG_MESSAGES_LIMIT,
+    RECENT_TICKET_RESOLUTIONS_LIMIT,
+)
 from src.infrastructure.db.repositories.memory_repository import MemoryRepository
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
+
+EPHEMERAL_TURN_STATE_KEYS = frozenset(
+    {
+        "decision",
+        "intent",
+        "cta",
+        "topic",
+        "cta_hint",
+        "emotion",
+        "is_repeat_like",
+        "confidence",
+        "domain",
+        "turn_relation",
+        "features",
+        "should_search_kb",
+        "should_generate_answer",
+        "should_offer_manager",
+        "current_subject",
+        "repeat_relation",
+        "dissatisfaction",
+        "memory_candidates",
+    }
+)
 
 
 def _read_value(view: object, key: str, default: object = None) -> object:
@@ -85,18 +112,51 @@ def create_load_state_node(
             patch["decision"] = _read_value(analytics_view, "decision")
 
         recent_messages = await thread_message_repo.get_messages_for_langgraph(
-            thread_id
+            thread_id, limit=RECENT_DIALOG_MESSAGES_LIMIT
         )
         patch["history"] = recent_messages
 
         persisted_state = await thread_runtime_state_repo.get_state_json(thread_id)
         if isinstance(persisted_state, dict):
             patch.update(persisted_state)
+        for key in EPHEMERAL_TURN_STATE_KEYS:
+            patch.pop(key, None)
 
         project_id_value = patch.get("project_id") or state.get("project_id")
         client_id_value = patch.get("client_id") or state.get("client_id")
         project_id = str(project_id_value) if project_id_value else None
         client_id = str(client_id_value) if client_id_value else None
+
+        if (
+            project_id
+            and client_id
+            and hasattr(thread_read_repo, "list_recent_closed_ticket_resolutions")
+        ):
+            try:
+                recent_ticket_resolutions = (
+                    await thread_read_repo.list_recent_closed_ticket_resolutions(
+                        project_id,
+                        client_id,
+                        limit=RECENT_TICKET_RESOLUTIONS_LIMIT,
+                        exclude_thread_id=str(thread_id),
+                    )
+                )
+                patch["recent_ticket_resolutions"] = recent_ticket_resolutions
+                logger.info(
+                    "recent_ticket_resolutions_loaded",
+                    extra={
+                        "project_id": project_id,
+                        "thread_id": thread_id,
+                        "client_id": client_id,
+                        "recent_resolution_count": len(recent_ticket_resolutions),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load recent ticket resolutions",
+                    extra={"thread_id": thread_id, "error": str(exc)},
+                )
+                patch["recent_ticket_resolutions"] = []
 
         if memory_repo and project_id and client_id:
             try:

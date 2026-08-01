@@ -3,6 +3,7 @@ from collections.abc import Collection
 from src.application.ports.project_port import ProjectControlPort
 
 from src.application.errors import ForbiddenError
+from src.domain.control_plane.roles import PROJECT_OWNER
 
 
 class ProjectAccessService:
@@ -28,6 +29,16 @@ class ProjectAccessService:
             return
 
         raise ForbiddenError("Access denied")
+
+    async def resolve_effective_project_role(
+        self,
+        project_id: str,
+        user_id: str,
+    ) -> str | None:
+        project = await self.repo.get_project_view(project_id)
+        if project and project.user_id == str(user_id):
+            return PROJECT_OWNER
+        return await self.repo.get_project_member_role(project_id, user_id)
 
 
 ProjectService = ProjectAccessService

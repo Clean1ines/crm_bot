@@ -9,6 +9,7 @@ from src.agent.nodes.response_generator import (
     build_answer_preview_prompt,
     create_response_generator_node,
 )
+from src.agent.nodes.intent_extractor import create_intent_extractor_node
 
 
 def _structured_content(
@@ -54,6 +55,47 @@ def _retrieved_state(
     }
 
 
+class _FixedIntentLlm:
+    def __init__(self, *, relation: str) -> None:
+        self.relation = relation
+
+    async def ainvoke(self, _messages):
+        return SimpleNamespace(
+            content=json.dumps(
+                {
+                    "domain": "business",
+                    "turn_relation": "continuation",
+                    "intent": "sales",
+                    "cta": "none",
+                    "features": {},
+                    "topic": "product",
+                    "cta_hint": None,
+                    "emotion": "neutral",
+                    "is_repeat_like": self.relation
+                    in {"repeat_answered", "repeat_unresolved"},
+                    "should_search_kb": True,
+                    "should_generate_answer": True,
+                    "should_offer_manager": False,
+                    "knowledge_query": "может ли клиент писать через веб-панель",
+                    "current_subject": "веб-панель",
+                    "repeat_relation": self.relation,
+                    "dissatisfaction": False,
+                    "memory_candidates": [],
+                },
+                ensure_ascii=False,
+            )
+        )
+
+
+class _CapturingResponseLlm:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    async def ainvoke(self, messages):
+        self.prompts.append(messages[-1][1])
+        return SimpleNamespace(content=_structured_content("Ответ по базе."))
+
+
 def test_resolve_response_model_name_prefers_project_fallback():
     model = _resolve_response_model_name(
         {
@@ -65,6 +107,54 @@ def test_resolve_response_model_name_prefers_project_fallback():
     )
 
     assert model == "llama-3.1-8b-instant"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "relation",
+    ("clarification", "repeat_answered", "repeat_unresolved"),
+)
+async def test_sequential_intent_patch_overrides_persisted_relation_in_response_prompt(
+    relation,
+):
+    intent_node = create_intent_extractor_node(llm=_FixedIntentLlm(relation=relation))
+    response_llm = _CapturingResponseLlm()
+    response_node = create_response_generator_node(
+        llm=response_llm,
+        model_name="base-model",
+    )
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    state = {
+        "decision": "LLM_GENERATE",
+        "user_input": "А клиент может писать через неё?",
+        "conversation_context": {
+            "current_subject": "старая тема",
+            "repeat_relation": "none",
+        },
+        "project_configuration": {"settings": {"target_language": "ru"}},
+        **_retrieved_state(),
+    }
+
+    with (
+        patch(
+            "src.agent.nodes.intent_extractor.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+        patch(
+            "src.agent.nodes.response_generator.log_node_execution",
+            AsyncMock(side_effect=passthrough),
+        ),
+    ):
+        intent_patch = await intent_node(state)
+        await response_node({**state, **intent_patch})
+
+    prompt = response_llm.prompts[-1]
+    assert '"current_subject":"веб-панель"' in prompt
+    assert f'"repeat_relation":"{relation}"' in prompt
+    assert '"repeat_relation":"none"' not in prompt
 
 
 def test_answer_preview_prompt_includes_clean_fact_without_internal_metadata() -> None:
@@ -328,7 +418,7 @@ async def test_response_generator_builds_project_override_llm():
         return_value=SimpleNamespace(content=_structured_content("base"))
     )
 
-    with patch("src.agent.nodes.response_generator.ChatGroq", FakeChatGroq):
+    with patch("src.infrastructure.llm.completion_client.ChatGroq", FakeChatGroq):
         node = create_response_generator_node(
             llm=base_llm, model_name="llama-3.3-70b-versatile"
         )

@@ -4,14 +4,12 @@ Manager reply orchestration.
 
 from src.application.errors import InternalServiceError
 from src.domain.display_names import build_display_name
-from src.domain.project_plane.json_types import json_object_from_unknown
 from src.domain.project_plane.manager_assignments import (
     ManagerActor,
     build_manager_audit_payload,
 )
 from src.domain.project_plane.thread_runtime import ThreadRuntimeSnapshot
 from src.domain.project_plane.thread_status import ThreadStatus
-from src.domain.runtime.dialog_state import default_dialog_state
 
 
 MANAGER_FALLBACK_NAME = "Manager"
@@ -27,6 +25,7 @@ class ManagerReplyService:
         thread_read=None,
         thread_runtime_state=None,
         memory_repo=None,
+        ticket_resolution_service=None,
         telegram_client,
         event_emitter,
         logger,
@@ -37,6 +36,7 @@ class ManagerReplyService:
         self.thread_read = thread_read or threads
         self.thread_runtime_state = thread_runtime_state
         self.memory_repo = memory_repo
+        self.ticket_resolution_service = ticket_resolution_service
         self.telegram_client = telegram_client
         self.event_emitter = event_emitter
         self.logger = logger
@@ -80,18 +80,21 @@ class ManagerReplyService:
         await self.threads.close_manager_ticket(thread_id)
 
         try:
+            if self.ticket_resolution_service is not None:
+                await self.ticket_resolution_service.generate_after_manager_close(
+                    thread_id
+                )
+        except Exception as exc:
+            self.logger.warning(
+                "Failed to store ticket resolution",
+                extra={"thread_id": thread_id, "error": str(exc)},
+            )
+
+        try:
             await self._reset_thread_analytics(thread_id)
         except Exception as exc:
             self.logger.warning(
                 "Failed to reset thread analytics", extra={"error": str(exc)}
-            )
-
-        try:
-            await self._reset_user_memory_after_ticket_closure(thread_id)
-        except Exception as exc:
-            self.logger.warning(
-                "Failed to reset user memory after ticket closure",
-                extra={"error": str(exc)},
             )
 
         try:
@@ -120,32 +123,6 @@ class ManagerReplyService:
         self.logger.info(
             "Thread analytics reset after ticket closure",
             extra={"thread_id": thread_id},
-        )
-
-    async def _reset_user_memory_after_ticket_closure(self, thread_id: str) -> None:
-        if self.memory_repo is None:
-            return
-
-        thread = await self.thread_read.get_thread_with_project_view(thread_id)
-        if not thread:
-            return
-
-        client_id = thread.client_id
-        project_id = thread.project_id
-        if not client_id or not project_id:
-            return
-
-        await self.memory_repo.set_lifecycle(project_id, client_id, "active_client")
-        await self.memory_repo.set(
-            project_id,
-            client_id,
-            "dialog_state",
-            json_object_from_unknown(default_dialog_state(lifecycle="active_client")),
-            "dialog_state",
-        )
-        self.logger.info(
-            "User memory reset after ticket closure",
-            extra={"client_id": client_id},
         )
 
     async def _emit_ticket_closed_event(

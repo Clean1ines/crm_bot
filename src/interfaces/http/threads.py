@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Json
+from pydantic import BaseModel, Field, Json
 
 from src.application.orchestration.conversation_orchestrator import (
     ConversationOrchestrator,
 )
+from src.application.ports.conversation_summary_port import TicketResolutionStatus
 from src.application.services.ticket_command_service import TicketCommandService
 from src.application.services.thread_command_service import ThreadCommandService
 from src.application.services.thread_query_service import ThreadQueryService
 from src.infrastructure.logging.logger import get_logger
+from src.domain.control_plane.roles import PROJECT_MANAGER_ROLES
 from src.interfaces.http.dependencies import (
     get_current_user_id,
     get_orchestrator,
@@ -27,6 +29,27 @@ class ReplyRequest(BaseModel):
 class UpdateMemoryRequest(BaseModel):
     key: str
     value: Json
+
+
+class UpdateResolutionRequest(BaseModel):
+    summary_text: str
+    expected_version: int
+
+
+class TicketResolutionResponse(BaseModel):
+    summary_text: str
+    status: TicketResolutionStatus
+    source: str | None = None
+    version: int
+    generated_at: str | None = None
+    updated_at: str | None = None
+    discussed_questions: list[str] = Field(default_factory=list)
+    resolved_questions: list[str] = Field(default_factory=list)
+    unresolved_questions: list[str] = Field(default_factory=list)
+    manager_decisions: list[str] = Field(default_factory=list)
+    customer_facts: list[str] = Field(default_factory=list)
+    business_commitments: list[str] = Field(default_factory=list)
+    error_type: str | None = None
 
 
 class ThreadResponse(BaseModel):
@@ -127,7 +150,7 @@ async def claim_thread(
     thread = await thread_queries.require_thread_access(
         thread_id,
         current_user_id,
-        ["owner", "admin", "manager"],
+        PROJECT_MANAGER_ROLES,
     )
     if thread.status == "closed":
         return {"status": "closed"}
@@ -150,11 +173,59 @@ async def close_thread(
     thread = await thread_queries.require_thread_access(
         thread_id,
         current_user_id,
-        ["owner", "admin", "manager"],
+        PROJECT_MANAGER_ROLES,
     )
     if thread.status == "closed":
         return {"status": "closed"}
     return await ticket_commands.close_ticket(thread_id=thread_id)
+
+
+@router.get("/{thread_id}/resolution", response_model=TicketResolutionResponse)
+async def get_ticket_resolution(
+    thread_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    thread_queries: ThreadQueryService = Depends(get_thread_query_service),
+):
+    return await thread_queries.get_ticket_resolution_for_user(
+        thread_id, current_user_id
+    )
+
+
+@router.patch("/{thread_id}/resolution", response_model=TicketResolutionResponse)
+async def update_ticket_resolution(
+    thread_id: str,
+    data: UpdateResolutionRequest,
+    current_user_id: str = Depends(get_current_user_id),
+    thread_queries: ThreadQueryService = Depends(get_thread_query_service),
+    thread_commands: ThreadCommandService = Depends(get_thread_command_service),
+):
+    await thread_queries.require_thread_access(
+        thread_id, current_user_id, PROJECT_MANAGER_ROLES
+    )
+    return await thread_commands.update_ticket_resolution(
+        thread_id=thread_id,
+        summary_text=data.summary_text,
+        expected_version=data.expected_version,
+        actor_user_id=current_user_id,
+    )
+
+
+@router.post(
+    "/{thread_id}/resolution/regenerate",
+    response_model=TicketResolutionResponse,
+)
+async def regenerate_ticket_resolution(
+    thread_id: str,
+    current_user_id: str = Depends(get_current_user_id),
+    thread_queries: ThreadQueryService = Depends(get_thread_query_service),
+    thread_commands: ThreadCommandService = Depends(get_thread_command_service),
+):
+    await thread_queries.require_thread_access(
+        thread_id, current_user_id, PROJECT_MANAGER_ROLES
+    )
+    return await thread_commands.regenerate_ticket_resolution(
+        thread_id=thread_id, actor_user_id=current_user_id
+    )
 
 
 @router.get("/{thread_id}/timeline")

@@ -188,6 +188,8 @@ def create_intent_extractor_node(
             conversation_summary=context.conversation_summary,
             history=context.history,
             user_memory=_prompt_memory_from_runtime(context.user_memory),
+            conversation_context=state.get("conversation_context"),
+            recent_ticket_resolutions=state.get("recent_ticket_resolutions"),
         )
 
         try:
@@ -200,7 +202,7 @@ def create_intent_extractor_node(
                     return _chat_groq_class()(
                         model=base_model,
                         temperature=0.0,
-                        max_tokens=220,
+                        max_tokens=340,
                         api_key=api_key,
                     )
 
@@ -210,7 +212,8 @@ def create_intent_extractor_node(
                 )
             payload = json.loads(_unwrap_json_block(str(response.content or "")))
             result = IntentExtractionResult.from_llm_payload(
-                payload
+                payload,
+                user_input=context.user_input,
             ).normalized_for_context(context)
             trace_extra: dict[str, object] = {
                 "thread_id": state.get("thread_id"),
@@ -227,6 +230,13 @@ def create_intent_extractor_node(
                 "should_offer_manager": result.should_offer_manager,
                 "resolved_cta": result.resolved_cta,
                 "resolved_cta_reply": result.resolved_cta_reply,
+                "repeat_relation": result.repeat_relation,
+                "current_subject": result.current_subject,
+                "dissatisfaction": result.dissatisfaction,
+                "memory_candidate_count": len(result.memory_candidates),
+                "accepted_memory_candidate_keys": [
+                    str(candidate.get("key")) for candidate in result.memory_candidates
+                ],
                 "handoff_intent_downgraded": bool(
                     result.normalization_flags.get("handoff_intent_downgraded")
                 ),
@@ -277,6 +287,9 @@ def create_intent_extractor_node(
                     "should_search_kb": result.should_search_kb,
                     "should_generate_answer": result.should_generate_answer,
                     "should_offer_manager": result.should_offer_manager,
+                    "repeat_relation": result.repeat_relation,
+                    "current_subject": result.current_subject,
+                    "memory_candidate_count": len(result.memory_candidates),
                 },
             )
             return dict(result.to_state_patch())

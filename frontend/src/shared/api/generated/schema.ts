@@ -1809,6 +1809,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/threads/{thread_id}/resolution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Ticket Resolution */
+        get: operations["get_ticket_resolution_api_threads__thread_id__resolution_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Ticket Resolution */
+        patch: operations["update_ticket_resolution_api_threads__thread_id__resolution_patch"];
+        trace?: never;
+    };
+    "/api/threads/{thread_id}/resolution/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Regenerate Ticket Resolution */
+        post: operations["regenerate_ticket_resolution_api_threads__thread_id__resolution_regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/threads/{thread_id}/timeline": {
         parameters: {
             query?: never;
@@ -2482,6 +2517,38 @@ export interface components {
             /** Unread Count */
             unread_count: number;
         };
+        /** TicketResolutionResponse */
+        TicketResolutionResponse: {
+            /** Summary Text */
+            summary_text: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "generated" | "edited" | "failed" | "missing";
+            /** Source */
+            source?: string | null;
+            /** Version */
+            version: number;
+            /** Generated At */
+            generated_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /** Discussed Questions */
+            discussed_questions?: string[];
+            /** Resolved Questions */
+            resolved_questions?: string[];
+            /** Unresolved Questions */
+            unresolved_questions?: string[];
+            /** Manager Decisions */
+            manager_decisions?: string[];
+            /** Customer Facts */
+            customer_facts?: string[];
+            /** Business Commitments */
+            business_commitments?: string[];
+            /** Error Type */
+            error_type?: string | null;
+        };
         /** TokenActionRequest */
         TokenActionRequest: {
             /** Token */
@@ -2498,6 +2565,13 @@ export interface components {
         UpdateProfileRequest: {
             /** Login */
             login?: string | null;
+        };
+        /** UpdateResolutionRequest */
+        UpdateResolutionRequest: {
+            /** Summary Text */
+            summary_text: string;
+            /** Expected Version */
+            expected_version: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -6354,6 +6428,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ThreadActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_ticket_resolution_api_threads__thread_id__resolution_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResolutionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_ticket_resolution_api_threads__thread_id__resolution_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateResolutionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResolutionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_ticket_resolution_api_threads__thread_id__resolution_regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketResolutionResponse"];
                 };
             };
             /** @description Validation Error */

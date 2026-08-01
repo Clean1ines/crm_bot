@@ -5,8 +5,10 @@ from typing import Literal, Mapping, cast
 from src.domain.runtime.cta import normalize_cta
 from src.domain.runtime.dialog_state import DialogState
 from src.domain.runtime.state_contracts import (
+    ConversationContextState,
     KnowledgeChunkPayload,
     ProjectRuntimeConfigurationState,
+    RecentTicketResolutionState,
     RuntimeFeatures,
     RuntimeMemory,
     RuntimeStateInput,
@@ -81,6 +83,10 @@ class ResponseGenerationContext:
     cta: str = ""
     topic: str = ""
     turn_relation: str = ""
+    conversation_context: ConversationContextState | Mapping[str, object] | None = None
+    recent_ticket_resolutions: (
+        list[RecentTicketResolutionState] | list[Mapping[str, object]]
+    ) = field(default_factory=list)
     generation_mode: GenerationMode | None = None
     tool_result: object | None = None
     tool_execution_status: str | None = None
@@ -107,6 +113,10 @@ class ResponseGenerationContext:
             cta=normalize_cta(state.get("cta")) or "",
             topic=str(state.get("topic") or ""),
             turn_relation=str(state.get("turn_relation") or ""),
+            conversation_context=effective_conversation_context_for_prompt(state),
+            recent_ticket_resolutions=list(
+                state.get("recent_ticket_resolutions") or []
+            ),
             generation_mode=_generation_mode_from_state(state),
             tool_result=state.get("tool_result"),
             tool_execution_status=_text_or_none(state.get("tool_execution_status")),
@@ -129,6 +139,8 @@ class ResponseGenerationContext:
             "user_memory": self.user_memory,
             "features": self.features,
             "project_configuration": self.project_configuration,
+            "conversation_context": self.conversation_context,
+            "recent_ticket_resolutions": self.recent_ticket_resolutions,
             "generation_mode": self.generation_mode,
             "tool_result": self.tool_result,
             "tool_execution_status": self.tool_execution_status,
@@ -217,6 +229,17 @@ def _mapping_or_none(value: object) -> Mapping[str, object] | None:
     if not isinstance(value, Mapping):
         return None
     return value
+
+
+def effective_conversation_context_for_prompt(
+    state: RuntimeStateInput,
+) -> Mapping[str, object] | None:
+    persisted = _mapping_or_none(state.get("conversation_context"))
+    effective: dict[str, object] = dict(persisted or {})
+    for key in ("current_subject", "repeat_relation", "dissatisfaction"):
+        if key in state:
+            effective[key] = state.get(key)
+    return effective or None
 
 
 def _project_configuration_or_none(

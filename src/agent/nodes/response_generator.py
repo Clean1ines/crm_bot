@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import json
 import os
 import re
-from typing import Protocol, cast
+from typing import cast
 
 from src.agent.router.prompt_builder import (
     DEFAULT_KB_LIMIT,
@@ -49,6 +49,10 @@ from src.domain.runtime.state_contracts import (
     RuntimeStateInput,
 )
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.completion_client import (
+    ChatGroqClient,
+    GroqTextCompletionClient,
+)
 from src.infrastructure.logging.logger import get_logger, log_node_execution
 
 logger = get_logger(__name__)
@@ -95,29 +99,6 @@ ACTION_OFFER_MARKERS = (
 CJK_PATTERN = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
 
 
-class ChatMessageResponse(Protocol):
-    content: str | None
-
-
-class ChatGroqClient(Protocol):
-    async def ainvoke(self, messages: list[tuple[str, str]]) -> ChatMessageResponse: ...
-
-
-class ChatGroqFactory(Protocol):
-    def __call__(
-        self,
-        *,
-        model: str,
-        temperature: float,
-        max_tokens: int,
-        api_key: object,
-    ) -> ChatGroqClient: ...
-
-
-class ChatGroqClientFactory(Protocol):
-    def __call__(self, *, api_key: str) -> ChatGroqClient: ...
-
-
 @dataclass(frozen=True, slots=True)
 class ContinuationOfferDecision:
     should_offer: bool
@@ -153,38 +134,6 @@ REPAIRABLE_VALIDATION_FAILURES = frozenset(
 )
 
 
-# Test hook and lazy runtime cache.
-# Keep this symbol module-level so existing tests can patch
-# src.agent.nodes.response_generator.ChatGroq without importing langchain_groq
-# at import time.
-ChatGroq: ChatGroqFactory | None = None
-
-
-def _primary_groq_api_key() -> str:
-    value = str(settings.GROQ_API_KEY).strip()
-    if not value:
-        raise RuntimeError("GROQ_API_KEY is not configured")
-    return value
-
-
-async def _ainvoke_chat_once(
-    *,
-    make_client: ChatGroqClientFactory,
-    messages: list[tuple[str, str]],
-) -> ChatMessageResponse:
-    client = make_client(api_key=_primary_groq_api_key())
-    return await client.ainvoke(messages)
-
-
-def _chat_groq_class() -> ChatGroqFactory:
-    if ChatGroq is not None:
-        return ChatGroq
-
-    from langchain_groq import ChatGroq as ImportedChatGroq
-
-    return cast(ChatGroqFactory, ImportedChatGroq)
-
-
 async def _invoke_response_model(
     *,
     llm: ChatGroqClient | None,
@@ -192,24 +141,14 @@ async def _invoke_response_model(
     base_model: str,
     prompt: str,
 ) -> str:
-    messages = [("human", prompt)]
-    if llm is not None and selected_model == base_model:
-        response = await llm.ainvoke(messages)
-    else:
-
-        def _make_client(*, api_key: str) -> ChatGroqClient:
-            return _chat_groq_class()(
-                model=selected_model,
-                temperature=0.3,
-                max_tokens=700,
-                api_key=api_key,
-            )
-
-        response = await _ainvoke_chat_once(
-            make_client=_make_client,
-            messages=messages,
-        )
-    return (response.content or "").strip()
+    client_llm = llm if selected_model == base_model else None
+    return await GroqTextCompletionClient().complete(
+        prompt,
+        model_name=selected_model,
+        temperature=0.3,
+        max_tokens=700,
+        llm=client_llm,
+    )
 
 
 def _merge_dialog_state_into_user_memory(
@@ -696,24 +635,14 @@ async def complete_response_prompt(
         cast(AgentState, {"project_configuration": project_configuration or {}}),
         base_model,
     )
-    messages = [("human", prompt)]
-    if llm is not None and selected_model == base_model:
-        response = await llm.ainvoke(messages)
-    else:
-
-        def _make_client(*, api_key: str) -> ChatGroqClient:
-            return _chat_groq_class()(
-                model=selected_model,
-                temperature=0.3,
-                max_tokens=500,
-                api_key=api_key,
-            )
-
-        response = await _ainvoke_chat_once(
-            make_client=_make_client,
-            messages=messages,
-        )
-    return (response.content or "").strip()
+    client_llm = llm if selected_model == base_model else None
+    return await GroqTextCompletionClient().complete(
+        prompt,
+        model_name=selected_model,
+        temperature=0.3,
+        max_tokens=500,
+        llm=client_llm,
+    )
 
 
 def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, object]:
@@ -1404,6 +1333,8 @@ def create_response_generator_node(
             features=_prompt_features(context.features),
             project_configuration=context.project_configuration,
             target_language=target_lang,
+            conversation_context=context.conversation_context,
+            recent_ticket_resolutions=context.recent_ticket_resolutions,
         )
         if generation_trace_extra is not None:
             generation_trace_extra["prompt_chars"] = len(prompt)

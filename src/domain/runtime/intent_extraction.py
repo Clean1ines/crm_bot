@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, replace
-from typing import Mapping
+import re
+from typing import Literal, Mapping, cast
 
 from src.domain.runtime.cta import (
     ACTION_CTAS,
@@ -24,6 +25,7 @@ from src.domain.runtime.policy.intent_topic import (
 )
 from src.domain.runtime.state_contracts import (
     RuntimeHistoryMessage,
+    MemoryCandidateState,
     RuntimeMemory,
     RuntimeStateInput,
     RuntimeStatePatch,
@@ -58,6 +60,14 @@ KNOWN_CTAS = frozenset(
 KNOWN_EMOTIONS = frozenset({"neutral", "positive", "negative", "angry"})
 MAX_KNOWLEDGE_QUERY_CHARS = 240
 CONTEXTUAL_KNOWLEDGE_QUERY_TURN_RELATIONS = frozenset({"continuation", "reopening"})
+KNOWN_REPEAT_RELATIONS = frozenset(
+    {"none", "clarification", "repeat_answered", "repeat_unresolved"}
+)
+KNOWN_MEMORY_TYPES = frozenset({"profile", "preferences", "context", "agreements"})
+MAX_CURRENT_SUBJECT_CHARS = 80
+MAX_MEMORY_CANDIDATES = 3
+MAX_MEMORY_VALUE_CHARS = 240
+MEMORY_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
 @dataclass(slots=True)
@@ -77,6 +87,10 @@ class IntentExtractionPayload:
     knowledge_query: str | None = None
     knowledge_query_source: KnowledgeQuerySource = KnowledgeQuerySource.NONE
     knowledge_query_rejected_reason: str | None = None
+    current_subject: str | None = None
+    repeat_relation: str = "none"
+    dissatisfaction: bool = False
+    memory_candidates: list[MemoryCandidateState] = field(default_factory=list)
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, object]) -> "IntentExtractionPayload":
@@ -125,6 +139,9 @@ class IntentExtractionPayload:
             )
         )
 
+        repeat_relation = _normalized_enum_value(
+            payload.get("repeat_relation"), KNOWN_REPEAT_RELATIONS, "none"
+        )
         return cls(
             intent=_normalized_enum_value(
                 payload.get("intent"), KNOWN_INTENTS, "unknown"
@@ -136,7 +153,7 @@ class IntentExtractionPayload:
             emotion=_normalized_enum_value(
                 payload.get("emotion"), KNOWN_EMOTIONS, "neutral"
             ),
-            is_repeat_like=_coerce_bool(payload.get("is_repeat_like"), default=False),
+            is_repeat_like=repeat_relation in {"repeat_answered", "repeat_unresolved"},
             domain=domain,
             turn_relation=turn_relation,
             should_search_kb=should_search_kb,
@@ -152,6 +169,15 @@ class IntentExtractionPayload:
                 else KnowledgeQuerySource.NONE
             ),
             knowledge_query_rejected_reason=knowledge_query_rejected_reason,
+            current_subject=_bounded_optional_text(
+                payload.get("current_subject"), MAX_CURRENT_SUBJECT_CHARS
+            ),
+            repeat_relation=repeat_relation,
+            dissatisfaction=_coerce_bool(payload.get("dissatisfaction"), default=False),
+            memory_candidates=_normalize_memory_candidates(
+                payload.get("memory_candidates"),
+                user_input=str(payload.get("_user_input") or ""),
+            ),
         )
 
 
@@ -198,13 +224,19 @@ class IntentExtractionResult:
     knowledge_query_source: KnowledgeQuerySource = KnowledgeQuerySource.NONE
     resolved_cta: str | None = None
     resolved_cta_reply: str | None = None
+    current_subject: str | None = None
+    repeat_relation: str = "none"
+    dissatisfaction: bool = False
+    memory_candidates: list[MemoryCandidateState] = field(default_factory=list)
     normalization_flags: Mapping[str, object] = field(default_factory=dict)
 
     @classmethod
     def from_llm_payload(
-        cls, payload: Mapping[str, object]
+        cls, payload: Mapping[str, object], *, user_input: str = ""
     ) -> "IntentExtractionResult":
-        validated = IntentExtractionPayload.from_mapping(payload)
+        validated = IntentExtractionPayload.from_mapping(
+            {**dict(payload), "_user_input": user_input}
+        )
         raw_features = payload.get("features")
         unknown_feature_keys = unrecognized_feature_keys(
             raw_features if isinstance(raw_features, Mapping) else None
@@ -224,6 +256,10 @@ class IntentExtractionResult:
             should_offer_manager=validated.should_offer_manager,
             knowledge_query=validated.knowledge_query,
             knowledge_query_source=validated.knowledge_query_source,
+            current_subject=validated.current_subject,
+            repeat_relation=validated.repeat_relation,
+            dissatisfaction=validated.dissatisfaction,
+            memory_candidates=list(validated.memory_candidates),
             resolved_cta=None,
             resolved_cta_reply=None,
             normalization_flags=(
@@ -265,49 +301,59 @@ class IntentExtractionResult:
                 _normalize_handoff_classification(self, context),
                 context,
             )
-            return _normalize_business_question_route(normalized, context)
+            return _with_repeat_relation_invariant(
+                _normalize_business_question_route(normalized, context)
+            )
 
         previous_topic = _previous_topic(context)
         previous_cta = _previous_cta(context)
 
         if reply_kind == "affirmative":
-            return _normalize_affirmative_reply(
-                self,
-                previous_topic=previous_topic,
-                previous_cta=previous_cta,
-                language=_continuation_language(context),
+            return _with_repeat_relation_invariant(
+                _normalize_affirmative_reply(
+                    self,
+                    previous_topic=previous_topic,
+                    previous_cta=previous_cta,
+                    language=_continuation_language(context),
+                )
             )
         if reply_kind == "negative":
-            return _normalize_negative_reply(
-                self,
-                previous_topic=previous_topic,
-                previous_cta=previous_cta,
+            return _with_repeat_relation_invariant(
+                _normalize_negative_reply(
+                    self,
+                    previous_topic=previous_topic,
+                    previous_cta=previous_cta,
+                )
             )
         if reply_kind == "price_objection":
-            return replace(
-                self,
-                domain="business",
-                intent="pricing",
-                topic="pricing",
-                cta="none",
-                emotion="negative",
-                is_repeat_like=True,
-                should_search_kb=True,
-                should_generate_answer=True,
+            return _with_repeat_relation_invariant(
+                replace(
+                    self,
+                    domain="business",
+                    intent="pricing",
+                    topic="pricing",
+                    cta="none",
+                    emotion="negative",
+                    should_search_kb=True,
+                    should_generate_answer=True,
+                )
             )
         if reply_kind == "issue_report":
-            return replace(
-                self,
-                domain="business",
-                intent="support",
-                topic="integration" if previous_topic == "integration" else "support",
-                cta="none",
-                emotion="negative",
-                is_repeat_like=True,
-                should_search_kb=True,
-                should_generate_answer=True,
+            return _with_repeat_relation_invariant(
+                replace(
+                    self,
+                    domain="business",
+                    intent="support",
+                    topic=(
+                        "integration" if previous_topic == "integration" else "support"
+                    ),
+                    cta="none",
+                    emotion="negative",
+                    should_search_kb=True,
+                    should_generate_answer=True,
+                )
             )
-        return self
+        return _with_repeat_relation_invariant(self)
 
     def to_state_patch(self) -> RuntimeStatePatch:
         patch: RuntimeStatePatch = {
@@ -328,6 +374,13 @@ class IntentExtractionResult:
         patch["knowledge_query_source"] = self.knowledge_query_source.value
         patch["resolved_cta"] = self.resolved_cta
         patch["resolved_cta_reply"] = self.resolved_cta_reply
+        patch["current_subject"] = self.current_subject
+        patch["repeat_relation"] = cast(
+            Literal["none", "clarification", "repeat_answered", "repeat_unresolved"],
+            self.repeat_relation,
+        )
+        patch["dissatisfaction"] = self.dissatisfaction
+        patch["memory_candidates"] = list(self.memory_candidates)
         patch["normalization_flags"] = dict(self.normalization_flags)
         return patch
 
@@ -344,6 +397,13 @@ def _coerce_bool(value: object, *, default: bool) -> bool:
         if normalized in {"false", "0", "no", "n", "нет"}:
             return False
     return bool(value)
+
+
+def _bounded_optional_text(value: object, limit: int) -> str | None:
+    text = _optional_text(value)
+    if text is None:
+        return None
+    return text[:limit].strip() or None
 
 
 def _optional_text(value: object) -> str | None:
@@ -563,6 +623,16 @@ def _normalize_business_question_route(
     )
 
 
+def _with_repeat_relation_invariant(
+    result: IntentExtractionResult,
+) -> IntentExtractionResult:
+    return replace(
+        result,
+        is_repeat_like=result.repeat_relation
+        in {"repeat_answered", "repeat_unresolved"},
+    )
+
+
 def _normalize_contextual_knowledge_query(
     result: IntentExtractionResult,
     context: IntentExtractionContext,
@@ -744,3 +814,73 @@ def _continuation_knowledge_query(
         "es": f"más detalles sobre {topic}",
     }
     return localized_queries[language].get(topic, fallback_queries[language])
+
+
+def _normalize_memory_candidates(
+    value: object,
+    *,
+    user_input: str,
+) -> list[MemoryCandidateState]:
+    if not isinstance(value, list):
+        return []
+
+    candidates: list[MemoryCandidateState] = []
+    seen_keys: set[str] = set()
+    normalized_input = _normalize_evidence_text(user_input)
+    for raw in value:
+        if len(candidates) >= MAX_MEMORY_CANDIDATES:
+            break
+        if not isinstance(raw, Mapping):
+            continue
+        key = _optional_text(raw.get("key"))
+        type_ = _normalized_enum_value(raw.get("type"), KNOWN_MEMORY_TYPES, "")
+        confidence = _coerce_float(raw.get("confidence"), default=0.0)
+        if key is None or not MEMORY_KEY_PATTERN.fullmatch(key):
+            continue
+        if key in seen_keys or not type_ or confidence < 0.85:
+            continue
+        evidence_quote = _bounded_optional_text(
+            raw.get("evidence_quote"), MAX_MEMORY_VALUE_CHARS
+        )
+        if evidence_quote is None:
+            continue
+        if _normalize_evidence_text(evidence_quote) not in normalized_input:
+            continue
+        raw_value = raw.get("value")
+        if raw_value is None or raw_value == "":
+            continue
+        if isinstance(raw_value, (dict, list)):
+            continue
+        candidate_value: object = raw_value
+        if isinstance(raw_value, str):
+            candidate_value = raw_value.strip()[:MAX_MEMORY_VALUE_CHARS]
+            if not candidate_value:
+                continue
+        seen_keys.add(key)
+        candidates.append(
+            MemoryCandidateState(
+                key=key,
+                value=candidate_value,
+                type=type_,
+                confidence=confidence,
+                evidence_quote=evidence_quote,
+            )
+        )
+    return candidates
+
+
+def _normalize_evidence_text(value: object) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
+def _coerce_float(value: object, *, default: float) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return max(0.0, min(1.0, float(value)))
+    if isinstance(value, str):
+        try:
+            return max(0.0, min(1.0, float(value.strip())))
+        except ValueError:
+            return default
+    return default

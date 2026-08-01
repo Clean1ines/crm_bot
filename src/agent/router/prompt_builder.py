@@ -13,12 +13,15 @@ from src.domain.runtime.prompting import (
     ProjectPromptContext,
     TruncateText,
 )
+from src.application.ports.prompt_template_port import PromptTemplateNotFoundError
 from src.domain.runtime.evidence_references import EvidenceReferenceIndex
 from src.domain.runtime.state_contracts import (
+    RECENT_DIALOG_MESSAGES_LIMIT,
     HistoryMessage,
     ProjectRuntimeConfigurationState,
 )
 from src.infrastructure.config.settings import settings
+from src.infrastructure.llm.prompt_template_loader import FilePromptTemplateLoader
 from src.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -40,10 +43,9 @@ _interpretation_block: str | None = None
 
 
 def _load_prompt_template(filename: str) -> str:
-    filepath = PROMPTS_DIR / filename
     try:
-        return filepath.read_text(encoding="utf-8")
-    except Exception as exc:
+        return FilePromptTemplateLoader(PROMPTS_DIR).load_filename(filename)
+    except PromptTemplateNotFoundError as exc:
         logger.error(
             "Failed to load prompt template",
             extra={"file": filename, "error": str(exc)},
@@ -138,7 +140,9 @@ def format_kb_prompt_entry_traces(
     return entries
 
 
-def format_history(history: Sequence[object], limit: int = 5) -> str:
+def format_history(
+    history: Sequence[object], limit: int = RECENT_DIALOG_MESSAGES_LIMIT
+) -> str:
     if not history:
         return "[]"
 
@@ -280,19 +284,108 @@ def build_intent_prompt(
     conversation_summary: str | None = None,
     history: list[HistoryMessage] | None = None,
     user_memory: dict[str, list[dict[str, object]]] | None = None,
+    conversation_context: object | None = None,
+    recent_ticket_resolutions: object | None = None,
 ) -> str:
     global _intent_prompt_template
     if _intent_prompt_template is None:
         _intent_prompt_template = _load_prompt_template("intent_prompt.txt")
 
-    hist_str = format_history(history, limit=5) if history else "[]"
+    hist_str = format_history(history) if history else "[]"
     mem_str = _format_memory(user_memory) if user_memory else ""
     return _intent_prompt_template.format(
         user_input=user_input,
         conversation_summary=conversation_summary or NO_DATA_TEXT,
         history=hist_str,
         user_memory=mem_str or NO_DATA_TEXT,
+        conversation_context=format_conversation_context_for_prompt(
+            conversation_context
+        ),
+        recent_ticket_resolutions=format_recent_ticket_resolutions_for_prompt(
+            recent_ticket_resolutions
+        ),
     )
+
+
+def format_conversation_context_for_prompt(value: object) -> str:
+    if not isinstance(value, dict):
+        return NO_DATA_TEXT
+    projection: dict[str, object] = {
+        "current_subject": _bounded_optional(value.get("current_subject"), 80),
+        "repeat_relation": _bounded_optional(value.get("repeat_relation"), 40),
+        "dissatisfaction": bool(value.get("dissatisfaction")),
+        "last_standalone_query": _bounded_optional(
+            value.get("last_standalone_query"), 240
+        ),
+        "question_attempts": _project_question_attempts(value.get("question_attempts")),
+    }
+    return json.dumps(projection, ensure_ascii=False, separators=(",", ":"))
+
+
+def format_recent_ticket_resolutions_for_prompt(value: object) -> str:
+    if not isinstance(value, list) or not value:
+        return NO_DATA_TEXT
+    resolutions: list[dict[str, object]] = []
+    for item in value[:3]:
+        if not isinstance(item, dict):
+            continue
+        resolutions.append(
+            {
+                "thread_id": _bounded_optional(item.get("thread_id"), 120),
+                "summary_text": _bounded_optional(item.get("summary_text"), 500),
+                "closed_at": _bounded_optional(item.get("closed_at"), 80),
+                "source": _bounded_optional(item.get("source"), 40),
+                "version": item.get("version"),
+            }
+        )
+    if not resolutions:
+        return NO_DATA_TEXT
+    return json.dumps(resolutions, ensure_ascii=False, separators=(",", ":"))
+
+
+def _project_question_attempts(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    attempts: list[dict[str, object]] = []
+    for item in value[-6:]:
+        if not isinstance(item, dict):
+            continue
+        attempts.append(
+            {
+                "standalone_query": _bounded_optional(
+                    item.get("standalone_query"), 240
+                ),
+                "subject": _bounded_optional(item.get("subject"), 80),
+                "outcome": _bounded_optional(item.get("outcome"), 40),
+                "answer_preview": _bounded_optional(item.get("answer_preview"), 160),
+                "unsupported_aspects": _bounded_list(
+                    item.get("unsupported_aspects"), limit=4, item_limit=160
+                ),
+                "supporting_entry_ids": _bounded_list(
+                    item.get("supporting_entry_ids"), limit=4, item_limit=120
+                ),
+                "attempted_at": _bounded_optional(item.get("attempted_at"), 80),
+            }
+        )
+    return attempts
+
+
+def _bounded_optional(value: object, limit: int) -> str | None:
+    if value is None:
+        return None
+    text = compact_whitespace(str(value))
+    return truncate_text(text, limit) if text else None
+
+
+def _bounded_list(value: object, *, limit: int, item_limit: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value[:limit]:
+        text = _bounded_optional(item, item_limit)
+        if text:
+            result.append(text)
+    return result
 
 
 def build_response_prompt(
@@ -307,6 +400,8 @@ def build_response_prompt(
     tool_result: object | None = None,
     project_configuration: ProjectRuntimeConfigurationState | None = None,
     target_language: str | None = None,
+    conversation_context: object | None = None,
+    recent_ticket_resolutions: object | None = None,
 ) -> str:
     global _response_prompt_templates, _response_prompt_template, _interpretation_block
     lang = (target_language or "").strip().lower()
@@ -326,7 +421,7 @@ def build_response_prompt(
     if _interpretation_block is None:
         _interpretation_block = _load_prompt_template("interpretation_block.txt")
 
-    hist_str = format_history(history, limit=5) if history else "[]"
+    hist_str = format_history(history) if history else "[]"
     mem_str = _format_memory(user_memory) if user_memory else ""
     feat_str = _format_features(features)
     project_context = format_project_configuration(
@@ -355,6 +450,12 @@ def build_response_prompt(
         conversation_summary=conversation_summary or NO_DATA_TEXT,
         history=hist_str,
         user_memory=mem_str or NO_DATA_TEXT,
+        conversation_context=format_conversation_context_for_prompt(
+            conversation_context
+        ),
+        recent_ticket_resolutions=format_recent_ticket_resolutions_for_prompt(
+            recent_ticket_resolutions
+        ),
         project_context=project_context,
         knowledge_block=knowledge_block,
         tool_result=tool_result_block,

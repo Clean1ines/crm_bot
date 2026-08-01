@@ -21,7 +21,11 @@ from src.application.ports.agent_runtime_port import (
     AgentFactoryPort,
     AgentGraphRuntimePort,
 )
-from src.domain.runtime.state_contracts import RuntimeHistoryMessage, RuntimeStateInput
+from src.domain.runtime.state_contracts import (
+    RECENT_DIALOG_MESSAGES_LIMIT,
+    RuntimeHistoryMessage,
+    RuntimeStateInput,
+)
 
 
 GRAPH_EMPTY_RESPONSE_FALLBACK_TEXT = "Sorry, I couldn't generate a response."
@@ -93,7 +97,7 @@ class GraphFactory:
 
 
 class GraphExecutor:
-    RECENT_MESSAGES_LIMIT = 10
+    RECENT_MESSAGES_LIMIT = RECENT_DIALOG_MESSAGES_LIMIT
 
     def __init__(self, logger) -> None:
         self.logger = logger
@@ -148,6 +152,8 @@ class GraphExecutor:
                 "client_profile": None,
                 "conversation_summary": "",
                 "history": request.recent_history,
+                "conversation_context": {},
+                "recent_ticket_resolutions": [],
                 "knowledge_chunks": None,
                 "decision": None,
                 "tool_name": None,

@@ -17,7 +17,8 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
             settings_row = await conn.fetchrow(
                 """
                 SELECT brand_name, industry, tone_of_voice, default_language,
-                       default_timezone, system_prompt_override, created_at, updated_at
+                       target_language, default_timezone, system_prompt_override,
+                       created_at, updated_at
                 FROM project_settings
                 WHERE project_id = $1
             """,
@@ -104,15 +105,17 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
                 """
                 INSERT INTO project_settings (
                     project_id, brand_name, industry, tone_of_voice,
-                    default_language, default_timezone, system_prompt_override
+                    default_language, target_language, default_timezone,
+                    system_prompt_override
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (project_id)
                 DO UPDATE SET
                     brand_name = COALESCE(EXCLUDED.brand_name, project_settings.brand_name),
                     industry = COALESCE(EXCLUDED.industry, project_settings.industry),
                     tone_of_voice = COALESCE(EXCLUDED.tone_of_voice, project_settings.tone_of_voice),
                     default_language = COALESCE(EXCLUDED.default_language, project_settings.default_language),
+                    target_language = COALESCE(EXCLUDED.target_language, project_settings.target_language),
                     default_timezone = COALESCE(EXCLUDED.default_timezone, project_settings.default_timezone),
                     system_prompt_override = COALESCE(EXCLUDED.system_prompt_override, project_settings.system_prompt_override),
                     updated_at = NOW()
@@ -122,6 +125,7 @@ class ProjectConfigurationRepository(ProjectRepositoryBase):
                 data.get("industry"),
                 data.get("tone_of_voice"),
                 data.get("default_language"),
+                data.get("target_language"),
                 data.get("default_timezone"),
                 data.get("system_prompt_override"),
             )

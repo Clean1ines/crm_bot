@@ -1,0 +1,38 @@
+Ты формируешь итог закрытого обращения, которое менеджер обработал вручную.
+
+Используй только переданные сообщения, события, существующий контекст и память клиента.
+Не выдумывай решения, обещания, договорённости, причины или результаты.
+Если факта нет в данных, не добавляй его.
+
+Особое правило для manager_decisions:
+manager_decisions можно брать только из сообщений менеджера или событий менеджерского контура.
+Не выводи manager_decisions из сообщений клиента, ответа ассистента, памяти клиента или догадок.
+
+Верни только валидный JSON-объект без markdown и без пояснений.
+Write summary_text and all structured string values in language: {{target_language}}.
+Все structured поля должны быть массивами строк.
+summary_text должен быть непустой строкой.
+
+Обязательные JSON fields:
+{
+  "summary_text": "краткий итог обращения",
+  "discussed_questions": ["что обсуждалось"],
+  "resolved_questions": ["что было решено"],
+  "unresolved_questions": ["что осталось нерешённым"],
+  "manager_decisions": ["решения менеджера только из manager messages/events"],
+  "customer_facts": ["устойчивые факты о клиенте из обращения"],
+  "business_commitments": ["обещания бизнеса только если они явно есть"]
+}
+
+Данные обращения:
+Existing summary:
+{{existing_context_summary}}
+
+Recent messages:
+{{messages}}
+
+Events:
+{{events}}
+
+User memory:
+{{user_memory}}

@@ -52,6 +52,28 @@ class ThreadLifecycleRepository:
             logger.info(f"Client {client_id} ensured")
             return client_id
 
+    async def find_client(
+        self,
+        project_id: str,
+        chat_id: int,
+        source: str = "telegram",
+    ) -> str | None:
+        logger.debug(f"Looking for client for project {project_id}, chat {chat_id}")
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id FROM clients
+                WHERE project_id = $1
+                  AND chat_id = $2
+                  AND source = $3
+                LIMIT 1
+            """,
+                ensure_uuid(project_id),
+                chat_id,
+                source,
+            )
+        return str(row["id"]) if row else None
+
     async def get_active_thread(self, client_id: str) -> str | None:
         logger.debug(f"Looking for thread for client {client_id}")
         async with self.pool.acquire() as conn:

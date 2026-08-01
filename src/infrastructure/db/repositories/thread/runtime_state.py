@@ -109,6 +109,84 @@ class ThreadRuntimeStateRepository:
             },
         )
 
+    async def update_ticket_resolution(
+        self,
+        thread_id: str,
+        *,
+        summary: str,
+        resolution: JsonObject,
+    ) -> None:
+        logger.info("Updating ticket resolution", extra={"thread_id": thread_id})
+
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE threads
+                SET
+                    context_summary = $1,
+                    state_json = jsonb_set(
+                        COALESCE(state_json, '{}'::jsonb),
+                        '{ticket_resolution}',
+                        $2::jsonb,
+                        true
+                    ),
+                    updated_at = NOW()
+                WHERE id = $3
+            """,
+                summary,
+                json.dumps(resolution, ensure_ascii=False),
+                ensure_uuid(thread_id),
+            )
+
+    async def compare_and_update_ticket_resolution(
+        self,
+        thread_id: str,
+        *,
+        expected_version: int,
+        summary: str,
+        resolution: JsonObject,
+    ) -> bool:
+        logger.info(
+            "Compare-and-update ticket resolution",
+            extra={"thread_id": thread_id, "expected_version": expected_version},
+        )
+
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE threads
+                SET
+                    context_summary = $1,
+                    state_json = jsonb_set(
+                        COALESCE(state_json, '{}'::jsonb),
+                        '{ticket_resolution}',
+                        $2::jsonb,
+                        true
+                    ),
+                    updated_at = NOW()
+                WHERE id = $3
+                  AND COALESCE(
+                    (state_json #>> '{ticket_resolution,version}')::int,
+                    0
+                  ) = $4
+                RETURNING id
+            """,
+                summary,
+                json.dumps(resolution, ensure_ascii=False),
+                ensure_uuid(thread_id),
+                expected_version,
+            )
+        return row is not None
+
+    async def get_ticket_resolution(self, thread_id: str) -> JsonObject | None:
+        state = await self.get_state_json(thread_id)
+        if not isinstance(state, dict):
+            return None
+        value = state.get("ticket_resolution")
+        if not isinstance(value, dict):
+            return None
+        return json_object_from_unknown(value)
+
     async def get_analytics_view(self, thread_id: str) -> ThreadAnalyticsView | None:
         logger.debug(f"Fetching analytics for thread {thread_id}")
 

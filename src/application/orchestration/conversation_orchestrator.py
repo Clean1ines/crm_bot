@@ -77,12 +77,15 @@ class ConversationOrchestrator:
         event_repo=None,
         tool_registry=None,
         memory_repo=None,
+        user_repo=None,
         *,
         cache_factory: CacheFactoryPort | None = None,
         thread_lock: ThreadLockPort | None = None,
         telegram_client: TelegramClientPort | None = None,
         logger: LoggerPort | None = None,
         agent_factory: AgentFactoryPort | None = None,
+        thread_command_service=None,
+        ticket_resolution_service=None,
     ):
         self.db = db_conn
         self.projects = project_repo
@@ -90,10 +93,12 @@ class ConversationOrchestrator:
         self.event_repo = event_repo
         self.tool_registry = tool_registry
         self.memory_repo = memory_repo
+        self.user_repo = user_repo
         self.cache_factory = cache_factory
         self.thread_lock = thread_lock or NullThreadLock()
         self.telegram_client = telegram_client or NullTelegramClient()
         self.logger = logger or NullLogger()
+        self.thread_commands = thread_command_service
 
         self.runtime_guards = ProjectRuntimeGuards(
             cache_factory=cache_factory, logger=self.logger
@@ -126,6 +131,7 @@ class ConversationOrchestrator:
             thread_read=thread_read_repo,
             thread_runtime_state=thread_runtime_state_repo,
             memory_repo=memory_repo,
+            ticket_resolution_service=ticket_resolution_service,
             telegram_client=self.telegram_client,
             event_emitter=self.event_emitter,
             logger=self.logger,
@@ -195,6 +201,25 @@ class ConversationOrchestrator:
 
     async def _cache(self):
         return await self.client_messages.cache()
+
+    async def reset_dialog_by_telegram_admin(
+        self,
+        *,
+        project_id: str,
+        chat_id: int,
+        actor_telegram_id: int,
+        username: str | None = None,
+        full_name: str | None = None,
+    ) -> str:
+        if self.thread_commands is None:
+            return "Сброс диалога временно недоступен."
+        return await self.thread_commands.reset_dialog_by_telegram_admin(
+            project_id=project_id,
+            chat_id=chat_id,
+            actor_telegram_id=actor_telegram_id,
+            username=username,
+            full_name=full_name,
+        )
 
     async def process_message(
         self,

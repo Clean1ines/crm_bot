@@ -292,6 +292,53 @@ class ThreadReadRepository:
             LIMIT $4 OFFSET $5
         """
 
+    async def list_recent_closed_ticket_resolutions(
+        self,
+        project_id: str,
+        client_id: str,
+        *,
+        limit: int = 3,
+        exclude_thread_id: str | None = None,
+    ) -> list[dict[str, object]]:
+        params: list[object] = [ensure_uuid(project_id), ensure_uuid(client_id), limit]
+        exclude_clause = ""
+        if exclude_thread_id is not None:
+            params.append(ensure_uuid(exclude_thread_id))
+            exclude_clause = f"AND t.id <> ${len(params)}"
+
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT
+                    t.id AS thread_id,
+                    t.state_json #>> '{{ticket_resolution,summary_text}}' AS summary_text,
+                    t.updated_at AS closed_at,
+                    t.state_json #>> '{{ticket_resolution,source}}' AS source,
+                    COALESCE((t.state_json #>> '{{ticket_resolution,version}}')::int, 0) AS version
+                FROM threads t
+                JOIN clients c ON t.client_id = c.id
+                WHERE c.project_id = $1
+                  AND t.client_id = $2
+                  AND t.status = 'closed'
+                  AND t.state_json #>> '{{ticket_resolution,status}}' IN ('generated', 'edited')
+                  AND COALESCE(t.state_json #>> '{{ticket_resolution,summary_text}}', '') <> ''
+                  {exclude_clause}
+                ORDER BY t.updated_at DESC
+                LIMIT $3
+            """,
+                *params,
+            )
+        return [
+            {
+                "thread_id": str(row["thread_id"]),
+                "summary_text": row["summary_text"] or "",
+                "closed_at": row["closed_at"].isoformat() if row["closed_at"] else None,
+                "source": row["source"],
+                "version": int(row["version"] or 0),
+            }
+            for row in rows
+        ]
+
     async def find_by_status(self, status: str) -> list[ThreadStatusSummaryView]:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(

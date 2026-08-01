@@ -13,6 +13,7 @@ Infrastructure modules must stay generic and must not import src.agent.
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
+from typing import cast
 
 import asyncpg
 from fastapi import FastAPI
@@ -20,6 +21,7 @@ from fastapi import FastAPI
 from src.application.orchestration.conversation_orchestrator import (
     ConversationOrchestrator,
 )
+from src.application.ports.project_port import ProjectControlPort
 from src.infrastructure.app.resources import (
     bootstrap_platform_owner,
     init_db,
@@ -42,7 +44,11 @@ from src.infrastructure.db.repositories.thread.read import ThreadReadRepository
 from src.infrastructure.db.repositories.thread.runtime_state import (
     ThreadRuntimeStateRepository,
 )
+from src.infrastructure.db.repositories.user_repository import UserRepository
 from src.infrastructure.logging.logger import get_logger
+from src.application.services.project_service import ProjectAccessService
+from src.application.services.thread_command_service import ThreadCommandService
+from src.application.services.ticket_resolution_service import TicketResolutionService
 from src.infrastructure.telegram.http_client import HttpTelegramClient
 from src.tools import tool_registry
 
@@ -122,6 +128,9 @@ def build_orchestrator(db_pool: asyncpg.Pool) -> ConversationOrchestrator:
     The application layer receives narrow thread repositories by injection.
     """
     from src.agent.graph import create_agent
+    from src.infrastructure.llm.conversation_summary_generator import (
+        ResponseCompletionConversationSummaryGenerator,
+    )
 
     thread_lifecycle_repo = ThreadLifecycleRepository(db_pool)
     thread_message_repo = ThreadMessageRepository(db_pool)
@@ -131,10 +140,34 @@ def build_orchestrator(db_pool: asyncpg.Pool) -> ConversationOrchestrator:
     queue_repo = QueueRepository(db_pool)
     event_repo = EventRepository(db_pool)
     memory_repo = MemoryRepository(db_pool)
+    project_repo = ProjectRepository(db_pool)
+    user_repo = UserRepository(db_pool)
+    summary_generator = ResponseCompletionConversationSummaryGenerator()
+    ticket_resolution_service = TicketResolutionService(
+        thread_runtime_state_repo=thread_runtime_state_repo,
+        thread_read_repo=thread_read_repo,
+        thread_message_repo=thread_message_repo,
+        event_repo=event_repo,
+        memory_repo=memory_repo,
+        project_configuration_repo=project_repo,
+        summary_generator=summary_generator,
+        logger=logger,
+    )
+    thread_command_service = ThreadCommandService(
+        thread_lifecycle_repo,
+        memory_repo,
+        thread_read_repo=thread_read_repo,
+        event_repo=event_repo,
+        project_access_service=ProjectAccessService(
+            cast(ProjectControlPort, project_repo)
+        ),
+        user_repo=user_repo,
+        ticket_resolution_service=ticket_resolution_service,
+    )
 
     return ConversationOrchestrator(
         db_conn=db_pool,
-        project_repo=ProjectRepository(db_pool),
+        project_repo=project_repo,
         thread_lifecycle_repo=thread_lifecycle_repo,
         thread_message_repo=thread_message_repo,
         thread_runtime_state_repo=thread_runtime_state_repo,
@@ -143,9 +176,12 @@ def build_orchestrator(db_pool: asyncpg.Pool) -> ConversationOrchestrator:
         event_repo=event_repo,
         tool_registry=tool_registry,
         memory_repo=memory_repo,
+        user_repo=user_repo,
         telegram_client=HttpTelegramClient(),
         logger=logger,
         agent_factory=create_agent,
+        thread_command_service=thread_command_service,
+        ticket_resolution_service=ticket_resolution_service,
     )
 
 

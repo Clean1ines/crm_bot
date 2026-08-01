@@ -1,3 +1,5 @@
+import pytest
+
 from src.domain.runtime.persistence import (
     PersistenceContext,
     extract_dialog_state_from_memory,
@@ -176,9 +178,6 @@ def test_persistence_state_payload_does_not_persist_ephemeral_intent_resolution_
     assert "knowledge_query" not in memory_candidates
     assert "resolved_cta" not in memory_candidates
     assert "resolved_cta_reply" not in memory_candidates
-    assert "knowledge_query" not in memory_candidates["dialog_state"]
-    assert "resolved_cta" not in memory_candidates["dialog_state"]
-    assert "resolved_cta_reply" not in memory_candidates["dialog_state"]
 
 
 def test_persistence_consumes_conversational_cta_after_yes_no_or_other_reply():
@@ -346,18 +345,29 @@ def test_persistence_keeps_pending_cta_without_user_input_or_during_technical_re
     assert technical_replay.normalized_dialog_state()["last_cta"] == "call_manager"
 
 
-def test_persistence_context_builds_conservative_memory_candidates():
+def test_persistence_context_writes_only_explicit_llm_memory_candidates():
     context = PersistenceContext.from_state(
         {
             "thread_id": "thread-1",
             "project_id": "project-1",
             "client_id": "client-1",
-            "user_input": "Слишком дорого, только в чат, и интеграция не работает",
-            "intent": "pricing",
-            "topic": "integration",
-            "emotion": "negative",
-            "lifecycle": "warm",
-            "cta": "none",
+            "user_input": "Я использую AmoCRM и люблю писать в чат",
+            "memory_candidates": [
+                {
+                    "key": "uses_crm",
+                    "value": "AmoCRM",
+                    "type": "profile",
+                    "confidence": 0.95,
+                    "evidence_quote": "Я использую AmoCRM",
+                },
+                {
+                    "key": "preferred_channel",
+                    "value": "chat",
+                    "type": "preferences",
+                    "confidence": 0.9,
+                    "evidence_quote": "люблю писать в чат",
+                },
+            ],
         }
     )
 
@@ -365,40 +375,32 @@ def test_persistence_context_builds_conservative_memory_candidates():
         (item.type, item.key): item.value for item in context.memory_write_candidates()
     }
 
-    assert ("dialog_state", "dialog_state") in candidates
-    assert ("lifecycle", "stage") in candidates
-    assert candidates[("preferences", "contact_preference")] == {
-        "preferred_channel": "chat",
-        "avoid_calls": True,
-    }
-    assert candidates[("behavior", "price_sensitivity")] == "high"
-    assert candidates[("rejections", "pricing_objection")] == "too_expensive"
-    assert candidates[("issues", "active_issue")] == {
-        "kind": "integration",
-        "emotion": "negative",
-    }
+    assert candidates[("dialog_state", "dialog_state")]["lifecycle"] == "active_client"
+    assert candidates[("lifecycle", "stage")] == {"stage": "active_client"}
+    assert candidates[("profile", "uses_crm")] == "AmoCRM"
+    assert candidates[("preferences", "preferred_channel")] == "chat"
 
 
-def test_persistence_context_does_not_store_raw_issue_text():
+def test_persistence_context_writes_deterministic_issue_memory():
     context = PersistenceContext.from_state(
         {
             "thread_id": "thread-1",
             "project_id": "project-1",
             "client_id": "client-1",
-            "user_input": "Ошибка в счете, вот номер карты 4111111111111111",
+            "user_input": "Ошибка в чате, моя карта 4111111111111111",
             "intent": "support",
             "topic": "support",
             "emotion": "negative",
         }
     )
 
-    issue_candidate = next(
-        item
-        for item in context.memory_write_candidates()
-        if item.type == "issues" and item.key == "active_issue"
-    )
-
-    assert issue_candidate.value == {"kind": "support", "emotion": "negative"}
+    candidates = {
+        (item.type, item.key): item.value for item in context.memory_write_candidates()
+    }
+    assert candidates[("issues", "active_issue")] == {
+        "kind": "support",
+        "emotion": "negative",
+    }
 
 
 def test_persistence_context_detects_repeated_technical_failure_incident():
@@ -571,3 +573,458 @@ def test_persistence_keeps_handoff_and_technical_ticket_ids_separate():
     assert context.state_payload is not None
     assert context.state_payload["handoff_ticket_id"] == "manager-ticket-1"
     assert context.state_payload["technical_ticket_id"] == "incident-ticket-1"
+
+
+def test_persistence_records_supported_answer_in_thread_conversation_context():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "user_input": "Вход в веб-панель",
+            "knowledge_query": "Вход в веб-панель",
+            "current_subject": "web_panel",
+            "repeat_relation": "none",
+            "response_text": "Да, веб-панель есть.",
+            "model_answerability": "supported",
+            "supporting_entry_ids": ["entry-1"],
+            "unsupported_aspects": [],
+            "knowledge_retrieval_status": "retrieved",
+            "generation_output_parse_status": "valid",
+        }
+    )
+
+    assert context.state_payload is not None
+    conversation_context = context.state_payload["conversation_context"]
+    assert "current_subject" not in context.state_payload
+    assert "repeat_relation" not in context.state_payload
+    assert "dissatisfaction" not in context.state_payload
+    assert conversation_context["current_subject"] == "web_panel"
+    assert conversation_context["repeat_relation"] == "none"
+    assert conversation_context["dissatisfaction"] is False
+    assert (
+        conversation_context["answered_questions"][0]["standalone_query"]
+        == "Вход в веб-панель"
+    )
+    assert conversation_context["answered_questions"][0]["supporting_entry_ids"] == [
+        "entry-1"
+    ]
+    assert conversation_context["question_attempts"][0]["outcome"] == "supported"
+    assert (
+        conversation_context["question_attempts"][0]["standalone_query"]
+        == "Вход в веб-панель"
+    )
+
+
+def test_persistence_does_not_record_unsupported_answer_as_answered():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "Назови тариф",
+            "response_text": "Точных цен нет.",
+            "model_answerability": "unsupported",
+            "knowledge_retrieval_status": "retrieved",
+            "generation_output_parse_status": "valid",
+        }
+    )
+
+    assert context.state_payload is not None
+    conversation_context = context.state_payload["conversation_context"]
+    assert conversation_context["answered_questions"] == []
+    assert conversation_context["question_attempts"][0]["outcome"] == "unsupported"
+    assert conversation_context["question_attempts"][0]["standalone_query"] == (
+        "назови тариф"
+    )
+
+
+def test_persistence_question_attempt_outcome_mapping():
+    cases = [
+        (
+            {"knowledge_retrieval_status": "failed"},
+            "retrieval_failed",
+        ),
+        (
+            {"knowledge_retrieval_status": "empty"},
+            "unsupported",
+        ),
+        (
+            {
+                "knowledge_retrieval_status": "retrieved",
+                "generation_output_parse_status": "invalid_json",
+            },
+            "generation_failed",
+        ),
+        (
+            {
+                "knowledge_retrieval_status": "retrieved",
+                "generation_output_parse_status": "valid",
+                "generation_schema_status": "invalid_payload",
+            },
+            "generation_failed",
+        ),
+        (
+            {
+                "knowledge_retrieval_status": "retrieved",
+                "generation_output_parse_status": "valid",
+                "generation_schema_status": "valid",
+                "evidence_reference_status": "unknown_refs",
+            },
+            "generation_failed",
+        ),
+        (
+            {
+                "knowledge_retrieval_status": "retrieved",
+                "fallback_reason": "invalid_generation",
+            },
+            "generation_failed",
+        ),
+        (
+            {
+                "knowledge_retrieval_status": "retrieved",
+                "fallback_reason": "generation_exception",
+            },
+            "generation_failed",
+        ),
+        (
+            {
+                "knowledge_retrieval_status": "retrieved",
+                "fallback_reason": "orphan_action_cta_removed",
+            },
+            "generation_failed",
+        ),
+        (
+            {
+                "knowledge_retrieval_status": "retrieved",
+                "generation_output_parse_status": "valid",
+                "generation_schema_status": "valid",
+                "evidence_reference_status": "valid",
+                "model_answerability": "supported",
+                "response_text": "Подтверждено.",
+            },
+            "supported",
+        ),
+        (
+            {
+                "knowledge_retrieval_status": "retrieved",
+                "generation_output_parse_status": "valid",
+                "generation_schema_status": "valid",
+                "evidence_reference_status": "valid",
+                "model_answerability": "partially_supported",
+                "response_text": "Частично подтверждено.",
+            },
+            "partially_supported",
+        ),
+    ]
+
+    for extra_state, expected in cases:
+        context = PersistenceContext.from_state(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "user_input": f"case {expected}",
+                **extra_state,
+            }
+        )
+
+        assert context.state_payload is not None
+        assert (
+            context.state_payload["conversation_context"]["question_attempts"][0][
+                "outcome"
+            ]
+            == expected
+        )
+
+
+@pytest.mark.parametrize(
+    "extra_state",
+    [
+        {
+            "model_answerability": "supported",
+            "generation_output_parse_status": "valid",
+            "generation_schema_status": "invalid_payload",
+        },
+        {
+            "model_answerability": "supported",
+            "generation_output_parse_status": "valid",
+            "generation_schema_status": "valid",
+            "evidence_reference_status": "unknown_refs",
+        },
+        {
+            "model_answerability": "supported",
+            "fallback_reason": "invalid_generation",
+        },
+        {
+            "model_answerability": "supported",
+            "fallback_reason": "generation_exception",
+        },
+        {
+            "model_answerability": "supported",
+            "fallback_reason": "orphan_action_cta_removed",
+        },
+    ],
+)
+def test_persistence_answered_questions_use_final_outcome_contract(extra_state):
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "Есть веб-панель?",
+            "response_text": "Да, веб-панель есть.",
+            "knowledge_retrieval_status": "retrieved",
+            **extra_state,
+        }
+    )
+
+    assert context.state_payload is not None
+    conversation_context = context.state_payload["conversation_context"]
+    assert conversation_context["answered_questions"] == []
+    assert (
+        conversation_context["question_attempts"][0]["outcome"] == "generation_failed"
+    )
+
+
+@pytest.mark.parametrize(
+    "schema_status",
+    [
+        "invalid_payload",
+        "invalid_enum",
+        "invalid_answerability_contract",
+        "missing_required_answer",
+        "unknown_status",
+    ],
+)
+def test_persistence_invalid_schema_status_blocks_answered_questions(schema_status):
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "Выполни операцию",
+            "response_text": "Операция выполнена.",
+            "model_answerability": "supported",
+            "knowledge_retrieval_status": "skipped",
+            "generation_output_parse_status": "not_called",
+            "generation_schema_status": schema_status,
+            "evidence_reference_status": "not_applicable",
+            "fallback_reason": None,
+        }
+    )
+
+    assert context.state_payload is not None
+    conversation_context = context.state_payload["conversation_context"]
+    assert conversation_context["answered_questions"] == []
+    assert (
+        conversation_context["question_attempts"][0]["outcome"] == "generation_failed"
+    )
+
+
+@pytest.mark.parametrize("answerability", ["supported", "partially_supported"])
+def test_persistence_successful_outcome_adds_answered_and_question_attempt(
+    answerability,
+):
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "Есть веб-панель?",
+            "response_text": "Да, веб-панель есть.",
+            "model_answerability": answerability,
+            "knowledge_retrieval_status": "retrieved",
+            "generation_output_parse_status": "valid",
+            "generation_schema_status": "valid",
+            "evidence_reference_status": "valid",
+            "supporting_entry_ids": ["entry-1"],
+        }
+    )
+
+    assert context.state_payload is not None
+    conversation_context = context.state_payload["conversation_context"]
+    assert conversation_context["answered_questions"][0]["answerability"] == (
+        answerability
+    )
+    assert conversation_context["question_attempts"][0]["outcome"] == answerability
+
+
+def test_persistence_successful_direct_tool_response_accepts_not_applicable_schema():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "Выполни операцию",
+            "response_text": "Операция выполнена.",
+            "model_answerability": "supported",
+            "knowledge_retrieval_status": "skipped",
+            "generation_output_parse_status": "not_called",
+            "generation_schema_status": "not_applicable",
+            "evidence_reference_status": "not_applicable",
+            "fallback_reason": None,
+        }
+    )
+
+    assert context.state_payload is not None
+    conversation_context = context.state_payload["conversation_context"]
+    assert conversation_context["answered_questions"][0]["answerability"] == "supported"
+    assert conversation_context["question_attempts"][0]["outcome"] == "supported"
+
+
+def test_persistence_subject_reset_for_new_topic_without_current_subject():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "новый вопрос",
+            "repeat_relation": "none",
+            "conversation_context": {"current_subject": "возврат"},
+        }
+    )
+
+    assert context.state_payload is not None
+    assert context.state_payload["conversation_context"]["current_subject"] is None
+
+
+def test_persistence_subject_falls_back_for_clarification():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "а через неё?",
+            "repeat_relation": "clarification",
+            "conversation_context": {"current_subject": "веб-панель"},
+        }
+    )
+
+    assert context.state_payload is not None
+    assert (
+        context.state_payload["conversation_context"]["current_subject"] == "веб-панель"
+    )
+
+
+def test_persistence_subject_uses_current_subject_for_new_topic():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "это конструктор ботов?",
+            "current_subject": "конструктор ботов",
+            "repeat_relation": "none",
+            "conversation_context": {"current_subject": "возврат"},
+        }
+    )
+
+    assert context.state_payload is not None
+    assert (
+        context.state_payload["conversation_context"]["current_subject"]
+        == "конструктор ботов"
+    )
+
+
+def test_persistence_writes_only_explicit_memory_candidates():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "user_input": "Я использую AmoCRM",
+            "memory_candidates": [
+                {
+                    "key": "uses_crm",
+                    "value": "AmoCRM",
+                    "type": "profile",
+                    "confidence": 0.95,
+                    "evidence_quote": "Я использую AmoCRM",
+                }
+            ],
+        }
+    )
+
+    candidates = {
+        (item.type, item.key): item.value for item in context.memory_write_candidates()
+    }
+    assert candidates[("dialog_state", "dialog_state")]["lifecycle"] == "active_client"
+    assert candidates[("lifecycle", "stage")] == {"stage": "active_client"}
+    assert candidates[("profile", "uses_crm")] == "AmoCRM"
+
+
+def test_persistence_deterministic_memory_wins_over_llm_candidate_conflict():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "client_id": "client-1",
+            "user_input": "Не звоните, только в чат",
+            "memory_candidates": [
+                {
+                    "key": "contact_preference",
+                    "value": "phone",
+                    "type": "preferences",
+                    "confidence": 0.95,
+                    "evidence_quote": "Не звоните",
+                }
+            ],
+        }
+    )
+
+    candidates = {
+        (item.type, item.key): item.value for item in context.memory_write_candidates()
+    }
+    assert candidates[("preferences", "contact_preference")] == {
+        "preferred_channel": "chat",
+        "avoid_calls": True,
+    }
+
+
+def test_short_reply_preserves_previous_standalone_query_for_any_short_text():
+    for user_input in ("Да", "Нет", "Ок", "Понял", "Спасибо", "Дорого", "Не работает"):
+        context = PersistenceContext.from_state(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "user_input": user_input,
+                "turn_relation": "short_reply",
+                "conversation_context": {
+                    "last_standalone_query": "Что умеет Axole?",
+                    "answered_questions": [],
+                },
+            }
+        )
+
+        assert context.state_payload is not None
+        assert (
+            context.state_payload["conversation_context"]["last_standalone_query"]
+            == "Что умеет Axole?"
+        )
+
+
+def test_short_reply_without_previous_query_uses_current_input():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "Не работает",
+            "turn_relation": "short_reply",
+        }
+    )
+
+    assert context.state_payload is not None
+    assert (
+        context.state_payload["conversation_context"]["last_standalone_query"]
+        == "не работает"
+    )
+
+
+def test_new_topic_replaces_previous_standalone_query():
+    context = PersistenceContext.from_state(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "user_input": "Что такое Axole?",
+            "turn_relation": "new_topic",
+            "conversation_context": {"last_standalone_query": "Старый вопрос"},
+        }
+    )
+
+    assert context.state_payload is not None
+    assert (
+        context.state_payload["conversation_context"]["last_standalone_query"]
+        == "что такое axole?"
+    )

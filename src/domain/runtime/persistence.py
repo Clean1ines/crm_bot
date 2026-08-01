@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Mapping, cast
+from datetime import UTC, datetime
+from typing import Literal, Mapping, Sequence, cast
 
 from src.domain.runtime.cta import (
     is_pending_cta,
@@ -13,6 +14,10 @@ from src.domain.runtime.dialog_state import (
 )
 from src.domain.project_plane.json_types import JsonValue, json_value_from_unknown
 from src.domain.runtime.state_contracts import (
+    ANSWERED_QUESTIONS_LIMIT,
+    AnsweredQuestionEntry,
+    ConversationContextState,
+    MemoryCandidateState,
     RuntimeMemory,
     RuntimeStateInput,
     RuntimeStatePatch,
@@ -55,6 +60,7 @@ ISSUE_PHRASES = (
     "issue",
     "problem",
 )
+QUESTION_ATTEMPTS_LIMIT = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +121,19 @@ class PersistenceContext:
     should_search_kb: bool = True
     should_generate_answer: bool = True
     should_offer_manager: bool = False
+    current_subject: str | None = None
+    repeat_relation: str | None = None
+    dissatisfaction: bool = False
+    memory_candidates: list[MemoryCandidateState] | None = None
+    knowledge_query: str | None = None
+    model_answerability: str | None = None
+    supporting_entry_ids: list[str] | None = None
+    unsupported_aspects: list[str] | None = None
+    knowledge_retrieval_status: str | None = None
+    generation_output_parse_status: str | None = None
+    generation_schema_status: str | None = None
+    evidence_reference_status: str | None = None
+    fallback_reason: str | None = None
     state_payload: RuntimeStatePatch | None = None
     user_memory: RuntimeMemory | None = None
 
@@ -162,11 +181,35 @@ class PersistenceContext:
                 state.get("should_generate_answer"), True
             ),
             should_offer_manager=coerce_bool(state.get("should_offer_manager"), False),
+            current_subject=_optional_text(state.get("current_subject")),
+            repeat_relation=_optional_text(state.get("repeat_relation")) or "none",
+            dissatisfaction=coerce_bool(state.get("dissatisfaction"), False),
+            memory_candidates=_memory_candidate_list(state.get("memory_candidates")),
+            knowledge_query=_optional_text(state.get("knowledge_query")),
+            model_answerability=_optional_text(state.get("model_answerability")),
+            supporting_entry_ids=_string_list(state.get("supporting_entry_ids")),
+            unsupported_aspects=_string_list(state.get("unsupported_aspects")),
+            knowledge_retrieval_status=_optional_text(
+                state.get("knowledge_retrieval_status")
+            ),
+            generation_output_parse_status=_optional_text(
+                state.get("generation_output_parse_status")
+            ),
+            generation_schema_status=_optional_text(
+                state.get("generation_schema_status")
+            ),
+            evidence_reference_status=_optional_text(
+                state.get("evidence_reference_status")
+            ),
+            fallback_reason=_optional_text(state.get("fallback_reason")),
             state_payload=state_copy,
             user_memory=state.get("user_memory"),
         )
         if context.state_payload is not None:
             context.state_payload["dialog_state"] = context.normalized_dialog_state()
+            context.state_payload["conversation_context"] = (
+                context.updated_conversation_context()
+            )
         return context
 
     def normalized_dialog_state(self) -> DialogState:
@@ -274,53 +317,217 @@ class PersistenceContext:
                 )
             )
 
-        if not self.user_input:
-            return candidates
+        if self.user_input:
+            if _contains_phrase(self.user_input, NO_CALL_PHRASES):
+                candidates.append(
+                    MemoryWriteCandidate(
+                        key="contact_preference",
+                        value={"preferred_channel": "chat", "avoid_calls": True},
+                        type="preferences",
+                    )
+                )
 
-        if _contains_phrase(self.user_input, NO_CALL_PHRASES):
+            if _contains_price_objection(
+                self.user_input,
+                topic=self.topic,
+                intent=self.intent,
+            ):
+                candidates.extend(
+                    (
+                        MemoryWriteCandidate(
+                            key="price_sensitivity",
+                            value="high",
+                            type="behavior",
+                        ),
+                        MemoryWriteCandidate(
+                            key="pricing_objection",
+                            value="too_expensive",
+                            type="rejections",
+                        ),
+                    )
+                )
+
+            issue_kind = _detect_issue_kind(
+                self.user_input,
+                topic=self.topic,
+                emotion=self.emotion,
+            )
+            if issue_kind is not None:
+                candidates.append(
+                    MemoryWriteCandidate(
+                        key="active_issue",
+                        value={
+                            "kind": issue_kind,
+                            "emotion": self.emotion or "negative",
+                        },
+                        type="issues",
+                    )
+                )
+
+        seen = {(candidate.type, candidate.key) for candidate in candidates}
+        for candidate in self.memory_candidates or []:
+            key = str(candidate.get("key") or "").strip()
+            type_ = str(candidate.get("type") or "").strip()
+            value = candidate.get("value")
+            if not key or not type_ or value in (None, ""):
+                continue
+            if (type_, key) in seen:
+                continue
+            seen.add((type_, key))
             candidates.append(
                 MemoryWriteCandidate(
-                    key="contact_preference",
-                    value={"preferred_channel": "chat", "avoid_calls": True},
-                    type="preferences",
+                    key=key,
+                    value=json_value_from_unknown(value),
+                    type=type_,
                 )
             )
-
-        if _contains_price_objection(
-            self.user_input,
-            topic=self.topic,
-            intent=self.intent,
-        ):
-            candidates.extend(
-                (
-                    MemoryWriteCandidate(
-                        key="price_sensitivity",
-                        value="high",
-                        type="behavior",
-                    ),
-                    MemoryWriteCandidate(
-                        key="pricing_objection",
-                        value="too_expensive",
-                        type="rejections",
-                    ),
-                )
-            )
-
-        issue_kind = _detect_issue_kind(
-            self.user_input,
-            topic=self.topic,
-            emotion=self.emotion,
-        )
-        if issue_kind is not None:
-            candidates.append(
-                MemoryWriteCandidate(
-                    key="active_issue",
-                    value={"kind": issue_kind, "emotion": self.emotion or "negative"},
-                    type="issues",
-                )
-            )
-
         return candidates
+
+    def updated_conversation_context(self) -> ConversationContextState:
+        existing = _conversation_context_from_payload(
+            (self.state_payload or {}).get("conversation_context")
+        )
+        repeat_relation = _repeat_relation(self.repeat_relation)
+        existing_subject = existing.get("current_subject")
+        if repeat_relation in {
+            "clarification",
+            "repeat_answered",
+            "repeat_unresolved",
+        }:
+            subject = self.current_subject or existing_subject
+        else:
+            subject = self.current_subject
+        standalone_query = self._standalone_query(existing)
+        answered_questions: list[AnsweredQuestionEntry] = list(
+            existing.get("answered_questions") or []
+        )
+        question_attempts = _question_attempts_from_context(existing)
+        entry = self._answered_question_entry(
+            subject=subject,
+            standalone_query=standalone_query,
+        )
+        if entry is not None and not _is_duplicate_answered_question(
+            answered_questions,
+            entry,
+        ):
+            answered_questions.append(entry)
+            answered_questions = answered_questions[-ANSWERED_QUESTIONS_LIMIT:]
+
+        attempt = self._question_attempt_entry(
+            subject=subject,
+            standalone_query=standalone_query,
+        )
+        if attempt is not None:
+            question_attempts.append(attempt)
+            question_attempts = question_attempts[-QUESTION_ATTEMPTS_LIMIT:]
+
+        return ConversationContextState(
+            current_subject=subject,
+            last_standalone_query=standalone_query,
+            repeat_relation=repeat_relation,
+            dissatisfaction=self.dissatisfaction,
+            answered_questions=answered_questions,
+            question_attempts=question_attempts,
+        )
+
+    def _standalone_query(self, existing: ConversationContextState) -> str:
+        if not self.knowledge_query and self.turn_relation == "short_reply":
+            previous = _optional_text(existing.get("last_standalone_query"))
+            if previous:
+                return previous
+        return _bounded_text(self.knowledge_query or self.user_input, 240)
+
+    def _answered_question_entry(
+        self,
+        *,
+        subject: str | None,
+        standalone_query: str,
+    ) -> AnsweredQuestionEntry | None:
+        outcome = self._question_attempt_outcome()
+        if outcome not in {"supported", "partially_supported"}:
+            return None
+        if not self.response_text:
+            return None
+        return AnsweredQuestionEntry(
+            standalone_query=standalone_query,
+            subject=subject,
+            answerability=outcome,
+            answer_preview=_bounded_text(self.response_text, 500),
+            supporting_entry_ids=list(self.supporting_entry_ids or [])[:8],
+            unsupported_aspects=list(self.unsupported_aspects or [])[:8],
+            answered_at=datetime.now(UTC).isoformat(),
+        )
+
+    def _question_attempt_entry(
+        self,
+        *,
+        subject: str | None,
+        standalone_query: str,
+    ) -> dict[str, object] | None:
+        outcome = self._question_attempt_outcome()
+        if outcome is None:
+            return None
+        return {
+            "standalone_query": standalone_query,
+            "subject": subject,
+            "outcome": outcome,
+            "answer_preview": _bounded_text(self.response_text, 500)
+            if self.response_text
+            else None,
+            "unsupported_aspects": list(self.unsupported_aspects or [])[:8],
+            "supporting_entry_ids": list(self.supporting_entry_ids or [])[:8],
+            "attempted_at": datetime.now(UTC).isoformat(),
+        }
+
+    def _question_attempt_outcome(self) -> str | None:
+        if (
+            self.knowledge_retrieval_status == "failed"
+            or self.fallback_reason == "retrieval_failed"
+        ):
+            return "retrieval_failed"
+        if (
+            self.knowledge_retrieval_status == "empty"
+            or self.fallback_reason == "no_evidence"
+        ):
+            return "unsupported"
+        if self._has_generation_failure_outcome():
+            return "generation_failed"
+        answerability = (self.model_answerability or "").strip()
+        if answerability in {"supported", "partially_supported"}:
+            return answerability
+        if answerability in {"unsupported", "conflicting_evidence"}:
+            return "unsupported"
+        return None
+
+    def _has_generation_failure_outcome(self) -> bool:
+        parse_status = (self.generation_output_parse_status or "").strip()
+        if parse_status and parse_status not in {"valid", "not_called"}:
+            return True
+
+        schema_status = (self.generation_schema_status or "").strip()
+        if schema_status and schema_status not in {
+            "valid",
+            "not_called",
+            "not_applicable",
+        }:
+            return True
+
+        evidence_status = (self.evidence_reference_status or "").strip()
+        if evidence_status in {
+            "missing_required_refs",
+            "unknown_refs",
+            "invalid_for_answerability",
+        }:
+            return True
+
+        return self.fallback_reason in {
+            "invalid_generation",
+            "generation_exception",
+            "generation_mode_contract_violation",
+            "orphan_action_cta_removed",
+            "retrieval_contract_violation",
+            "tool_result_contract_violation",
+        }
 
     def should_create_technical_incident(self) -> bool:
         return (
@@ -502,6 +709,8 @@ def _copy_runtime_flags(
         state_copy["domain"] = state["domain"]
     if "turn_relation" in state:
         state_copy["turn_relation"] = state["turn_relation"]
+    if "conversation_context" in state:
+        state_copy["conversation_context"] = state["conversation_context"]
     if "should_search_kb" in state:
         state_copy["should_search_kb"] = state["should_search_kb"]
     if "should_generate_answer" in state:
@@ -526,3 +735,165 @@ def _support_issue_kind(*, topic: str | None, emotion: str | None) -> str | None
     if topic == "support" or emotion in {"negative", "angry"}:
         return "support"
     return None
+
+
+def _conversation_context_from_payload(value: object) -> ConversationContextState:
+    if not isinstance(value, Mapping):
+        return ConversationContextState(
+            current_subject=None,
+            last_standalone_query=None,
+            repeat_relation="none",
+            dissatisfaction=False,
+            answered_questions=[],
+            question_attempts=[],
+        )
+    answered = value.get("answered_questions")
+    attempts = value.get("question_attempts")
+    answered_questions = cast(
+        list[AnsweredQuestionEntry],
+        [
+            {str(key): item_value for key, item_value in item.items()}
+            for item in answered
+            if isinstance(item, Mapping)
+        ][-ANSWERED_QUESTIONS_LIMIT:]
+        if isinstance(answered, list)
+        else [],
+    )
+    question_attempts = (
+        _question_attempts_from_payload(attempts)
+        if isinstance(attempts, list)
+        else _attempts_from_legacy_answered_questions(answered_questions)
+    )
+    return ConversationContextState(
+        current_subject=_optional_text(value.get("current_subject")),
+        last_standalone_query=_optional_text(value.get("last_standalone_query")),
+        repeat_relation=_repeat_relation(value.get("repeat_relation")),
+        dissatisfaction=coerce_bool(value.get("dissatisfaction"), False),
+        answered_questions=answered_questions,
+        question_attempts=question_attempts,
+    )
+
+
+def _question_attempts_from_context(
+    context: ConversationContextState,
+) -> list[dict[str, object]]:
+    return _question_attempts_from_payload(context.get("question_attempts"))
+
+
+def _question_attempts_from_payload(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    attempts: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, Mapping):
+            continue
+        query = _optional_text(item.get("standalone_query"))
+        outcome = _optional_text(item.get("outcome"))
+        if not query or outcome not in {
+            "supported",
+            "partially_supported",
+            "unsupported",
+            "retrieval_failed",
+            "generation_failed",
+        }:
+            continue
+        attempts.append(
+            {
+                "standalone_query": query,
+                "subject": _optional_text(item.get("subject")),
+                "outcome": outcome,
+                "answer_preview": _optional_text(item.get("answer_preview")),
+                "unsupported_aspects": _string_list(item.get("unsupported_aspects"))[
+                    :8
+                ],
+                "supporting_entry_ids": _string_list(item.get("supporting_entry_ids"))[
+                    :8
+                ],
+                "attempted_at": _optional_text(item.get("attempted_at")) or "",
+            }
+        )
+    return attempts[-QUESTION_ATTEMPTS_LIMIT:]
+
+
+def _attempts_from_legacy_answered_questions(
+    answered_questions: list[AnsweredQuestionEntry],
+) -> list[dict[str, object]]:
+    attempts: list[dict[str, object]] = []
+    for item in answered_questions[-QUESTION_ATTEMPTS_LIMIT:]:
+        query = _optional_text(item.get("standalone_query"))
+        answerability = _optional_text(item.get("answerability"))
+        if not query or answerability not in {"supported", "partially_supported"}:
+            continue
+        attempts.append(
+            {
+                "standalone_query": query,
+                "subject": _optional_text(item.get("subject")),
+                "outcome": answerability,
+                "answer_preview": _optional_text(item.get("answer_preview")),
+                "unsupported_aspects": _string_list(item.get("unsupported_aspects"))[
+                    :8
+                ],
+                "supporting_entry_ids": _string_list(item.get("supporting_entry_ids"))[
+                    :8
+                ],
+                "attempted_at": _optional_text(item.get("answered_at")) or "",
+            }
+        )
+    return attempts
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item is not None]
+
+
+def _memory_candidate_list(value: object) -> list[MemoryCandidateState]:
+    if not isinstance(value, list):
+        return []
+    return [
+        MemoryCandidateState(**dict(item))
+        for item in value
+        if isinstance(item, Mapping)
+    ]
+
+
+def _bounded_text(value: object, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    return text[:limit].strip()
+
+
+def _is_duplicate_answered_question(
+    entries: Sequence[Mapping[str, object]],
+    candidate: Mapping[str, object],
+) -> bool:
+    if not entries:
+        return False
+    last = entries[-1]
+    return _normalized_text(last.get("standalone_query")) == _normalized_text(
+        candidate.get("standalone_query")
+    ) and _string_list(last.get("supporting_entry_ids")) == _string_list(
+        candidate.get("supporting_entry_ids")
+    )
+
+
+def _normalized_text(value: object) -> str:
+    return " ".join(str(value or "").split()).lower()
+
+
+def _repeat_relation(
+    value: object,
+) -> Literal["none", "clarification", "repeat_answered", "repeat_unresolved"]:
+    text = _optional_text(value) or "none"
+    if text in {"none", "clarification", "repeat_answered", "repeat_unresolved"}:
+        return cast(
+            Literal["none", "clarification", "repeat_answered", "repeat_unresolved"],
+            text,
+        )
+    return "none"
+
+
+def _object_list(value: object) -> list[object]:
+    if not isinstance(value, list):
+        return []
+    return list(value)

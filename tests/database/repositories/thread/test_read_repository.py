@@ -69,3 +69,32 @@ async def test_get_dialogs_keeps_active_filter_narrow(read_repo, mock_pool):
 
     _, _, statuses, _, _, _, _ = mock_pool.mock_conn.fetch.await_args.args
     assert statuses == ["active"]
+
+
+@pytest.mark.asyncio
+async def test_recent_closed_ticket_resolutions_filter_successful_manager_results(
+    read_repo, mock_pool
+):
+    project_id = str(uuid4())
+    client_id = str(uuid4())
+    current_thread_id = str(uuid4())
+    mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
+
+    await read_repo.list_recent_closed_ticket_resolutions(
+        project_id,
+        client_id,
+        limit=3,
+        exclude_thread_id=current_thread_id,
+    )
+
+    sql, stored_project_id, stored_client_id, limit, excluded = (
+        mock_pool.mock_conn.fetch.await_args.args
+    )
+    assert str(stored_project_id) == project_id
+    assert str(stored_client_id) == client_id
+    assert limit == 3
+    assert str(excluded) == current_thread_id
+    assert "ticket_resolution,status" in sql
+    assert "IN ('generated', 'edited')" in sql
+    assert "ticket_resolution,summary_text" in sql
+    assert "t.id <> $4" in sql

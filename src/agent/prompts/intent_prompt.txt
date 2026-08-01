@@ -25,6 +25,13 @@
 - should_generate_answer: true только когда после классификации нужно генерировать LLM-ответ.
 - should_offer_manager: true когда нужно предложить помощь человека, но не форсировать её сразу.
 - knowledge_query: contextual KB query или null. Используй только когда user_input является continuation/reopening и буквальный текст пользователя слишком короткий/зависит от контекста. Не копируй user_input как knowledge_query.
+- current_subject: текущая самостоятельная тема разговора. Это не эмоция и не intent; это короткое название предмета вопроса, например "веб-панель", "цены", "интеграции".
+- repeat_relation:
+  - clarification: реплика зависит от предыдущей темы и уточняет её. Пример: "Есть веб-панель?" → "А клиент может писать через неё?"
+  - repeat_answered: пользователь повторяет вопрос, который уже есть в question_attempts с outcome=supported или outcome=partially_supported, и после этого ответа не было нового релевантного manager resolution.
+  - repeat_unresolved: пользователь повторяет вопрос, который ранее есть в question_attempts с outcome=unsupported, outcome=retrieval_failed или outcome=generation_failed, либо прошлый attempt содержал существенные unsupported_aspects, либо пользователь явно недоволен предыдущим ответом.
+  - none: новый самостоятельный вопрос, не зависящий от предыдущего ответа как уточнение и не являющийся повтором.
+- dissatisfaction: true только при явном недовольстве ответом ассистента ("это не ответ", "ты не помог", "не то"), а не при отрицательной теме сообщения вроде проблемы, ошибки, возврата или жалобы на продукт.
 
 Правила языка:
 - Не отвечай пользователю содержательно в этом prompt.
@@ -47,6 +54,12 @@
 - Для short_reply оставляй knowledge_query=null, если это ответ на action CTA или отказ.
 - Для continuation/reopening можно задать knowledge_query только как самостоятельный поисковый запрос, раскрывающий контекст предыдущей темы.
 - knowledge_query должен быть не длиннее 240 символов.
+- memory_candidates создавай только для устойчивых фактов, которые пользователь прямо сообщил в текущем сообщении.
+- Не создавай memory_candidates из ответа ассистента, прошлых manager resolutions, topic, intent, эмоции, бизнес-эвристики или предположения.
+- Не сохраняй текущий вопрос, временное состояние диалога или сомнительные факты как stable memory.
+- Каждый memory candidate обязан содержать evidence_quote — дословный фрагмент текущего сообщения пользователя.
+- Если нет дословного evidence_quote из текущего сообщения пользователя, верни пустой список memory_candidates.
+- Максимум 3 memory_candidates.
 
 Сообщение пользователя: {user_input}
 
@@ -54,6 +67,8 @@
 - Summary: {conversation_summary}
 - Recent messages: {history}
 - User memory: {user_memory}
+- Conversation context: {conversation_context}
+- Recent resolved manager cases: {recent_ticket_resolutions}
 
 Верни только JSON:
 {{
@@ -69,7 +84,13 @@
   "should_search_kb": true|false,
   "should_generate_answer": true|false,
   "should_offer_manager": true|false,
-  "knowledge_query": "string or null"
+  "knowledge_query": "string or null",
+  "current_subject": "string or null",
+  "repeat_relation": "none|clarification|repeat_answered|repeat_unresolved",
+  "dissatisfaction": true|false,
+  "memory_candidates": [
+    {{"key":"safe_snake_case","value":"explicit value","type":"profile|preferences|context|agreements","confidence":0.0,"evidence_quote":"exact quote from current user message"}}
+  ]
 }}
 
 Жёсткие правила для коротких ответов:

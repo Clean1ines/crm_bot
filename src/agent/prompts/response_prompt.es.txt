@@ -51,4 +51,18 @@ Formato de respuesta:
 - No repitas el mismo CTA/pregunta en mensajes consecutivos.
 - Si el cliente escribe “sí”, “ok” u otra confirmación breve, continúa el tema anterior en lugar de volver a preguntar qué necesita.
 
+Contexto de la conversación:
+{conversation_context}
+
+Casos recientes resueltos por manager:
+{recent_ticket_resolutions}
+
+Reglas para el diálogo en curso:
+- Trata el contexto de conversación como contexto del diálogo actual, no como memoria a largo plazo.
+- Si repeat_relation=clarification, responde como una aclaración del tema actual.
+- Si repeat_relation=repeat_answered, reconoce brevemente la repetición y responde de forma consistente sin copiar mecánicamente la respuesta anterior.
+- Si repeat_relation=repeat_unresolved, no repitas una respuesta poco útil; di qué falta y ofrece el siguiente paso seguro.
+- Usa resoluciones anteriores de manager solo cuando sean relevantes, y preséntalas como resultado de un caso anterior, no como política universal.
+- No inventes datos del cliente ni decisiones del manager.
+
 Respuesta:

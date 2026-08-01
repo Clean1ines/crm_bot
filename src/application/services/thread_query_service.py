@@ -88,6 +88,53 @@ class ThreadQueryService:
         )
         return thread
 
+    async def get_ticket_resolution_for_user(
+        self, thread_id: str, current_user_id: str
+    ) -> dict[str, object]:
+        await self.require_thread_access(
+            thread_id, current_user_id, PROJECT_MANAGER_ROLES
+        )
+        resolution = None
+        if hasattr(self.thread_runtime_state_repo, "get_ticket_resolution"):
+            resolution = await self.thread_runtime_state_repo.get_ticket_resolution(
+                thread_id
+            )
+        if not isinstance(resolution, dict):
+            return {
+                "summary_text": "",
+                "status": "missing",
+                "source": None,
+                "version": 0,
+                "generated_at": None,
+                "updated_at": None,
+                "discussed_questions": [],
+                "resolved_questions": [],
+                "unresolved_questions": [],
+                "manager_decisions": [],
+                "customer_facts": [],
+                "business_commitments": [],
+                "error_type": None,
+            }
+        return {
+            "summary_text": str(resolution.get("summary_text") or ""),
+            "status": str(resolution.get("status") or "missing"),
+            "source": resolution.get("source"),
+            "version": _coerce_int(resolution.get("version")),
+            "generated_at": resolution.get("generated_at"),
+            "updated_at": resolution.get("updated_at"),
+            "discussed_questions": _string_list(resolution.get("discussed_questions")),
+            "resolved_questions": _string_list(resolution.get("resolved_questions")),
+            "unresolved_questions": _string_list(
+                resolution.get("unresolved_questions")
+            ),
+            "manager_decisions": _string_list(resolution.get("manager_decisions")),
+            "customer_facts": _string_list(resolution.get("customer_facts")),
+            "business_commitments": _string_list(
+                resolution.get("business_commitments")
+            ),
+            "error_type": resolution.get("error_type"),
+        }
+
     async def get_messages_for_user(
         self,
         thread_id: str,
@@ -218,3 +265,20 @@ def _message_counts(value: object) -> ThreadMessageCounts:
     if isinstance(value, dict):
         return ThreadMessageCounts.from_record(value)
     return ThreadMessageCounts()
+
+
+def _coerce_int(value: object) -> int:
+    try:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            return int(value)
+        return 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]

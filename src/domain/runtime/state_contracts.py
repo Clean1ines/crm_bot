@@ -1,4 +1,16 @@
-from typing import Mapping, TypedDict
+from typing import Literal, Mapping, TypedDict
+
+
+RECENT_DIALOG_MESSAGES_LIMIT = 8
+ANSWERED_QUESTIONS_LIMIT = 10
+RECENT_TICKET_RESOLUTIONS_LIMIT = 3
+
+RepeatRelation = Literal[
+    "none",
+    "clarification",
+    "repeat_answered",
+    "repeat_unresolved",
+]
 
 
 class RuntimeHistoryMessage(TypedDict):
@@ -9,6 +21,51 @@ class RuntimeHistoryMessage(TypedDict):
 class RuntimeMemoryEntry(TypedDict):
     key: str
     value: object
+
+
+class AnsweredQuestionEntry(TypedDict, total=False):
+    standalone_query: str
+    subject: str | None
+    answerability: str
+    answer_preview: str
+    supporting_entry_ids: list[str]
+    unsupported_aspects: list[str]
+    answered_at: str
+
+
+class QuestionAttemptEntry(TypedDict, total=False):
+    standalone_query: str
+    subject: str | None
+    outcome: str
+    answer_preview: str | None
+    unsupported_aspects: list[str]
+    supporting_entry_ids: list[str]
+    attempted_at: str
+
+
+class ConversationContextState(TypedDict, total=False):
+    current_subject: str | None
+    last_standalone_query: str | None
+    repeat_relation: RepeatRelation
+    dissatisfaction: bool
+    answered_questions: list[AnsweredQuestionEntry]
+    question_attempts: list[QuestionAttemptEntry]
+
+
+class MemoryCandidateState(TypedDict, total=False):
+    key: str
+    value: object
+    type: str
+    confidence: float
+    evidence_quote: str
+
+
+class RecentTicketResolutionState(TypedDict, total=False):
+    thread_id: str
+    summary_text: str
+    closed_at: str | None
+    source: str | None
+    version: int
 
 
 class RuntimeMemory(TypedDict, total=False):
@@ -85,6 +142,8 @@ class RuntimeStateInput(TypedDict, total=False):
     response_text: str | None
     conversation_summary: str | None
     history: list[RuntimeHistoryMessage]
+    conversation_context: ConversationContextState
+    recent_ticket_resolutions: list[RecentTicketResolutionState]
     user_memory: RuntimeMemory
     knowledge_chunks: list[KnowledgeChunkPayload]
     knowledge_retrieval_status: str | None
@@ -105,6 +164,10 @@ class RuntimeStateInput(TypedDict, total=False):
     is_repeat_like: bool
     domain: str | None
     turn_relation: str | None
+    current_subject: str | None
+    repeat_relation: RepeatRelation | None
+    dissatisfaction: bool
+    memory_candidates: list[MemoryCandidateState]
     should_search_kb: bool
     should_generate_answer: bool
     should_offer_manager: bool
@@ -155,6 +218,10 @@ class RuntimeStatePatch(TypedDict, total=False):
     metadata: Mapping[str, object]
     conversation_summary: str | None
     history: list[RuntimeHistoryMessage] | list[Mapping[str, object]]
+    conversation_context: ConversationContextState | Mapping[str, object]
+    recent_ticket_resolutions: (
+        list[RecentTicketResolutionState] | list[Mapping[str, object]]
+    )
     user_memory: RuntimeMemory | Mapping[str, object]
     knowledge_chunks: list[KnowledgeChunkPayload] | None
     knowledge_retrieval_status: str | None
@@ -175,6 +242,10 @@ class RuntimeStatePatch(TypedDict, total=False):
     is_repeat_like: bool
     domain: str | None
     turn_relation: str | None
+    current_subject: str | None
+    repeat_relation: RepeatRelation | None
+    dissatisfaction: bool
+    memory_candidates: list[MemoryCandidateState]
     should_search_kb: bool
     should_generate_answer: bool
     should_offer_manager: bool

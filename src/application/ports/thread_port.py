@@ -25,6 +25,13 @@ class ThreadLifecyclePort(Protocol):
         full_name: str | None = None,
     ) -> str: ...
 
+    async def find_client(
+        self,
+        project_id: str,
+        chat_id: int,
+        source: str = "telegram",
+    ) -> str | None: ...
+
     async def get_active_thread(self, client_id: str) -> str | None: ...
 
     async def create_thread(self, client_id: str) -> str: ...
@@ -59,7 +66,7 @@ class ThreadMessagePort(Protocol):
     ) -> None: ...
 
     async def get_messages_for_langgraph(
-        self, thread_id: str
+        self, thread_id: str, limit: int | None = None
     ) -> list[ThreadRuntimeMessageView]: ...
 
     async def get_messages(
@@ -72,6 +79,21 @@ class ThreadMessagePort(Protocol):
 
 class ThreadRuntimeStatePort(Protocol):
     async def update_summary(self, thread_id: str, summary: str) -> None: ...
+
+    async def update_ticket_resolution(
+        self, thread_id: str, *, summary: str, resolution: JsonObject
+    ) -> None: ...
+
+    async def compare_and_update_ticket_resolution(
+        self,
+        thread_id: str,
+        *,
+        expected_version: int,
+        summary: str,
+        resolution: JsonObject,
+    ) -> bool: ...
+
+    async def get_ticket_resolution(self, thread_id: str) -> JsonObject | None: ...
 
     async def get_state_json(self, thread_id: str) -> JsonObject | None: ...
 
@@ -109,3 +131,12 @@ class ThreadReadPort(Protocol):
     ) -> list[ThreadDialogView]: ...
 
     async def find_by_status(self, status: str) -> list[ThreadStatusSummaryView]: ...
+
+    async def list_recent_closed_ticket_resolutions(
+        self,
+        project_id: str,
+        client_id: str,
+        *,
+        limit: int = 3,
+        exclude_thread_id: str | None = None,
+    ) -> list[dict[str, object]]: ...

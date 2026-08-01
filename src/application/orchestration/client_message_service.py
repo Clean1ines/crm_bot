@@ -812,15 +812,12 @@ class ClientMessageService:
         runtime_context,
         question: str,
     ):
-        recent_messages = self.graph_executor.trim_recent_history(
-            await self.thread_messages.get_messages_for_langgraph(thread_id)
-        )
         return self.graph_executor.create_graph_execution_request(
             project_id=project_id,
             thread_id=thread_id_str,
             chat_id=chat_id,
             question=question,
-            recent_history=recent_messages,
+            recent_history=[],
             runtime_context=runtime_context,
             trace_id=uuid.uuid4().hex,
         )

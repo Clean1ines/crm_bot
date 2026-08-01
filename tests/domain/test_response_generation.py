@@ -30,6 +30,38 @@ def test_response_generation_context_from_state_normalizes_values():
     assert context.decision == "LLM_GENERATE"
 
 
+def test_response_generation_context_uses_current_intent_patch_without_mutation():
+    persisted_context = {
+        "current_subject": "старая тема",
+        "repeat_relation": "none",
+        "dissatisfaction": False,
+        "answered_questions": [{"standalone_query": "старый вопрос"}],
+    }
+
+    context = ResponseGenerationContext.from_state(
+        {
+            "conversation_context": persisted_context,
+            "current_subject": "веб-панель",
+            "repeat_relation": "clarification",
+            "dissatisfaction": True,
+        }
+    )
+
+    assert context.conversation_context is not None
+    assert context.conversation_context["current_subject"] == "веб-панель"
+    assert context.conversation_context["repeat_relation"] == "clarification"
+    assert context.conversation_context["dissatisfaction"] is True
+    assert context.conversation_context["answered_questions"] == [
+        {"standalone_query": "старый вопрос"}
+    ]
+    assert persisted_context == {
+        "current_subject": "старая тема",
+        "repeat_relation": "none",
+        "dissatisfaction": False,
+        "answered_questions": [{"standalone_query": "старый вопрос"}],
+    }
+
+
 def test_response_generation_result_to_state_patch_matches_contract():
     signature = inspect.signature(ResponseGenerationResult)
     kwargs = {}

@@ -67,20 +67,40 @@ class ThreadMessageRepository:
                 )
 
     async def get_messages_for_langgraph(
-        self, thread_id: str
+        self, thread_id: str, limit: int | None = None
     ) -> list[ThreadRuntimeMessageView]:
         logger.debug(f"Fetching messages for thread {thread_id}")
 
+        if limit is not None and limit <= 0:
+            return []
+
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT role, content
-                FROM messages
-                WHERE thread_id = $1
-                ORDER BY created_at ASC
-            """,
-                ensure_uuid(thread_id),
-            )
+            if limit is None:
+                rows = await conn.fetch(
+                    """
+                    SELECT role, content
+                    FROM messages
+                    WHERE thread_id = $1
+                    ORDER BY created_at ASC
+                """,
+                    ensure_uuid(thread_id),
+                )
+            else:
+                rows = await conn.fetch(
+                    """
+                    SELECT role, content
+                    FROM (
+                        SELECT role, content, created_at
+                        FROM messages
+                        WHERE thread_id = $1
+                        ORDER BY created_at DESC
+                        LIMIT $2
+                    ) recent_messages
+                    ORDER BY created_at ASC
+                """,
+                    ensure_uuid(thread_id),
+                    limit,
+                )
 
         messages = [ThreadRuntimeMessageView.from_record(dict(row)) for row in rows]
         logger.debug(f"Retrieved {len(messages)} messages")

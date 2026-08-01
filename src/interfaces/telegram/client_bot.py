@@ -16,6 +16,8 @@ logger = get_logger(__name__)
 
 OK_RESPONSE: dict[str, bool] = {"ok": True}
 IDEMPOTENCY_TTL_SECONDS = 3600
+RESET_DIALOG_COMMAND = "/reset_dialog"
+
 CLIENT_ERROR_MESSAGE = (
     "❌ Произошла ошибка при обработке вашего запроса. Попробуйте позже."
 )
@@ -86,6 +88,24 @@ async def _send_error_message(bot_token: str, chat_id: object) -> None:
         )
 
 
+def _sender_id(sender: dict[str, object], fallback: int) -> int:
+    value = sender.get("id")
+    try:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            return int(value)
+        return fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _is_reset_dialog_command(text: str) -> bool:
+    command = text.strip().split(maxsplit=1)[0].lower()
+    command = command.split("@", maxsplit=1)[0]
+    return command == RESET_DIALOG_COMMAND
+
+
 async def _process_text_message(
     *,
     message: dict[str, object],
@@ -109,14 +129,23 @@ async def _process_text_message(
         },
     )
 
-    response_text = await orchestrator.process_message(
-        project_id=project_id,
-        chat_id=chat_id,
-        text=text,
-        username=username,
-        full_name=_extract_full_name(sender),
-        source="telegram",
-    )
+    if _is_reset_dialog_command(text):
+        response_text = await orchestrator.reset_dialog_by_telegram_admin(
+            project_id=project_id,
+            chat_id=chat_id,
+            actor_telegram_id=_sender_id(sender, chat_id),
+            username=username,
+            full_name=_extract_full_name(sender),
+        )
+    else:
+        response_text = await orchestrator.process_message(
+            project_id=project_id,
+            chat_id=chat_id,
+            text=text,
+            username=username,
+            full_name=_extract_full_name(sender),
+            source="telegram",
+        )
 
     if response_text:
         await _send_telegram_message(bot_token, chat_id, response_text)

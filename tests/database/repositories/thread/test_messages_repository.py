@@ -91,3 +91,41 @@ async def test_get_messages_returns_chronological_user_assistant_manager_history
         "Сейчас уточню детали",
         "[Alice Manager]: Я подключился",
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_messages_for_langgraph_uses_desc_limit_subquery_for_bounded_tail(
+    message_repo, mock_pool
+):
+    thread_id = str(uuid4())
+    mock_pool.mock_conn.fetch = AsyncMock(
+        return_value=[
+            {"role": "assistant", "content": "older"},
+            {"role": "user", "content": "newer"},
+        ]
+    )
+
+    messages = await message_repo.get_messages_for_langgraph(thread_id, limit=8)
+
+    sql, query_thread_id, limit = mock_pool.mock_conn.fetch.await_args.args
+    assert str(query_thread_id) == thread_id
+    assert limit == 8
+    assert "ORDER BY created_at DESC" in sql
+    assert "LIMIT $2" in sql
+    assert "ORDER BY created_at ASC" in sql
+    assert [message.content for message in messages] == ["older", "newer"]
+
+
+@pytest.mark.asyncio
+async def test_get_messages_for_langgraph_preserves_legacy_unbounded_read(
+    message_repo, mock_pool
+):
+    thread_id = str(uuid4())
+    mock_pool.mock_conn.fetch = AsyncMock(return_value=[])
+
+    await message_repo.get_messages_for_langgraph(thread_id)
+
+    sql, query_thread_id = mock_pool.mock_conn.fetch.await_args.args
+    assert str(query_thread_id) == thread_id
+    assert "ORDER BY created_at ASC" in sql
+    assert "LIMIT $2" not in sql

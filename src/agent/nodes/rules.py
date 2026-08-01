@@ -86,6 +86,7 @@ async def _rules_node_impl(state: AgentState) -> dict[str, object]:
             return {
                 "decision": "ESCALATE",
                 "dialog_state": cleared_dialog_state,
+                "turn_relation": "short_reply",
             }
 
         if confirmation_reply == "decline":
@@ -95,6 +96,7 @@ async def _rules_node_impl(state: AgentState) -> dict[str, object]:
                 "response_text": build_handoff_details_requested_text(),
                 "requires_human": False,
                 "dialog_state": cleared_dialog_state,
+                "turn_relation": "short_reply",
             }
 
         logger.info("Rule triggered: handoff confirmation replaced by new details")

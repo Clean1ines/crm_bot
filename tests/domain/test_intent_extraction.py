@@ -40,7 +40,7 @@ def test_intent_extraction_result_serializes_validated_payload():
         "topic": "support",
         "cta_hint": None,
         "emotion": "negative",
-        "is_repeat_like": True,
+        "is_repeat_like": False,
         "domain": "business",
         "turn_relation": "unknown",
         "should_search_kb": True,
@@ -50,6 +50,10 @@ def test_intent_extraction_result_serializes_validated_payload():
         "knowledge_query_source": "none",
         "resolved_cta": None,
         "resolved_cta_reply": None,
+        "current_subject": None,
+        "repeat_relation": "none",
+        "dissatisfaction": False,
+        "memory_candidates": [],
         "normalization_flags": {},
     }
 
@@ -238,6 +242,110 @@ def test_intent_extraction_normalizes_affirmative_short_reply_from_previous_cta(
     assert result.intent == "sales"
     assert result.topic == "pricing"
     assert result.cta == "call_manager"
+
+
+def test_intent_extraction_price_objection_is_not_repeat_without_repeat_relation():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "pricing",
+            "cta": "none",
+            "features": {},
+            "topic": "pricing",
+            "emotion": "negative",
+            "is_repeat_like": True,
+            "repeat_relation": "none",
+        }
+    ).normalized_for_context(
+        IntentExtractionContext.from_state({"user_input": "Дорого"})
+    )
+
+    assert result.intent == "pricing"
+    assert result.is_repeat_like is False
+
+
+def test_intent_extraction_issue_report_is_not_repeat_without_repeat_relation():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "support",
+            "cta": "none",
+            "features": {},
+            "topic": "support",
+            "emotion": "negative",
+            "is_repeat_like": True,
+            "repeat_relation": "none",
+        }
+    ).normalized_for_context(
+        IntentExtractionContext.from_state({"user_input": "Не работает"})
+    )
+
+    assert result.intent == "support"
+    assert result.is_repeat_like is False
+
+
+def test_intent_extraction_price_objection_keeps_repeat_unresolved_true():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "pricing",
+            "cta": "none",
+            "features": {},
+            "topic": "pricing",
+            "is_repeat_like": False,
+            "repeat_relation": "repeat_unresolved",
+        }
+    ).normalized_for_context(
+        IntentExtractionContext.from_state({"user_input": "Дорого"})
+    )
+
+    assert result.repeat_relation == "repeat_unresolved"
+    assert result.is_repeat_like is True
+
+
+def test_intent_extraction_clarification_is_not_repeat_like():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "sales",
+            "cta": "none",
+            "features": {},
+            "topic": "product",
+            "is_repeat_like": True,
+            "repeat_relation": "clarification",
+        }
+    ).normalized_for_context(
+        IntentExtractionContext.from_state({"user_input": "А через неё?"})
+    )
+
+    assert result.repeat_relation == "clarification"
+    assert result.is_repeat_like is False
+
+
+def test_intent_extraction_repeat_relation_invariant_overrides_llm_contradiction():
+    answered = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "sales",
+            "cta": "none",
+            "features": {},
+            "topic": "product",
+            "is_repeat_like": False,
+            "repeat_relation": "repeat_answered",
+        }
+    ).normalized_for_context(
+        IntentExtractionContext.from_state({"user_input": "Ещё раз"})
+    )
+    none = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "sales",
+            "cta": "none",
+            "features": {},
+            "topic": "product",
+            "is_repeat_like": True,
+            "repeat_relation": "none",
+        }
+    ).normalized_for_context(
+        IntentExtractionContext.from_state({"user_input": "Новая тема"})
+    )
+
+    assert answered.is_repeat_like is True
+    assert none.is_repeat_like is False
 
 
 def test_intent_extraction_ignores_none_cta_and_uses_persisted_action_cta():
@@ -628,7 +736,31 @@ def test_intent_extraction_normalizes_price_objection_short_reply():
     assert result.topic == "pricing"
     assert result.cta == "none"
     assert result.emotion == "negative"
+    assert result.is_repeat_like is False
+
+
+def test_repeat_answered_relation_overrides_contradictory_repeat_flag():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "repeat_relation": "repeat_answered",
+            "is_repeat_like": False,
+        }
+    )
+
+    assert result.repeat_relation == "repeat_answered"
     assert result.is_repeat_like is True
+
+
+def test_clarification_relation_overrides_contradictory_repeat_flag():
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "repeat_relation": "clarification",
+            "is_repeat_like": True,
+        }
+    )
+
+    assert result.repeat_relation == "clarification"
+    assert result.is_repeat_like is False
 
 
 def test_intent_extraction_normalizes_issue_reply_with_integration_context():
