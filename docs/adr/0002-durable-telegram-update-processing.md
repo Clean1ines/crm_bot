@@ -1,8 +1,10 @@
 # ADR-0002: Durable Telegram Update Intake and Idempotent Processing
 
 Date: 2026-08-04
-Status: proposed
-Deciders: crm_bot maintainers; project owner approval pending
+Status: accepted
+Accepted by: project owner
+Acceptance date: 2026-08-04
+Deciders: crm_bot maintainers; project owner
 
 ## Context
 

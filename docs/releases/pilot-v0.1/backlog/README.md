@@ -29,6 +29,7 @@ required_adrs: [ADR-0002]
 requirements: [NFR-03]
 risks: [R20]
 release_acceptance: [AT-NFR-03]
+supports_parent_acceptance: []
 dependencies: []
 qa_record: docs/releases/pilot-v0.1/qa/S1.1.md
 evidence_record: docs/releases/pilot-v0.1/evidence/S1.1.md
@@ -44,6 +45,13 @@ evidence_record: docs/releases/pilot-v0.1/evidence/S1.1.md
 - `verified`: all required gates and independent acceptance passed.
 - `committed`: one task-scoped commit exists.
 - `blocked`: task cannot proceed; blocker must be written in the card.
+
+## Acceptance ownership fields
+
+- `release_acceptance`: release-level tests that this work item can prove completely within its own scope.
+- `supports_parent_acceptance`: release-level tests for which this work item creates necessary prerequisites or partial evidence, but must not declare the full test passed by itself.
+
+For S1 work packages, repository/schema work may support parent runtime acceptance without owning webhook, worker, handler, retry, or business-side-effect evidence. Parent release acceptance is complete only when the owning later work item or integrated slice proves the full end-to-end boundary.
 
 ## Card update rules
 

@@ -1,8 +1,10 @@
 # ADR-0003: PostgreSQL-Owned Conversation Runtime Coordination and State Consistency
 
 Date: 2026-08-04
-Status: proposed
-Deciders: crm_bot maintainers; project owner approval pending
+Status: accepted
+Accepted by: project owner
+Acceptance date: 2026-08-04
+Deciders: crm_bot maintainers; project owner
 
 ## Context
 
