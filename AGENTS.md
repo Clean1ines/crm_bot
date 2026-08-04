@@ -334,3 +334,78 @@ If `.env.test` is missing, create it from `.env.test.example`.
 Do not ask for production environment values to run local/Codex checks. Use the placeholder values from `.env.test.example`.
 
 Do not add real deployment values to `.env.example`, `.env.test.example`, docs, reports, or commits.
+
+
+<!-- BEGIN CRM_BOT MVP WORK ITEM ROUTER -->
+
+## Pilot MVP backlog work-item router
+
+A request that names a Pilot v0.1 backlog ID such as `S1.1`, `S1.2`, or says `backlog item` MUST use:
+
+- `.codex/workflows/mvp-work-item.md`;
+- `.agents/skills/crm-bot-mvp-work-item/SKILL.md`;
+- `.agents/skills/crm-bot-qa-design/SKILL.md` before implementation;
+- `.agents/skills/crm-bot-acceptance-verification/SKILL.md` after implementation.
+
+The task card at `docs/releases/pilot-v0.1/backlog/<ID>-*.md` is the direct execution contract. The agent must also read every requirement, risk, ADR, specification, acceptance test, dependency, and architecture reference linked by that card.
+
+### Mandatory gates
+
+For a Pilot backlog item, the agent MUST NOT patch production code until:
+
+1. the backlog item resolves uniquely;
+2. its status permits QA design;
+3. all required documents have been checked against current code;
+4. every required ADR is `accepted` for implementation;
+5. a read-only `qa_designer` has produced a QA Design Record with verdict `READY` or `READY_WITH_CORRECTIONS`;
+6. required corrections have been incorporated into the task contract;
+7. impact analysis and an implementation plan are complete;
+8. tests that prove the missing behavior have been identified and, where practical, shown failing for the expected reason.
+
+### Documentation freshness
+
+Current code is evidence of current implementation, not authority to silently rewrite requirements.
+
+If code and documentation disagree:
+
+- correct stale factual documentation when the approved decision is unchanged;
+- stop and require ADR/specification resolution when the disagreement changes architecture, requirement meaning, release scope, security policy, persistence semantics, or acceptance criteria;
+- never reinterpret requirements merely to make the current implementation pass.
+
+### QA participation
+
+QA design is mandatory before code. QA must independently cover state transitions, negative behavior, concurrency, retries, restart/recovery, partial failure, migrations, security/tenant boundaries, external dependencies, observability, and regression surfaces relevant to the work item.
+
+After implementation, `acceptance_reviewer` must independently compare the result with the task card, accepted ADRs, requirements, QA Design Record, acceptance criteria, actual diff, and validation evidence.
+
+### Work-item state and commit policy
+
+Work-item state is separate from requirement and release state. Completing one work package must not mark a parent requirement or release as verified unless its full acceptance contract is proven.
+
+For cards containing `commit_policy: on_green`, the card itself is explicit authorization to create one local task-scoped commit, but only after every commit gate in the work-item workflow passes. This authorization does not permit push.
+
+The agent must not commit when:
+
+- required ADRs are not accepted;
+- QA or reviewer verdict is failing or blocked;
+- focused or affected regression checks fail;
+- full required validation was not run without a documented accepted exception;
+- documentation/evidence is stale;
+- the staged diff contains unrelated changes;
+- secrets or real environment values may be present.
+
+One work item produces at most one implementation commit. Do not push unless the user explicitly requests it separately.
+
+### Required completion artifacts
+
+A verified work item must update:
+
+- its backlog card;
+- its QA Design Record;
+- `TRACEABILITY_MATRIX.md` and other affected release documents;
+- a task evidence record under `docs/releases/pilot-v0.1/evidence/`;
+- actual architecture documentation only when implementation state truly changed.
+
+The evidence record must contain the result commit SHA. To avoid a second documentation commit, write the evidence record with `result_commit: SELF` before commit; after commit report the actual SHA in the final response. A later release-evidence rollup may replace `SELF` with the immutable SHA.
+
+<!-- END CRM_BOT MVP WORK ITEM ROUTER -->
