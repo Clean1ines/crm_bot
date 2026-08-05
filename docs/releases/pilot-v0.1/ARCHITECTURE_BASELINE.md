@@ -9,12 +9,12 @@ This document separates the actual architecture at the baseline commit from the 
 | Component | Actual Current State | Target Pilot State | Gap |
 |---|---|---|---|
 | FastAPI HTTP app | Interfaces expose auth, projects, knowledge, chat, threads, webhooks. | Release-gated API with health/readiness and pilot smoke. | Health/readiness and deploy smoke are not release-proven. |
-| Telegram client bot | Processes client updates, `/reset_dialog`, Redis TTL duplicate guard. | Verified webhook, PostgreSQL durable inbox, effectively-once business processing, PostgreSQL same-thread lease, and minimal state CAS. | Dedupe incomplete; production lock not wired; no durable Telegram inbox or state revision. |
+| Telegram client bot | Processes client updates, `/reset_dialog`, Redis TTL duplicate guard. S1.1 added the PostgreSQL inbox schema/repository boundary, but this runtime path is not switched to it yet. | Verified webhook, PostgreSQL durable inbox, effectively-once business processing, PostgreSQL same-thread lease, and minimal state CAS. | Direct dispatch/Redis behavior remains until S1.2; production lock not wired; no state revision. |
 | Telegram manager bot | Handles callbacks and manager text. | Project/thread-bound manager actions. | Callback thread ID not bound to target thread project. |
 | Frontend web panel | Owner/manager UI, channel settings, ticket detail. | Browser E2E-proven owner/manager flows. | E2E suite absent for pilot workflows. |
 | Knowledge workbench | Upload, extraction, curation, publication surfaces. | Operator-approved knowledge publication smoke. | Release smoke and runbook not yet proven. |
 | Agent runtime | LangGraph nodes load state, run rules, intent, RAG, response, persistence. | Runtime with PostgreSQL processing ownership, DB thread lease, minimal state revision/CAS, durable outbound intent, and eval evidence. | `NullThreadLock`/`NullCache` wiring and whole-state persistence race remain at baseline. |
-| PostgreSQL | Primary source for projects, clients, threads, messages, events, knowledge, runtime state. | Authoritative source for Telegram update acceptance, processing lifecycle, thread execution lease, state revision/CAS, backup/restore, and smoke-tested DB. | Telegram inbox, thread lease, state revision, backup/restore, and migration gates are missing. |
+| PostgreSQL | Primary source for projects, clients, threads, messages, events, knowledge, runtime state. S1.1 added nullable numeric Telegram bot ID storage and the `telegram_inbox_updates` table/repository boundary. | Authoritative source for Telegram update acceptance, processing lifecycle, thread execution lease, state revision/CAS, backup/restore, and smoke-tested DB. | Inbox schema/repository exists but is not wired to webhook/worker; thread lease, state revision, backup/restore, and migration gates are still missing. |
 | Redis | Used by some locks, sessions, duplicate guards, queue/runtime patterns. | Optional acceleration/cache/wakeup/rate accounting layer with degraded behavior; not authoritative for Telegram intake or state correctness. | Production composition passes neither thread lock nor cache factory; Redis-only correctness is not acceptable. |
 | LLM/Groq | Direct Groq completion client for ticket summaries plus broader runtime use. | Bounded timeout/failure/capacity policy. | Direct summary path lacks release-proven timeout/capacity policy. |
 
@@ -109,7 +109,7 @@ Target: load target thread, verify target project, validate manager in target pr
 | Messages/events | `messages`, `events` | Used as audit and runtime context. |
 | Runtime state | `threads.state_json` | Whole document save for graph state; resolution CAS only for subdocument. |
 | Ticket resolution | `threads.state_json.ticket_resolution`, `context_summary` | No dedicated resolution table at baseline. |
-| Telegram update acceptance | none dedicated at baseline | Target source of truth is PostgreSQL durable inbox for client, manager, and platform-admin updates. |
+| Telegram update acceptance | S1.1 implements `migrations/132_create_telegram_inbox.sql`, `telegram_inbox_updates`, `TelegramUpdateIdentity`, `PostgresTelegramInboxRepository`, and project/platform numeric Telegram bot-ID storage. Current webhooks/handlers still do not use this source of truth. | Target source of truth is PostgreSQL durable inbox for client, manager, and platform-admin updates. |
 | Thread execution ownership | `ThreadLockPort` call, defaulting to `NullThreadLock` in production | Target source of truth is PostgreSQL row/table-backed execution lease with owner token and expiration. |
 | State revision | none for whole `state_json` | Target source of truth is PostgreSQL revision/CAS; whole-document JSON may remain physical storage only with CAS. |
 | Outbound delivery intent | direct Telegram send paths and tool calls | Target source of truth is durable outbound intent/result before/after external Telegram delivery. |
@@ -118,6 +118,7 @@ Target: load target thread, verify target project, validate manager in target pr
 ## Queues, Redis, LLM, Telegram, Frontend/OpenAPI
 
 - Queues/events exist for runtime side effects, and a PostgreSQL-backed work-item runtime exists for knowledge/RAG flows; target Telegram update processing uses a separate PostgreSQL inbox and worker, not the knowledge/RAG work-item lifecycle.
+- S1.1 implements the separate Telegram inbox schema and repository lifecycle primitives: insert-or-read-existing, duplicate/anomaly diagnostics, claim, renew, expired-row discovery/reclaim, complete, retryable failure, terminal failure, ownership validation, and attempt accounting. These primitives are not yet called by webhook intake or a worker.
 - Redis is used for manager sessions and intended guards/locks, but target pilot correctness must remain PostgreSQL-owned; Redis is optional acceleration/accounting with degraded behavior.
 - LLM summary generation uses Groq and strict JSON parsing; timeout/capacity policy is not release-proven.
 - Telegram inbound webhook verification exists via secret token checks; setup differs by onboarding path.
@@ -125,7 +126,7 @@ Target: load target thread, verify target project, validate manager in target pr
 
 ## Target Runtime Flow For Telegram Updates
 
-Target, not implemented at baseline:
+Target, partially implemented after S1.1 only at schema/repository level:
 
 1. Webhook request verifies the Telegram surface secret.
 2. Webhook request performs minimal structural validation and builds identity from surface/role, stable project or platform scope, and Telegram `update_id`.
@@ -139,6 +140,8 @@ Target, not implemented at baseline:
 10. Messages, events, state revision update, lifecycle mutations, and durable outbound intent are committed before final Telegram response delivery.
 11. Outbound delivery executes from durable intent and persists result or ambiguity.
 12. Telegram inbox lifecycle reaches completed, retryable failed, or terminal failed.
+
+S1.1 implements the persistence objects needed by steps 2, 3, 5, and 12, but only as repository/schema primitives. Durable runtime intake starts in S1.2, and S1.1 does not prove NFR-03, AT-NFR-03, AT-S1-01, AT-S1-02, or full S1 release readiness.
 
 ## Trust And Tenant Boundaries
 

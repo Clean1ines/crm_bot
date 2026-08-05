@@ -40,7 +40,10 @@ class ProjectTokenRepository(ProjectRepositoryBase):
             await conn.execute(
                 """
                 UPDATE projects 
-                SET bot_token = $1, client_bot_username = $2, updated_at = NOW()
+                SET bot_token = $1,
+                    client_bot_username = $2,
+                    client_telegram_bot_id = NULL,
+                    updated_at = NOW()
                 WHERE id = $3
             """,
                 encrypted,
@@ -51,6 +54,34 @@ class ProjectTokenRepository(ProjectRepositoryBase):
 
     async def clear_bot_token(self, project_id: ProjectId) -> None:
         await self.set_bot_token(project_id, None)
+
+    async def get_client_telegram_bot_id(self, project_id: ProjectId) -> int | None:
+        async with self.pool.acquire() as conn:
+            value = await conn.fetchval(
+                """
+                SELECT client_telegram_bot_id FROM projects WHERE id = $1
+                """,
+                ensure_uuid(project_id),
+            )
+        return int(value) if value is not None else None
+
+    async def set_client_telegram_bot_id(
+        self,
+        project_id: ProjectId,
+        telegram_bot_id: int | None,
+    ) -> None:
+        _validate_optional_telegram_bot_id(telegram_bot_id)
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE projects
+                SET client_telegram_bot_id = $1, updated_at = NOW()
+                WHERE id = $2
+                """,
+                telegram_bot_id,
+                ensure_uuid(project_id),
+            )
+        self._invalidate_project_runtime_cache(project_id)
 
     async def get_manager_bot_token(self, project_id: ProjectId) -> str | None:
         cache_key = self._canonical_project_cache_key(project_id)
@@ -88,7 +119,10 @@ class ProjectTokenRepository(ProjectRepositoryBase):
             await conn.execute(
                 """
                 UPDATE projects 
-                SET manager_bot_token = $1, manager_bot_username = $2, updated_at = NOW()
+                SET manager_bot_token = $1,
+                    manager_bot_username = $2,
+                    manager_telegram_bot_id = NULL,
+                    updated_at = NOW()
                 WHERE id = $3
             """,
                 encrypted,
@@ -99,6 +133,34 @@ class ProjectTokenRepository(ProjectRepositoryBase):
 
     async def clear_manager_token(self, project_id: ProjectId) -> None:
         await self.set_manager_bot_token(project_id, None)
+
+    async def get_manager_telegram_bot_id(self, project_id: ProjectId) -> int | None:
+        async with self.pool.acquire() as conn:
+            value = await conn.fetchval(
+                """
+                SELECT manager_telegram_bot_id FROM projects WHERE id = $1
+                """,
+                ensure_uuid(project_id),
+            )
+        return int(value) if value is not None else None
+
+    async def set_manager_telegram_bot_id(
+        self,
+        project_id: ProjectId,
+        telegram_bot_id: int | None,
+    ) -> None:
+        _validate_optional_telegram_bot_id(telegram_bot_id)
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE projects
+                SET manager_telegram_bot_id = $1, updated_at = NOW()
+                WHERE id = $2
+                """,
+                telegram_bot_id,
+                ensure_uuid(project_id),
+            )
+        self._invalidate_project_runtime_cache(project_id)
 
     async def get_webhook_secret(self, project_id: ProjectId) -> str | None:
         cache_key = self._canonical_project_cache_key(project_id)
@@ -192,3 +254,12 @@ class ProjectTokenRepository(ProjectRepositoryBase):
                 if decrypted == raw_token:
                     return str(row["id"])
         return None
+
+
+def _validate_optional_telegram_bot_id(value: int | None) -> None:
+    if value is None:
+        return
+    if type(value) is not int:
+        raise TypeError("telegram_bot_id must be int or None")
+    if value <= 0:
+        raise ValueError("telegram_bot_id must be positive when provided")

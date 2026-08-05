@@ -21,6 +21,9 @@ _EXPORT_MODULES: dict[str, str] = {
     "ThreadRuntimeStateRepository": (
         "src.infrastructure.db.repositories.thread.runtime_state"
     ),
+    "PostgresTelegramInboxRepository": (
+        "src.infrastructure.db.repositories.telegram_inbox_repository"
+    ),
     "UserRepository": "src.infrastructure.db.repositories.user_repository",
 }
 

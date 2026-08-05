@@ -275,15 +275,16 @@ Evidence status values: `confirmed_defect`, `confirmed_missing_behavior`, `proba
 - Evidence status: confirmed_missing_behavior.
 - Severity: P2.
 - Scenario: duplicate update IDs, concurrent duplicate callbacks, Redis outage, replacement bot account reusing an old `update_id`, or duplicate delivery after processing has already moved to completed/processing/failed.
-- Chain: `client_bot._is_duplicate_update` uses global `processed_update:{update_id}` exists/setex; manager/platform handlers lack same guard.
-- Mechanism: non-atomic key, missing surface/project/bot-account scope, and any broad lifecycle upsert would risk resetting status, owner, lease, attempts, error, completion, payload, or outbound state on duplicate delivery.
-- Existing protections: client TTL dedupe.
-- Why insufficient: race, cross-project suppression, bot-replacement update ID collision, and lifecycle reset risks remain.
-- Minimal fix: PostgreSQL durable Telegram inbox keyed by surface/role, project or platform scope, persisted non-secret Telegram bot account ID or bot-generation identity, and Telegram `update_id`; initial intake uses atomic INSERT semantics such as `INSERT ... ON CONFLICT DO NOTHING` then reads the existing row; duplicates never reset lifecycle, ownership, attempts, error, payload, completion, or outbound state; differing payload for the same identity records an anomaly; Redis `SET NX EX` may remain only as acceleration.
+- Chain: current runtime still enters `client_bot._is_duplicate_update` with global `processed_update:{update_id}` exists/setex, while manager/platform handlers lack the shared durable guard; S1.1 adds `migrations/132_create_telegram_inbox.sql`, `TelegramUpdateIdentity`, `PostgresTelegramInboxRepository`, and numeric bot-ID persistence but does not wire webhook/worker intake.
+- Mechanism: S1.1 partially removes the schema/repository identity and lifecycle risks by implementing stable numeric bot identity, durable logical update identity, lifecycle preservation, anomaly diagnostics, and repository ownership primitives. The runtime risk remains because direct webhook/handler dispatch, restart/redelivery behavior, and irreversible business-side-effect protection are not yet integrated.
+- Existing protections: client TTL dedupe plus S1.1 schema/repository boundary with task-level evidence for AT-S1-16 through AT-S1-20.
+- Why insufficient: S1.1 is not connected to webhook durable intake or a worker, and AT-NFR-03, AT-S1-01, and AT-S1-02 are not fully proven. Duplicate runtime processing can still occur until S1.2/S1.7 integration.
+- Minimal fix: S1.2 must route webhook intake through the PostgreSQL inbox and worker lifecycle, and S1.7/S1 integrated acceptance must prove restart/redelivery and effectively-once internal business outcomes. R25 external Telegram delivery ambiguity remains residual and is not eliminated by R20 remediation.
 - Acceptance test: AT-NFR-03, AT-S1-01, AT-S1-02, AT-S1-03, AT-S1-11, AT-S1-16, AT-S1-17, AT-S1-18, AT-S1-19, AT-S1-20.
 - Regression risk: low/medium.
 - Temporary limitation: no for S1 durable intake; some downstream close idempotency remains in S3.
-- Slice: S1 for durable inbox; S3 for close-specific idempotency.
+- Release status: partial/blocking until integrated webhook, worker, restart/redelivery, and business-side-effect acceptance passes.
+- Slice: S1.1 partially complete at schema/repository boundary; S1.2/S1.7 remain required for durable intake; S3 for close-specific idempotency.
 
 ### R21: Prior manager resolutions may expose manager-only content
 
