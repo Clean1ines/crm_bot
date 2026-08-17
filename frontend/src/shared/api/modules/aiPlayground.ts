@@ -16,10 +16,9 @@ export type AiPlaygroundModelOption = {
   reasoning_format?: AiPlaygroundReasoningFormat;
 };
 
-export const AI_PLAYGROUND_DEFAULT_MODEL = 'llama-3.1-8b-instant';
+export const AI_PLAYGROUND_DEFAULT_MODEL = 'qwen/qwen3.6-27b';
 
 export const AI_PLAYGROUND_MODELS: AiPlaygroundModelOption[] = [
-  { id: 'llama-3.1-8b-instant', label: 'llama-3.1-8b-instant', rpm: 30, rpd: 14400, tpm: 6000, tpd: 500000 },
   { id: 'qwen/qwen3.6-27b', label: 'qwen/qwen3.6-27b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
   {
     id: 'qwen/qwen3.6-27b:reasoning-none',
@@ -31,12 +30,15 @@ export const AI_PLAYGROUND_MODELS: AiPlaygroundModelOption[] = [
     tpd: 200000,
     reasoning_effort: 'none',
   },
-  { id: 'llama-3.3-70b-versatile', label: 'llama-3.3-70b-versatile', rpm: 30, rpd: 1000, tpm: 12000, tpd: 100000 },
-  { id: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'meta-llama/llama-4-scout-17b-16e-instruct', rpm: 30, rpd: 1000, tpm: 30000, tpd: 500000 },
   { id: 'openai/gpt-oss-120b', label: 'openai/gpt-oss-120b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
   { id: 'openai/gpt-oss-20b', label: 'openai/gpt-oss-20b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
+  { id: 'openai/gpt-oss-safeguard-20b', label: 'openai/gpt-oss-safeguard-20b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
+  { id: 'meta-llama/llama-prompt-guard-2-22m', label: 'meta-llama/llama-prompt-guard-2-22m', rpm: 30, rpd: 14400, tpm: 15000, tpd: 500000 },
+  { id: 'meta-llama/llama-prompt-guard-2-86m', label: 'meta-llama/llama-prompt-guard-2-86m', rpm: 30, rpd: 14400, tpm: 15000, tpd: 500000 },
   { id: 'groq/compound', label: 'groq/compound', rpm: 30, rpd: 250, tpm: 70000 },
   { id: 'groq/compound-mini', label: 'groq/compound-mini', rpm: 30, rpd: 250, tpm: 70000 },
+  { id: 'canopylabs/orpheus-arabic-saudi', label: 'canopylabs/orpheus-arabic-saudi', rpm: 10, rpd: 100, tpm: 1200, tpd: 3600 },
+  { id: 'canopylabs/orpheus-v1-english', label: 'canopylabs/orpheus-v1-english', rpm: 10, rpd: 100, tpm: 1200, tpd: 3600 },
 ];
 
 export type AiPlaygroundRunRequest = {

@@ -220,16 +220,16 @@ def test_explicit_reasoning_effort_must_be_supported_by_model() -> None:
         )
 
 
-def test_reasoning_effort_is_omitted_for_models_without_reasoning_controls() -> None:
-    llama_profile = build_groq_free_plan_model_profiles()[1]
+def test_default_reasoning_effort_is_sent_for_gpt_oss_models() -> None:
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[1]
 
     request = GroqChatRequestBuilder().build(
-        route=_route(model="llama-3.1-8b-instant"),
-        model_profile=llama_profile,
+        route=_route(model="openai/gpt-oss-120b"),
+        model_profile=gpt_oss_profile,
         messages=(_message(),),
     )
 
-    assert "reasoning_effort" not in request.payload
+    assert request.payload["reasoning_effort"] == "medium"
 
 
 def test_builder_validates_route_matches_model_profile() -> None:
@@ -237,7 +237,7 @@ def test_builder_validates_route_matches_model_profile() -> None:
 
     with pytest.raises(ValueError):
         GroqChatRequestBuilder().build(
-            route=_route(model="llama-3.1-8b-instant"),
+            route=_route(model="openai/gpt-oss-20b"),
             model_profile=qwen_profile,
             messages=(_message(),),
         )

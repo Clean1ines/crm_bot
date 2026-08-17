@@ -90,12 +90,12 @@ async def test_tpm_limit_rejected_before_llm_call() -> None:
             AiPlaygroundRunRequest(
                 system_prompt="x" * 20000,
                 user_input="x" * 20000,
-                model="llama-3.1-8b-instant",
+                model="qwen/qwen3.6-27b",
             )
         )
 
     assert "Твоё сообщение:" in str(exc.value)
-    assert "6000 TPM" in str(exc.value)
+    assert "8000 TPM" in str(exc.value)
     assert llm.calls == []
 
 

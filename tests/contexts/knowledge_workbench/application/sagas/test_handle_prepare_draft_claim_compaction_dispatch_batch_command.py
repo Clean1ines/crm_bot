@@ -548,7 +548,7 @@ async def test_daily_exhausted_primary_model_waits_for_user_model_choice() -> No
         "openai/gpt-oss-120b"
     )
     assert workflow_uow.outbox.events[0].payload["degraded_candidate_model_id"] == (
-        "llama-3.3-70b-versatile"
+        "qwen/qwen3.6-27b"
     )
     assert workflow_uow.timeline.entries[0].message == (
         "Draft claim compaction waiting for user model choice"

@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-AI_PLAYGROUND_DEFAULT_MODEL = "llama-3.1-8b-instant"
+AI_PLAYGROUND_DEFAULT_MODEL = "qwen/qwen3.6-27b"
 
 # User-provided Groq developer-plan limits. Values are input TPM limits used by
 # Playground preflight validation, not billing or exact tokenizer accounting.
@@ -19,14 +19,6 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
     "canopylabs/orpheus-v1-english": {"rpm": 10, "rpd": 100, "tpm": 1200, "tpd": 3600},
     "groq/compound": {"rpm": 30, "rpd": 250, "tpm": 70000},
     "groq/compound-mini": {"rpm": 30, "rpd": 250, "tpm": 70000},
-    "llama-3.1-8b-instant": {"rpm": 30, "rpd": 14400, "tpm": 6000, "tpd": 500000},
-    "llama-3.3-70b-versatile": {"rpm": 30, "rpd": 1000, "tpm": 12000, "tpd": 100000},
-    "meta-llama/llama-4-scout-17b-16e-instruct": {
-        "rpm": 30,
-        "rpd": 1000,
-        "tpm": 30000,
-        "tpd": 500000,
-    },
     "meta-llama/llama-prompt-guard-2-22m": {
         "rpm": 30,
         "rpd": 14400,
@@ -39,8 +31,6 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
         "tpm": 15000,
         "tpd": 500000,
     },
-    "openai/gpt-oss-120b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
-    "openai/gpt-oss-20b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
     "openai/gpt-oss-safeguard-20b": {
         "rpm": 30,
         "rpd": 1000,
@@ -48,6 +38,8 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
         "tpd": 200000,
     },
     "qwen/qwen3.6-27b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
+    "openai/gpt-oss-120b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
+    "openai/gpt-oss-20b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
 }
 
 

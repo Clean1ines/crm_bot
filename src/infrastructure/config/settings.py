@@ -72,10 +72,10 @@ class Settings(BaseSettings):
         None, description="Optional fourth Groq API key for rate-limit rotation"
     )
     GROQ_MODEL: str = Field(
-        "llama-3.3-70b-versatile", description="Default Groq model for agent"
+        "qwen/qwen3.6-27b", description="Default Groq model for agent"
     )
     GROQ_KNOWLEDGE_PREPROCESSING_MODEL: str = Field(
-        "llama-3.1-8b-instant",
+        "openai/gpt-oss-20b",
         description="Groq model used by knowledge document preprocessing/compiler jobs",
     )
     CLAIM_BUILDER_PROMPT_TOKENS: int = Field(
@@ -120,7 +120,7 @@ class Settings(BaseSettings):
         "models.yaml", description="Path to YAML file with model definitions"
     )
     DEFAULT_MODEL: str = Field(
-        "llama-3.1-8b-instant",
+        "openai/gpt-oss-20b",
         description="Fallback model when preferred ones are rate-limited",
     )
     MODEL_SELECTION_STRATEGY: str = Field(

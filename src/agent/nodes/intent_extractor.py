@@ -175,7 +175,7 @@ def _conversation_context_subject(value: object) -> object:
 
 def create_intent_extractor_node(
     llm: ChatGroqClient | None = None,
-    model_name: str = "llama-3.1-8b-instant",
+    model_name: str = "openai/gpt-oss-120b",
 ):
     """
     Create the intent-extractor node with an optional lightweight LLM client.

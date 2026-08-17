@@ -96,17 +96,17 @@ class _CapturingResponseLlm:
         return SimpleNamespace(content=_structured_content("Ответ по базе."))
 
 
-def test_resolve_response_model_name_prefers_project_fallback():
+def test_resolve_response_model_name_ignores_generic_degraded_fallback():
     model = _resolve_response_model_name(
         {
             "project_configuration": {
-                "limit_profile": {"fallback_model": "llama-3.1-8b-instant"},
+                "limit_profile": {"fallback_model": "openai/gpt-oss-20b"},
             }
         },
-        "llama-3.3-70b-versatile",
+        "qwen/qwen3.6-27b",
     )
 
-    assert model == "llama-3.1-8b-instant"
+    assert model == "qwen/qwen3.6-27b"
 
 
 @pytest.mark.asyncio
@@ -403,7 +403,7 @@ async def test_response_generator_does_not_add_continuation_after_language_fallb
 
 
 @pytest.mark.asyncio
-async def test_response_generator_builds_project_override_llm():
+async def test_response_generator_ignores_generic_project_fallback_model():
     created_models = []
 
     class FakeChatGroq:
@@ -420,7 +420,7 @@ async def test_response_generator_builds_project_override_llm():
 
     with patch("src.infrastructure.llm.completion_client.ChatGroq", FakeChatGroq):
         node = create_response_generator_node(
-            llm=base_llm, model_name="llama-3.3-70b-versatile"
+            llm=base_llm, model_name="qwen/qwen3.6-27b"
         )
 
         async def passthrough(_name, impl, state, **_kwargs):
@@ -435,15 +435,15 @@ async def test_response_generator_builds_project_override_llm():
                     "decision": "LLM_GENERATE",
                     "user_input": "Привет",
                     "project_configuration": {
-                        "limit_profile": {"fallback_model": "llama-3.1-8b-instant"},
+                        "limit_profile": {"fallback_model": "openai/gpt-oss-20b"},
                     },
                     **_retrieved_state(),
                 }
             )
 
-    assert "Хочу ответить на вашем языке корректно" in result["response_text"]
-    assert created_models == ["llama-3.1-8b-instant"]
-    base_llm.ainvoke.assert_not_called()
+    assert result["response_text"] == "base"
+    assert created_models == []
+    base_llm.ainvoke.assert_awaited()
 
 
 @pytest.mark.asyncio

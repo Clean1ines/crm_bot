@@ -11,7 +11,7 @@ from src.domain.project_plane.json_types import JsonObject, JsonValue
 
 
 PRIMARY_DRAFT_CLAIM_COMPACTION_MODEL_ID = "openai/gpt-oss-120b"
-DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID = "llama-3.3-70b-versatile"
+DEGRADED_DRAFT_CLAIM_COMPACTION_MODEL_ID = "qwen/qwen3.6-27b"
 
 
 class DraftClaimCompactionNodeKind(StrEnum):

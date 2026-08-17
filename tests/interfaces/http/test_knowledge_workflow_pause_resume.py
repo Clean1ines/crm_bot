@@ -158,7 +158,7 @@ class FakeDegradedFallbackRunner:
             raise self.error
         return ConfirmDraftClaimCompactionDegradedFallbackResult(
             workflow_run_id=command.workflow_run_id,
-            degraded_model_ref="llama-3.3-70b-versatile",
+            degraded_model_ref="qwen/qwen3.6-27b",
             appended_command_id=WorkflowCommandId("workflow-command:degraded"),
         )
 
@@ -332,7 +332,7 @@ async def test_confirm_degraded_fallback_endpoint_appends_resume_command(
     )
 
     assert response["status"] == "degraded_fallback_confirmed"
-    assert response["degraded_model_ref"] == "llama-3.3-70b-versatile"
+    assert response["degraded_model_ref"] == "qwen/qwen3.6-27b"
     assert runner.commands[0].project_id == "project-1"
     assert runner.commands[0].actor_user_id == "owner-1"
 

@@ -57,10 +57,8 @@ def test_factory_builds_provider_models_and_accounts_from_explicit_seeds() -> No
 
     assert [profile.model_id.value for profile in components.model_profiles] == [
         "qwen/qwen3.6-27b",
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
         "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
     ]
 
     assert [account.account_ref.value for account in components.provider_accounts] == [

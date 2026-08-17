@@ -2047,7 +2047,7 @@ export interface components {
             user_input: string;
             /**
              * Model
-             * @default llama-3.1-8b-instant
+             * @default qwen/qwen3.6-27b
              */
             model: string;
             /**

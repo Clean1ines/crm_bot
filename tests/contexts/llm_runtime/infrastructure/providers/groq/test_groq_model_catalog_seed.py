@@ -22,12 +22,10 @@ def test_groq_free_plan_seed_contains_target_text_models_in_fallback_order() -> 
 
     assert [profile.model_id.value for profile in profiles] == [
         "qwen/qwen3.6-27b",
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
         "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
     ]
-    assert [profile.model_rank for profile in profiles] == [0, 2, 3, 4, 5]
+    assert [profile.model_rank for profile in profiles] == [0, 1, 2]
     assert all(profile.provider_id == GROQ_PROVIDER_ID for profile in profiles)
 
 
@@ -36,41 +34,18 @@ def test_qwen_seed_can_disable_reasoning_for_output_budget_control() -> None:
     qwen = next(
         profile for profile in profiles if profile.model_id.value == "qwen/qwen3.6-27b"
     )
-    llama_instant = next(
-        profile
-        for profile in profiles
-        if profile.model_id.value == "llama-3.1-8b-instant"
-    )
-
     assert qwen.model_id.value == "qwen/qwen3.6-27b"
     assert qwen.lifecycle is ModelLifecycle.PREVIEW
     assert qwen.reasoning_profile.can_disable_reasoning
     assert qwen.reasoning_profile.default_effort is ReasoningEffort.NONE
     assert qwen.context_window_tokens == 131_072
-    assert qwen.max_output_tokens == 32_768
+    assert qwen.max_output_tokens == 16_384
     assert qwen.rate_limits.requests_per_minute == 30
     assert qwen.rate_limits.tokens_per_minute == 8_000
     assert qwen.rate_limits.tokens_per_day == 200_000
     assert qwen.token_price.input_per_million == Decimal("0.60")
     assert qwen.token_price.output_per_million == Decimal("3.00")
     assert qwen.model_char_to_token_multiplier == Decimal("2.8")
-    assert llama_instant.model_char_to_token_multiplier == Decimal("4.0")
-
-
-def test_llama_instant_seed_uses_free_plan_capacity_and_large_output_window() -> None:
-    llama_instant = build_groq_free_plan_model_profiles()[1]
-
-    assert llama_instant.model_id.value == "llama-3.1-8b-instant"
-    assert llama_instant.lifecycle is ModelLifecycle.PRODUCTION
-    assert llama_instant.context_window_tokens == 131_072
-    assert llama_instant.max_output_tokens == 131_072
-    assert llama_instant.rate_limits.requests_per_minute == 30
-    assert llama_instant.rate_limits.requests_per_day == 14_400
-    assert llama_instant.rate_limits.tokens_per_minute == 6_000
-    assert llama_instant.rate_limits.tokens_per_day == 500_000
-    assert llama_instant.token_price.input_per_million == Decimal("0.05")
-    assert llama_instant.token_price.output_per_million == Decimal("0.08")
-    assert llama_instant.model_char_to_token_multiplier == Decimal("4.0")
 
 
 def test_model_budget_profile_for_ref_returns_seeded_model_budget_fields() -> None:
@@ -85,7 +60,7 @@ def test_model_budget_profile_for_ref_returns_seeded_model_budget_fields() -> No
 
 def test_gpt_oss_120b_seed_represent_reasoning_controls_without_disable_none() -> None:
     profiles = build_groq_free_plan_model_profiles()
-    gpt_oss_120b = profiles[4]
+    gpt_oss_120b = profiles[1]
 
     assert gpt_oss_120b.reasoning_profile.supports_reasoning_control
     assert not gpt_oss_120b.reasoning_profile.can_disable_reasoning
@@ -95,24 +70,19 @@ def test_gpt_oss_120b_seed_represent_reasoning_controls_without_disable_none() -
     assert gpt_oss_120b.rate_limits.tokens_per_minute == 8_000
     assert gpt_oss_120b.rate_limits.tokens_per_day == 200_000
     assert gpt_oss_120b.model_char_to_token_multiplier == Decimal("3.7")
+    assert gpt_oss_120b.supports_json_schema is True
 
 
-def test_llama_70b_seed_uses_lower_daily_token_limit_and_32768_output() -> None:
-    llama_70b = build_groq_free_plan_model_profiles()[2]
+def test_gpt_oss_20b_seed_uses_degraded_capacity_and_schema_support() -> None:
+    gpt_oss_20b = build_groq_free_plan_model_profiles()[2]
 
-    assert llama_70b.model_id.value == "llama-3.3-70b-versatile"
-    assert llama_70b.max_output_tokens == 32_768
-    assert llama_70b.rate_limits.tokens_per_minute == 12_000
-    assert llama_70b.rate_limits.tokens_per_day == 100_000
-    assert not llama_70b.can_disable_reasoning
-
-
-def test_scout_seed_uses_30000_tpm_limit() -> None:
-    scout = build_groq_free_plan_model_profiles()[3]
-
-    assert scout.model_id.value == "meta-llama/llama-4-scout-17b-16e-instruct"
-    assert scout.rate_limits.tokens_per_minute == 30_000
-    assert scout.rate_limits.tokens_per_day == 500_000
+    assert gpt_oss_20b.model_id.value == "openai/gpt-oss-20b"
+    assert gpt_oss_20b.max_output_tokens == 65_536
+    assert gpt_oss_20b.rate_limits.tokens_per_minute == 8_000
+    assert gpt_oss_20b.rate_limits.tokens_per_day == 200_000
+    assert gpt_oss_20b.token_price.input_per_million == Decimal("0.075")
+    assert gpt_oss_20b.token_price.output_per_million == Decimal("0.30")
+    assert gpt_oss_20b.supports_json_schema is True
 
 
 def test_groq_provider_accounts_are_capacity_slots_not_secret_values() -> None:

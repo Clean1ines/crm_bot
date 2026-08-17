@@ -54,17 +54,13 @@ def test_default_catalog_primary_is_qwen() -> None:
 def test_default_catalog_automatic_fallback_refs_are_ordered() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert catalog.automatic_fallback_model_refs() == (
-        "llama-3.3-70b-versatile",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "openai/gpt-oss-120b",
-    )
+    assert catalog.automatic_fallback_model_refs() == ("openai/gpt-oss-120b",)
 
 
 def test_default_catalog_degraded_user_choice_model() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert catalog.degraded_user_choice_model_ref() == "llama-3.1-8b-instant"
+    assert catalog.degraded_user_choice_model_ref() == "openai/gpt-oss-20b"
 
 
 def test_route_for_model_ref_returns_role_and_order() -> None:
@@ -74,7 +70,7 @@ def test_route_for_model_ref_returns_role_and_order() -> None:
 
     assert route is not None
     assert route.role is LlmModelRouteRole.AUTOMATIC_FALLBACK
-    assert route.order == 3
+    assert route.order == 1
 
 
 def test_model_route_requires_capacity_limits() -> None:
@@ -125,11 +121,7 @@ def test_larger_output_fallback_returns_only_larger_output_models_by_order() -> 
 
     assert catalog.automatic_fallback_model_refs_with_larger_output_limit(
         "qwen/qwen3.6-27b",
-    ) == (
-        "llama-3.3-70b-versatile",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "openai/gpt-oss-120b",
-    )
+    ) == ("openai/gpt-oss-120b",)
 
 
 def test_larger_input_fallback_returns_only_larger_input_models_by_order() -> None:
@@ -137,11 +129,7 @@ def test_larger_input_fallback_returns_only_larger_input_models_by_order() -> No
 
     assert catalog.automatic_fallback_model_refs_with_larger_input_limit(
         "qwen/qwen3.6-27b",
-    ) == (
-        "llama-3.3-70b-versatile",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
-        "openai/gpt-oss-120b",
-    )
+    ) == ("openai/gpt-oss-120b",)
 
 
 def test_rejects_duplicate_model_ref() -> None:
@@ -301,13 +289,10 @@ def test_enabled_reasoning_provider_options_include_effort_when_present() -> Non
     }
 
 
-def test_daily_limit_fallback_chain_excludes_openai_gpt_oss() -> None:
+def test_daily_limit_fallback_chain_uses_automatic_fallback() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert catalog.automatic_fallback_model_refs()[0] == "llama-3.3-70b-versatile"
-    assert catalog.automatic_fallback_model_refs_for_daily_limit()[0] == (
-        "llama-3.3-70b-versatile"
-    )
-    assert "openai/gpt-oss-120b" not in (
-        catalog.automatic_fallback_model_refs_for_daily_limit()
+    assert catalog.automatic_fallback_model_refs() == ("openai/gpt-oss-120b",)
+    assert catalog.automatic_fallback_model_refs_for_daily_limit() == (
+        "openai/gpt-oss-120b",
     )

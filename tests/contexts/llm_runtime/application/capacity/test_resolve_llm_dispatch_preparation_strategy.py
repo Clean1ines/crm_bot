@@ -160,28 +160,28 @@ def test_fallback_required_marker_resolves_first_automatic_fallback_model() -> N
 def test_retry_larger_output_limit_picks_first_larger_output_fallback() -> None:
     result = _resolver().execute(_command("RETRY_LARGER_OUTPUT_LIMIT_MODEL"))
 
-    assert result.active_model_ref == "llama-3.3-70b-versatile"
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "RETRY_LARGER_OUTPUT_LIMIT_MODEL"
 
 
 def test_larger_output_required_marker_picks_first_larger_output_fallback() -> None:
     result = _resolver().execute(_command("LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"))
 
-    assert result.active_model_ref == "llama-3.3-70b-versatile"
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "LARGER_OUTPUT_LIMIT_MODEL_REQUIRED"
 
 
 def test_retry_larger_input_limit_picks_first_larger_input_fallback() -> None:
     result = _resolver().execute(_command("RETRY_LARGER_INPUT_LIMIT_MODEL"))
 
-    assert result.active_model_ref == "llama-3.3-70b-versatile"
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "RETRY_LARGER_INPUT_LIMIT_MODEL"
 
 
 def test_larger_input_required_marker_picks_first_larger_input_fallback() -> None:
     result = _resolver().execute(_command("LARGER_INPUT_LIMIT_MODEL_REQUIRED"))
 
-    assert result.active_model_ref == "llama-3.3-70b-versatile"
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "LARGER_INPUT_LIMIT_MODEL_REQUIRED"
 
 
@@ -302,7 +302,7 @@ def test_larger_output_strategy_without_larger_output_fallback_raises() -> None:
         )
 
 
-def test_daily_limit_fallback_skips_openai_gpt_oss() -> None:
+def test_daily_limit_fallback_resolves_to_automatic_fallback() -> None:
     result = ResolveLlmDispatchPreparationStrategy().execute(
         ResolveLlmDispatchPreparationStrategyCommand(
             current_active_model_ref="qwen/qwen3.6-27b",
@@ -311,11 +311,11 @@ def test_daily_limit_fallback_skips_openai_gpt_oss() -> None:
         )
     )
 
-    assert result.active_model_ref == "llama-3.3-70b-versatile"
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
 
 
-def test_retry_plan_daily_limit_fallback_skips_openai_gpt_oss() -> None:
+def test_retry_plan_daily_limit_fallback_resolves_to_automatic_fallback() -> None:
     result = ResolveLlmDispatchPreparationStrategy().execute(
         ResolveLlmDispatchPreparationStrategyCommand(
             current_active_model_ref="qwen/qwen3.6-27b",
@@ -324,5 +324,5 @@ def test_retry_plan_daily_limit_fallback_skips_openai_gpt_oss() -> None:
         )
     )
 
-    assert result.active_model_ref == "llama-3.3-70b-versatile"
+    assert result.active_model_ref == "openai/gpt-oss-120b"
     assert result.strategy_applied == WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE.value

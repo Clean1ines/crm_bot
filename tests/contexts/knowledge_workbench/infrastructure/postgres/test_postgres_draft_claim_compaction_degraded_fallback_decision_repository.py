@@ -35,7 +35,7 @@ async def test_loads_only_unresolved_daily_capacity_choice_for_project() -> None
             "waiting_payload": {
                 "reason": "primary_model_daily_capacity_exhausted",
             },
-            "degraded_model_ref": "llama-3.3-70b-versatile",
+            "degraded_model_ref": "qwen/qwen3.6-27b",
         }
     )
 
@@ -47,7 +47,7 @@ async def test_loads_only_unresolved_daily_capacity_choice_for_project() -> None
     )
 
     assert decision is not None
-    assert decision.degraded_model_ref == "llama-3.3-70b-versatile"
+    assert decision.degraded_model_ref == "qwen/qwen3.6-27b"
     query, args = connection.calls[0]
     assert "NOT EXISTS" in query
     assert "workflow_run.project_id = $2" in query

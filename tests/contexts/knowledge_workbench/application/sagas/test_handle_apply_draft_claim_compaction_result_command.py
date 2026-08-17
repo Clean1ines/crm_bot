@@ -610,7 +610,7 @@ async def test_waiting_user_model_choice_appends_event_without_scheduling() -> N
         event.event_type
         == KnowledgeExtractionCanonicalEventType.DRAFT_CLAIM_COMPACTION_WAITING_USER_MODEL_CHOICE.value
     )
-    assert event.payload["degraded_candidate_model_id"] == "llama-3.3-70b-versatile"
+    assert event.payload["degraded_candidate_model_id"] == "qwen/qwen3.6-27b"
     assert event.payload["node_refs"] == ["compacted-a", "compacted-b"]
     assert event.payload["resume_work_type"] == "compacted_vs_compacted"
 
@@ -665,7 +665,7 @@ def _decision(
         next_work_item=DraftClaimCompactionNextWorkItem(
             work_type=work_type,
             node_refs=node_refs,
-            degraded_model_id="llama-3.3-70b-versatile"
+            degraded_model_id="qwen/qwen3.6-27b"
             if work_type
             is DraftClaimCompactionNextWorkItemType.WAIT_FOR_USER_MODEL_CHOICE
             else None,
