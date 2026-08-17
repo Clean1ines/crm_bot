@@ -30,17 +30,12 @@ ANGER_KEYWORDS = [
     "\u0440\u0430\u0437\u0432\u043e\u0434",
     "\u043c\u043e\u0448\u0435\u043d\u043d\u0438\u043a",
     "\u043d\u0435\u0434\u043e\u0432\u043e\u043b\u0435\u043d",
-    "\u0432\u0435\u0440\u043d\u0438\u0442\u0435 \u0434\u0435\u043d\u044c\u0433\u0438",
-    "refund",
-    "chargeback",
-    "\u0436\u0430\u043b\u043e\u0431\u0430",
-    "\u043f\u043e\u0434\u0430\u0432\u043b\u0435\u043d\u0438\u0435",
-    "\u043d\u0435\u0432\u0435\u0440\u043e\u044f\u0442\u043d\u043e \u0434\u043e\u0440\u043e\u0433\u043e",
     "\u0441\u0436\u0438\u0433\u0430\u044e \u043a\u043e\u043d\u0442\u0440\u0430\u043a\u0442",
-    "\u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0430\u043a\u043a\u0430\u0443\u043d\u0442",
 ]
 
 CAPS_THRESHOLD = 0.5
+CAPS_MIN_LETTERS = 12
+CAPS_MIN_WORDS = 3
 
 
 def _detect_anger(text: str) -> bool:
@@ -55,7 +50,12 @@ def _detect_anger(text: str) -> bool:
         return False
 
     caps_ratio = sum(1 for character in letters if character.isupper()) / len(letters)
-    if caps_ratio > CAPS_THRESHOLD:
+    word_count = len(text.split())
+    if (
+        len(letters) >= CAPS_MIN_LETTERS
+        and word_count >= CAPS_MIN_WORDS
+        and caps_ratio > CAPS_THRESHOLD
+    ):
         logger.debug("High caps ratio detected", extra={"ratio": caps_ratio})
         return True
 

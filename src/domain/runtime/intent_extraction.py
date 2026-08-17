@@ -68,6 +68,40 @@ MAX_CURRENT_SUBJECT_CHARS = 80
 MAX_MEMORY_CANDIDATES = 3
 MAX_MEMORY_VALUE_CHARS = 240
 MEMORY_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+DEPENDENT_REFERENT_PATTERN = re.compile(
+    r"\b(его|её|ее|это|этот|эта|эту|этом|него|ней|ним|it|this|that)\b",
+    re.IGNORECASE,
+)
+ACTION_CTA_PHRASES = (
+    "передать вопрос менеджеру",
+    "передам вопрос менеджеру",
+    "передать менеджеру",
+    "передать диалог менеджеру",
+    "позвать менеджера",
+    "связать с менеджером",
+    "связаться с менеджером",
+    "пригласить менеджера",
+    "позвать оператора",
+    "связать с оператором",
+    "talk to an operator",
+    "connect you with a manager",
+    "handoff to a manager",
+)
+CONSULTATION_CTA_PHRASES = (
+    "записать на созвон",
+    "назначить консультацию",
+    "забронировать консультацию",
+    "book a consultation",
+    "schedule a consultation",
+)
+HANDOFF_DOMAIN_TERMS = (
+    "менеджер",
+    "оператор",
+    "human handoff",
+    "handoff",
+    "operator",
+    "manager",
+)
 
 
 @dataclass(slots=True)
@@ -187,6 +221,7 @@ class IntentExtractionContext:
     conversation_summary: str | None = None
     history: list[RuntimeHistoryMessage] = field(default_factory=list)
     user_memory: RuntimeMemory | None = None
+    conversation_context: Mapping[str, object] | None = None
     topic: str | None = None
     cta: str | None = None
     dialog_state: DialogState | None = None
@@ -199,6 +234,11 @@ class IntentExtractionContext:
             conversation_summary=state.get("conversation_summary"),
             history=list(state.get("history") or []),
             user_memory=state.get("user_memory"),
+            conversation_context=(
+                state.get("conversation_context")
+                if isinstance(state.get("conversation_context"), Mapping)
+                else None
+            ),
             topic=_optional_text(state.get("topic")),
             cta=normalize_cta(state.get("cta")),
             dialog_state=_dialog_state_or_none(state.get("dialog_state")),
@@ -547,13 +587,14 @@ def _previous_cta(context: IntentExtractionContext) -> str | None:
 def _cta_from_last_assistant_message(
     history: list[RuntimeHistoryMessage],
 ) -> str | None:
+    """Backward-compatible fallback for legacy assistant text with explicit action CTA."""
     for message in reversed(history):
         if message.get("role") != "assistant":
             continue
         content = str(message.get("content") or "").lower()
-        if any(marker in content for marker in ("менеджер", "operator", "manager")):
+        if any(marker in content for marker in ACTION_CTA_PHRASES):
             return "call_manager"
-        if any(marker in content for marker in ("созвон", "консультац", "consult")):
+        if any(marker in content for marker in CONSULTATION_CTA_PHRASES):
             return "book_consultation"
         return None
     return None
@@ -608,6 +649,28 @@ def _normalize_business_question_route(
         return result
     if result.resolved_cta in ACTION_CTAS:
         return result
+    normalized_cta = normalize_cta(result.cta)
+    if (
+        normalized_cta == "call_manager"
+        and result.should_search_kb
+        and result.should_generate_answer
+        and (
+            _mentions_handoff_domain_term(context.user_input)
+            or _mentions_handoff_domain_term(result.current_subject or "")
+        )
+    ):
+        return replace(
+            result,
+            cta="none",
+            should_offer_manager=False,
+            normalization_flags={
+                **dict(result.normalization_flags),
+                "action_cta_downgraded": True,
+                "action_cta_downgrade_reason": (
+                    "business_answer_without_explicit_request"
+                ),
+            },
+        )
     if result.should_search_kb and result.should_generate_answer:
         return result
 
@@ -679,7 +742,73 @@ def _normalize_contextual_knowledge_query(
                 "knowledge_query_rejected_reason": "same_as_user_input",
             },
         )
+    anchored_subject = _referent_anchor_subject(result, context)
+    if anchored_subject:
+        anchored_query = _anchored_knowledge_query(context.user_input, anchored_subject)
+        return replace(
+            result,
+            current_subject=anchored_subject,
+            knowledge_query=anchored_query,
+            knowledge_query_source=KnowledgeQuerySource.MODEL_CONTEXTUAL,
+            normalization_flags={
+                **dict(result.normalization_flags),
+                "referent_anchor_subject": anchored_subject,
+                "referent_anchor_reason": "dependent_followup_current_subject",
+                "knowledge_query_source": KnowledgeQuerySource.MODEL_CONTEXTUAL.value,
+            },
+        )
     return result
+
+
+def _referent_anchor_subject(
+    result: IntentExtractionResult,
+    context: IntentExtractionContext,
+) -> str | None:
+    persisted_subject = _conversation_context_subject(context)
+    if not persisted_subject:
+        return None
+    if result.turn_relation not in CONTEXTUAL_KNOWLEDGE_QUERY_TURN_RELATIONS:
+        return None
+    if not DEPENDENT_REFERENT_PATTERN.search(context.user_input):
+        return None
+    if _same_normalized_text(result.current_subject, persisted_subject):
+        return None
+    if _subject_hint_present(context.user_input, result.current_subject):
+        return None
+    return persisted_subject
+
+
+def _conversation_context_subject(context: IntentExtractionContext) -> str | None:
+    conversation_context = context.conversation_context
+    if not isinstance(conversation_context, Mapping):
+        return None
+    return _bounded_optional_text(
+        conversation_context.get("current_subject"), MAX_CURRENT_SUBJECT_CHARS
+    )
+
+
+def _subject_hint_present(text: str, subject: str | None) -> bool:
+    if not subject:
+        return False
+    text_tokens = set(re.findall(r"[\w-]+", text.casefold()))
+    for token in re.findall(r"[\w-]+", subject.casefold()):
+        if len(token) >= 3 and token in text_tokens:
+            return True
+    return False
+
+
+def _mentions_handoff_domain_term(text: str) -> bool:
+    normalized = text.casefold()
+    return any(term in normalized for term in HANDOFF_DOMAIN_TERMS)
+
+
+def _anchored_knowledge_query(user_input: str, subject: str) -> str:
+    normalized_input = " ".join(user_input.strip().split()).casefold()
+    if "подключ" in normalized_input or "connect" in normalized_input:
+        return f"Как подключить {subject}?"
+    if normalized_input.startswith(("как ", "how ")):
+        return f"{user_input.strip()} ({subject})"[:MAX_KNOWLEDGE_QUERY_CHARS]
+    return f"{subject}: {user_input.strip()}"[:MAX_KNOWLEDGE_QUERY_CHARS]
 
 
 def _normalize_affirmative_reply(

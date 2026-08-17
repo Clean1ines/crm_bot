@@ -167,6 +167,12 @@ def _technical_failure_patch(state: AgentState, exc: Exception) -> dict[str, obj
     }
 
 
+def _conversation_context_subject(value: object) -> object:
+    if not isinstance(value, dict):
+        return None
+    return value.get("current_subject")
+
+
 def create_intent_extractor_node(
     llm: ChatGroqClient | None = None,
     model_name: str = "llama-3.1-8b-instant",
@@ -215,6 +221,9 @@ def create_intent_extractor_node(
                 payload,
                 user_input=context.user_input,
             ).normalized_for_context(context)
+            persisted_current_subject = _conversation_context_subject(
+                state.get("conversation_context")
+            )
             trace_extra: dict[str, object] = {
                 "thread_id": state.get("thread_id"),
                 "project_id": state.get("project_id"),
@@ -231,8 +240,16 @@ def create_intent_extractor_node(
                 "resolved_cta": result.resolved_cta,
                 "resolved_cta_reply": result.resolved_cta_reply,
                 "repeat_relation": result.repeat_relation,
+                "persisted_current_subject": persisted_current_subject,
+                "model_proposed_subject": payload.get("current_subject"),
                 "current_subject": result.current_subject,
                 "dissatisfaction": result.dissatisfaction,
+                "model_contextual_query_present": bool(payload.get("knowledge_query")),
+                "final_knowledge_query_present": bool(result.knowledge_query),
+                "knowledge_query_source": result.knowledge_query_source.value,
+                "action_cta_downgraded": bool(
+                    result.normalization_flags.get("action_cta_downgraded")
+                ),
                 "memory_candidate_count": len(result.memory_candidates),
                 "accepted_memory_candidate_keys": [
                     str(candidate.get("key")) for candidate in result.memory_candidates
@@ -253,10 +270,12 @@ def create_intent_extractor_node(
                 trace_extra.update(
                     {
                         "user_input_preview": _preview_text(context.user_input),
+                        "model_contextual_query_preview": _preview_text(
+                            payload.get("knowledge_query")
+                        ),
                         "knowledge_query_preview": _preview_text(
                             result.knowledge_query
                         ),
-                        "knowledge_query_source": result.knowledge_query_source.value,
                         "knowledge_query_rejected_reason": (
                             result.normalization_flags.get(
                                 "knowledge_query_rejected_reason"

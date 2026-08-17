@@ -448,7 +448,7 @@ async def test_intent_extractor_downgrades_false_handoff_for_manager_information
 
 
 @pytest.mark.asyncio
-async def test_intent_extractor_keeps_advisory_manager_offer():
+async def test_intent_extractor_keeps_advisory_manager_offer_without_explicit_request():
     llm = AsyncMock()
     llm.ainvoke = AsyncMock(
         return_value=SimpleNamespace(

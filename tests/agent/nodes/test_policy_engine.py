@@ -200,6 +200,120 @@ async def test_policy_engine_ordinary_merge_keeps_policy_route_over_intent_flags
 
 
 @pytest.mark.asyncio
+async def test_policy_engine_preserves_contextual_knowledge_query_for_continuation():
+    node = create_policy_engine_node(event_repo=None)
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.policy_engine.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node(
+            {
+                "thread_id": "thread-1",
+                "project_id": "project-1",
+                "lifecycle": "active_client",
+                "intent": "other",
+                "topic": "product",
+                "cta": "none",
+                "user_input": "а как его подключить?",
+                "turn_relation": "continuation",
+                "knowledge_query": "Как подключить менеджерский контур?",
+                "knowledge_query_source": "model_contextual",
+                "should_search_kb": True,
+                "should_generate_answer": True,
+                "should_offer_manager": False,
+                "dialog_state": {
+                    "last_intent": "other",
+                    "last_cta": None,
+                    "last_topic": "product",
+                    "repeat_count": 0,
+                    "lead_status": "active_client",
+                    "lifecycle": "active_client",
+                },
+            }
+        )
+
+    assert result["decision"] == "LLM_GENERATE"
+    assert result["knowledge_query"] == "Как подключить менеджерский контур?"
+    assert result["knowledge_query_source"] == "model_contextual"
+    assert result["should_search_kb"] is True
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_suppresses_only_normalized_false_manager_offer():
+    node = create_policy_engine_node(event_repo=None)
+
+    false_offer = await node(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "lifecycle": "active_client",
+            "intent": "support",
+            "topic": "support",
+            "cta": "none",
+            "user_input": "Как подключить менеджерский контур?",
+            "turn_relation": "new_topic",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "should_offer_manager": True,
+            "normalization_flags": {"action_cta_downgraded": True},
+            "dialog_state": {"repeat_count": 0},
+        }
+    )
+
+    legitimate_offer = await node(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "lifecycle": "active_client",
+            "intent": "support",
+            "topic": "support",
+            "cta": "call_manager",
+            "user_input": "Можно ли получить персональный расчёт?",
+            "turn_relation": "new_topic",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "should_offer_manager": True,
+            "dialog_state": {"repeat_count": 0},
+        }
+    )
+
+    assert false_offer["decision"] == "LLM_GENERATE"
+    assert false_offer["should_offer_manager"] is False
+    assert legitimate_offer["decision"] == "LLM_GENERATE"
+    assert legitimate_offer["should_offer_manager"] is True
+
+
+@pytest.mark.asyncio
+async def test_policy_engine_clears_query_when_search_is_forbidden_by_template_route():
+    node = create_policy_engine_node(event_repo=None)
+
+    result = await node(
+        {
+            "thread_id": "thread-1",
+            "project_id": "project-1",
+            "domain": "greeting",
+            "intent": "other",
+            "topic": "other",
+            "cta": "none",
+            "turn_relation": "continuation",
+            "knowledge_query": "Как подключить менеджерский контур?",
+            "knowledge_query_source": "model_contextual",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "dialog_state": {"repeat_count": 0},
+        }
+    )
+
+    assert result["decision"] == "RESPOND_TEMPLATE"
+    assert result["should_search_kb"] is False
+    assert result.get("knowledge_query") is None
+
+
+@pytest.mark.asyncio
 async def test_policy_engine_routes_informational_manager_mention_to_generation():
     node = create_policy_engine_node(event_repo=None)
 

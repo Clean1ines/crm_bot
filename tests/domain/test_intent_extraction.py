@@ -1,3 +1,5 @@
+import pytest
+
 from src.domain.runtime.intent_extraction import (
     IntentExtractionContext,
     IntentExtractionResult,
@@ -415,6 +417,82 @@ def test_intent_extraction_normalizes_affirmative_reply_from_assistant_action_ct
     assert result.should_search_kb is False
 
 
+def test_intent_extraction_does_not_confirm_informational_manager_mention():
+    context = IntentExtractionContext.from_state(
+        {
+            "user_input": "да",
+            "history": [
+                {
+                    "role": "assistant",
+                    "content": "Менеджерский контур — это функция для работы с обращениями.",
+                }
+            ],
+        }
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "unknown",
+            "cta": "none",
+            "features": {},
+            "topic": "other",
+            "cta_hint": None,
+            "emotion": "neutral",
+            "is_repeat_like": False,
+        }
+    ).normalized_for_context(context)
+
+    assert result.resolved_cta is None
+    assert result.cta == "none"
+    assert result.should_search_kb is True
+
+
+def test_intent_extraction_confirms_explicit_manager_cta_from_legacy_assistant_text():
+    context = IntentExtractionContext.from_state(
+        {
+            "user_input": "да",
+            "history": [{"role": "assistant", "content": "Передать диалог менеджеру?"}],
+        }
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "unknown",
+            "cta": "none",
+            "features": {},
+            "topic": "other",
+        }
+    ).normalized_for_context(context)
+
+    assert result.resolved_cta == "call_manager"
+    assert result.resolved_cta_reply == "affirmative"
+    assert result.should_search_kb is False
+
+
+def test_intent_extraction_does_not_confirm_paraphrased_informational_operator_mention():
+    context = IntentExtractionContext.from_state(
+        {
+            "user_input": "да",
+            "history": [
+                {
+                    "role": "assistant",
+                    "content": "Операторский сценарий описывает работу сотрудников с обращениями.",
+                }
+            ],
+        }
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "intent": "unknown",
+            "cta": "none",
+            "features": {},
+            "topic": "other",
+        }
+    ).normalized_for_context(context)
+
+    assert result.resolved_cta is None
+    assert result.cta == "none"
+    assert result.should_search_kb is True
+
+
 def test_intent_extraction_normalizes_shared_affirmative_vocabulary():
     for user_input in ("Конечно", "Sure"):
         context = IntentExtractionContext.from_state(
@@ -631,6 +709,124 @@ def test_intent_extraction_downgrades_non_explicit_handoff_classification():
     }
 
 
+def test_intent_extraction_downgrades_manager_domain_question_cta_offer():
+    context = IntentExtractionContext.from_state(
+        {"user_input": "Как подключить менеджерский контур?"}
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "support",
+            "cta": "call_manager",
+            "features": {},
+            "topic": "support",
+            "cta_hint": None,
+            "emotion": "neutral",
+            "is_repeat_like": False,
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "should_offer_manager": True,
+        }
+    ).normalized_for_context(context)
+
+    assert result.cta == "none"
+    assert result.should_offer_manager is False
+    assert result.should_search_kb is True
+
+
+def test_intent_extraction_preserves_explicit_manager_request():
+    context = IntentExtractionContext.from_state(
+        {"user_input": "Передай мой вопрос менеджеру"}
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "handoff_request",
+            "cta": "call_manager",
+            "features": {},
+            "topic": "handoff",
+            "should_search_kb": False,
+            "should_generate_answer": False,
+            "should_offer_manager": True,
+        }
+    ).normalized_for_context(context)
+
+    assert result.intent == "handoff_request"
+    assert result.cta == "call_manager"
+    assert result.should_offer_manager is True
+
+
+@pytest.mark.parametrize(
+    "model_query",
+    ["Подключение PDF", "Как подключить PDF?", "Можно ли подключить PDF?"],
+)
+def test_intent_extraction_anchors_pronoun_followup_to_persisted_subject(model_query):
+    context = IntentExtractionContext.from_state(
+        {
+            "user_input": "а как его подключить?",
+            "conversation_context": {"current_subject": "менеджерский контур"},
+            "history": [
+                {"role": "user", "content": "А PDF?"},
+                {"role": "assistant", "content": "PDF поддерживается."},
+                {"role": "user", "content": "Что такое менеджерский контур?"},
+                {
+                    "role": "assistant",
+                    "content": "Менеджерский контур — это функция для обращений.",
+                },
+            ],
+        }
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "support",
+            "cta": "none",
+            "features": {},
+            "topic": "support",
+            "turn_relation": "continuation",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "knowledge_query": model_query,
+            "current_subject": "PDF",
+        }
+    ).normalized_for_context(context)
+
+    assert result.turn_relation == "continuation"
+    assert result.current_subject == "менеджерский контур"
+    assert result.knowledge_query is not None
+    assert "менеджерск" in result.knowledge_query.lower()
+    assert "pdf" not in result.knowledge_query.lower()
+    assert result.normalization_flags["referent_anchor_subject"] == (
+        "менеджерский контур"
+    )
+
+
+def test_intent_extraction_allows_legitimate_reopening_to_older_subject():
+    context = IntentExtractionContext.from_state(
+        {
+            "user_input": "Вернёмся к PDF: как его подключить?",
+            "conversation_context": {"current_subject": "менеджерский контур"},
+        }
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "support",
+            "cta": "none",
+            "features": {},
+            "topic": "support",
+            "turn_relation": "reopening",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "knowledge_query": "Как подключить PDF?",
+            "current_subject": "PDF",
+        }
+    ).normalized_for_context(context)
+
+    assert result.current_subject == "PDF"
+    assert result.knowledge_query == "Как подключить PDF?"
+
+
 def test_intent_extraction_keeps_advisory_manager_offer_without_explicit_request():
     context = IntentExtractionContext.from_state(
         {"user_input": "Можно ли получить персональный расчёт?"}
@@ -658,6 +854,27 @@ def test_intent_extraction_keeps_advisory_manager_offer_without_explicit_request
     assert result.should_generate_answer is True
     assert result.should_offer_manager is True
     assert result.normalization_flags == {}
+
+
+def test_intent_extraction_preserves_explicit_consultation_action_request():
+    context = IntentExtractionContext.from_state(
+        {"user_input": "Запиши меня на консультацию"}
+    )
+    result = IntentExtractionResult.from_llm_payload(
+        {
+            "domain": "business",
+            "intent": "sales",
+            "cta": "book_consultation",
+            "features": {},
+            "topic": "pricing",
+            "should_search_kb": True,
+            "should_generate_answer": True,
+            "should_offer_manager": True,
+        }
+    ).normalized_for_context(context)
+
+    assert result.cta == "book_consultation"
+    assert result.should_offer_manager is True
 
 
 def test_intent_extraction_keeps_explicit_handoff_classification():

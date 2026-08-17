@@ -18,7 +18,7 @@ async def test_rules_node_requests_confirmation_for_angry_message():
     ):
         result = await rules_node(
             {
-                "user_input": "refund now",
+                "user_input": "ВЫ МЕНЯ БЕСИТЕ, СЕРВИС НЕ РАБОТАЕТ",
                 "dialog_state": {
                     "last_intent": None,
                     "last_cta": None,
@@ -34,6 +34,47 @@ async def test_rules_node_requests_confirmation_for_angry_message():
     assert result["decision"] == "RESPOND"
     assert result["requires_human"] is False
     assert result["dialog_state"]["handoff_confirmation_pending"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "user_input", ["PDF", "PDF?", "А PDF?", "API", "А API?", "CRM", "SQL"]
+)
+async def test_rules_node_allows_short_caps_technical_acronyms(user_input):
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.rules.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await rules_node({"user_input": user_input})
+
+    assert result["decision"] == "PROCEED_TO_LLM"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "user_input",
+    [
+        "refund",
+        "chargeback",
+        "жалоба",
+        "удалить аккаунт",
+        "это дорого",
+    ],
+)
+async def test_rules_node_does_not_treat_business_risk_as_anger(user_input):
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.rules.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await rules_node({"user_input": user_input})
+
+    assert result["decision"] == "PROCEED_TO_LLM"
 
 
 @pytest.mark.asyncio

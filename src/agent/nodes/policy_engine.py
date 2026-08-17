@@ -7,10 +7,7 @@ from typing import Protocol, cast
 from uuid import UUID
 
 from src.agent.state import AgentState
-from src.domain.runtime.cta import (
-    CONTINUE_EXPLANATION_CTA,
-    normalize_cta,
-)
+from src.domain.runtime.cta import CONTINUE_EXPLANATION_CTA, normalize_cta
 from src.domain.runtime.policy.decision_engine import get_decision
 from src.domain.runtime.policy.handoff_confirmation import (
     build_handoff_confirmation_text,
@@ -170,6 +167,54 @@ def _clear_turn_scoped_execution_fields(patch: dict[str, object]) -> None:
     )
 
 
+def _contextual_knowledge_query_for_policy_merge(
+    state: AgentState,
+) -> tuple[str | None, str, str]:
+    query = _optional_text(state.get("knowledge_query"))
+    if query is None:
+        return None, "none", "missing"
+    turn_relation = str(state.get("turn_relation") or "").strip().lower()
+    if turn_relation not in {"continuation", "reopening"}:
+        return None, "none", "not_contextual_turn"
+    if not bool(state.get("should_search_kb") or False):
+        return None, "none", "search_disabled"
+    if _resolved_cta_reply(state) == "negative":
+        return None, "none", "negative_cta_reply"
+    source = str(state.get("knowledge_query_source") or "model_contextual").strip()
+    return query, source or "model_contextual", "preserved"
+
+
+def _persisted_current_subject(state: AgentState) -> object:
+    conversation_context = state.get("conversation_context")
+    if not isinstance(conversation_context, Mapping):
+        return None
+    return conversation_context.get("current_subject")
+
+
+def _should_preserve_manager_offer(state: AgentState) -> bool:
+    if not bool(state.get("should_offer_manager") or False):
+        return False
+    flags = state.get("normalization_flags")
+    if not isinstance(flags, Mapping):
+        return True
+    if flags.get("action_cta_downgraded") or flags.get("handoff_intent_downgraded"):
+        return False
+    return True
+
+
+def _knowledge_query_clear_reason_for_trace(
+    *,
+    final_patch: Mapping[str, object],
+    state: AgentState,
+) -> str | None:
+    if final_patch.get("knowledge_query"):
+        return None
+    if final_patch.get("decision") != "LLM_GENERATE":
+        return "decision_not_llm_generate"
+    _query, _source, reason = _contextual_knowledge_query_for_policy_merge(state)
+    return reason
+
+
 def _merge_intent_and_policy_state(
     state: AgentState,
     policy_patch: dict[str, object],
@@ -261,6 +306,8 @@ def _merge_intent_and_policy_state(
                     "topic": state.get("topic") or policy_patch.get("topic"),
                     "turn_relation": "continuation",
                     "knowledge_query": _optional_text(state.get("knowledge_query")),
+                    "knowledge_query_source": state.get("knowledge_query_source")
+                    or "canonical_continue_explanation",
                     "should_search_kb": True,
                     "should_generate_answer": True,
                     "should_offer_manager": False,
@@ -289,7 +336,6 @@ def _merge_intent_and_policy_state(
             return patch
 
     patch = dict(policy_patch)
-    patch["knowledge_query"] = None
     if patch.get("decision") == "LLM_GENERATE":
         _clear_turn_scoped_execution_fields(patch)
         patch["generation_mode"] = GenerationMode.KNOWLEDGE_ANSWER.value
@@ -302,11 +348,16 @@ def _merge_intent_and_policy_state(
                 patch["dialog_state"] = dialog_state
         patch["should_search_kb"] = True
         patch["should_generate_answer"] = True
-        patch["should_offer_manager"] = bool(state.get("should_offer_manager") or False)
+        patch["should_offer_manager"] = _should_preserve_manager_offer(state)
+        query, source, _reason = _contextual_knowledge_query_for_policy_merge(state)
+        patch["knowledge_query"] = query
+        patch["knowledge_query_source"] = source
     if "turn_relation" in state:
         patch["turn_relation"] = state.get("turn_relation")
     if patch.get("decision") != "LLM_GENERATE":
         _clear_turn_scoped_execution_fields(patch)
+        patch["knowledge_query"] = None
+        patch["knowledge_query_source"] = "none"
         patch["should_search_kb"] = False
         patch["should_generate_answer"] = False
         patch["should_offer_manager"] = False
@@ -616,6 +667,19 @@ def create_policy_engine_node(
                 "should_search_kb": final_patch.get("should_search_kb"),
                 "should_generate_answer": final_patch.get("should_generate_answer"),
                 "should_offer_manager": final_patch.get("should_offer_manager"),
+                "persisted_current_subject": _persisted_current_subject(state),
+                "final_normalized_subject": state.get("current_subject"),
+                "model_contextual_query_present": bool(state.get("knowledge_query")),
+                "final_knowledge_query_present": bool(
+                    final_patch.get("knowledge_query")
+                ),
+                "final_knowledge_query_source": final_patch.get(
+                    "knowledge_query_source"
+                ),
+                "knowledge_query_clear_reason": _knowledge_query_clear_reason_for_trace(
+                    final_patch=final_patch,
+                    state=state,
+                ),
                 "response_kind": "template"
                 if final_patch.get("decision") == "RESPOND_TEMPLATE"
                 else ("deterministic" if final_patch.get("response_text") else "llm"),

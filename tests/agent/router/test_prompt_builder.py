@@ -6,11 +6,13 @@ from src.agent.nodes.response_generator import (
     build_structured_response_repair_prompt,
 )
 from src.agent.router.prompt_builder import (
+    build_response_prompt,
     format_conversation_context_for_prompt,
     format_kb_prompt_entry_traces,
     format_kb_results,
     format_recent_ticket_resolutions_for_prompt,
 )
+from src.agent.router import prompt_builder
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -104,6 +106,31 @@ def test_response_prompt_dynamic_context_precedes_final_output_marker():
         assert context_index < marker_index
         assert prompt.count("{conversation_context}") == 1
         assert prompt.count("{recent_ticket_resolutions}") == 1
+
+
+def test_response_prompt_ru_uses_canonical_default_template(monkeypatch):
+    loaded: list[str] = []
+
+    def fake_load(filename: str) -> str:
+        loaded.append(filename)
+        if filename == "interpretation_block.txt":
+            return "interpretation"
+        return "response {user_input}"
+
+    monkeypatch.setattr(prompt_builder, "_response_prompt_templates", {})
+    monkeypatch.setattr(prompt_builder, "_response_prompt_template", None)
+    monkeypatch.setattr(prompt_builder, "_interpretation_block", None)
+    monkeypatch.setattr(prompt_builder, "_load_prompt_template", fake_load)
+
+    prompt = build_response_prompt(
+        decision="LLM_GENERATE",
+        user_input="Что такое менеджерский контур?",
+        target_language="ru",
+    )
+
+    assert prompt == "response Что такое менеджерский контур?"
+    assert "response_prompt.txt" in loaded
+    assert "response_prompt.ru.txt" not in loaded
 
 
 def test_intent_prompt_defines_operational_relation_fields():

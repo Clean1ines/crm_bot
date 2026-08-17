@@ -405,7 +405,7 @@ def build_response_prompt(
 ) -> str:
     global _response_prompt_templates, _response_prompt_template, _interpretation_block
     lang = (target_language or "").strip().lower()
-    template_key = lang if lang in {"ru", "en", "de", "es"} else "default"
+    template_key = lang if lang in {"en", "de", "es"} else "default"
     if template_key not in _response_prompt_templates:
         localized_name = (
             f"response_prompt.{template_key}.txt"
