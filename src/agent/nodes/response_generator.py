@@ -1093,6 +1093,7 @@ def create_response_generator_node(
         target_lang = _project_target_language(state)
         if target_lang == "unknown":
             target_lang = input_lang
+        response_lang = input_lang if input_lang != "unknown" else target_lang
 
         logger.debug(
             "Preparing response prompt",
@@ -1146,7 +1147,7 @@ def create_response_generator_node(
             )
             patch = _safe_generation_fallback(
                 generation_mode=str(context.generation_mode or "UNKNOWN"),
-                target_language=target_lang,
+                target_language=response_lang,
                 retrieval_status=context.knowledge_retrieval_status,
                 semantic_grounding_status="not_applicable",
                 fallback_reason="generation_mode_contract_violation",
@@ -1178,7 +1179,7 @@ def create_response_generator_node(
             )
             patch = _safe_generation_fallback(
                 generation_mode=str(context.generation_mode or "UNKNOWN"),
-                target_language=target_lang,
+                target_language=response_lang,
                 retrieval_status=context.knowledge_retrieval_status,
                 semantic_grounding_status="not_applicable",
                 fallback_reason="retrieval_contract_violation",
@@ -1199,7 +1200,7 @@ def create_response_generator_node(
             if context.knowledge_retrieval_status == "failed":
                 patch = _safe_generation_fallback(
                     generation_mode=generation_mode,
-                    target_language=target_lang,
+                    target_language=response_lang,
                     retrieval_status=context.knowledge_retrieval_status,
                     fallback_reason="retrieval_failed",
                 )
@@ -1217,7 +1218,7 @@ def create_response_generator_node(
             if context.knowledge_retrieval_status == "empty":
                 patch = _safe_generation_fallback(
                     generation_mode=generation_mode,
-                    target_language=target_lang,
+                    target_language=response_lang,
                     retrieval_status=context.knowledge_retrieval_status,
                     fallback_reason="no_evidence",
                 )
@@ -1246,7 +1247,7 @@ def create_response_generator_node(
             )
             patch = _safe_generation_fallback(
                 generation_mode=str(context.generation_mode or "UNKNOWN"),
-                target_language=target_lang,
+                target_language=response_lang,
                 retrieval_status=context.knowledge_retrieval_status,
                 semantic_grounding_status="not_applicable",
                 fallback_reason="tool_result_contract_violation",
@@ -1265,7 +1266,7 @@ def create_response_generator_node(
 
         if _tool_result_failed(context):
             patch = _response_patch(
-                response_text=_tool_failure_text(target_lang),
+                response_text=_tool_failure_text(response_lang),
                 metadata=_generation_metadata(
                     generation_mode=generation_mode,
                     retrieval_status=context.knowledge_retrieval_status,
@@ -1393,7 +1394,7 @@ def create_response_generator_node(
             if structured_result is None:
                 patch = _safe_generation_fallback(
                     generation_mode=generation_mode,
-                    target_language=target_lang,
+                    target_language=response_lang,
                     retrieval_status=context.knowledge_retrieval_status,
                     parse_status=validation.parse_status,
                     schema_status=validation.schema_status,
@@ -1436,20 +1437,21 @@ def create_response_generator_node(
             output_lang = detect_language_hint(response_text)
             if (
                 response_text
-                and target_lang != "unknown"
+                and response_lang != "unknown"
                 and output_lang != "unknown"
-                and target_lang != output_lang
-            ) or _contains_invalid_language_mix(response_text, target_lang):
+                and response_lang != output_lang
+            ) or _contains_invalid_language_mix(response_text, response_lang):
                 logger.warning(
                     "Response language mismatch detected; using safe fallback",
                     extra={
                         "input_lang": input_lang,
                         "target_lang": target_lang,
+                        "response_lang": response_lang,
                         "output_lang": output_lang,
                         "decision": context.decision,
                     },
                 )
-                response_text = _language_mismatch_fallback(target_lang)
+                response_text = _language_mismatch_fallback(response_lang)
                 is_fallback_response = True
                 fallback_reason = "language_validation_failed"
                 structured_result = StructuredResponseResult(
@@ -1462,11 +1464,11 @@ def create_response_generator_node(
                 structured_result.answerability == "unsupported"
                 and fallback_reason != "language_validation_failed"
             ):
-                response_text = _no_confirmation_text(target_lang)
+                response_text = _no_confirmation_text(response_lang)
                 is_fallback_response = True
                 fallback_reason = "unsupported"
             elif structured_result.answerability == "conflicting_evidence":
-                response_text = _conflicting_evidence_text(target_lang)
+                response_text = _conflicting_evidence_text(response_lang)
                 is_fallback_response = True
                 fallback_reason = "conflicting_evidence"
 
@@ -1477,7 +1479,7 @@ def create_response_generator_node(
                 generated_action_cta_detected,
             ) = _sanitize_generated_action_cta(response_text)
             if generated_action_cta_detected and not response_text.strip():
-                response_text = _invalid_generation_text(target_lang)
+                response_text = _invalid_generation_text(response_lang)
                 is_fallback_response = True
                 fallback_reason = "orphan_action_cta_removed"
 
@@ -1487,7 +1489,7 @@ def create_response_generator_node(
                 is_fallback_response=is_fallback_response,
             )
             if continuation_decision.should_offer:
-                response_text = _with_continuation_prompt(response_text, target_lang)
+                response_text = _with_continuation_prompt(response_text, response_lang)
                 response_cta = continuation_decision.cta
                 response_topic = context.topic
 
