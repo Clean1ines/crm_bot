@@ -6,6 +6,7 @@ from src.domain.runtime.value_parsing import coerce_int
 
 
 ConfigurationInput = ProjectRuntimeConfigurationState | Mapping[str, object]
+DEFAULT_PROJECT_LANGUAGE = "ru"
 
 
 def _positive_int(value: object) -> int | None:
@@ -18,7 +19,7 @@ class ProjectRuntimeProfile:
     requests_per_minute: int | None = None
     max_concurrent_threads: int | None = None
     fallback_model: str | None = None
-    default_language: str | None = None
+    default_language: str | None = DEFAULT_PROJECT_LANGUAGE
     target_language: str | None = None
     default_timezone: str | None = None
     tone_of_voice: str | None = None
@@ -40,8 +41,9 @@ class ProjectRuntimeProfile:
                 limit_block.get("max_concurrent_threads")
             ),
             fallback_model=_optional_stripped_text(limit_block.get("fallback_model")),
-            default_language=_optional_stripped_text(
-                settings_block.get("default_language")
+            default_language=(
+                _optional_stripped_text(settings_block.get("default_language"))
+                or DEFAULT_PROJECT_LANGUAGE
             ),
             target_language=_optional_stripped_text(
                 settings_block.get("target_language")

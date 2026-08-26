@@ -29,6 +29,16 @@ def test_project_runtime_profile_extracts_limits_and_settings():
     assert profile.system_prompt_override == "Уточняй город клиента."
 
 
+def test_project_runtime_profile_uses_russian_when_language_is_unset():
+    empty_profile = ProjectRuntimeProfile.from_configuration(None)
+    configured_without_language = ProjectRuntimeProfile.from_configuration(
+        {"settings": {}, "limit_profile": {}}
+    )
+
+    assert empty_profile.default_language == "ru"
+    assert configured_without_language.default_language == "ru"
+
+
 def test_project_runtime_profile_ignores_invalid_values():
     profile = ProjectRuntimeProfile.from_configuration(
         {
@@ -46,4 +56,4 @@ def test_project_runtime_profile_ignores_invalid_values():
     assert profile.requests_per_minute is None
     assert profile.max_concurrent_threads is None
     assert profile.fallback_model is None
-    assert profile.default_language is None
+    assert profile.default_language == "ru"
