@@ -32,13 +32,8 @@ export const AI_PLAYGROUND_MODELS: AiPlaygroundModelOption[] = [
   },
   { id: 'openai/gpt-oss-120b', label: 'openai/gpt-oss-120b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
   { id: 'openai/gpt-oss-20b', label: 'openai/gpt-oss-20b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
-  { id: 'openai/gpt-oss-safeguard-20b', label: 'openai/gpt-oss-safeguard-20b', rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000 },
-  { id: 'meta-llama/llama-prompt-guard-2-22m', label: 'meta-llama/llama-prompt-guard-2-22m', rpm: 30, rpd: 14400, tpm: 15000, tpd: 500000 },
-  { id: 'meta-llama/llama-prompt-guard-2-86m', label: 'meta-llama/llama-prompt-guard-2-86m', rpm: 30, rpd: 14400, tpm: 15000, tpd: 500000 },
   { id: 'groq/compound', label: 'groq/compound', rpm: 30, rpd: 250, tpm: 70000 },
   { id: 'groq/compound-mini', label: 'groq/compound-mini', rpm: 30, rpd: 250, tpm: 70000 },
-  { id: 'canopylabs/orpheus-arabic-saudi', label: 'canopylabs/orpheus-arabic-saudi', rpm: 10, rpd: 100, tpm: 1200, tpd: 3600 },
-  { id: 'canopylabs/orpheus-v1-english', label: 'canopylabs/orpheus-v1-english', rpm: 10, rpd: 100, tpm: 1200, tpd: 3600 },
 ];
 
 export type AiPlaygroundRunRequest = {

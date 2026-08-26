@@ -57,7 +57,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             model_id=ModelId("qwen/qwen3.6-27b"),
             lifecycle=ModelLifecycle.PREVIEW,
             context_window_tokens=131_072,
-            max_output_tokens=16_384,
+            max_output_tokens=32_768,
             model_rank=0,
             rate_limits=RateLimitProfile(
                 requests_per_minute=30,
@@ -86,7 +86,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             lifecycle=ModelLifecycle.PRODUCTION,
             context_window_tokens=131_072,
             max_output_tokens=65_536,
-            model_rank=1,
+            model_rank=5,
             rate_limits=RateLimitProfile(
                 requests_per_minute=30,
                 requests_per_day=1_000,
@@ -107,7 +107,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             ),
             model_char_to_token_multiplier=Decimal("3.7"),
             supports_json_object=True,
-            supports_json_schema=True,
+            supports_json_schema=False,
         ),
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,

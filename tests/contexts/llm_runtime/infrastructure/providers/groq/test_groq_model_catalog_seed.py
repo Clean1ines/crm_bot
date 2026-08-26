@@ -25,7 +25,7 @@ def test_groq_free_plan_seed_contains_target_text_models_in_fallback_order() -> 
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
     ]
-    assert [profile.model_rank for profile in profiles] == [0, 1, 2]
+    assert [profile.model_rank for profile in profiles] == [0, 5, 2]
     assert all(profile.provider_id == GROQ_PROVIDER_ID for profile in profiles)
 
 
@@ -39,7 +39,7 @@ def test_qwen_seed_can_disable_reasoning_for_output_budget_control() -> None:
     assert qwen.reasoning_profile.can_disable_reasoning
     assert qwen.reasoning_profile.default_effort is ReasoningEffort.NONE
     assert qwen.context_window_tokens == 131_072
-    assert qwen.max_output_tokens == 16_384
+    assert qwen.max_output_tokens == 32_768
     assert qwen.rate_limits.requests_per_minute == 30
     assert qwen.rate_limits.tokens_per_minute == 8_000
     assert qwen.rate_limits.tokens_per_day == 200_000
@@ -70,7 +70,7 @@ def test_gpt_oss_120b_seed_represent_reasoning_controls_without_disable_none() -
     assert gpt_oss_120b.rate_limits.tokens_per_minute == 8_000
     assert gpt_oss_120b.rate_limits.tokens_per_day == 200_000
     assert gpt_oss_120b.model_char_to_token_multiplier == Decimal("3.7")
-    assert gpt_oss_120b.supports_json_schema is True
+    assert gpt_oss_120b.supports_json_schema is False
 
 
 def test_gpt_oss_20b_seed_uses_degraded_capacity_and_schema_support() -> None:

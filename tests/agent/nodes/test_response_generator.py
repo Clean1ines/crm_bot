@@ -96,7 +96,7 @@ class _CapturingResponseLlm:
         return SimpleNamespace(content=_structured_content("Ответ по базе."))
 
 
-def test_resolve_response_model_name_ignores_generic_degraded_fallback():
+def test_resolve_response_model_name_prefers_project_fallback():
     model = _resolve_response_model_name(
         {
             "project_configuration": {
@@ -106,7 +106,7 @@ def test_resolve_response_model_name_ignores_generic_degraded_fallback():
         "qwen/qwen3.6-27b",
     )
 
-    assert model == "qwen/qwen3.6-27b"
+    assert model == "openai/gpt-oss-20b"
 
 
 @pytest.mark.asyncio
@@ -403,7 +403,7 @@ async def test_response_generator_does_not_add_continuation_after_language_fallb
 
 
 @pytest.mark.asyncio
-async def test_response_generator_ignores_generic_project_fallback_model():
+async def test_response_generator_builds_project_override_llm():
     created_models = []
 
     class FakeChatGroq:
@@ -441,9 +441,9 @@ async def test_response_generator_ignores_generic_project_fallback_model():
                 }
             )
 
-    assert result["response_text"] == "base"
-    assert created_models == []
-    base_llm.ainvoke.assert_awaited()
+    assert "Хочу ответить на вашем языке корректно" in result["response_text"]
+    assert created_models == ["openai/gpt-oss-20b"]
+    base_llm.ainvoke.assert_not_called()
 
 
 @pytest.mark.asyncio

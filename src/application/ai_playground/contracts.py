@@ -31,6 +31,8 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
         "tpm": 15000,
         "tpd": 500000,
     },
+    "openai/gpt-oss-120b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
+    "openai/gpt-oss-20b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
     "openai/gpt-oss-safeguard-20b": {
         "rpm": 30,
         "rpd": 1000,
@@ -38,8 +40,6 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
         "tpd": 200000,
     },
     "qwen/qwen3.6-27b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
-    "openai/gpt-oss-120b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
-    "openai/gpt-oss-20b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
 }
 
 

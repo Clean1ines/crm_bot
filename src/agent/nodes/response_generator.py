@@ -168,8 +168,10 @@ def _merge_dialog_state_into_user_memory(
 
 
 def _resolve_response_model_name(state: AgentState, default_model: str) -> str:
-    del state
-    return default_model
+    profile = ProjectRuntimeProfile.from_configuration(
+        state.get("project_configuration")
+    )
+    return profile.fallback_model or default_model
 
 
 def _prompt_user_memory(value: object) -> dict[str, list[dict[str, object]]] | None:
