@@ -164,7 +164,8 @@ async def test_intent_extractor_internal_groq_client_requests_json_object_mode(
 
     assert captured_kwargs["model"] == "openai/gpt-oss-120b"
     assert captured_kwargs["temperature"] == 0.0
-    assert captured_kwargs["max_tokens"] == 340
+    assert captured_kwargs["max_tokens"] == 1024
+    assert captured_kwargs["reasoning_effort"] == "low"
     assert captured_kwargs["model_kwargs"] == {
         "response_format": {"type": "json_object"}
     }
