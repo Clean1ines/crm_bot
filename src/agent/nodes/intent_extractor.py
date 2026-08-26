@@ -4,8 +4,10 @@ Intent extraction node for LangGraph pipeline.
 Uses a lightweight LLM to extract domain, intent, CTA, topic, emotion, and feature hints.
 """
 
+from dataclasses import replace
 import json
 import os
+import re
 from typing import Protocol, cast
 
 from src.agent.router.prompt_builder import build_intent_prompt
@@ -28,6 +30,26 @@ TECHNICAL_CLASSIFICATION_FIRST_TEXT = (
 TECHNICAL_CLASSIFICATION_REPEAT_TEXT = (
     "Техническая ошибка повторилась. Я уже передал технический инцидент владельцу проекта. "
     "Можете позвать менеджера, чтобы не ждать восстановления ассистента."
+)
+
+_HANDOFF_INFORMATION_TERMS = (
+    "менеджер",
+    "оператор",
+    "handoff",
+    "manager",
+    "operator",
+)
+_HANDOFF_INFORMATION_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bчто\s+такое\b",
+        r"\bкак\s+(?:работает|устроен|происходит|подключается|подключить|настроить)\b",
+        r"\bкогда\s+(?:подключается|вызывается|нужен|нужна|нужно)\b",
+        r"\b(?:зачем|для\s+чего)\s+(?:нужен|нужна|нужно|используется)\b",
+        r"\bможно\s+ли\s+(?:настроить|подключить|добавить)\b",
+        r"\bчем\s+отличается\b",
+        r"\bв\s+каких\s+случаях\b",
+    )
 )
 
 
@@ -175,6 +197,59 @@ def _conversation_context_subject(value: object) -> object:
     return value.get("current_subject")
 
 
+def _looks_like_handoff_information_question(text: str) -> bool:
+    normalized = " ".join(str(text).strip().casefold().split())
+    if not normalized:
+        return False
+    if not any(term in normalized for term in _HANDOFF_INFORMATION_TERMS):
+        return False
+    return any(pattern.search(normalized) for pattern in _HANDOFF_INFORMATION_PATTERNS)
+
+
+def _restore_semantic_handoff(
+    result: IntentExtractionResult,
+    *,
+    payload: object,
+    user_input: str,
+) -> IntentExtractionResult:
+    """Trust an explicit LLM handoff intent when deterministic rules missed wording.
+
+    Regex rules are a fast path, not an authorization gate. The existing domain
+    normalization intentionally downgrades possible false-positive manager mentions;
+    this adapter restores a genuine semantic handoff unless the utterance is clearly
+    an informational question about the manager/handoff mechanism itself.
+    """
+    if not isinstance(payload, dict):
+        return result
+    raw_intent = str(payload.get("intent") or "").strip().lower()
+    if raw_intent != "handoff_request":
+        return result
+    if not result.normalization_flags.get("handoff_intent_downgraded"):
+        return result
+    if _looks_like_handoff_information_question(user_input):
+        return result
+
+    flags = dict(result.normalization_flags)
+    flags.pop("handoff_intent_downgraded", None)
+    flags.pop("handoff_intent_downgrade_reason", None)
+    flags["semantic_handoff_restored"] = True
+
+    return replace(
+        result,
+        domain="business",
+        intent="handoff_request",
+        topic="handoff",
+        cta="call_manager",
+        resolved_cta="call_manager",
+        resolved_cta_reply="affirmative",
+        should_search_kb=False,
+        should_generate_answer=False,
+        should_offer_manager=False,
+        knowledge_query=None,
+        normalization_flags=flags,
+    )
+
+
 def create_intent_extractor_node(
     llm: ChatGroqClient | None = None,
     model_name: str = "openai/gpt-oss-120b",
@@ -225,6 +300,11 @@ def create_intent_extractor_node(
                 payload,
                 user_input=context.user_input,
             ).normalized_for_context(context)
+            result = _restore_semantic_handoff(
+                result,
+                payload=payload,
+                user_input=context.user_input,
+            )
             persisted_current_subject = _conversation_context_subject(
                 state.get("conversation_context")
             )
