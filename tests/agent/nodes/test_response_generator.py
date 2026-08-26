@@ -10,6 +10,8 @@ from src.agent.nodes.response_generator import (
     create_response_generator_node,
 )
 from src.agent.nodes.intent_extractor import create_intent_extractor_node
+from src.infrastructure.llm.completion_client import GroqTextCompletionClient
+import src.infrastructure.llm.completion_client as completion_client
 
 
 def _structured_content(
@@ -403,12 +405,87 @@ async def test_response_generator_does_not_add_continuation_after_language_fallb
 
 
 @pytest.mark.asyncio
-async def test_response_generator_builds_project_override_llm():
-    created_models = []
+async def test_response_generator_qwen_structured_requests_json_mode_for_initial_and_repair(
+    monkeypatch,
+):
+    created_kwargs: list[dict[str, object]] = []
 
     class FakeChatGroq:
-        def __init__(self, *, model, temperature, max_tokens, api_key):
-            created_models.append(model)
+        def __init__(self, **kwargs: object) -> None:
+            created_kwargs.append(dict(kwargs))
+
+        async def ainvoke(self, _messages):
+            if len(created_kwargs) == 1:
+                return SimpleNamespace(content="{not json")
+            return SimpleNamespace(content=_structured_content("Факт подтверждён."))
+
+    monkeypatch.setattr(completion_client, "ChatGroq", FakeChatGroq)
+    monkeypatch.setattr(completion_client, "_primary_groq_api_key", lambda: "test-key")
+    node = create_response_generator_node(model_name="qwen/qwen3.6-27b")
+
+    result = await node(
+        {
+            "decision": "LLM_GENERATE",
+            "generation_mode": "KNOWLEDGE_ANSWER",
+            "user_input": "Что известно?",
+            "project_configuration": {"settings": {"target_language": "ru"}},
+            **_retrieved_state("Факт подтверждён в базе знаний."),
+        }
+    )
+
+    assert result["response_text"] == "Факт подтверждён."
+    assert result["model_evidence_refs"] == ["E1"]
+    assert result["supporting_entry_ids"] == ["entry-1"]
+    assert result["metadata"]["generation_attempt_count"] == 2
+    assert result["metadata"]["repair_attempted"] is True
+    assert result["metadata"]["repair_succeeded"] is True
+    assert len(created_kwargs) == 2
+    for kwargs in created_kwargs:
+        assert kwargs["model"] == "qwen/qwen3.6-27b"
+        assert kwargs["temperature"] == 0.3
+        assert kwargs["max_tokens"] == 700
+        assert kwargs["model_kwargs"] == {
+            "response_format": {"type": "json_object"}
+        }
+        assert kwargs["reasoning_effort"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_groq_text_completion_plain_call_does_not_force_json_mode(monkeypatch):
+    created_kwargs: dict[str, object] = {}
+
+    class FakeChatGroq:
+        def __init__(self, **kwargs: object) -> None:
+            created_kwargs.update(kwargs)
+
+        async def ainvoke(self, _messages):
+            return SimpleNamespace(content="plain text")
+
+    monkeypatch.setattr(completion_client, "ChatGroq", FakeChatGroq)
+    monkeypatch.setattr(completion_client, "_primary_groq_api_key", lambda: "test-key")
+
+    result = await GroqTextCompletionClient().complete(
+        "plain prompt",
+        model_name="qwen/qwen3.6-27b",
+        temperature=0.2,
+        max_tokens=123,
+    )
+
+    assert result == "plain text"
+    assert created_kwargs["model"] == "qwen/qwen3.6-27b"
+    assert created_kwargs["temperature"] == 0.2
+    assert created_kwargs["max_tokens"] == 123
+    assert "model_kwargs" not in created_kwargs
+    assert "reasoning_effort" not in created_kwargs
+
+
+@pytest.mark.asyncio
+async def test_response_generator_builds_project_override_llm():
+    created_kwargs: list[dict[str, object]] = []
+
+    class FakeChatGroq:
+        def __init__(self, **kwargs: object) -> None:
+            created_kwargs.append(dict(kwargs))
 
         async def ainvoke(self, _messages):
             return SimpleNamespace(content=_structured_content("override"))
@@ -442,7 +519,12 @@ async def test_response_generator_builds_project_override_llm():
             )
 
     assert "Хочу ответить на вашем языке корректно" in result["response_text"]
-    assert created_models == ["openai/gpt-oss-20b"]
+    assert len(created_kwargs) == 1
+    assert created_kwargs[0]["model"] == "openai/gpt-oss-20b"
+    assert created_kwargs[0]["model_kwargs"] == {
+        "response_format": {"type": "json_object"}
+    }
+    assert "reasoning_effort" not in created_kwargs[0]
     base_llm.ainvoke.assert_not_called()
 
 

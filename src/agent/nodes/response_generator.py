@@ -114,6 +114,10 @@ class StructuredGenerationValidation:
     failure_reason: str | None = None
 
 
+QWEN_RESPONSE_MODEL = "qwen/qwen3.6-27b"
+STRUCTURED_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
+
+
 REPAIRABLE_VALIDATION_FAILURES = frozenset(
     {
         "invalid_json",
@@ -148,6 +152,8 @@ async def _invoke_response_model(
         temperature=0.3,
         max_tokens=700,
         llm=client_llm,
+        response_format=STRUCTURED_RESPONSE_FORMAT,
+        reasoning_effort="none" if selected_model == QWEN_RESPONSE_MODEL else None,
     )
 
 

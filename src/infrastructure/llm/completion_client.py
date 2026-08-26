@@ -22,6 +22,8 @@ class ChatGroqFactory(Protocol):
         temperature: float,
         max_tokens: int,
         api_key: object,
+        model_kwargs: dict[str, object] | None = None,
+        reasoning_effort: str | None = None,
     ) -> ChatGroqClient: ...
 
 
@@ -38,6 +40,8 @@ class GroqTextCompletionClient(TextCompletionPort):
         temperature: float = 0.2,
         model_name: str | None = None,
         llm: ChatGroqClient | None = None,
+        response_format: dict[str, object] | None = None,
+        reasoning_effort: str | None = None,
     ) -> str:
         del target_language
         model = model_name or settings.GROQ_MODEL
@@ -45,12 +49,32 @@ class GroqTextCompletionClient(TextCompletionPort):
             response = await llm.ainvoke([("human", prompt)])
             return (response.content or "").strip()
 
-        response = await _chat_groq_class()(
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            api_key=_primary_groq_api_key(),
-        ).ainvoke([("human", prompt)])
+        chat_groq_factory = _chat_groq_class()
+        if response_format is None and reasoning_effort is None:
+            client = chat_groq_factory(
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                api_key=_primary_groq_api_key(),
+            )
+        elif reasoning_effort is None:
+            client = chat_groq_factory(
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                api_key=_primary_groq_api_key(),
+                model_kwargs={"response_format": response_format},
+            )
+        else:
+            client = chat_groq_factory(
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                api_key=_primary_groq_api_key(),
+                model_kwargs={"response_format": response_format},
+                reasoning_effort=reasoning_effort,
+            )
+        response = await client.ainvoke([("human", prompt)])
         return (response.content or "").strip()
 
 
