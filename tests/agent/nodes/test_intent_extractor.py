@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import src.agent.nodes.intent_extractor as intent_extractor
 from src.agent.nodes.intent_extractor import create_intent_extractor_node
 from src.agent.nodes.kb_search import create_kb_search_node
 from src.domain.runtime.persistence import PersistenceContext
@@ -125,6 +126,50 @@ async def test_intent_extractor_parses_json_block_into_state_patch():
     assert result["intent"] == "support"
     assert result["features"] == {}
     assert result["is_repeat_like"] is False
+
+
+@pytest.mark.asyncio
+async def test_intent_extractor_internal_groq_client_requests_json_object_mode(
+    monkeypatch,
+):
+    captured_kwargs: dict[str, object] = {}
+
+    class FakeChatGroq:
+        def __init__(self, **kwargs: object) -> None:
+            captured_kwargs.update(kwargs)
+
+        async def ainvoke(self, _messages):
+            return SimpleNamespace(
+                content=json.dumps(
+                    _intent_payload(
+                        repeat_relation="none",
+                        current_subject="документы",
+                    ),
+                    ensure_ascii=False,
+                )
+            )
+
+    monkeypatch.setattr(intent_extractor, "ChatGroq", FakeChatGroq)
+    monkeypatch.setattr(intent_extractor, "_primary_groq_api_key", lambda: "test-key")
+    node = intent_extractor.create_intent_extractor_node()
+
+    async def passthrough(_name, impl, state, **_kwargs):
+        return await impl(state)
+
+    with patch(
+        "src.agent.nodes.intent_extractor.log_node_execution",
+        AsyncMock(side_effect=passthrough),
+    ):
+        result = await node({"user_input": "Какие документы лучше загружать?"})
+
+    assert captured_kwargs["model"] == "openai/gpt-oss-120b"
+    assert captured_kwargs["temperature"] == 0.0
+    assert captured_kwargs["max_tokens"] == 340
+    assert captured_kwargs["model_kwargs"] == {
+        "response_format": {"type": "json_object"}
+    }
+    assert result["intent"] == "sales"
+    assert result["current_subject"] == "документы"
 
 
 @pytest.mark.asyncio

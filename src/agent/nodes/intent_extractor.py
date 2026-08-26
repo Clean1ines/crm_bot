@@ -47,6 +47,7 @@ class ChatGroqFactory(Protocol):
         temperature: float,
         max_tokens: int,
         api_key: object,
+        model_kwargs: dict[str, object],
     ) -> ChatGroqClient: ...
 
 
@@ -210,6 +211,7 @@ def create_intent_extractor_node(
                         temperature=0.0,
                         max_tokens=340,
                         api_key=api_key,
+                        model_kwargs={"response_format": {"type": "json_object"}},
                     )
 
                 response = await _ainvoke_chat_once(
