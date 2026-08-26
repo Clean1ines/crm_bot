@@ -9,6 +9,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import asyncpg
 from dotenv import load_dotenv
@@ -41,6 +42,19 @@ def is_prod_env(env_file):
     return "prod" in env_file.name.lower()
 
 
+def normalize_asyncpg_dsn(dsn: str) -> str:
+    """Remove libpq-only URI options unsupported by asyncpg."""
+    parts = urlsplit(dsn)
+
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key != "channel_binding"
+    ]
+
+    return urlunsplit(parts._replace(query=urlencode(query)))
+
+
 async def apply_migrations_for_env(env_file):
     """Загружает переменные из env_file и применяет миграции к соответствующей БД."""
     print(
@@ -49,7 +63,10 @@ async def apply_migrations_for_env(env_file):
 
     # Загружаем переменные из файла
     load_dotenv(dotenv_path=env_file, override=True)
-    DATABASE_URL = os.getenv("DATABASE_URL")
+    DATABASE_URL = (
+        os.getenv("MIGRATION_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+    )
     if not DATABASE_URL:
         print(
             f"{Colors.RED}❌ DATABASE_URL не задан в {env_file.name}, пропускаем{Colors.RESET}"
@@ -72,7 +89,12 @@ async def apply_migrations_for_env(env_file):
 
     conn = None
     try:
-        conn = await asyncpg.connect(DATABASE_URL)
+        asyncpg_dsn = normalize_asyncpg_dsn(DATABASE_URL)
+        conn = await asyncpg.connect(
+            asyncpg_dsn,
+            timeout=15,
+            command_timeout=120,
+        )
     except Exception as e:
         print(f"{Colors.RED}❌ Не удалось подключиться к БД: {e}{Colors.RESET}")
         return

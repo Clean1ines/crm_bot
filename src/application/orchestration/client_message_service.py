@@ -3,7 +3,6 @@ Client message orchestration.
 """
 
 import asyncio
-import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -45,11 +44,6 @@ MANAGER_RECOVERY_FAILED_TEXT = (
 RETURN_TO_ASSISTANT_COMMAND = "вернуться к ассистенту"
 CLOSE_RESOLVED_COMMAND = "закрыть обращение: решено"
 WAITING_TOO_LONG_COMMAND = "долго жду"
-
-
-def split_questions(text: str) -> list[str]:
-    parts = re.split(r"[?!\n]+", text)
-    return [part.strip() for part in parts if part.strip()]
 
 
 class ClientMessageService:
@@ -731,45 +725,16 @@ class ClientMessageService:
         thread_id_str: str,
         runtime_context,
     ) -> str:
-        questions = split_questions(text) or [text]
-        self.logger.debug(
-            f"Split message into {len(questions)} questions",
-            extra={"thread_id": thread_id_str},
-        )
-
-        responses = await self._collect_question_responses(
+        response = await self._process_single_question(
             project_id=project_id,
             chat_id=chat_id,
             thread_id=thread_id,
             thread_id_str=thread_id_str,
             runtime_context=runtime_context,
-            questions=questions,
+            question=text,
         )
+        responses = [] if response is None else [response]
         return self._final_response(thread_id_str, responses)
-
-    async def _collect_question_responses(
-        self,
-        *,
-        project_id: str,
-        chat_id: int,
-        thread_id,
-        thread_id_str: str,
-        runtime_context,
-        questions: list[str],
-    ) -> list[str]:
-        responses: list[str] = []
-        for question in questions:
-            response = await self._process_single_question(
-                project_id=project_id,
-                chat_id=chat_id,
-                thread_id=thread_id,
-                thread_id_str=thread_id_str,
-                runtime_context=runtime_context,
-                question=question,
-            )
-            if response is not None:
-                responses.append(response)
-        return responses
 
     async def _process_single_question(
         self,

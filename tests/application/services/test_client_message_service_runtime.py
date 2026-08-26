@@ -131,6 +131,7 @@ def _service(
         queue_repo=queue_repo,
         graph_factory=graph_factory,
         graph_executor=graph_executor,
+        thread_lock=thread_lock,
         cache=cache,
         event_emitter=event_emitter,
         manager_replies=manager_replies,
@@ -415,7 +416,71 @@ async def test_active_thread_still_invokes_graph():
 
     assert result == "AI response"
     deps.graph_factory.get_graph_for_project.assert_awaited_once_with(PROJECT_ID)
+    deps.graph_executor.create_graph_execution_request.assert_called_once()
+    assert (
+        deps.graph_executor.create_graph_execution_request.call_args.kwargs["question"]
+        == "Что умеет сервис?"
+    )
     deps.graph_executor.invoke_graph.assert_awaited_once()
+    deps.thread_messages.add_message.assert_awaited_once_with(
+        THREAD_ID, role="user", content="Что умеет сервис?"
+    )
+    deps.thread_lock.acquire_thread_lock.assert_awaited_once_with(THREAD_ID)
+    deps.thread_lock.release_thread_lock.assert_awaited_once_with(THREAD_ID)
+
+
+@pytest.mark.asyncio
+async def test_multi_question_message_is_one_atomic_graph_turn():
+    service, deps = _service(status=ThreadStatus.ACTIVE.value)
+    message = (
+        "Можно ли использовать Axole для медицинских или юридических консультаций?\n"
+        "За сколько дней можно запустить бота?"
+    )
+
+    result = await service.process_message(PROJECT_ID, CHAT_ID, message)
+
+    assert result == "AI response"
+    deps.thread_messages.add_message.assert_awaited_once_with(
+        THREAD_ID, role="user", content=message
+    )
+    deps.graph_factory.get_graph_for_project.assert_awaited_once_with(PROJECT_ID)
+    deps.graph_executor.create_graph_execution_request.assert_called_once()
+    assert deps.graph_executor.create_graph_execution_request.call_args.kwargs[
+        "question"
+    ] == message
+    deps.graph_executor.invoke_graph.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_punctuation_inside_message_does_not_create_additional_graph_turns():
+    service, deps = _service(status=ThreadStatus.ACTIVE.value)
+    message = "Привет! Подскажите, Axole работает с CRM? Это важно."
+
+    result = await service.process_message(PROJECT_ID, CHAT_ID, message)
+
+    assert result == "AI response"
+    deps.thread_messages.add_message.assert_awaited_once_with(
+        THREAD_ID, role="user", content=message
+    )
+    deps.graph_executor.create_graph_execution_request.assert_called_once()
+    assert deps.graph_executor.create_graph_execution_request.call_args.kwargs[
+        "question"
+    ] == message
+    deps.graph_executor.invoke_graph.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_active_thread_returns_single_graph_outcome_normally():
+    service, deps = _service(status=ThreadStatus.ACTIVE.value)
+    deps.graph_executor.invoke_graph.return_value = _outcome("Single answer")
+
+    result = await service.process_message(
+        PROJECT_ID, CHAT_ID, "Первый вопрос? Второй вопрос?"
+    )
+
+    assert result == "Single answer"
+    deps.graph_executor.invoke_graph.assert_awaited_once()
+    deps.graph_executor.outcome.assert_called_once_with("Single answer")
 
 
 @pytest.mark.asyncio
