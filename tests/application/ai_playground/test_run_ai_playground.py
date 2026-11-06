@@ -144,7 +144,7 @@ async def test_llm_called_once_with_expected_prompt_input_model() -> None:
         AiPlaygroundRunRequest(
             system_prompt=" system ",
             user_input=" input ",
-            model="qwen/qwen3.6-27b",
+            model="openai/gpt-oss-120b",
         )
     )
 
