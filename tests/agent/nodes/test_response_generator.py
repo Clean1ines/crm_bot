@@ -110,6 +110,37 @@ def test_resolve_response_model_name_prefers_project_fallback():
 
     assert model == "openai/gpt-oss-20b"
 
+@pytest.mark.parametrize(
+    "retired_model",
+    (
+        "qwen/qwen3.6-27b",
+        "qwen/qwen3-32b",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "groq/compound",
+        "groq/compound-mini",
+    ),
+)
+def test_resolve_response_model_name_replaces_retired_groq_models(retired_model):
+    assert (
+        _resolve_response_model_name({}, retired_model)
+        == "openai/gpt-oss-120b"
+    )
+
+
+def test_resolve_response_model_name_replaces_retired_project_override():
+    assert (
+        _resolve_response_model_name(
+            {
+                "project_configuration": {
+                    "limit_profile": {"fallback_model": "qwen/qwen3.6-27b"},
+                }
+            },
+            "openai/gpt-oss-120b",
+        )
+        == "openai/gpt-oss-120b"
+    )
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -405,7 +436,7 @@ async def test_response_generator_does_not_add_continuation_after_language_fallb
 
 
 @pytest.mark.asyncio
-async def test_response_generator_qwen_structured_requests_json_mode_for_initial_and_repair(
+async def test_response_generator_gpt_oss_structured_requests_json_mode_for_initial_and_repair(
     monkeypatch,
 ):
     created_kwargs: list[dict[str, object]] = []
@@ -421,7 +452,7 @@ async def test_response_generator_qwen_structured_requests_json_mode_for_initial
 
     monkeypatch.setattr(completion_client, "ChatGroq", FakeChatGroq)
     monkeypatch.setattr(completion_client, "_primary_groq_api_key", lambda: "test-key")
-    node = create_response_generator_node(model_name="qwen/qwen3.6-27b")
+    node = create_response_generator_node(model_name="openai/gpt-oss-120b")
 
     result = await node(
         {
@@ -441,13 +472,13 @@ async def test_response_generator_qwen_structured_requests_json_mode_for_initial
     assert result["metadata"]["repair_succeeded"] is True
     assert len(created_kwargs) == 2
     for kwargs in created_kwargs:
-        assert kwargs["model"] == "qwen/qwen3.6-27b"
+        assert kwargs["model"] == "openai/gpt-oss-120b"
         assert kwargs["temperature"] == 0.3
         assert kwargs["max_tokens"] == 700
         assert kwargs["model_kwargs"] == {
             "response_format": {"type": "json_object"}
         }
-        assert kwargs["reasoning_effort"] == "none"
+        assert "reasoning_effort" not in kwargs
 
 
 @pytest.mark.asyncio
