@@ -72,7 +72,7 @@ class Settings(BaseSettings):
         None, description="Optional fourth Groq API key for rate-limit rotation"
     )
     GROQ_MODEL: str = Field(
-        "qwen/qwen3.6-27b", description="Default Groq model for agent"
+        "openai/gpt-oss-120b", description="Default Groq model for agent"
     )
     GROQ_KNOWLEDGE_PREPROCESSING_MODEL: str = Field(
         "openai/gpt-oss-20b",
