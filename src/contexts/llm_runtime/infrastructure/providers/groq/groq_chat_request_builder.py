@@ -105,7 +105,7 @@ class GroqChatRequestBuilder:
                 }
                 for message in messages
             ],
-            "reasoning_format": "hidden",
+            "include_reasoning": False,
         }
         if options.max_completion_tokens is not None:
             payload["max_completion_tokens"] = options.max_completion_tokens
