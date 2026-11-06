@@ -4,7 +4,6 @@ from decimal import Decimal
 
 import pytest
 
-from src.contexts.llm_runtime.domain.value_objects.model_lifecycle import ModelLifecycle
 from src.contexts.llm_runtime.domain.value_objects.reasoning_effort import (
     ReasoningEffort,
 )
