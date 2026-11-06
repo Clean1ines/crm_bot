@@ -654,7 +654,7 @@ async def complete_response_prompt(
     model_name: str | None = None,
 ) -> str:
     base_model = _normalize_response_model_name(
-        model_name or settings.GROQ_MODEL
+        model_name or DEFAULT_GROQ_RESPONSE_MODEL
     )
     selected_model = _resolve_response_model_name(
         cast(AgentState, {"project_configuration": project_configuration or {}}),
@@ -1094,7 +1094,7 @@ def create_response_generator_node(
     """
 
     base_model = _normalize_response_model_name(
-        model_name or settings.GROQ_MODEL
+        model_name or DEFAULT_GROQ_RESPONSE_MODEL
     )
 
     async def _response_generator_node_impl(state: AgentState) -> dict[str, object]:
