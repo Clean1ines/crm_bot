@@ -509,7 +509,7 @@ async def test_groq_text_completion_plain_call_does_not_force_json_mode(monkeypa
     assert created_kwargs["temperature"] == 0.2
     assert created_kwargs["max_tokens"] == 123
     assert created_kwargs["model_kwargs"] == {"reasoning_format": "hidden"}
-    assert "reasoning_effort" not in created_kwargs
+    assert created_kwargs["reasoning_effort"] == "low"
 
 
 @pytest.mark.asyncio
