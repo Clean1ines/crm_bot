@@ -54,39 +54,11 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
     return (
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,
-            model_id=ModelId("qwen/qwen3.6-27b"),
-            lifecycle=ModelLifecycle.PREVIEW,
-            context_window_tokens=131_072,
-            max_output_tokens=32_768,
-            model_rank=0,
-            rate_limits=RateLimitProfile(
-                requests_per_minute=30,
-                requests_per_day=1_000,
-                tokens_per_minute=8_000,
-                tokens_per_day=200_000,
-            ),
-            token_price=TokenPrice(
-                input_per_million=Decimal("0.60"),
-                output_per_million=Decimal("3.00"),
-            ),
-            reasoning_profile=ReasoningProfile(
-                supported_efforts=(
-                    ReasoningEffort.NONE,
-                    ReasoningEffort.DEFAULT,
-                ),
-                default_effort=ReasoningEffort.NONE,
-            ),
-            model_char_to_token_multiplier=Decimal("2.8"),
-            supports_json_object=True,
-            supports_json_schema=False,
-        ),
-        ModelProfile(
-            provider_id=GROQ_PROVIDER_ID,
             model_id=ModelId("openai/gpt-oss-120b"),
             lifecycle=ModelLifecycle.PRODUCTION,
             context_window_tokens=131_072,
             max_output_tokens=65_536,
-            model_rank=5,
+            model_rank=0,
             rate_limits=RateLimitProfile(
                 requests_per_minute=30,
                 requests_per_day=1_000,
@@ -103,7 +75,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
                     ReasoningEffort.MEDIUM,
                     ReasoningEffort.HIGH,
                 ),
-                default_effort=ReasoningEffort.MEDIUM,
+                default_effort=ReasoningEffort.LOW,
             ),
             model_char_to_token_multiplier=Decimal("3.7"),
             supports_json_object=True,
@@ -115,7 +87,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             lifecycle=ModelLifecycle.PRODUCTION,
             context_window_tokens=131_072,
             max_output_tokens=65_536,
-            model_rank=2,
+            model_rank=1,
             rate_limits=RateLimitProfile(
                 requests_per_minute=30,
                 requests_per_day=1_000,
@@ -132,11 +104,12 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
                     ReasoningEffort.MEDIUM,
                     ReasoningEffort.HIGH,
                 ),
-                default_effort=ReasoningEffort.MEDIUM,
+                default_effort=ReasoningEffort.LOW,
             ),
             model_char_to_token_multiplier=Decimal("3.7"),
             supports_json_object=True,
             supports_json_schema=True,
+            enabled=False,
         ),
     )
 
