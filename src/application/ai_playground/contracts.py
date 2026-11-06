@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-AI_PLAYGROUND_DEFAULT_MODEL = "qwen/qwen3.6-27b"
+AI_PLAYGROUND_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 # User-provided Groq developer-plan limits. Values are input TPM limits used by
 # Playground preflight validation, not billing or exact tokenizer accounting.
@@ -17,8 +17,6 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
         "tpd": 3600,
     },
     "canopylabs/orpheus-v1-english": {"rpm": 10, "rpd": 100, "tpm": 1200, "tpd": 3600},
-    "groq/compound": {"rpm": 30, "rpd": 250, "tpm": 70000},
-    "groq/compound-mini": {"rpm": 30, "rpd": 250, "tpm": 70000},
     "meta-llama/llama-prompt-guard-2-22m": {
         "rpm": 30,
         "rpd": 14400,
@@ -39,7 +37,6 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
         "tpm": 8000,
         "tpd": 200000,
     },
-    "qwen/qwen3.6-27b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
 }
 
 
