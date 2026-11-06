@@ -56,7 +56,6 @@ def test_factory_builds_provider_models_and_accounts_from_explicit_seeds() -> No
     assert components.provider.model_profiles == components.model_profiles
 
     assert [profile.model_id.value for profile in components.model_profiles] == [
-        "qwen/qwen3.6-27b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
     ]
