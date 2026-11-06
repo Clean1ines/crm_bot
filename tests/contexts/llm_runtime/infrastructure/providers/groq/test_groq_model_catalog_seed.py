@@ -47,7 +47,7 @@ def test_gpt_oss_120b_seed_represent_reasoning_controls_without_disable_none() -
     assert gpt_oss_120b.rate_limits.tokens_per_minute == 8_000
     assert gpt_oss_120b.rate_limits.tokens_per_day == 200_000
     assert gpt_oss_120b.model_char_to_token_multiplier == Decimal("3.7")
-    assert gpt_oss_120b.supports_json_schema is False
+    assert gpt_oss_120b.supports_json_schema is True
 
 
 def test_gpt_oss_20b_seed_uses_degraded_capacity_and_schema_support() -> None:
