@@ -68,7 +68,7 @@ def test_success_response_with_missing_content_is_invalid_output() -> None:
     assert mapped.matched_rule == "empty_or_missing_content"
 
 
-def test_length_finish_reason_is_classified_as_output_too_large() -> None:
+def test_length_finish_reason_is_classified_as_invalid_output() -> None:
     mapped = GroqProviderResponseMapper().map_response(
         response=GroqProviderHttpResponse(
             status_code=200,
