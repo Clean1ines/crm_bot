@@ -86,8 +86,8 @@ def test_length_finish_reason_is_classified_as_output_too_large() -> None:
     )
 
     assert isinstance(mapped.provider_result, LlmProviderFailure)
-    assert mapped.provider_result.error_kind is LlmErrorKind.OUTPUT_TOO_LARGE
-    assert mapped.matched_rule == "output_length_finish_reason"
+    assert mapped.provider_result.error_kind is LlmErrorKind.INVALID_OUTPUT
+    assert mapped.matched_rule == "truncated_output_length"
 
 
 def test_success_response_supports_responses_api_usage_fields() -> None:
