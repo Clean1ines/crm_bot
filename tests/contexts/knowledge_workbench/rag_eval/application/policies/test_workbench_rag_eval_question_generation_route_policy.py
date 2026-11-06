@@ -7,7 +7,6 @@ from src.contexts.knowledge_workbench.rag_eval.application.policies.workbench_ra
     WorkbenchRagEvalQuestionGenerationRoutePolicy,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
-    WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,
     WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF,
     workbench_rag_eval_route_catalog,
 )
@@ -20,71 +19,65 @@ from src.contexts.llm_runtime.domain.capacity.llm_model_route_catalog import (
 )
 
 
-def test_default_policy_uses_only_v2_automatic_route_chain() -> None:
+def test_default_policy_uses_only_gpt_oss_120b() -> None:
     policy = WorkbenchRagEvalQuestionGenerationRoutePolicy.default()
 
-    assert policy.primary_model_ref == "qwen/qwen3.6-27b"
-    assert policy.automatic_fallback_model_ref == "openai/gpt-oss-120b"
-    assert policy.automatic_model_refs() == (
-        "qwen/qwen3.6-27b",
-        "openai/gpt-oss-120b",
-    )
+    assert policy.primary_model_ref == "openai/gpt-oss-120b"
+    assert policy.automatic_model_refs() == ("openai/gpt-oss-120b",)
+    assert policy.route_catalog.automatic_fallback_model_refs() == ()
     assert all(
         route.role is not LlmModelRouteRole.DEGRADED_USER_CHOICE
         for route in policy.route_catalog.routes
     )
 
 
-def test_candidate_chain_rotates_accounts_across_primary_and_fallback() -> None:
+def test_candidate_chain_uses_primary_model_and_rotates_accounts() -> None:
     policy = WorkbenchRagEvalQuestionGenerationRoutePolicy.default()
 
     chain = policy.candidate_chain(entry_index=2)
 
-    assert len(chain) == 2
-
-    primary, fallback = chain
+    assert len(chain) == 1
+    primary = chain[0]
 
     assert primary.model_ref == WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF
     assert primary.role is LlmModelRouteRole.PRIMARY
     assert primary.account_ref == WORKBENCH_RAG_EVAL_ACCOUNT_REFS[2]
     assert primary.slot_index == 2
-    assert primary.execution_settings.reasoning_enabled is False
-
-    assert fallback.model_ref == WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF
-    assert fallback.role is LlmModelRouteRole.AUTOMATIC_FALLBACK
-    assert fallback.account_ref == WORKBENCH_RAG_EVAL_ACCOUNT_REFS[3]
-    assert fallback.slot_index == 3
-    assert fallback.execution_settings.reasoning_enabled is False
+    assert primary.execution_settings.reasoning_enabled is True
+    assert primary.execution_settings.reasoning_effort == "low"
 
 
 def test_candidate_chain_wraps_account_lane_index() -> None:
     policy = WorkbenchRagEvalQuestionGenerationRoutePolicy.default()
 
-    primary, fallback = policy.candidate_chain(entry_index=3)
+    candidate = policy.candidate_chain(entry_index=4)[0]
 
-    assert primary.account_ref == WORKBENCH_RAG_EVAL_ACCOUNT_REFS[3]
-    assert fallback.account_ref == WORKBENCH_RAG_EVAL_ACCOUNT_REFS[0]
+    assert candidate.account_ref == WORKBENCH_RAG_EVAL_ACCOUNT_REFS[0]
+    assert candidate.slot_index == 0
 
 
-def test_policy_rejects_catalog_with_wrong_automatic_fallback() -> None:
-    reasoning_disabled = LlmModelExecutionSettings(reasoning_enabled=False)
+def test_policy_rejects_any_automatic_fallback_route() -> None:
+    reasoning_enabled = LlmModelExecutionSettings(
+        reasoning_enabled=True,
+        reasoning_effort="low",
+    )
     catalog = LlmModelRouteCatalog(
         routes=(
             LlmModelRoute(
                 model_ref=WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF,
                 role=LlmModelRouteRole.PRIMARY,
                 order=0,
-                execution_settings=reasoning_disabled,
+                execution_settings=reasoning_enabled,
                 capacity_limits=LlmModelCapacityLimits(
                     input_token_limit=6_000,
                     output_token_limit=8_192,
                 ),
             ),
             LlmModelRoute(
-                model_ref="llama-3.3-70b-versatile",
+                model_ref="openai/gpt-oss-20b",
                 role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
                 order=1,
-                execution_settings=reasoning_disabled,
+                execution_settings=reasoning_enabled,
                 capacity_limits=LlmModelCapacityLimits(
                     input_token_limit=128_000,
                     output_token_limit=32_768,
@@ -96,7 +89,7 @@ def test_policy_rejects_catalog_with_wrong_automatic_fallback() -> None:
 
     with pytest.raises(
         ValueError,
-        match="automatic fallback must be openai/gpt-oss-120b",
+        match="must not configure automatic fallback routes",
     ):
         WorkbenchRagEvalQuestionGenerationRoutePolicy(
             route_catalog=catalog,
