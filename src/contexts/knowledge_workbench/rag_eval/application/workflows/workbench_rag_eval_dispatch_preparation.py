@@ -24,8 +24,8 @@ from src.contexts.llm_runtime.domain.entities.model_profile import ModelProfile
 QUESTION_GENERATION_PROFILE_ID = "workbench_rag_eval.question_generation.real_due_batch"
 ADJUDICATION_PROFILE_ID = "workbench_rag_eval.adjudication.real_due_batch"
 
-WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF = "qwen/qwen3.6-27b"
-WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF = "openai/gpt-oss-120b"
+WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF = "openai/gpt-oss-120b"
+WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF = "openai/gpt-oss-20b"
 
 
 def workbench_rag_eval_route_catalog() -> LlmModelRouteCatalog:
