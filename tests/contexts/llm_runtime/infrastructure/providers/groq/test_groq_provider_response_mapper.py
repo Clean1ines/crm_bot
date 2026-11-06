@@ -53,7 +53,7 @@ def test_success_response_extracts_chat_content_usage_and_quota_snapshot() -> No
     assert mapped.matched_rule == "http_success"
 
 
-def test_success_response_tolerates_missing_content_and_usage() -> None:
+def test_success_response_with_missing_content_is_invalid_output() -> None:
     mapped = GroqProviderResponseMapper().map_response(
         response=GroqProviderHttpResponse(
             status_code=200,
@@ -63,9 +63,31 @@ def test_success_response_tolerates_missing_content_and_usage() -> None:
         observed_at=_now(),
     )
 
-    assert isinstance(mapped.provider_result, LlmProviderSuccess)
-    assert mapped.provider_result.raw_text == ""
-    assert mapped.provider_result.usage is None
+    assert isinstance(mapped.provider_result, LlmProviderFailure)
+    assert mapped.provider_result.error_kind is LlmErrorKind.INVALID_OUTPUT
+    assert mapped.matched_rule == "empty_or_missing_content"
+
+
+def test_length_finish_reason_is_classified_as_output_too_large() -> None:
+    mapped = GroqProviderResponseMapper().map_response(
+        response=GroqProviderHttpResponse(
+            status_code=200,
+            headers={},
+            body={
+                "choices": [
+                    {
+                        "message": {"content": '{"partial":'},
+                        "finish_reason": "length",
+                    },
+                ],
+            },
+        ),
+        observed_at=_now(),
+    )
+
+    assert isinstance(mapped.provider_result, LlmProviderFailure)
+    assert mapped.provider_result.error_kind is LlmErrorKind.OUTPUT_TOO_LARGE
+    assert mapped.matched_rule == "output_length_finish_reason"
 
 
 def test_success_response_supports_responses_api_usage_fields() -> None:
