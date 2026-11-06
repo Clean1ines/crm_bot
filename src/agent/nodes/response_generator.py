@@ -164,6 +164,7 @@ async def _invoke_response_model(
         max_tokens=700,
         llm=client_llm,
         response_format=STRUCTURED_RESPONSE_FORMAT,
+        reasoning_effort="low",
     )
 
 
