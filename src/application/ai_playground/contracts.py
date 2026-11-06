@@ -41,7 +41,7 @@ AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
 
 
 AiPlaygroundResponseFormat = Literal["text", "json"]
-AiPlaygroundReasoningEffort = Literal["none"]
+AiPlaygroundReasoningEffort = Literal["low", "medium", "high"]
 AiPlaygroundReasoningFormat = Literal["hidden", "parsed"]
 
 
