@@ -75,7 +75,7 @@ class Settings(BaseSettings):
         "openai/gpt-oss-120b", description="Default Groq model for agent"
     )
     GROQ_KNOWLEDGE_PREPROCESSING_MODEL: str = Field(
-        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
         description="Groq model used by knowledge document preprocessing/compiler jobs",
     )
     CLAIM_BUILDER_PROMPT_TOKENS: int = Field(
@@ -120,7 +120,7 @@ class Settings(BaseSettings):
         "models.yaml", description="Path to YAML file with model definitions"
     )
     DEFAULT_MODEL: str = Field(
-        "openai/gpt-oss-20b",
+        "openai/gpt-oss-120b",
         description="Fallback model when preferred ones are rate-limited",
     )
     MODEL_SELECTION_STRATEGY: str = Field(
