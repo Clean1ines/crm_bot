@@ -66,13 +66,30 @@ class GroqProviderResponseMapper:
         )
 
         if 200 <= response.status_code < 300:
-            return GroqProviderMappedResponse(
-                provider_result=LlmProviderSuccess(
-                    raw_text=self._extract_chat_content(response.body),
+            finish_reason = self._extract_finish_reason(response.body)
+            raw_text = self._extract_chat_content(response.body)
+            if finish_reason == "length":
+                provider_result: LlmProviderResult = LlmProviderFailure(
+                    error_kind=LlmErrorKind.OUTPUT_TOO_LARGE,
+                    wait_until=quota_snapshot.unavailable_until,
+                )
+                matched_rule = "output_length_finish_reason"
+            elif not raw_text.strip():
+                provider_result = LlmProviderFailure(
+                    error_kind=LlmErrorKind.INVALID_OUTPUT,
+                    wait_until=quota_snapshot.unavailable_until,
+                )
+                matched_rule = "empty_or_missing_content"
+            else:
+                provider_result = LlmProviderSuccess(
+                    raw_text=raw_text,
                     usage=self._extract_usage(response.body),
-                ),
+                )
+                matched_rule = "http_success"
+            return GroqProviderMappedResponse(
+                provider_result=provider_result,
                 quota_snapshot=quota_snapshot,
-                matched_rule="http_success",
+                matched_rule=matched_rule,
             )
 
         error_kind, matched_rule = self._classify_error(
