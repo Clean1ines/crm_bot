@@ -2,7 +2,6 @@ import { authedJsonRequest } from '../core/http';
 
 export type AiPlaygroundResponseFormat = 'text' | 'json';
 export type AiPlaygroundReasoningEffort = 'low' | 'medium' | 'high';
-export type AiPlaygroundReasoningFormat = 'hidden' | 'parsed';
 
 export type AiPlaygroundModelOption = {
   id: string;
@@ -13,7 +12,6 @@ export type AiPlaygroundModelOption = {
   tpm: number;
   tpd?: number;
   reasoning_effort?: AiPlaygroundReasoningEffort;
-  reasoning_format?: AiPlaygroundReasoningFormat;
 };
 
 export const AI_PLAYGROUND_DEFAULT_MODEL = 'openai/gpt-oss-120b';
@@ -29,7 +27,6 @@ export type AiPlaygroundRunRequest = {
   model: string;
   response_format: AiPlaygroundResponseFormat;
   reasoning_effort?: AiPlaygroundReasoningEffort | null;
-  reasoning_format?: AiPlaygroundReasoningFormat | null;
 };
 
 export type AiPlaygroundUsage = {
