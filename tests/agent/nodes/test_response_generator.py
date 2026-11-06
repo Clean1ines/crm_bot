@@ -478,7 +478,7 @@ async def test_response_generator_gpt_oss_structured_requests_json_mode_for_init
         assert kwargs["max_tokens"] == 700
         assert kwargs["model_kwargs"] == {
             "response_format": {"type": "json_object"},
-            "reasoning_format": "hidden",
+            "include_reasoning": False,
         }
         assert kwargs["reasoning_effort"] == "low"
 
@@ -508,7 +508,7 @@ async def test_groq_text_completion_plain_call_does_not_force_json_mode(monkeypa
     assert created_kwargs["model"] == "openai/gpt-oss-120b"
     assert created_kwargs["temperature"] == 0.2
     assert created_kwargs["max_tokens"] == 123
-    assert created_kwargs["model_kwargs"] == {"reasoning_format": "hidden"}
+    assert created_kwargs["model_kwargs"] == {"include_reasoning": False}
     assert created_kwargs["reasoning_effort"] == "low"
 
 
@@ -556,7 +556,7 @@ async def test_response_generator_builds_project_override_llm():
     assert created_kwargs[0]["model"] == "openai/gpt-oss-20b"
     assert created_kwargs[0]["model_kwargs"] == {
         "response_format": {"type": "json_object"},
-        "reasoning_format": "hidden",
+        "include_reasoning": False,
     }
     assert created_kwargs[0]["reasoning_effort"] == "low"
     base_llm.ainvoke.assert_not_called()
