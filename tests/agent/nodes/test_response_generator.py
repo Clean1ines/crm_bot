@@ -110,6 +110,7 @@ def test_resolve_response_model_name_prefers_project_fallback():
 
     assert model == "openai/gpt-oss-20b"
 
+
 @pytest.mark.parametrize(
     "retired_model",
     (
