@@ -44,7 +44,7 @@ class GroqTextCompletionClient(TextCompletionPort):
         reasoning_effort: str | None = None,
     ) -> str:
         del target_language
-        model = model_name or settings.GROQ_MODEL
+        model = _resolve_groq_completion_model(model_name)
         if llm is not None:
             response = await llm.ainvoke([("human", prompt)])
             return (response.content or "").strip()
