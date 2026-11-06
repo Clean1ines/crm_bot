@@ -45,16 +45,16 @@ def _route(
     )
 
 
-def test_default_catalog_primary_is_qwen() -> None:
+def test_default_catalog_primary_is_gpt_oss_120b() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert catalog.primary_model_ref() == "qwen/qwen3.6-27b"
+    assert catalog.primary_model_ref() == "openai/gpt-oss-120b"
 
 
-def test_default_catalog_automatic_fallback_refs_are_ordered() -> None:
+def test_default_catalog_has_no_automatic_model_fallback() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert catalog.automatic_fallback_model_refs() == ("openai/gpt-oss-120b",)
+    assert catalog.automatic_fallback_model_refs() == ()
 
 
 def test_default_catalog_degraded_user_choice_model() -> None:
@@ -69,8 +69,8 @@ def test_route_for_model_ref_returns_role_and_order() -> None:
     route = catalog.route_for_model_ref("openai/gpt-oss-120b")
 
     assert route is not None
-    assert route.role is LlmModelRouteRole.AUTOMATIC_FALLBACK
-    assert route.order == 1
+    assert route.role is LlmModelRouteRole.PRIMARY
+    assert route.order == 0
 
 
 def test_model_route_requires_capacity_limits() -> None:
@@ -116,20 +116,20 @@ def test_capacity_limits_for_model_ref_rejects_unknown_model() -> None:
         catalog.capacity_limits_for_model_ref("unknown/model")
 
 
-def test_larger_output_fallback_returns_only_larger_output_models_by_order() -> None:
+def test_larger_output_fallback_is_empty_without_automatic_fallbacks() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
     assert catalog.automatic_fallback_model_refs_with_larger_output_limit(
-        "qwen/qwen3.6-27b",
-    ) == ("openai/gpt-oss-120b",)
+        "openai/gpt-oss-120b",
+    ) == ()
 
 
-def test_larger_input_fallback_returns_only_larger_input_models_by_order() -> None:
+def test_larger_input_fallback_is_empty_without_automatic_fallbacks() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
     assert catalog.automatic_fallback_model_refs_with_larger_input_limit(
-        "qwen/qwen3.6-27b",
-    ) == ("openai/gpt-oss-120b",)
+        "openai/gpt-oss-120b",
+    ) == ()
 
 
 def test_rejects_duplicate_model_ref() -> None:
@@ -214,21 +214,24 @@ def test_rejects_duplicate_order() -> None:
         )
 
 
-def test_qwen_primary_route_disables_reasoning() -> None:
+def test_gpt_oss_primary_route_uses_low_reasoning() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    settings = catalog.execution_settings_for_model_ref("qwen/qwen3.6-27b")
+    settings = catalog.execution_settings_for_model_ref("openai/gpt-oss-120b")
 
-    assert settings.reasoning_enabled is False
-    assert settings.reasoning_effort is None
+    assert settings.reasoning_enabled is True
+    assert settings.reasoning_effort == "low"
 
 
-def test_qwen_execution_settings_provider_options_disable_reasoning() -> None:
+def test_gpt_oss_execution_settings_send_low_reasoning_effort() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    settings = catalog.execution_settings_for_model_ref("qwen/qwen3.6-27b")
+    settings = catalog.execution_settings_for_model_ref("openai/gpt-oss-120b")
 
-    assert settings.to_provider_options() == {"reasoning_enabled": False}
+    assert settings.to_provider_options() == {
+        "reasoning_enabled": True,
+        "reasoning_effort": "low",
+    }
 
 
 def test_reasoning_effort_is_rejected_when_reasoning_disabled() -> None:
@@ -248,7 +251,8 @@ def test_execution_settings_for_model_ref_returns_known_model_settings() -> None
     settings = catalog.execution_settings_for_model_ref("openai/gpt-oss-120b")
 
     assert isinstance(settings, LlmModelExecutionSettings)
-    assert settings.reasoning_enabled is False
+    assert settings.reasoning_enabled is True
+    assert settings.reasoning_effort == "low"
 
 
 def test_execution_settings_for_model_ref_rejects_unknown_model() -> None:
@@ -264,7 +268,8 @@ def test_every_default_catalog_route_has_explicit_execution_settings() -> None:
     for route in catalog.routes:
         assert isinstance(route.execution_settings, LlmModelExecutionSettings)
         assert route.execution_settings.to_provider_options() == {
-            "reasoning_enabled": False,
+            "reasoning_enabled": True,
+            "reasoning_effort": "low",
         }
 
 
@@ -289,10 +294,8 @@ def test_enabled_reasoning_provider_options_include_effort_when_present() -> Non
     }
 
 
-def test_daily_limit_fallback_chain_uses_automatic_fallback() -> None:
+def test_daily_limit_fallback_chain_does_not_select_degraded_model() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert catalog.automatic_fallback_model_refs() == ("openai/gpt-oss-120b",)
-    assert catalog.automatic_fallback_model_refs_for_daily_limit() == (
-        "openai/gpt-oss-120b",
-    )
+    assert catalog.automatic_fallback_model_refs() == ()
+    assert catalog.automatic_fallback_model_refs_for_daily_limit() == ()
