@@ -168,7 +168,7 @@ async def test_intent_extractor_internal_groq_client_requests_json_object_mode(
     assert captured_kwargs["reasoning_effort"] == "low"
     assert captured_kwargs["model_kwargs"] == {
         "response_format": {"type": "json_object"},
-        "reasoning_format": "hidden",
+        "include_reasoning": False,
     }
     assert result["intent"] == "sales"
     assert result["current_subject"] == "документы"
