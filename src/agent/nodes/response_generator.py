@@ -48,7 +48,6 @@ from src.domain.runtime.state_contracts import (
     RuntimeHistoryMessage,
     RuntimeStateInput,
 )
-from src.infrastructure.config.settings import settings
 from src.infrastructure.llm.completion_client import (
     ChatGroqClient,
     GroqTextCompletionClient,
