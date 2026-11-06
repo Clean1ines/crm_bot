@@ -79,7 +79,7 @@ def build_groq_free_plan_model_profiles() -> tuple[ModelProfile, ...]:
             ),
             model_char_to_token_multiplier=Decimal("3.7"),
             supports_json_object=True,
-            supports_json_schema=False,
+            supports_json_schema=True,
         ),
         ModelProfile(
             provider_id=GROQ_PROVIDER_ID,
