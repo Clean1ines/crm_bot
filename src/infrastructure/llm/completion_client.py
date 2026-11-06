@@ -87,6 +87,23 @@ class GroqTextCompletionClient(TextCompletionPort):
         return (response.content or "").strip()
 
 
+DEFAULT_GROQ_COMPLETION_MODEL = "openai/gpt-oss-120b"
+DEGRADED_GROQ_COMPLETION_MODEL = "openai/gpt-oss-20b"
+_ALLOWED_GROQ_COMPLETION_MODELS = frozenset(
+    {DEFAULT_GROQ_COMPLETION_MODEL, DEGRADED_GROQ_COMPLETION_MODEL}
+)
+
+
+def _resolve_groq_completion_model(model_name: str | None) -> str:
+    if model_name is None:
+        return DEFAULT_GROQ_COMPLETION_MODEL
+
+    normalized = model_name.strip()
+    if normalized in _ALLOWED_GROQ_COMPLETION_MODELS:
+        return normalized
+    return DEFAULT_GROQ_COMPLETION_MODEL
+
+
 def _primary_groq_api_key() -> str:
     value = str(settings.GROQ_API_KEY).strip()
     if not value:
