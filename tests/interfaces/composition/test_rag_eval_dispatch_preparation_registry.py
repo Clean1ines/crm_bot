@@ -10,7 +10,6 @@ from src.contexts.knowledge_workbench.application.sagas.plan_claim_builder_secti
     CLAIM_BUILDER_SECTION_WORK_KIND,
 )
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
-    WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,
     WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF,
     make_adjudication_dispatch_preparation_builder,
     make_question_generation_dispatch_preparation_builder,
@@ -78,12 +77,9 @@ def test_rag_eval_route_catalog_has_only_required_routes() -> None:
     catalog = workbench_rag_eval_route_catalog()
 
     assert catalog.primary_model_ref() == WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF
-    assert catalog.automatic_fallback_model_refs() == (
-        WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,
-    )
+    assert catalog.automatic_fallback_model_refs() == ()
     assert tuple(route.model_ref for route in catalog.routes) == (
         "openai/gpt-oss-120b",
-        "openai/gpt-oss-20b",
     )
     with pytest.raises(ValueError, match="no DEGRADED_USER_CHOICE"):
         catalog.degraded_user_choice_model_ref()
