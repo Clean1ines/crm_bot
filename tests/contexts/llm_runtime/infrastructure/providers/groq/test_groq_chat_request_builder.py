@@ -42,7 +42,7 @@ def _provider_id() -> ProviderId:
     return ProviderId("groq")
 
 
-def _route(model: str = "qwen/qwen3.6-27b") -> LlmRoute:
+def _route(model: str = "openai/gpt-oss-120b") -> LlmRoute:
     return LlmRoute(
         provider_id=_provider_id(),
         model_id=ModelId(model),
@@ -87,11 +87,11 @@ def _custom_profile(
 
 
 def test_builder_creates_chat_completion_payload_with_json_mode() -> None:
-    qwen_profile = build_groq_free_plan_model_profiles()[0]
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[0]
 
     request = GroqChatRequestBuilder().build(
         route=_route(),
-        model_profile=qwen_profile,
+        model_profile=gpt_oss_profile,
         messages=(
             GroqChatMessage(
                 role=GroqChatMessageRole.SYSTEM, content="You return JSON."
@@ -100,7 +100,9 @@ def test_builder_creates_chat_completion_payload_with_json_mode() -> None:
         ),
     )
 
-    assert request.payload["model"] == "qwen/qwen3.6-27b"
+    assert request.payload["model"] == "openai/gpt-oss-120b"
+    assert request.payload["reasoning_format"] == "hidden"
+    assert request.payload["reasoning_effort"] == "low"
     assert request.payload["messages"] == [
         {"role": "system", "content": "You return JSON."},
         {"role": "user", "content": "Return JSON."},
@@ -110,47 +112,36 @@ def test_builder_creates_chat_completion_payload_with_json_mode() -> None:
     assert request.payload["temperature"] == 0.0
 
 
-def test_qwen_default_reasoning_effort_is_none_to_preserve_output_budget() -> None:
-    qwen_profile = build_groq_free_plan_model_profiles()[0]
+def test_disabled_execution_settings_do_not_send_unsupported_none_effort() -> None:
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[0]
 
     request = GroqChatRequestBuilder().build(
         route=_route(),
-        model_profile=qwen_profile,
-        messages=(_message(),),
-    )
-
-    assert request.payload["reasoning_effort"] == "none"
-
-
-def test_disabled_execution_settings_send_none_reasoning_effort() -> None:
-    qwen_profile = build_groq_free_plan_model_profiles()[0]
-
-    request = GroqChatRequestBuilder().build(
-        route=_route(),
-        model_profile=qwen_profile,
+        model_profile=gpt_oss_profile,
         messages=(_message(),),
         options=GroqChatRequestOptions(
             execution_settings=LlmModelExecutionSettings(reasoning_enabled=False),
         ),
     )
 
-    assert request.payload["reasoning_effort"] == "none"
+    assert "reasoning_effort" not in request.payload
+    assert request.payload["reasoning_format"] == "hidden"
 
 
-def test_qwen_default_catalog_settings_send_none_reasoning_effort() -> None:
-    qwen_profile = build_groq_free_plan_model_profiles()[0]
+def test_default_catalog_settings_send_low_reasoning_effort() -> None:
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[0]
     settings = default_groq_llm_model_route_catalog().execution_settings_for_model_ref(
-        "qwen/qwen3.6-27b",
+        "openai/gpt-oss-120b",
     )
 
     request = GroqChatRequestBuilder().build(
         route=_route(),
-        model_profile=qwen_profile,
+        model_profile=gpt_oss_profile,
         messages=(_message(),),
         options=GroqChatRequestOptions(execution_settings=settings),
     )
 
-    assert request.payload["reasoning_effort"] == "none"
+    assert request.payload["reasoning_effort"] == "low"
 
 
 def test_execution_settings_enabled_uses_explicit_reasoning_effort() -> None:
@@ -200,28 +191,28 @@ def test_options_reject_invalid_execution_settings_type() -> None:
 
 
 def test_explicit_reasoning_effort_must_be_supported_by_model() -> None:
-    qwen_profile = build_groq_free_plan_model_profiles()[0]
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[0]
 
     allowed = GroqChatRequestBuilder().build(
         route=_route(),
-        model_profile=qwen_profile,
+        model_profile=gpt_oss_profile,
         messages=(_message(),),
-        options=GroqChatRequestOptions(reasoning_effort=ReasoningEffort.DEFAULT),
+        options=GroqChatRequestOptions(reasoning_effort=ReasoningEffort.LOW),
     )
 
-    assert allowed.payload["reasoning_effort"] == "default"
+    assert allowed.payload["reasoning_effort"] == "low"
 
     with pytest.raises(ValueError):
         GroqChatRequestBuilder().build(
             route=_route(),
-            model_profile=qwen_profile,
+            model_profile=gpt_oss_profile,
             messages=(_message(),),
-            options=GroqChatRequestOptions(reasoning_effort=ReasoningEffort.HIGH),
+            options=GroqChatRequestOptions(reasoning_effort=ReasoningEffort.NONE),
         )
 
 
 def test_default_reasoning_effort_is_sent_for_gpt_oss_models() -> None:
-    gpt_oss_profile = build_groq_free_plan_model_profiles()[1]
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[0]
 
     request = GroqChatRequestBuilder().build(
         route=_route(model="openai/gpt-oss-120b"),
@@ -229,7 +220,7 @@ def test_default_reasoning_effort_is_sent_for_gpt_oss_models() -> None:
         messages=(_message(),),
     )
 
-    assert request.payload["reasoning_effort"] == "medium"
+    assert request.payload["reasoning_effort"] == "low"
 
 
 def test_builder_validates_route_matches_model_profile() -> None:
@@ -244,14 +235,14 @@ def test_builder_validates_route_matches_model_profile() -> None:
 
 
 def test_builder_rejects_max_completion_tokens_above_model_limit() -> None:
-    qwen_profile = build_groq_free_plan_model_profiles()[0]
+    gpt_oss_profile = build_groq_free_plan_model_profiles()[0]
 
     with pytest.raises(ValueError):
         GroqChatRequestBuilder().build(
             route=_route(),
-            model_profile=qwen_profile,
+            model_profile=gpt_oss_profile,
             messages=(_message(),),
-            options=GroqChatRequestOptions(max_completion_tokens=40_961),
+            options=GroqChatRequestOptions(max_completion_tokens=65_537),
         )
 
 
