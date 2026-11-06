@@ -290,7 +290,7 @@ def create_intent_extractor_node(
                         api_key=api_key,
                         model_kwargs={
                             "response_format": {"type": "json_object"},
-                            "reasoning_format": "hidden",
+                            "include_reasoning": False,
                         },
                     )
 
