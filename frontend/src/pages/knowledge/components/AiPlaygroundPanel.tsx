@@ -60,7 +60,6 @@ export const AiPlaygroundPanel: React.FC<AiPlaygroundPanelProps> = ({
         model: selectedModel.model ?? selectedModel.id,
         response_format: expectJson ? "json" : "text",
         reasoning_effort: selectedModel.reasoning_effort,
-        reasoning_format: selectedModel.reasoning_format,
       });
 
       return data;
