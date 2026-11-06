@@ -70,10 +70,10 @@ class GroqProviderResponseMapper:
             raw_text = self._extract_chat_content(response.body)
             if finish_reason == "length":
                 provider_result: LlmProviderResult = LlmProviderFailure(
-                    error_kind=LlmErrorKind.OUTPUT_TOO_LARGE,
+                    error_kind=LlmErrorKind.INVALID_OUTPUT,
                     wait_until=quota_snapshot.unavailable_until,
                 )
-                matched_rule = "output_length_finish_reason"
+                matched_rule = "truncated_output_length"
             elif not raw_text.strip():
                 provider_result = LlmProviderFailure(
                     error_kind=LlmErrorKind.INVALID_OUTPUT,
