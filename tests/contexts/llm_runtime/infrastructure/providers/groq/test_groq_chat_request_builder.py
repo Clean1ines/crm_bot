@@ -101,7 +101,7 @@ def test_builder_creates_chat_completion_payload_with_json_mode() -> None:
     )
 
     assert request.payload["model"] == "openai/gpt-oss-120b"
-    assert request.payload["reasoning_format"] == "hidden"
+    assert request.payload["include_reasoning"] is False
     assert request.payload["reasoning_effort"] == "low"
     assert request.payload["messages"] == [
         {"role": "system", "content": "You return JSON."},
@@ -125,7 +125,7 @@ def test_disabled_execution_settings_do_not_send_unsupported_none_effort() -> No
     )
 
     assert "reasoning_effort" not in request.payload
-    assert request.payload["reasoning_format"] == "hidden"
+    assert request.payload["include_reasoning"] is False
 
 
 def test_default_catalog_settings_send_low_reasoning_effort() -> None:
