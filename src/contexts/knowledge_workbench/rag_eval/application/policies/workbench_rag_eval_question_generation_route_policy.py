@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.contexts.knowledge_workbench.rag_eval.application.workflows.workbench_rag_eval_dispatch_preparation import (
-    WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,
     WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF,
     workbench_rag_eval_route_catalog,
 )
@@ -78,12 +77,13 @@ class WorkbenchRagEvalQuestionGenerationRoutePolicy:
             self.route_catalog.primary_model_ref()
             != WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF
         ):
-            raise ValueError("Workbench RAG Eval primary model must be qwen/qwen3.6-27b")
-
-        automatic_fallbacks = self.route_catalog.automatic_fallback_model_refs()
-        if automatic_fallbacks != (WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,):
             raise ValueError(
-                "Workbench RAG Eval automatic fallback must be openai/gpt-oss-120b"
+                "Workbench RAG Eval primary model must be openai/gpt-oss-120b"
+            )
+
+        if self.route_catalog.automatic_fallback_model_refs():
+            raise ValueError(
+                "Workbench RAG Eval must not configure automatic fallback routes"
             )
 
         if any(
@@ -102,15 +102,8 @@ class WorkbenchRagEvalQuestionGenerationRoutePolicy:
     def primary_model_ref(self) -> str:
         return WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF
 
-    @property
-    def automatic_fallback_model_ref(self) -> str:
-        return WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF
-
     def automatic_model_refs(self) -> tuple[str, ...]:
-        return (
-            self.primary_model_ref,
-            self.automatic_fallback_model_ref,
-        )
+        return (self.primary_model_ref,)
 
     def candidate_chain(
         self,
