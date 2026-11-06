@@ -213,24 +213,17 @@ class LlmModelRouteCatalog:
 
 
 def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
-    reasoning_disabled = LlmModelExecutionSettings(reasoning_enabled=False)
+    reasoning_low = LlmModelExecutionSettings(
+        reasoning_enabled=True,
+        reasoning_effort="low",
+    )
     return LlmModelRouteCatalog(
         routes=(
             LlmModelRoute(
-                model_ref="qwen/qwen3.6-27b",
+                model_ref="openai/gpt-oss-120b",
                 role=LlmModelRouteRole.PRIMARY,
                 order=0,
-                execution_settings=reasoning_disabled,
-                capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=8_000,
-                    output_token_limit=8192,
-                ),
-            ),
-            LlmModelRoute(
-                model_ref="openai/gpt-oss-120b",
-                role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
-                order=1,
-                execution_settings=reasoning_disabled,
+                execution_settings=reasoning_low,
                 capacity_limits=LlmModelCapacityLimits(
                     input_token_limit=131_072,
                     output_token_limit=65_536,
@@ -239,8 +232,8 @@ def default_groq_llm_model_route_catalog() -> LlmModelRouteCatalog:
             LlmModelRoute(
                 model_ref="openai/gpt-oss-20b",
                 role=LlmModelRouteRole.DEGRADED_USER_CHOICE,
-                order=2,
-                execution_settings=reasoning_disabled,
+                order=1,
+                execution_settings=reasoning_low,
                 capacity_limits=LlmModelCapacityLimits(
                     input_token_limit=131_072,
                     output_token_limit=65_536,
