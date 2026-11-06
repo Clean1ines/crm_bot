@@ -96,7 +96,7 @@ def _decision() -> DraftClaimCompactionDegradedFallbackDecision:
                 "account_capacities": ({"account_ref": "stale"},),
             },
         },
-        degraded_model_ref="qwen/qwen3.6-27b",
+        degraded_model_ref="openai/gpt-oss-20b",
     )
 
 
@@ -116,16 +116,16 @@ async def test_confirmation_appends_degraded_prepare_command_and_audit_event() -
         )
     )
 
-    assert result.degraded_model_ref == "qwen/qwen3.6-27b"
+    assert result.degraded_model_ref == "openai/gpt-oss-20b"
     assert len(workflow_uow.command_log.commands) == 1
     appended = workflow_uow.command_log.commands[0]
     assert appended.command_type == (
         KnowledgeExtractionCanonicalCommandType.PREPARE_DRAFT_CLAIM_COMPACTION_DISPATCH_BATCH.value
     )
-    assert appended.payload["active_model_ref"] == "qwen/qwen3.6-27b"
+    assert appended.payload["active_model_ref"] == "openai/gpt-oss-20b"
     preparation = appended.payload["llm_dispatch_preparation"]
     assert isinstance(preparation, dict)
-    assert preparation["active_model_ref"] == "qwen/qwen3.6-27b"
+    assert preparation["active_model_ref"] == "openai/gpt-oss-20b"
     assert "account_capacities" not in preparation
     assert appended.payload["user_confirmed_degraded_fallback"] is True
     assert len(workflow_uow.outbox.events) == 1
@@ -153,7 +153,7 @@ async def test_graph_confirmation_schedules_degraded_work_before_prepare() -> No
     scheduler = FakeDegradedFallbackScheduler()
     decision = DraftClaimCompactionDegradedFallbackDecision(
         source_command_id=WorkflowCommandId("workflow-command:apply"),
-        degraded_model_ref="qwen/qwen3.6-27b",
+        degraded_model_ref="openai/gpt-oss-20b",
         group_ref="group-1",
         node_refs=("compacted-a", "compacted-b"),
         resume_work_type="compacted_vs_compacted",
@@ -175,7 +175,7 @@ async def test_graph_confirmation_schedules_degraded_work_before_prepare() -> No
     )
 
     assert scheduler.calls == [decision]
-    assert result.degraded_model_ref == "qwen/qwen3.6-27b"
+    assert result.degraded_model_ref == "openai/gpt-oss-20b"
     assert (
         workflow_uow.command_log.commands[0].payload["scheduled_work_item_count"] == 1
     )
