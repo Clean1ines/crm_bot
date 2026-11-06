@@ -36,7 +36,7 @@ def test_claim_builder_and_compaction_model_contracts() -> None:
     assert CLAIM_BUILDER_ACTIVE_MODEL_REF == "openai/gpt-oss-120b"
     assert catalog.automatic_fallback_model_refs() == ()
     assert DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF == "openai/gpt-oss-120b"
-    assert DRAFT_CLAIM_COMPACTION_DEGRADED_MODEL_REF == "qwen/qwen3.6-27b"
+    assert DRAFT_CLAIM_COMPACTION_DEGRADED_MODEL_REF == "openai/gpt-oss-20b"
 
 
 def test_agent_and_playground_default_contracts() -> None:
