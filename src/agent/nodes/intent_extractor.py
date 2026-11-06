@@ -288,7 +288,10 @@ def create_intent_extractor_node(
                         max_tokens=1024,
                         reasoning_effort="low",
                         api_key=api_key,
-                        model_kwargs={"response_format": {"type": "json_object"}},
+                        model_kwargs={
+                            "response_format": {"type": "json_object"},
+                            "reasoning_format": "hidden",
+                        },
                     )
 
                 response = await _ainvoke_chat_once(
