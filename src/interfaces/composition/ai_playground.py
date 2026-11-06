@@ -91,9 +91,9 @@ class GroqAiPlaygroundAdapter:
             ),
             options=self._request_options(request),
         )
+        # GPT-OSS rejects reasoning_format. The request builder already sets
+        # include_reasoning=False, so the legacy compatibility field is ignored.
         payload = dict(chat_request.payload)
-        if request.reasoning_format is not None:
-            payload["reasoning_format"] = request.reasoning_format
 
         transport_response = await asyncio.to_thread(
             self.provider.transport.post_chat_completions,
