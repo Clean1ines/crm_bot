@@ -25,31 +25,23 @@ QUESTION_GENERATION_PROFILE_ID = "workbench_rag_eval.question_generation.real_du
 ADJUDICATION_PROFILE_ID = "workbench_rag_eval.adjudication.real_due_batch"
 
 WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF = "openai/gpt-oss-120b"
-WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF = "openai/gpt-oss-20b"
 
 
 def workbench_rag_eval_route_catalog() -> LlmModelRouteCatalog:
-    reasoning_disabled = LlmModelExecutionSettings(reasoning_enabled=False)
+    reasoning_low = LlmModelExecutionSettings(
+        reasoning_enabled=True,
+        reasoning_effort="low",
+    )
     return LlmModelRouteCatalog(
         routes=(
             LlmModelRoute(
                 model_ref=WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF,
                 role=LlmModelRouteRole.PRIMARY,
                 order=0,
-                execution_settings=reasoning_disabled,
+                execution_settings=reasoning_low,
                 capacity_limits=LlmModelCapacityLimits(
                     input_token_limit=8_000,
                     output_token_limit=8_192,
-                ),
-            ),
-            LlmModelRoute(
-                model_ref=WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,
-                role=LlmModelRouteRole.AUTOMATIC_FALLBACK,
-                order=1,
-                execution_settings=reasoning_disabled,
-                capacity_limits=LlmModelCapacityLimits(
-                    input_token_limit=131_072,
-                    output_token_limit=65_536,
                 ),
             ),
         ),
@@ -101,10 +93,7 @@ class WorkbenchRagEvalDispatchPreparationBuilder:
         _require_non_empty_text(active_model_ref, field_name="active_model_ref")
         if not provider_account_refs:
             raise ValueError("provider_account_refs must be non-empty")
-        if active_model_ref not in {
-            WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF,
-            WORKBENCH_RAG_EVAL_AUTOMATIC_FALLBACK_MODEL_REF,
-        }:
+        if active_model_ref != WORKBENCH_RAG_EVAL_PRIMARY_MODEL_REF:
             raise ValueError(
                 "RAG Eval dispatch attempted to use forbidden model route: "
                 f"{active_model_ref}"
