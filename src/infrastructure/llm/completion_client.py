@@ -56,7 +56,7 @@ class GroqTextCompletionClient(TextCompletionPort):
                 temperature=temperature,
                 max_tokens=max_tokens,
                 api_key=_primary_groq_api_key(),
-                model_kwargs={"reasoning_format": "hidden"},
+                model_kwargs={"include_reasoning": False},
                 reasoning_effort="low",
             )
         elif reasoning_effort is None:
@@ -67,7 +67,7 @@ class GroqTextCompletionClient(TextCompletionPort):
                 api_key=_primary_groq_api_key(),
                 model_kwargs={
                     "response_format": response_format,
-                    "reasoning_format": "hidden",
+                    "include_reasoning": False,
                 },
                 reasoning_effort="low",
             )
@@ -79,7 +79,7 @@ class GroqTextCompletionClient(TextCompletionPort):
                 api_key=_primary_groq_api_key(),
                 model_kwargs={
                     "response_format": response_format,
-                    "reasoning_format": "hidden",
+                    "include_reasoning": False,
                 },
                 reasoning_effort=reasoning_effort,
             )
