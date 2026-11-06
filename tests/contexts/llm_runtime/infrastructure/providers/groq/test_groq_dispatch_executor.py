@@ -163,7 +163,7 @@ async def test_builds_request_from_dispatch_payload_and_honors_gpt_oss_low_reaso
         },
     ]
     assert request_payload["reasoning_effort"] == "low"
-    assert request_payload["reasoning_format"] == "hidden"
+    assert request_payload["include_reasoning"] is False
     assert "max_completion_tokens" not in request_payload
     assert "max_tokens" not in request_payload
 
@@ -207,7 +207,7 @@ async def test_claim_builder_budget_is_not_sent_as_provider_completion_cap() -> 
     assert "max_completion_tokens" not in request_payload
     assert "max_tokens" not in request_payload
     assert request_payload["reasoning_effort"] == "low"
-    assert request_payload["reasoning_format"] == "hidden"
+    assert request_payload["include_reasoning"] is False
 
 
 @pytest.mark.asyncio
