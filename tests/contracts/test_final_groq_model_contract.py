@@ -24,8 +24,8 @@ SHUTDOWN_MODEL_REFS = {
 def test_general_groq_route_catalog_contract() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert catalog.primary_model_ref() == "qwen/qwen3.6-27b"
-    assert catalog.automatic_fallback_model_refs() == ("openai/gpt-oss-120b",)
+    assert catalog.primary_model_ref() == "openai/gpt-oss-120b"
+    assert catalog.automatic_fallback_model_refs() == ()
     assert catalog.degraded_user_choice_model_ref() == "openai/gpt-oss-20b"
     assert not {route.model_ref for route in catalog.routes} & SHUTDOWN_MODEL_REFS
 
@@ -33,21 +33,21 @@ def test_general_groq_route_catalog_contract() -> None:
 def test_claim_builder_and_compaction_model_contracts() -> None:
     catalog = default_groq_llm_model_route_catalog()
 
-    assert CLAIM_BUILDER_ACTIVE_MODEL_REF == "qwen/qwen3.6-27b"
-    assert catalog.automatic_fallback_model_refs() == ("openai/gpt-oss-120b",)
+    assert CLAIM_BUILDER_ACTIVE_MODEL_REF == "openai/gpt-oss-120b"
+    assert catalog.automatic_fallback_model_refs() == ()
     assert DRAFT_CLAIM_COMPACTION_ACTIVE_MODEL_REF == "openai/gpt-oss-120b"
     assert DRAFT_CLAIM_COMPACTION_DEGRADED_MODEL_REF == "qwen/qwen3.6-27b"
 
 
 def test_agent_and_playground_default_contracts() -> None:
-    assert Settings.model_fields["GROQ_MODEL"].default == "qwen/qwen3.6-27b"
-    assert Settings.model_fields["DEFAULT_MODEL"].default == "openai/gpt-oss-20b"
+    assert Settings.model_fields["GROQ_MODEL"].default == "openai/gpt-oss-120b"
+    assert Settings.model_fields["DEFAULT_MODEL"].default == "openai/gpt-oss-120b"
     assert (
         Settings.model_fields["GROQ_KNOWLEDGE_PREPROCESSING_MODEL"].default
-        == "openai/gpt-oss-20b"
+        == "openai/gpt-oss-120b"
     )
     assert create_intent_extractor_node.__defaults__ == (
         None,
         "openai/gpt-oss-120b",
     )
-    assert AI_PLAYGROUND_DEFAULT_MODEL == "qwen/qwen3.6-27b"
+    assert AI_PLAYGROUND_DEFAULT_MODEL == "openai/gpt-oss-120b"
