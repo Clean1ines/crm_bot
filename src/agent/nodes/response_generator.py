@@ -1095,7 +1095,9 @@ def create_response_generator_node(
         Async LangGraph node that emits a response_text state patch.
     """
 
-    base_model = model_name or settings.GROQ_MODEL
+    base_model = _normalize_response_model_name(
+        model_name or settings.GROQ_MODEL
+    )
 
     async def _response_generator_node_impl(state: AgentState) -> dict[str, object]:
         context = ResponseGenerationContext.from_state(cast(RuntimeStateInput, state))
