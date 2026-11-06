@@ -302,27 +302,25 @@ def test_larger_output_strategy_without_larger_output_fallback_raises() -> None:
         )
 
 
-def test_daily_limit_fallback_resolves_to_automatic_fallback() -> None:
-    result = ResolveLlmDispatchPreparationStrategy().execute(
-        ResolveLlmDispatchPreparationStrategyCommand(
-            current_active_model_ref="qwen/qwen3.6-27b",
-            strategy="DAILY_LIMIT_FALLBACK_MODEL_REQUIRED",
-            route_catalog=default_groq_llm_model_route_catalog(),
+def test_legacy_daily_limit_fallback_does_not_select_degraded_model_automatically() -> None:
+    with pytest.raises(ValueError, match="no daily-limit fallback"):
+        ResolveLlmDispatchPreparationStrategy().execute(
+            ResolveLlmDispatchPreparationStrategyCommand(
+                current_active_model_ref="openai/gpt-oss-120b",
+                strategy="DAILY_LIMIT_FALLBACK_MODEL_REQUIRED",
+                route_catalog=default_groq_llm_model_route_catalog(),
+            )
         )
-    )
-
-    assert result.active_model_ref == "openai/gpt-oss-120b"
-    assert result.strategy_applied == "DAILY_LIMIT_FALLBACK_MODEL_REQUIRED"
 
 
-def test_retry_plan_daily_limit_fallback_resolves_to_automatic_fallback() -> None:
+def test_user_selected_daily_limit_fallback_resolves_to_degraded_model() -> None:
     result = ResolveLlmDispatchPreparationStrategy().execute(
         ResolveLlmDispatchPreparationStrategyCommand(
-            current_active_model_ref="qwen/qwen3.6-27b",
+            current_active_model_ref="openai/gpt-oss-120b",
             route_catalog=default_groq_llm_model_route_catalog(),
             retry_plan=WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE,
         )
     )
 
-    assert result.active_model_ref == "openai/gpt-oss-120b"
+    assert result.active_model_ref == "openai/gpt-oss-20b"
     assert result.strategy_applied == WorkItemRetryPlan.RETRY_DAILY_FALLBACK_ROUTE.value
