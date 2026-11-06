@@ -90,7 +90,7 @@ async def test_tpm_limit_rejected_before_llm_call() -> None:
             AiPlaygroundRunRequest(
                 system_prompt="x" * 20000,
                 user_input="x" * 20000,
-                model="qwen/qwen3.6-27b",
+                model="openai/gpt-oss-120b",
             )
         )
 
@@ -151,4 +151,4 @@ async def test_llm_called_once_with_expected_prompt_input_model() -> None:
     assert len(llm.calls) == 1
     assert llm.calls[0].system_prompt == "system"
     assert llm.calls[0].user_input == "input"
-    assert llm.calls[0].model == "qwen/qwen3.6-27b"
+    assert llm.calls[0].model == "openai/gpt-oss-120b"
