@@ -57,6 +57,7 @@ class GroqTextCompletionClient(TextCompletionPort):
                 max_tokens=max_tokens,
                 api_key=_primary_groq_api_key(),
                 model_kwargs={"reasoning_format": "hidden"},
+                reasoning_effort="low",
             )
         elif reasoning_effort is None:
             client = chat_groq_factory(
@@ -68,6 +69,7 @@ class GroqTextCompletionClient(TextCompletionPort):
                     "response_format": response_format,
                     "reasoning_format": "hidden",
                 },
+                reasoning_effort="low",
             )
         else:
             client = chat_groq_factory(
