@@ -81,9 +81,9 @@ def _dispatch_payload(
                 "budget_contract_version": "v3",
                 "estimator": "test_budget",
                 "provider": "groq",
-                "model_ref": "qwen/qwen3.6-27b",
+                "model_ref": "openai/gpt-oss-120b",
                 "model_tpm_limit": 8000,
-                "model_char_to_token_multiplier": "2.8",
+                "model_char_to_token_multiplier": "3.7",
                 "phase": "test",
                 "operation": "dispatch",
                 "prompt_tokens": 500,
@@ -97,12 +97,12 @@ def _dispatch_payload(
         "llm_allocation": {
             "provider": "groq",
             "account_ref": "groq_org_primary",
-            "model_ref": "qwen/qwen3.6-27b",
+            "model_ref": "openai/gpt-oss-120b",
             "slot_index": 0,
         },
         "llm_execution_settings": execution_settings
         if execution_settings is not None
-        else {"reasoning_enabled": False},
+        else {"reasoning_enabled": True, "reasoning_effort": "low"},
     }
 
 
@@ -134,7 +134,7 @@ def _event(logs: list[dict[str, object]], name: str) -> dict[str, object]:
 
 
 @pytest.mark.asyncio
-async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_disabled() -> (
+async def test_builds_request_from_dispatch_payload_and_honors_gpt_oss_low_reasoning() -> (
     None
 ):
     transport = FakeGroqTransport(response=_success_response(raw_text='{"done": true}'))
@@ -145,7 +145,7 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
     assert result.output_payload == {
         "raw_text": '{"done": true}',
         "provider": "groq",
-        "model_ref": "qwen/qwen3.6-27b",
+        "model_ref": "openai/gpt-oss-120b",
         "account_ref": "groq_org_primary",
         "usage": {
             "input_tokens": 7,
@@ -155,14 +155,15 @@ async def test_builds_request_from_dispatch_payload_and_honors_qwen_reasoning_di
     }
     assert len(transport.payloads) == 1
     request_payload = transport.payloads[0]
-    assert request_payload["model"] == "qwen/qwen3.6-27b"
+    assert request_payload["model"] == "openai/gpt-oss-120b"
     assert request_payload["messages"] == [
         {
             "role": "user",
             "content": "Extract claims",
         },
     ]
-    assert request_payload["reasoning_effort"] == "none"
+    assert request_payload["reasoning_effort"] == "low"
+    assert request_payload["reasoning_format"] == "hidden"
     assert "max_completion_tokens" not in request_payload
     assert "max_tokens" not in request_payload
 
@@ -181,9 +182,9 @@ async def test_claim_builder_budget_is_not_sent_as_provider_completion_cap() -> 
             "budget_contract_version": "v3",
             "estimator": "measured_prompt_3008_source_char_div_2.8",
             "provider": "groq",
-            "model_ref": "qwen/qwen3.6-27b",
+            "model_ref": "openai/gpt-oss-120b",
             "model_tpm_limit": 8000,
-            "model_char_to_token_multiplier": "2.8",
+            "model_char_to_token_multiplier": "3.7",
             "phase": "claim_builder_section_extraction",
             "operation": "section_extraction",
             "prompt_tokens": 3008,
@@ -205,7 +206,8 @@ async def test_claim_builder_budget_is_not_sent_as_provider_completion_cap() -> 
     request_payload = transport.payloads[0]
     assert "max_completion_tokens" not in request_payload
     assert "max_tokens" not in request_payload
-    assert request_payload["reasoning_effort"] == "none"
+    assert request_payload["reasoning_effort"] == "low"
+    assert request_payload["reasoning_format"] == "hidden"
 
 
 @pytest.mark.asyncio
