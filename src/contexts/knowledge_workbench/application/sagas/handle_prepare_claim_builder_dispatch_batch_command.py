@@ -57,7 +57,7 @@ from src.interfaces.composition.prepare_llm_dispatch_batch import (
 )
 
 
-CLAIM_BUILDER_ACTIVE_MODEL_REF = "qwen/qwen3.6-27b"
+CLAIM_BUILDER_ACTIVE_MODEL_REF = "openai/gpt-oss-120b"
 LOGGER = structlog.get_logger(__name__)
 
 
