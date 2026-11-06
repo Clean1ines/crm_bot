@@ -7,36 +7,12 @@ from pydantic import BaseModel, Field
 
 AI_PLAYGROUND_DEFAULT_MODEL = "openai/gpt-oss-120b"
 
-# User-provided Groq developer-plan limits. Values are input TPM limits used by
-# Playground preflight validation, not billing or exact tokenizer accounting.
+# Values are input TPM limits used by Playground preflight validation,
+# not billing or exact tokenizer accounting. Keep this allowlist aligned with
+# the models exposed by the Playground adapter and UI.
 AI_PLAYGROUND_MODEL_LIMITS: dict[str, dict[str, int]] = {
-    "canopylabs/orpheus-arabic-saudi": {
-        "rpm": 10,
-        "rpd": 100,
-        "tpm": 1200,
-        "tpd": 3600,
-    },
-    "canopylabs/orpheus-v1-english": {"rpm": 10, "rpd": 100, "tpm": 1200, "tpd": 3600},
-    "meta-llama/llama-prompt-guard-2-22m": {
-        "rpm": 30,
-        "rpd": 14400,
-        "tpm": 15000,
-        "tpd": 500000,
-    },
-    "meta-llama/llama-prompt-guard-2-86m": {
-        "rpm": 30,
-        "rpd": 14400,
-        "tpm": 15000,
-        "tpd": 500000,
-    },
     "openai/gpt-oss-120b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
     "openai/gpt-oss-20b": {"rpm": 30, "rpd": 1000, "tpm": 8000, "tpd": 200000},
-    "openai/gpt-oss-safeguard-20b": {
-        "rpm": 30,
-        "rpd": 1000,
-        "tpm": 8000,
-        "tpd": 200000,
-    },
 }
 
 
@@ -51,6 +27,7 @@ class AiPlaygroundRunRequest(BaseModel):
     model: str = Field(default=AI_PLAYGROUND_DEFAULT_MODEL)
     response_format: AiPlaygroundResponseFormat = "text"
     reasoning_effort: AiPlaygroundReasoningEffort | None = None
+    # Deprecated compatibility input. GPT-OSS requests never forward reasoning_format.
     reasoning_format: AiPlaygroundReasoningFormat | None = None
     max_completion_tokens: int | None = Field(default=None, ge=1)
 
