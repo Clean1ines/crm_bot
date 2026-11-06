@@ -114,7 +114,6 @@ class StructuredGenerationValidation:
     failure_reason: str | None = None
 
 
-QWEN_RESPONSE_MODEL = "qwen/qwen3.6-27b"
 DEFAULT_GROQ_RESPONSE_MODEL = "openai/gpt-oss-120b"
 RETIRED_GROQ_RESPONSE_MODELS = frozenset(
     {
@@ -165,7 +164,6 @@ async def _invoke_response_model(
         max_tokens=700,
         llm=client_llm,
         response_format=STRUCTURED_RESPONSE_FORMAT,
-        reasoning_effort="none" if selected_model == QWEN_RESPONSE_MODEL else None,
     )
 
 
