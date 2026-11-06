@@ -55,7 +55,7 @@ def _prepare_command() -> WorkflowCommand:
             "publication_id": None,
             "source_document_ref": None,
             "scheduled_work_item_count": 2,
-            "active_model_ref": "qwen/qwen3.6-27b",
+            "active_model_ref": "openai/gpt-oss-120b",
             "work_kind": (WORKBENCH_RAG_EVAL_QUESTION_GENERATION_WORK_KIND.value),
         },
         status=WorkflowCommandStatus.PENDING,
