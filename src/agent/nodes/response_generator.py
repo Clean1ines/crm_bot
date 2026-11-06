@@ -115,6 +115,18 @@ class StructuredGenerationValidation:
 
 
 QWEN_RESPONSE_MODEL = "qwen/qwen3.6-27b"
+DEFAULT_GROQ_RESPONSE_MODEL = "openai/gpt-oss-120b"
+RETIRED_GROQ_RESPONSE_MODELS = frozenset(
+    {
+        "qwen/qwen3.6-27b",
+        "qwen/qwen3-32b",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "groq/compound",
+        "groq/compound-mini",
+    }
+)
 STRUCTURED_RESPONSE_FORMAT: dict[str, object] = {"type": "json_object"}
 
 
@@ -173,11 +185,18 @@ def _merge_dialog_state_into_user_memory(
     return merged
 
 
+def _normalize_response_model_name(model_name: str) -> str:
+    if model_name in RETIRED_GROQ_RESPONSE_MODELS:
+        return DEFAULT_GROQ_RESPONSE_MODEL
+    return model_name
+
+
 def _resolve_response_model_name(state: AgentState, default_model: str) -> str:
     profile = ProjectRuntimeProfile.from_configuration(
         state.get("project_configuration")
     )
-    return profile.fallback_model or default_model
+    configured_model = profile.fallback_model or default_model
+    return _normalize_response_model_name(configured_model)
 
 
 def _prompt_user_memory(value: object) -> dict[str, list[dict[str, object]]] | None:
@@ -636,7 +655,9 @@ async def complete_response_prompt(
     llm: ChatGroqClient | None = None,
     model_name: str | None = None,
 ) -> str:
-    base_model = model_name or settings.GROQ_MODEL
+    base_model = _normalize_response_model_name(
+        model_name or settings.GROQ_MODEL
+    )
     selected_model = _resolve_response_model_name(
         cast(AgentState, {"project_configuration": project_configuration or {}}),
         base_model,
