@@ -124,6 +124,20 @@ class GroqProviderResponseMapper:
 
         return content
 
+    def _extract_finish_reason(self, body: JsonObject) -> str | None:
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+
+        first_choice = choices[0]
+        if not isinstance(first_choice, Mapping):
+            return None
+
+        finish_reason = first_choice.get("finish_reason")
+        if not isinstance(finish_reason, str):
+            return None
+        return finish_reason.strip().lower() or None
+
     def _extract_usage(self, body: JsonObject) -> TokenUsage | None:
         usage = body.get("usage")
         if not isinstance(usage, Mapping):
