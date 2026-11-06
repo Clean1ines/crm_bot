@@ -477,9 +477,10 @@ async def test_response_generator_gpt_oss_structured_requests_json_mode_for_init
         assert kwargs["temperature"] == 0.3
         assert kwargs["max_tokens"] == 700
         assert kwargs["model_kwargs"] == {
-            "response_format": {"type": "json_object"}
+            "response_format": {"type": "json_object"},
+            "reasoning_format": "hidden",
         }
-        assert "reasoning_effort" not in kwargs
+        assert kwargs["reasoning_effort"] == "low"
 
 
 @pytest.mark.asyncio
@@ -498,16 +499,16 @@ async def test_groq_text_completion_plain_call_does_not_force_json_mode(monkeypa
 
     result = await GroqTextCompletionClient().complete(
         "plain prompt",
-        model_name="qwen/qwen3.6-27b",
+        model_name="openai/gpt-oss-120b",
         temperature=0.2,
         max_tokens=123,
     )
 
     assert result == "plain text"
-    assert created_kwargs["model"] == "qwen/qwen3.6-27b"
+    assert created_kwargs["model"] == "openai/gpt-oss-120b"
     assert created_kwargs["temperature"] == 0.2
     assert created_kwargs["max_tokens"] == 123
-    assert "model_kwargs" not in created_kwargs
+    assert created_kwargs["model_kwargs"] == {"reasoning_format": "hidden"}
     assert "reasoning_effort" not in created_kwargs
 
 
@@ -554,9 +555,10 @@ async def test_response_generator_builds_project_override_llm():
     assert len(created_kwargs) == 1
     assert created_kwargs[0]["model"] == "openai/gpt-oss-20b"
     assert created_kwargs[0]["model_kwargs"] == {
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        "reasoning_format": "hidden",
     }
-    assert "reasoning_effort" not in created_kwargs[0]
+    assert created_kwargs[0]["reasoning_effort"] == "low"
     base_llm.ainvoke.assert_not_called()
 
 
